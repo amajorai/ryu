@@ -4,6 +4,11 @@ const withMDX = createMDX();
 
 /** @type {import('next').NextConfig} */
 const config = {
+  // Self-contained server bundle for a lean Docker runtime (apps/fumadocs/Dockerfile).
+  output: "standalone",
+  // Type/lint are gated in CI/editor, not the deploy build.
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
   serverExternalPackages: ["@takumi-rs/image-response"],
   reactStrictMode: true,
   async rewrites() {
