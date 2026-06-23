@@ -1,5 +1,10 @@
 # Ryu for Raycast
 
+[![Docs](https://shieldcn.dev/badge/Docs-ryuhq.com-73DC8C.svg?logo=readthedocs&logoColor=white)](https://ryuhq.com/help)
+[![License](https://shieldcn.dev/badge/License-MIT-73DC8C.svg?logo=opensourceinitiative&logoColor=white)](./LICENSE)
+[![Discord](https://shieldcn.dev/discord/1439211418724597800.svg?logo=discord&logoColor=white&color=4B78E6)](https://ryuhq.com/discord)
+[![X](https://shieldcn.dev/badge/Follow-@ryuhq-FA9BFA.svg?logo=x&logoColor=white)](https://twitter.com/ryuhq)
+
 > Pipe your existing Raycast setup into Ryu. Part of [Ryu](../../README.md).
 
 [![License](https://shieldcn.dev/badge/License-MIT-73DC8C.svg?logo=opensourceinitiative&logoColor=white)](./LICENSE)
