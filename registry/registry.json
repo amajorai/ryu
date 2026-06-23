@@ -1,0 +1,60 @@
+{
+  "version": "1",
+  "entries": [
+    {
+      "id": "io.ryu.ghost",
+      "name": "Ghost",
+      "version": "1.0.0",
+      "description": "Desktop automation: 29 screen perception and input control tools. Windows-first.",
+      "source": "builtin",
+      "kinds": ["tool"],
+      "permission_grants": [],
+      "built_in": true,
+      "tags": ["automation", "desktop"]
+    },
+    {
+      "id": "io.ryu.shadow",
+      "name": "Shadow",
+      "version": "1.0.0",
+      "description": "Screen and audio capture, OCR, proactive engine, semantic memory and search.",
+      "source": "builtin",
+      "kinds": ["tool"],
+      "permission_grants": [],
+      "built_in": true,
+      "tags": ["capture", "memory"]
+    },
+    {
+      "id": "io.ryu.spider",
+      "name": "Spider",
+      "version": "1.0.0",
+      "description": "High-performance web crawler and scraper.",
+      "source": "builtin",
+      "kinds": ["tool"],
+      "permission_grants": ["mcp:web_scrape"],
+      "built_in": true,
+      "tags": ["web", "scraping"]
+    },
+    {
+      "id": "io.ryu.exa",
+      "name": "Exa",
+      "version": "1.0.0",
+      "description": "Neural search: find any content on the web. Requires EXA_API_KEY.",
+      "source": "builtin",
+      "kinds": ["tool"],
+      "permission_grants": ["mcp:web_search"],
+      "built_in": true,
+      "tags": ["search", "web"]
+    },
+    {
+      "id": "io.ryu.headroom",
+      "name": "Headroom",
+      "version": "1.0.0",
+      "description": "Context compression (chopratejas/headroom): compress tool outputs, logs, files, and RAG chunks. 60-95% fewer tokens, reversible retrieval. Requires headroom-ai[mcp].",
+      "source": "https://raw.githubusercontent.com/amajorai/ryu/main/packages/headroom/ryu.json",
+      "kinds": ["tool"],
+      "permission_grants": [],
+      "built_in": false,
+      "tags": ["context", "compression"]
+    }
+  ]
+}
