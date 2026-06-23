@@ -6,7 +6,6 @@
       "apps/*",
       "packages/*",
       "crates/ryu-sdk-napi",
-      "!apps/raycast",
       "!apps/tts-sidecar",
       "!apps/unsloth-sidecar"
     ],
@@ -53,7 +52,7 @@
     "dev:cli": "cd apps/cli && cargo run",
     "clean": "turbo clean && bun run clean:rust",
     "clean:desktop": "turbo -F desktop clean",
-    "clean:rust": "cargo clean --manifest-path apps/desktop/src-tauri/Cargo.toml; cargo clean --manifest-path apps/core/Cargo.toml; cargo clean --manifest-path apps/cli/Cargo.toml; cargo clean --manifest-path apps/gateway/Cargo.toml; cargo clean --manifest-path apps/ghost/Cargo.toml; cargo clean --manifest-path apps/shadow/Cargo.toml; cargo clean --manifest-path apps/predict/Cargo.toml; cargo clean --manifest-path apps/predict-spike/Cargo.toml; cargo clean --manifest-path apps/web/src-tauri/Cargo.toml; cargo clean --manifest-path crates/ghost-core/Cargo.toml; cargo clean --manifest-path crates/ghost-eyes/Cargo.toml; cargo clean --manifest-path crates/ghost-hands/Cargo.toml; cargo clean --manifest-path crates/shadow-core/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-ffi/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-napi/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-uniffi/Cargo.toml",
+    "clean:rust": "cargo clean --manifest-path apps/desktop/src-tauri/Cargo.toml; cargo clean --manifest-path apps/core/Cargo.toml; cargo clean --manifest-path apps/cli/Cargo.toml; cargo clean --manifest-path apps/gateway/Cargo.toml; cargo clean --manifest-path apps/predict/Cargo.toml; cargo clean --manifest-path apps/predict-spike/Cargo.toml; cargo clean --manifest-path apps/web/src-tauri/Cargo.toml; cargo clean --manifest-path crates/ghost-core/Cargo.toml; cargo clean --manifest-path crates/ghost-eyes/Cargo.toml; cargo clean --manifest-path crates/ghost-hands/Cargo.toml; cargo clean --manifest-path crates/shadow-core/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-ffi/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-napi/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-uniffi/Cargo.toml",
     "check": "ultracite check",
     "fix": "ultracite fix",
     "prepare": "husky"

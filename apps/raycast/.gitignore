@@ -1,7 +1,0 @@
-# Raycast extension (fenced from the monorepo workspace — its own toolchain)
-node_modules
-dist
-.raycast-swift-build
-.swiftpm
-raycast-env.d.ts
-*.log

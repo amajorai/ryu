@@ -38,8 +38,6 @@ jobs:
           - { os: macos-latest,   dir: cli,     bin: ryu,         ext: "" }
           - { os: windows-latest, dir: cli,     bin: ryu,         ext: ".exe" }
           # Windows-first sidecars
-          - { os: windows-latest, dir: ghost,   bin: ghost,       ext: ".exe" }
-          - { os: windows-latest, dir: shadow,  bin: shadow,      ext: ".exe" }
     steps:
       - uses: actions/checkout@v4
         with:
