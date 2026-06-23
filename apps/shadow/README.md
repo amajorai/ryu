@@ -45,6 +45,10 @@ Capture data is stored under `~/.ryu/shadow/`. The default build records JPEG ke
 
 Continuous screen and audio capture is inherently sensitive. Shadow is designed as a device-bound sensor: it always runs locally, never routes capture off-device, and gates every source behind explicit consent and a pause control. It is open-source so this behaviour is fully auditable. If you self-host it, keep the capture device-local and consent-gated.
 
+## Credits
+
+Shadow is derived from [Shadow](https://github.com/ghostwright/shadow) by Ghostwright, which is MIT-licensed. The original copyright and license notice are retained in [NOTICE](./NOTICE).
+
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0 — see [LICENSE](./LICENSE), with MIT-licensed portions from Shadow per [NOTICE](./NOTICE). © 2026 A Major Pte. Ltd.

@@ -41,6 +41,10 @@ Ghost is a stdio MCP server, so it has no network port. Launch it from any MCP-c
 
 Screen perception plus synthetic input control are exactly the capabilities malware wants. Ghost is published open-source precisely so the behaviour is auditable, not opaque. Inside Ryu it runs only behind explicit user consent; if you embed it elsewhere, gate it behind clear consent and treat it as a sensitive capability.
 
+## Credits
+
+Ghost is derived from [Ghost OS](https://github.com/ghostwright/ghost-os) by Ghostwright, which is MIT-licensed. The original copyright and license notice are retained in [NOTICE](./NOTICE).
+
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0 — see [LICENSE](./LICENSE), with MIT-licensed portions from Ghost OS per [NOTICE](./NOTICE). © 2026 A Major Pte. Ltd.

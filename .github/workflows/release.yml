@@ -73,7 +73,8 @@ jobs:
           set -e
           src="apps/${{ matrix.dir }}/target/release/${{ matrix.bin }}${{ matrix.ext }}"
           osname="${{ runner.os }}"
-          asset="${{ matrix.bin }}-${osname}-x64${{ matrix.ext }}"
+          name="${{ matrix.bin }}"; [ "$name" = "ryu" ] && name="ryu-cli"
+          asset="${name}-${osname}-x64${{ matrix.ext }}"
           mkdir -p dist
           cp "$src" "dist/$asset"
 
