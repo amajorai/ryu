@@ -1,6 +1,7 @@
 mod agent_routing;
 mod agents;
 mod auth;
+mod capabilities;
 mod catalog;
 mod catalog_source;
 mod claude_config;

@@ -7184,7 +7184,11 @@ async fn oai_chat_completions(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn health() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok" }))
+    Json(json!({
+        "status": "ok",
+        "version": crate::capabilities::version(),
+        "capabilities": crate::capabilities::CAPABILITIES,
+    }))
 }
 
 #[utoipa::path(
