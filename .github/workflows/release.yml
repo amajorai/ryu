@@ -47,7 +47,11 @@ jobs:
 
       - name: Linux build deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+
+      - name: macOS build deps (Core)
+        if: runner.os == 'macOS' && matrix.dir == 'core'
+        run: brew install dbus pkg-config
 
       - name: Install protoc (Core needs prost-build)
         if: matrix.dir == 'core'
