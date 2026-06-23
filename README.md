@@ -23,7 +23,7 @@ zero lock-in.**
 
 ## Download the app
 
-Most people want the **[Ryu desktop app](https://github.com/amajorai/ryu-releases/releases/latest)** — download, pick an agent, go. This repository is the open-core engine you can self-host and build on. See also **[Awesome Ryu](https://github.com/amajorai/awesome-ryu)** for the ecosystem.
+Most people want the **[Ryu desktop app](https://github.com/amajorai/ryu/releases/latest)** — download, pick an agent, go. This repository is the open-core engine you can self-host and build on. See also **[Awesome Ryu](https://github.com/amajorai/awesome-ryu)** for the ecosystem.
 
 ## Architecture
 
