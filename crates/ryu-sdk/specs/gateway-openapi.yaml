@@ -1,0 +1,736 @@
+openapi: 3.1.0
+info:
+  title: Ryu Gateway API
+  version: "1.0.0"
+  description: |
+    The **Ryu Gateway** is the OpenAI-compatible control layer that governs every
+    model call: routing, fallback, rate-limiting, firewall/PII-DLP, budgets, evals,
+    and audit. Point any OpenAI-compatible client at the gateway by swapping its
+    base URL; the request surface below is a superset of the OpenAI API plus Ryu's
+    governance, eval, and audit endpoints.
+
+    Authentication is via a bearer token (`Authorization: Bearer <api-key>`). When
+    the gateway runs with `auth.require_auth = false`, anonymous requests are
+    allowed. Admin endpoints (`/v1/config`, `/v1/audit`) additionally require the
+    master key or a loopback peer.
+servers:
+  - url: http://localhost:7981
+    description: Local gateway (default bind)
+security:
+  - bearerAuth: []
+tags:
+  - name: Inference
+    description: OpenAI-compatible chat, image, and audio generation.
+  - name: Models
+    description: Available models and configured modalities.
+  - name: Evals
+    description: Provider scoring and dataset eval runs.
+  - name: Governance
+    description: Grant validation and manifest signing/verification.
+  - name: Audit
+    description: Usage audit log and sandbox execution governance.
+  - name: Config
+    description: Runtime gateway configuration (admin).
+  - name: Tools
+    description: Configured tool integrations (Composio).
+  - name: Health
+    description: Liveness and provider status.
+paths:
+  /v1/chat/completions:
+    post:
+      tags: [Inference]
+      summary: Create a chat completion
+      description: |
+        OpenAI-compatible chat completion. Set `stream: true` to receive a
+        Server-Sent Events stream of `chat.completion.chunk` objects. Per-request
+        governance is driven by optional `x-ryu-*` headers (user/agent identity,
+        per-agent provider/model slot overrides, session correlation).
+      operationId: createChatCompletion
+      parameters:
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/AgentIdHeader"
+        - name: x-ryu-slot-chat-provider
+          in: header
+          required: false
+          description: Per-agent chat provider override.
+          schema: { type: string }
+        - name: x-ryu-slot-chat-model
+          in: header
+          required: false
+          description: Per-agent chat model override.
+          schema: { type: string }
+        - name: x-ryu-session-id
+          in: header
+          required: false
+          description: Core conversation id, recorded in the audit log for correlation.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionRequest"
+      responses:
+        "200":
+          description: A chat completion (or an SSE stream when `stream` is true).
+          headers:
+            x-request-id:
+              description: Gateway request id.
+              schema: { type: string }
+            x-provider:
+              description: Upstream provider that served the request.
+              schema: { type: string }
+            x-cache:
+              description: Exact-cache result.
+              schema: { type: string, enum: [HIT, MISS] }
+            x-degraded:
+              description: Set to `fallback:<provider>` when served by a fallback.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatCompletionResponse"
+            text/event-stream:
+              schema:
+                type: string
+                description: "SSE stream of chat.completion.chunk objects (one per `data:` line)."
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/images/generations:
+    post:
+      tags: [Inference]
+      summary: Create an image
+      operationId: createImage
+      parameters:
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/AgentIdHeader"
+        - name: x-ryu-slot-image-provider
+          in: header
+          required: false
+          schema: { type: string }
+        - name: x-ryu-slot-image-model
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageGenerationRequest"
+      responses:
+        "200":
+          description: Generated image(s).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageGenerationResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/audio/speech:
+    post:
+      tags: [Inference]
+      summary: Generate speech (text-to-speech)
+      operationId: createSpeech
+      parameters:
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/AgentIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeechRequest"
+      responses:
+        "200":
+          description: Binary audio stream.
+          content:
+            audio/mpeg:
+              schema: { type: string, format: binary }
+            audio/ogg:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/audio/transcriptions:
+    post:
+      tags: [Inference]
+      summary: Transcribe audio (speech-to-text)
+      operationId: createTranscription
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/TranscriptionRequest"
+      responses:
+        "200":
+          description: Transcribed text.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  text: { type: string }
+                required: [text]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/modalities:
+    get:
+      tags: [Models]
+      summary: List configured modalities
+      operationId: listModalities
+      security: []
+      responses:
+        "200":
+          description: Configured modality → provider/model mapping.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  modalities:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        modality: { type: string, examples: [chat, image, tts, stt] }
+                        provider: { type: string }
+                        model: { type: string }
+                        configured: { type: boolean }
+  /v1/models:
+    get:
+      tags: [Models]
+      summary: List available models
+      operationId: listModels
+      security: []
+      responses:
+        "200":
+          description: OpenAI-compatible model list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelList"
+  /v1/tools/composio:
+    get:
+      tags: [Tools]
+      summary: List configured Composio actions
+      operationId: listComposioTools
+      responses:
+        "200":
+          description: Composio actions exposed as tools.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object: { type: string, const: list }
+                  composio_enabled: { type: boolean }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        type: { type: string, const: composio }
+                        description: { type: string }
+  /v1/evals:
+    get:
+      tags: [Evals]
+      summary: Get eval configuration and provider scores
+      operationId: getEvals
+      security: []
+      responses:
+        "200":
+          description: Eval config plus rolling per-provider scores.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  sample_rate: { type: number, format: float, minimum: 0, maximum: 1 }
+                  max_latency_ms: { type: integer }
+                  providers:
+                    type: object
+                    additionalProperties: { type: number, format: float }
+  /v1/evals/run:
+    post:
+      tags: [Evals]
+      summary: Run an eval dataset
+      description: Runs a dataset (or the built-in 3-case set when omitted) through the pipeline and scores each case.
+      operationId: runEvals
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvalRunRequest"
+      responses:
+        "200":
+          description: Per-case scores and aggregate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalRunResponse"
+  /v1/grants/validate:
+    post:
+      tags: [Governance]
+      summary: Validate requested grants against policy
+      operationId: validateGrants
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                app_id: { type: string }
+                grants:
+                  type: array
+                  items: { type: string }
+              required: [grants]
+      responses:
+        "200":
+          description: Approved / denied grants.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approved: { type: array, items: { type: string } }
+                  denied: { type: array, items: { type: string } }
+                  all_approved: { type: boolean }
+  /v1/manifests/sign:
+    post:
+      tags: [Governance]
+      summary: Sign a manifest (loopback only)
+      description: Privileged ed25519 signing oracle. Restricted to loopback peers.
+      operationId: signManifest
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                manifest: { type: object, additionalProperties: true }
+              required: [manifest]
+      responses:
+        "200":
+          description: Signature over the manifest.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  algorithm: { type: string, const: ed25519 }
+                  signature: { type: string, description: hex }
+                  public_key: { type: string, description: base64 }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/manifests/verify:
+    post:
+      tags: [Governance]
+      summary: Verify a manifest signature
+      operationId: verifyManifest
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                manifest: { type: object, additionalProperties: true }
+                signature: { type: string }
+                public_key: { type: string }
+              required: [manifest, signature]
+      responses:
+        "200":
+          description: Verification result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+  /v1/manifests/pubkey:
+    get:
+      tags: [Governance]
+      summary: Get the gateway's public verifying key
+      operationId: getManifestPubkey
+      security: []
+      responses:
+        "200":
+          description: The gateway ed25519 public key.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  algorithm: { type: string, const: ed25519 }
+                  public_key: { type: string, description: base64 }
+  /v1/audit:
+    get:
+      tags: [Audit]
+      summary: Query the usage audit log (admin)
+      description: Requires the master key. Returns recorded model calls with token and cost accounting.
+      operationId: queryAudit
+      parameters:
+        - { name: api_key, in: query, schema: { type: string } }
+        - { name: org_id, in: query, schema: { type: string } }
+        - { name: team_id, in: query, schema: { type: string } }
+        - { name: project_id, in: query, schema: { type: string } }
+        - { name: provider, in: query, schema: { type: string } }
+        - { name: model, in: query, schema: { type: string } }
+        - { name: errors_only, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: request_id, in: query, schema: { type: string } }
+        - { name: session_id, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Matching audit entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEntry" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/exec/audit:
+    post:
+      tags: [Audit]
+      summary: Ingest a sandbox execution event
+      description: Trusted-forwarder or master key only.
+      operationId: ingestExecAudit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                backend: { type: string }
+                command: { type: string }
+                duration_ms: { type: integer }
+                exit_code: { type: integer }
+                session_id: { type: string }
+                error: { type: string }
+              required: [backend, command, duration_ms, exit_code]
+      responses:
+        "200":
+          description: Acknowledged.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  exec_count: { type: integer }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/exec/budget/check:
+    post:
+      tags: [Audit]
+      summary: Pre-run sandbox execution budget gate
+      operationId: checkExecBudget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                backend: { type: string }
+                command: { type: string }
+              required: [backend, command]
+      responses:
+        "200":
+          description: Whether the command is allowed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  allowed: { type: boolean }
+                  reason: { type: string }
+                  current_count: { type: integer }
+                  max_count: { type: integer }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/config:
+    get:
+      tags: [Config]
+      summary: Get gateway config (admin, redacted)
+      description: Requires the master key (or a loopback peer in no-auth mode). Secrets are redacted.
+      operationId: getConfig
+      responses:
+        "200":
+          description: Current redacted config.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GatewayConfig"
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [Config]
+      summary: Update gateway config (admin)
+      description: |
+        Partial update. `firewall`, `budgets`, and `auth.api_keys` hot-swap;
+        `routing` and provider credentials require a restart.
+      operationId: putConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GatewayConfig"
+      responses:
+        "200":
+          description: Applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: Gateway status and configured providers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, examples: [ok] }
+                  version: { type: string }
+                  providers: { type: array, items: { type: string } }
+                  auth_required: { type: boolean }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API key issued by the gateway, or the master key for admin endpoints.
+  parameters:
+    UserIdHeader:
+      name: x-ryu-user-id
+      in: header
+      required: false
+      description: Per-user budget identity.
+      schema: { type: string }
+    AgentIdHeader:
+      name: x-ryu-agent-id
+      in: header
+      required: false
+      description: Per-agent budget identity.
+      schema: { type: string }
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Caller is not permitted (admin/loopback only).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Rate limit or budget stop reached.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            message: { type: string }
+            type: { type: string }
+            code: { type: string }
+    ChatMessage:
+      type: object
+      properties:
+        role: { type: string, enum: [system, user, assistant, tool] }
+        content: { type: string }
+      required: [role, content]
+    ChatCompletionRequest:
+      type: object
+      properties:
+        model: { type: string, description: Routed via the gateway model map. }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/ChatMessage" }
+        stream: { type: boolean, default: false }
+        temperature: { type: number, format: float }
+        top_p: { type: number, format: float }
+        max_tokens: { type: integer }
+      required: [model, messages]
+      additionalProperties: true
+    ChatCompletionResponse:
+      type: object
+      properties:
+        id: { type: string }
+        object: { type: string, const: chat.completion }
+        created: { type: integer }
+        model: { type: string }
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index: { type: integer }
+              message: { $ref: "#/components/schemas/ChatMessage" }
+              finish_reason: { type: string }
+        usage: { $ref: "#/components/schemas/Usage" }
+    Usage:
+      type: object
+      properties:
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+        total_tokens: { type: integer }
+    ImageGenerationRequest:
+      type: object
+      properties:
+        model: { type: string }
+        prompt: { type: string }
+        "n": { type: integer, default: 1 }
+        size: { type: string, examples: ["1024x1024"] }
+        quality: { type: string, enum: [standard, hd] }
+        response_format: { type: string, enum: [url, b64_json] }
+      required: [prompt]
+      additionalProperties: true
+    ImageGenerationResponse:
+      type: object
+      properties:
+        created: { type: integer }
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              url: { type: string }
+              b64_json: { type: string }
+    SpeechRequest:
+      type: object
+      properties:
+        model: { type: string }
+        input: { type: string }
+        voice: { type: string, examples: [alloy] }
+        response_format: { type: string, enum: [mp3, opus, aac, flac] }
+        speed: { type: number, format: float, minimum: 0.25, maximum: 4.0 }
+      required: [model, input]
+      additionalProperties: true
+    TranscriptionRequest:
+      type: object
+      properties:
+        file: { type: string, format: binary }
+        model: { type: string }
+        language: { type: string }
+        prompt: { type: string }
+        response_format: { type: string, enum: [json, text, vtt, srt] }
+        temperature: { type: number, format: float }
+      required: [file, model]
+    ModelList:
+      type: object
+      properties:
+        object: { type: string, const: list }
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              object: { type: string, const: model }
+              created: { type: integer }
+              owned_by: { type: string }
+    EvalRunRequest:
+      type: object
+      properties:
+        model: { type: string, default: gpt-4o-mini }
+        agent_id: { type: string }
+        dataset:
+          type: array
+          items:
+            type: object
+            properties:
+              prompt: { type: string }
+              expected_output: { type: string }
+              expected_substring: { type: string }
+            required: [prompt]
+    EvalRunResponse:
+      type: object
+      properties:
+        cases:
+          type: array
+          items:
+            type: object
+            properties:
+              prompt: { type: string }
+              latency_ms: { type: integer }
+              token_efficiency: { type: number, format: float }
+              policy_pass: { type: boolean }
+              substring_match: { type: boolean }
+              score: { type: number, format: float }
+        aggregate:
+          type: object
+          properties:
+            avg_latency_ms: { type: number, format: float }
+            avg_token_efficiency: { type: number, format: float }
+            policy_pass_rate: { type: number, format: float }
+            avg_score: { type: number, format: float }
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: string }
+        timestamp: { type: string, format: date-time }
+        api_key: { type: string }
+        request_id: { type: string }
+        session_id: { type: string }
+        org_id: { type: string }
+        team_id: { type: string }
+        project_id: { type: string }
+        model: { type: string }
+        provider: { type: string }
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+        cost_usd: { type: number, format: double }
+        error: { type: string }
+    GatewayConfig:
+      type: object
+      description: Firewall, budgets, providers, auth, and routing config. Secrets are redacted on read.
+      properties:
+        firewall: { type: object, additionalProperties: true }
+        budgets: { type: object, additionalProperties: true }
+        providers: { type: object, additionalProperties: true }
+        auth:
+          type: object
+          properties:
+            require_auth: { type: boolean }
+            api_keys:
+              type: array
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  key: { type: string }
+                  trusted_forwarder: { type: boolean }
+                  org_id: { type: string }
+                  team_id: { type: string }
+        routing:
+          type: object
+          properties:
+            default_provider: { type: string }
+            model_map: { type: object, additionalProperties: true }
+            fallback_chain:
+              type: array
+              items: { type: string }

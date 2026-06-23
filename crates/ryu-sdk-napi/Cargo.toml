@@ -1,0 +1,23 @@
+[package]
+name = "ryu-sdk-napi"
+version = "0.0.1"
+edition = "2021"
+description = "Node-API (napi-rs) binding exposing the ryu-sdk Rust core to TypeScript/JavaScript as a native addon."
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = [
+    "napi8",
+    "async",
+    "tokio_rt",
+] }
+napi-derive = "2"
+ryu-sdk = { path = "../ryu-sdk" }
+serde_json = "1"
+futures-util = "0.3"
+
+[build-dependencies]
+napi-build = "2"

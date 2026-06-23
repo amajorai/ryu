@@ -1,0 +1,16 @@
+{
+  "title": "M C P",
+  "description": "MCP servers, tools, catalog, sandbox.",
+  "pages": [
+    "mcp_catalog_list",
+    "mcp_catalog_detail",
+    "mcp_catalog_install",
+    "sandbox_disable",
+    "sandbox_enable",
+    "sandbox_status",
+    "list_mcp_servers",
+    "create_mcp_server",
+    "list_mcp_tools",
+    "call_mcp_tool"
+  ]
+}

@@ -1,0 +1,126 @@
+---
+title: "Security: Firewall & DLP"
+description: "Scan prompts and responses for PII, secrets, and prompt injection, with policies and streaming redaction"
+---
+
+The firewall (`apps/gateway/src/firewall/mod.rs`) is the Gateway's data-loss-prevention layer. It
+scans traffic in both directions, applies a configurable policy on a detection, and can be enforced
+as a locked baseline that a local override cannot weaken. Everything routes through one
+config-gated scanner, so nothing about what is detected or how is hardcoded into the request path.
+
+## What it detects
+
+Patterns are compiled regexes, grouped one set per category.
+
+| Category | Examples |
+|---|---|
+| PII | email, phone, SSN, credit card, passport, driver license, medical record |
+| Secrets | API keys, JWTs, PEM keys, database connection strings, cloud credentials |
+| Prompt injection | known injection patterns such as "ignore previous instructions" |
+
+Inbound scans run on the prompt before the provider call (`scan_inbound`, injection takes
+priority). Outbound scans run on the response (`scan_outbound`, secrets and PII).
+
+<Callout type="warn">
+  Only the curated pattern sets above ship today. There is no UI or config field for custom
+  user-authored firewall patterns yet, and the desktop configuration surface that exposes these
+  controls is part of the remaining Gateway moat-surface work. Configure the firewall through
+  `gateway.toml` or `PUT /v1/config`.
+</Callout>
+
+## Policies
+
+The action taken on a detection is `firewall.policy` (`FirewallPolicy` in
+`apps/gateway/src/config.rs`).
+
+| Policy | Wire value | Behavior |
+|---|---|---|
+| Warn and continue | `warn_and_continue` (default) | Log the detection, let the request through |
+| Block | `block` | Reject the request with a 403 |
+| Sanitize | `sanitize` | Replace the matched text with a redaction marker, then continue |
+
+The master switch and each direction are independent toggles. All are hot-swappable through
+`PUT /v1/config` (see [Configuration](/docs/gateway/configuration)).
+
+| Field | Default | Controls |
+|---|---|---|
+| `firewall.enabled` | `true` | Master switch for inbound and outbound scanning |
+| `scan_inbound` | `true` | Scan prompts before the provider call |
+| `scan_outbound` | `true` | Scan responses after the provider call |
+| `log_detections` | `true` | Emit a detection record per match |
+| `redact_pii` | `true` | Redact PII spans when `policy = sanitize` |
+| `redact_secrets` | `true` | Redact secret spans when `policy = sanitize` |
+
+## Locked guardrails
+
+When the Gateway is governed by a control plane, an organization can require a baseline set of
+guardrails (for example `pii` and `secrets`). `scan_locked_guardrails` ignores the local
+`enabled` / `scan_inbound` config and runs the required categories regardless, so a lower level
+cannot bypass an admin-locked guardrail.
+
+## Companion egress redaction
+
+Requests that originate from the context companion (a screen-capture source) are forwarded by Core
+with the `x-ryu-companion-source` header, surfaced as `companion_source` on the pipeline request.
+When set, `redact_companion_egress` unconditionally redacts both PII and secrets before egress,
+ignoring `enabled`, `redact_pii`, and `redact_secrets`. Companion text is screen-captured rather
+than typed by the user, so it is always sanitized. This is a locked guardrail: capture sources are
+sanitized even when the firewall is fully disabled.
+
+## Response-side DLP (streaming)
+
+The request-side firewall covers prompts before they leave the Gateway. The
+subscription-preserving passthrough proxy (`apps/gateway/src/passthrough/mod.rs`) adds DLP on the
+*response* side for agents that speak a provider-native wire format and authenticate with the
+user's own subscription bearer (Claude Code over Anthropic Messages, Codex over OpenAI Responses).
+That proxy forwards the caller's own credentials unchanged, so the regular OpenAI-compat firewall
+never sees its traffic. The streaming redactor closes that gap. To enable the passthrough for an
+agent, see [Gateway for any agent](/docs/gateway/gateway-for-any-agent).
+
+As the upstream SSE response streams back, `redact_response_passthrough` reassembles each complete
+`\n\n`-terminated event across network-chunk boundaries (it buffers raw bytes, never a `String`, so
+a multibyte UTF-8 char split across two chunks is never corrupted), then rewrites the assistant-text
+delta in place.
+
+| Wire format | Event rewritten | Field redacted |
+|---|---|---|
+| Anthropic | `content_block_delta` | `delta.text` (the `text_delta`) |
+| OpenAI Responses | `output_text.delta` | top-level `delta` string |
+
+Each matched span runs through the firewall's `fw.sanitize()` (the same config-gated routine the
+request side uses), so PII and secret spans become `[REDACTED:NAME]` markers before the bytes reach
+the caller. Non-text events (`message_start` / `message_stop`, `ping`, `[DONE]`, function-call
+deltas) pass through verbatim, and SSE framing is preserved exactly. The redactor wraps the response
+body only when `firewall.enabled` is on; otherwise the upstream stream is forwarded untouched.
+
+The redactor fails open: a scanner-less config or an unparseable `data:` JSON payload passes the raw
+event through unchanged rather than dropping it. The accumulated (already-redacted) assistant text is
+scanned once at stream end via `scan_outbound` to audit any residual outbound violation.
+
+<Callout type="warn">
+  Redaction is **per-delta**. A secret split across two separate text-delta events (`sk-` in one
+  event, the rest in the next) is not caught inline; it is only flagged by the single end-of-stream
+  audit scan, not rewritten. A cross-delta hold-back buffer is a deliberate follow-on. The passthrough
+  proxy is loopback-only and opt-in. Gemini is not wirable because the Gemini CLI exposes no
+  base-URL hook. Streaming redaction is unit-tested across chunk boundaries; the full live round-trip
+  needs a real subscription agent and has not been exercised end to end.
+</Callout>
+
+## Scan a string directly
+
+`POST /v1/firewall/check` runs the scanner over an arbitrary `text` for the requested guardrails,
+without making a model call. This is the same `FirewallScanner` the request path uses, exposed for
+testing patterns or validating content out of band.
+
+```
+POST /v1/firewall/check
+```
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/gateway/governance" />
+  <DocCard href="/docs/gateway/gateway-for-any-agent" />
+  <DocCard href="/docs/gateway/configuration" />
+  <DocCard href="/docs/gateway/evals-audit" />
+</Cards>

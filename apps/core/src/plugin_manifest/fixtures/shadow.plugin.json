@@ -1,0 +1,32 @@
+{
+  "id": "io.ryu.shadow",
+  "name": "Shadow",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "tool-shadow-search",
+      "name": "Semantic Search",
+      "kind": "tool",
+      "config": { "slug": "shadow__search" }
+    },
+    {
+      "id": "tool-shadow-context",
+      "name": "Screen Context",
+      "kind": "tool",
+      "config": { "slug": "shadow__context" }
+    },
+    {
+      "id": "tool-shadow-recall",
+      "name": "Memory Recall",
+      "kind": "tool",
+      "config": { "slug": "shadow__recall" }
+    },
+    {
+      "id": "tool-shadow-capture",
+      "name": "Capture",
+      "kind": "tool",
+      "config": { "slug": "shadow__capture" }
+    }
+  ],
+  "permission_grants": ["mcp:shadow"]
+}

@@ -1,0 +1,20 @@
+{
+  "title": "Spaces",
+  "description": "Spaces/RAG documents + embeddings.",
+  "pages": [
+    "get_embedding_model",
+    "set_embedding_model",
+    "trigger_reindex",
+    "reindex_status",
+    "list_spaces",
+    "create_space",
+    "delete_space",
+    "list_documents",
+    "ingest_document",
+    "get_document",
+    "delete_document",
+    "update_document",
+    "create_page",
+    "search_space"
+  ]
+}

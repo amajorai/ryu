@@ -1,0 +1,26 @@
+{
+  "pages": [
+    "agents",
+    "auth",
+    "sidecars",
+    "catalog",
+    "chat",
+    "conversations",
+    "downloads",
+    "spaces",
+    "engines",
+    "gateway",
+    "health",
+    "mcp",
+    "nodes",
+    "models",
+    "plugins",
+    "preferences",
+    "retrieval",
+    "skills",
+    "teams",
+    "tools",
+    "worktree",
+    "workflows"
+  ]
+}

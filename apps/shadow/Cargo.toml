@@ -1,0 +1,95 @@
+[package]
+name = "shadow"
+version = "0.0.1"
+edition = "2021"
+
+[[bin]]
+name = "shadow"
+path = "src/main.rs"
+
+[dependencies]
+shadow-core = { path = "../../crates/shadow-core" }
+ghost-core = { path = "../../crates/ghost-core" }
+ghost-eyes = { path = "../../crates/ghost-eyes" }
+ghost-hands = { path = "../../crates/ghost-hands" }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+futures-util = "0.3"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+rusqlite = { version = "0.38", features = ["bundled"] }
+
+# Capture dependencies
+cpal = "0.16"  # Cross-platform audio
+image = "0.25"  # Image processing
+regex = "1"  # For parsing coordinates
+hound = "3"  # WAV writing
+rmp-serde = "1"  # MessagePack serialization for events
+rmpv = "1"  # MessagePack value types
+base64 = "0.22"  # Base64 encoding for screenshot tool
+arboard = "3"  # Cross-platform clipboard access (clipboard capture)
+notify = "6"  # Cross-platform filesystem watching (filesystem capture)
+
+# Intelligence dependencies (optional - require system libraries)
+ort = { version = "2.0.0-rc.12", optional = true }  # ONNX Runtime
+whisper-rs = { version = "0.11", optional = true }  # Whisper transcription
+
+# Video pipeline (optional - requires FFmpeg system libs)
+ffmpeg-next = { version = "7", optional = true }
+
+[features]
+default = []
+full = ["ort", "whisper-rs"]
+video = ["ffmpeg-next"]
+
+# Platform-specific dependencies
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"  # Read CapabilityAccessManager mic-in-use state (meeting detection)
+windows = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_UI_Input",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Accessibility",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_Graphics_Gdi",
+    "Media_Ocr",
+    "Globalization",
+    "Graphics_Imaging",
+    "Storage_Streams",
+]}
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.24"
+objc2 = "0.5"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.13"
+evdev = "0.12"
+# AT-SPI2 (Linux equivalent of AXUIElement / IUIAutomation) — real element tree over D-Bus.
+atspi = { version = "0.30", default-features = false, features = ["connection", "proxies", "tokio", "zbus"] }
+
+[target.'cfg(target_os = "linux")'.dependencies.tesseract]
+version = "0.14"
+optional = true

@@ -1,0 +1,654 @@
+//! In-process MCP server that bridges Ryu's registry tools into an ACP session.
+//!
+//! The ACP SDK's `with_mcp_server` mechanism injects an MCP server into the
+//! session handshake so the agent discovers and calls Ryu's registered tools
+//! (Ghost, Shadow, and any user-configured servers) during its own tool loop,
+//! rather than only seeing its built-in tools.
+//!
+//! Every call is routed through `McpRegistry::call_tool`, which enforces the
+//! per-agent allowlist before dispatching. There is no direct-egress path that
+//! bypasses Core's allowlist (governance requirement U68).
+//!
+//! # ACP parity (#477, P3)
+//!
+//! The bridge surfaces the **same meta-tools** the gateway / openai-compat plane
+//! offers so a model behaves identically on either plane: `tool_search` and
+//! `describe` (always on — discovery is open), plus `execute` and `resume`
+//! (programmatic tool calling, gated on `tool_exec::is_available()`). It also
+//! threads the per-agent **Composio** action allowlist (`composio_actions`) so
+//! Composio actions selected for an ACP-bound agent are both offered (as shallow
+//! function defs) and **callable** (their `composio__<slug>` ids are merged into
+//! the effective allowlist `call_tool` enforces). Composio reaches the ACP plane
+//! through this bridge — the ACP subprocess carries no `x-ryu-tools` header, so
+//! there is no second, gateway-side tool loop and no double execution.
+//!
+//! Discovery is open while **execution stays allowlist-gated**: `tool_search` /
+//! `describe` are always offered, but executing any tool the search surfaced
+//! still passes through `McpRegistry::call_tool`'s allowlist check (search ≠
+//! grant). An empty static allowlist therefore still offers the meta-tools.
+//!
+//! # Spike validation note (AC5)
+//!
+//! Injection mechanism validated: `SessionBuilder::with_mcp_server` (in-process,
+//! ACP 0.11.1) is the correct path. It adds the server to the `session.new`
+//! request's `mcp_servers` list so the agent's own MCP client connects back to
+//! our in-process handler during the turn. The ACP SDK's `McpActiveSession`
+//! handles the per-turn lifecycle; each tool call routes through `call_tool`
+//! here before the result is returned to the agent.
+
+use std::borrow::Cow;
+use std::sync::Arc;
+
+use agent_client_protocol::{
+    mcp_server::{McpConnectionTo, McpServer, McpServerConnect},
+    Agent, DynConnectTo, NullRun,
+};
+use rmcp::{
+    model::{
+        CallToolResult, Content, Implementation, ListToolsResult, ProtocolVersion, ServerInfo, Tool,
+    },
+    service::RequestContext,
+    ErrorData as McpError, ServiceExt,
+};
+use serde_json::{json, Map, Value};
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+use crate::sidecar::mcp::catalog::ToolKind;
+use crate::sidecar::mcp::McpRegistry;
+use crate::tool_exec;
+
+/// Default `tool_search` result cap (Contract 3).
+const TOOL_SEARCH_DEFAULT_LIMIT: usize = 8;
+const TOOL_SEARCH_MAX_LIMIT: usize = 25;
+
+/// Build an in-process MCP server for `agent_id` offering the Ryu meta-tools plus
+/// the registry + Composio tools it is allowed to use.
+///
+/// The offered set is the union of:
+/// - the allowlisted registry tools (`tools_for_agent`),
+/// - one shallow function def per per-agent Composio action (`composio_actions`),
+/// - the always-on meta-tools `tool_search` / `describe`, and
+/// - `execute` / `resume` when `tool_exec::is_available()` (a JS backend is built
+///   and runnable).
+///
+/// Unlike the pre-#477 behaviour, this **always** returns `Some` — even for an
+/// empty static allowlist — because tool *discovery* is open while *execution*
+/// stays allowlist-gated in `call_tool`. (`mcp = None` legacy callers simply do
+/// not call this.)
+///
+/// `composio_actions` are bare Composio action slugs (e.g. `GITHUB_CREATE_ISSUE`).
+/// Their fully-qualified `composio__<slug>` ids are merged into the effective
+/// allowlist so they are callable; when `allowlist` is `None` the agent is
+/// unrestricted and no merge is needed.
+pub async fn build_ryu_mcp_server(
+    mcp: Arc<McpRegistry>,
+    allowlist: Option<Vec<String>>,
+    composio_actions: Vec<String>,
+    agent_id: String,
+    identity_profile_ids: Vec<String>,
+) -> Option<McpServer<Agent, NullRun>> {
+    let tools = mcp.tools_for_agent(allowlist.as_deref()).await;
+
+    // Effective allowlist used by `call_tool`: when restricted, the agent's
+    // selected Composio ids must be callable, so merge `composio__<slug>` in.
+    // When unrestricted (`None`) everything is already permitted.
+    let effective_allowlist = allowlist.map(|mut list| {
+        for slug in &composio_actions {
+            let id = format!("composio__{slug}");
+            if !list.contains(&id) {
+                list.push(id);
+            }
+        }
+        list
+    });
+
+    let server = RyuMcpServer {
+        mcp,
+        allowlist: effective_allowlist,
+        composio_actions,
+        agent_id,
+        identity_profile_ids,
+        tools,
+    };
+    Some(McpServer::new(server, NullRun))
+}
+
+/// `McpServerConnect` implementation that serves Ryu's registry + meta tools.
+struct RyuMcpServer {
+    mcp: Arc<McpRegistry>,
+    /// Effective allowlist (registry grants + merged Composio ids), or `None`
+    /// for an unrestricted agent.
+    allowlist: Option<Vec<String>>,
+    /// Bare Composio action slugs offered to this agent.
+    composio_actions: Vec<String>,
+    /// Effective agent id (used to scope programmatic-tool-calling execution).
+    agent_id: String,
+    /// Bound Identity Vault profiles (epic #517). Threaded into `call_tool` so a
+    /// tool call targeting a NEEDS_AUTH bound domain elicits, and an AUTHENTICATED
+    /// one reads the credential under the gateway grant. Empty = no vault consult.
+    identity_profile_ids: Vec<String>,
+    /// Pre-fetched list of allowed registry tools (avoids async in `connect`).
+    tools: Vec<crate::sidecar::mcp::RegistryTool>,
+}
+
+impl McpServerConnect<Agent> for RyuMcpServer {
+    fn name(&self) -> String {
+        "ryu-registry".to_owned()
+    }
+
+    fn connect(
+        &self,
+        _cx: McpConnectionTo<Agent>,
+    ) -> DynConnectTo<agent_client_protocol::role::mcp::Client> {
+        let handler = RyuMcpHandler {
+            mcp: Arc::clone(&self.mcp),
+            allowlist: self.allowlist.clone(),
+            composio_actions: self.composio_actions.clone(),
+            agent_id: self.agent_id.clone(),
+            identity_profile_ids: self.identity_profile_ids.clone(),
+            tools: self.tools.clone(),
+        };
+        DynConnectTo::new(RyuMcpComponent { handler })
+    }
+}
+
+/// Per-connection component: connects the in-process rmcp `ServerHandler` to
+/// the ACP MCP transport.
+struct RyuMcpComponent {
+    handler: RyuMcpHandler,
+}
+
+impl agent_client_protocol::ConnectTo<agent_client_protocol::role::mcp::Client>
+    for RyuMcpComponent
+{
+    async fn connect_to(
+        self,
+        client: impl agent_client_protocol::ConnectTo<agent_client_protocol::role::mcp::Server>,
+    ) -> Result<(), agent_client_protocol::Error> {
+        let (mcp_server_stream, mcp_client_stream) = tokio::io::duplex(8192);
+        let (mcp_server_read, mcp_server_write) = tokio::io::split(mcp_server_stream);
+        let (mcp_client_read, mcp_client_write) = tokio::io::split(mcp_client_stream);
+
+        let run_client = async {
+            let byte_streams = agent_client_protocol::ByteStreams::new(
+                mcp_client_write.compat_write(),
+                mcp_client_read.compat(),
+            );
+            <agent_client_protocol::ByteStreams<_, _> as agent_client_protocol::ConnectTo<
+                agent_client_protocol::role::mcp::Client,
+            >>::connect_to(byte_streams, client)
+            .await
+        };
+
+        let handler = self.handler;
+        let run_server = async move {
+            let running = handler
+                .serve((mcp_server_read, mcp_server_write))
+                .await
+                .map_err(agent_client_protocol::Error::into_internal_error)?;
+            running
+                .waiting()
+                .await
+                .map(|_| ())
+                .map_err(agent_client_protocol::Error::into_internal_error)
+        };
+
+        let (r1, r2) = tokio::join!(run_client, run_server);
+        r1?;
+        r2?;
+        Ok(())
+    }
+}
+
+/// Build the locked `tool_search` function-tool schema (Contract 3, byte-identical
+/// to the gateway plane). Returned as a JSON object so `list_tools` can unwrap the
+/// `function.parameters` map for rmcp `Tool::new`.
+fn tool_search_def() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "tool_search",
+            "description": "Search the available tool catalog for tools that can accomplish a task. Returns a ranked list of tool descriptors (id, name, description). Call this FIRST when you need a capability not already provided as a tool, then call the returned tool by its exact id (or describe it for its argument schema).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Natural-language description of the capability you need (e.g. 'send a slack message')." },
+                    "kind": { "type": "string", "enum": ["mcp", "builtin", "composio", "app", "any"], "description": "Optional filter by tool source plane. 'any' (default) searches all.", "default": "any" },
+                    "limit": { "type": "integer", "description": "Max results.", "default": 8, "minimum": 1, "maximum": 25 }
+                },
+                "required": ["query"]
+            }
+        }
+    })
+}
+
+/// The `describe` meta-tool: resolve a tool id to its argument schema. No locked
+/// schema in the contracts; a minimal `{ id }` object is sufficient.
+fn describe_tool_def() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "describe",
+            "description": "Describe a tool returned by tool_search: returns its argument schema (names, types, required flags) so you can call it correctly. Pass the exact tool id (e.g. 'exa__search' or 'composio__SLACK_SEND_MESSAGE').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Fully-qualified tool id to describe." }
+                },
+                "required": ["id"]
+            }
+        }
+    })
+}
+
+/// A shallow Composio function def offered to the agent (the action's full schema
+/// is not pre-listed; the model passes a freeform `arguments` object, mirroring
+/// `catalog::describe`'s shallow Composio shape).
+fn composio_def(slug: &str) -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": format!("composio__{slug}"),
+            "description": format!("Composio action {slug}. Pass the action's parameters as the `arguments` object."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "arguments": { "type": "object", "description": "Action-specific parameters for this Composio action." }
+                }
+            }
+        }
+    })
+}
+
+/// Pull the bare `function.parameters` object map out of a function-tool def for
+/// rmcp `Tool::new` (which wants the parameters object, not the whole def).
+fn params_map(def: &Value) -> Map<String, Value> {
+    def.get("function")
+        .and_then(|f| f.get("parameters"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Build an rmcp `Tool` from a function-tool def `Value`.
+fn tool_from_def(def: &Value) -> Tool {
+    let name = def
+        .get("function")
+        .and_then(|f| f.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let description = def
+        .get("function")
+        .and_then(|f| f.get("description"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let mut tool = Tool::new(
+        Cow::Owned(name),
+        description.clone(),
+        Arc::new(params_map(def)),
+    );
+    if !description.is_empty() {
+        tool.description = Some(Cow::Owned(description));
+    }
+    tool
+}
+
+/// `rmcp::ServerHandler` that dispatches through `McpRegistry::call_tool` plus the
+/// always-on Ryu meta-tools.
+struct RyuMcpHandler {
+    mcp: Arc<McpRegistry>,
+    allowlist: Option<Vec<String>>,
+    composio_actions: Vec<String>,
+    agent_id: String,
+    /// Bound Identity Vault profiles (epic #517); see [`RyuMcpServer`].
+    identity_profile_ids: Vec<String>,
+    tools: Vec<crate::sidecar::mcp::RegistryTool>,
+}
+
+impl RyuMcpHandler {
+    /// Build the full offered tool list (registry + Composio + meta-tools). Split
+    /// out of `list_tools` so it is unit-testable without an rmcp
+    /// `RequestContext` (which has no public constructor).
+    fn build_tool_list(&self) -> Vec<Tool> {
+        let mut tools: Vec<Tool> = self
+            .tools
+            .iter()
+            .map(|t| {
+                let schema: serde_json::Map<String, Value> = t
+                    .input_schema
+                    .as_ref()
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default();
+                let mut tool = Tool::new(
+                    Cow::Owned(t.id.clone()),
+                    t.description.clone().unwrap_or_default(),
+                    Arc::new(schema),
+                );
+                if let Some(desc) = &t.description {
+                    tool.description = Some(Cow::Owned(desc.clone()));
+                }
+                tool
+            })
+            .collect();
+
+        // Per-agent Composio actions (offered + callable via the merged allowlist).
+        for slug in &self.composio_actions {
+            tools.push(tool_from_def(&composio_def(slug)));
+        }
+
+        // Always-on discovery meta-tools.
+        tools.push(tool_from_def(&tool_search_def()));
+        tools.push(tool_from_def(&describe_tool_def()));
+
+        // Programmatic tool calling — only when a JS backend is built + runnable.
+        if tool_exec::is_available() {
+            tools.push(tool_from_def(&tool_exec::schema::execute_tool_def()));
+            tools.push(tool_from_def(&tool_exec::schema::resume_tool_def()));
+        }
+
+        tools
+    }
+
+    /// Dispatch the `tool_search` meta-tool. Returns the bridge envelope
+    /// `{ "results": [ToolDescriptor] }` (distinct from the HTTP route's
+    /// `{object,data}` shape).
+    async fn dispatch_tool_search(&self, args: &Value) -> Result<Value, McpError> {
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let kind = args
+            .get("kind")
+            .and_then(Value::as_str)
+            .and_then(ToolKind::parse_filter);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .map(|n| (n as usize).clamp(1, TOOL_SEARCH_MAX_LIMIT))
+            .unwrap_or(TOOL_SEARCH_DEFAULT_LIMIT);
+        let results = self.mcp.search(query, kind, limit).await;
+        Ok(json!({ "results": results }))
+    }
+
+    /// Dispatch the `describe` meta-tool. Returns the `DescribedTool` object (or
+    /// an error when the id is unknown).
+    async fn dispatch_describe(&self, args: &Value) -> Result<Value, McpError> {
+        let id = args.get("id").and_then(Value::as_str).unwrap_or_default();
+        match self.mcp.describe(id).await {
+            Some(d) => serde_json::to_value(d).map_err(|e| {
+                McpError::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
+            }),
+            None => Err(McpError::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                format!("unknown tool id '{id}'"),
+                None,
+            )),
+        }
+    }
+}
+
+impl rmcp::ServerHandler for RyuMcpHandler {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::default()
+            .with_server_info(Implementation::from_build_env())
+            .with_protocol_version(ProtocolVersion::LATEST)
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: RequestContext<rmcp::RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        Ok(ListToolsResult::with_all_items(self.build_tool_list()))
+    }
+
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        _context: RequestContext<rmcp::RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool_id = request.name.as_ref();
+        let args: Value = request
+            .arguments
+            .clone()
+            .map(Value::Object)
+            .unwrap_or(Value::Null);
+
+        // ── Meta-tool dispatch arms (BEFORE the registry fallthrough) ──────────
+        let result: Value = match tool_id {
+            "tool_search" => self.dispatch_tool_search(&args).await?,
+            "describe" => self.dispatch_describe(&args).await?,
+            "execute" if tool_exec::is_available() => {
+                let code = args
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let invoker =
+                    std::sync::Arc::new(tool_exec::SandboxToolInvoker::registry_with_identity(
+                        Arc::clone(&self.mcp),
+                        self.agent_id.clone(),
+                        self.allowlist.clone(),
+                        None,
+                        self.identity_profile_ids.clone(),
+                    ));
+                let outcome = tool_exec::execute_code(code, invoker, &self.agent_id).await;
+                serde_json::to_value(outcome).map_err(|e| {
+                    McpError::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
+                })?
+            }
+            "resume" if tool_exec::is_available() => {
+                let execution_id = args
+                    .get("executionId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let action = args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let content = args.get("content").cloned().unwrap_or(Value::Null);
+                let outcome =
+                    tool_exec::resume_execution(execution_id, &self.agent_id, action, content)
+                        .await;
+                serde_json::to_value(outcome).map_err(|e| {
+                    McpError::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
+                })?
+            }
+            // Registry fallthrough (incl. Composio by `composio__<slug>` id): the
+            // allowlist is enforced inside `call_tool` (no direct-egress path).
+            // The Identity Vault consult (epic #517) runs first inside
+            // `call_tool_with_identity` for the agent's bound profiles.
+            _ => self
+                .mcp
+                .call_tool_with_identity(
+                    tool_id,
+                    args,
+                    self.allowlist.as_deref(),
+                    None,
+                    &self.identity_profile_ids,
+                    None,
+                )
+                .await
+                .map_err(|e| {
+                    McpError::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
+                })?,
+        };
+
+        let text = match result {
+            Value::String(s) => s,
+            other => other.to_string(),
+        };
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sidecar::mcp::{McpRegistry, McpServerConfig};
+    use std::collections::BTreeMap;
+
+    fn empty_registry() -> Arc<McpRegistry> {
+        Arc::new(McpRegistry::empty())
+    }
+
+    /// Build a handler directly (mirrors `build_ryu_mcp_server`'s wiring) so we can
+    /// exercise `list_tools` / `call_tool` without the ACP duplex transport.
+    async fn handler(
+        mcp: Arc<McpRegistry>,
+        allowlist: Option<Vec<String>>,
+        composio_actions: Vec<String>,
+    ) -> RyuMcpHandler {
+        let tools = mcp.tools_for_agent(allowlist.as_deref()).await;
+        let effective_allowlist = allowlist.map(|mut list| {
+            for slug in &composio_actions {
+                let id = format!("composio__{slug}");
+                if !list.contains(&id) {
+                    list.push(id);
+                }
+            }
+            list
+        });
+        RyuMcpHandler {
+            mcp,
+            allowlist: effective_allowlist,
+            composio_actions,
+            agent_id: "ryu".to_owned(),
+            identity_profile_ids: Vec::new(),
+            tools,
+        }
+    }
+
+    fn names_of(tools: &[Tool]) -> Vec<String> {
+        tools.iter().map(|t| t.name.to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn empty_allowlist_still_offers_meta_tools() {
+        // CONTRACT CHANGE (#477): an empty static allowlist STILL offers the
+        // meta-tools — discovery is open; execution stays allowlist-gated in
+        // `call_tool`. So `build_ryu_mcp_server` is always `Some`.
+        let mcp = empty_registry();
+        let result =
+            build_ryu_mcp_server(mcp, Some(vec![]), vec![], "ryu".to_owned(), vec![]).await;
+        assert!(
+            result.is_some(),
+            "empty allowlist must still offer the always-on meta-tools"
+        );
+    }
+
+    #[tokio::test]
+    async fn allowlisted_tool_is_registered_unlisted_still_offers_meta_tools() {
+        // When an allowlist names a server that lists no tools, no *registry*
+        // tools are offered — but the meta-tools are still present (#477), so the
+        // server is `Some`. This proves the allowlist gating path runs without a
+        // direct-egress bypass while discovery stays open.
+        let mcp = Arc::new(McpRegistry::from_servers({
+            let mut m = BTreeMap::new();
+            m.insert(
+                "mock-server".to_owned(),
+                McpServerConfig {
+                    command: "echo".to_owned(),
+                    args: vec![],
+                    env: BTreeMap::new(),
+                    description: Some("mock".to_owned()),
+                    enabled: true,
+                },
+            );
+            m
+        }));
+        let result = build_ryu_mcp_server(
+            Arc::clone(&mcp),
+            Some(vec!["mock-server".to_owned()]),
+            vec![],
+            "ryu".to_owned(),
+            vec![],
+        )
+        .await;
+        assert!(result.is_some(), "meta-tools are always offered");
+
+        // A non-existent server allowlist still offers the meta-tools.
+        let result2 = build_ryu_mcp_server(
+            Arc::clone(&mcp),
+            Some(vec!["does-not-exist".to_owned()]),
+            vec![],
+            "ryu".to_owned(),
+            vec![],
+        )
+        .await;
+        assert!(
+            result2.is_some(),
+            "non-existent server allowlist still offers meta-tools"
+        );
+    }
+
+    #[tokio::test]
+    async fn none_allowlist_offers_shadow_tools() {
+        // A `None` allowlist means "no restriction". Shadow tools are always
+        // available (built-in HTTP provider, no binary required), and the
+        // meta-tools are offered on top.
+        let mcp = empty_registry();
+        let result = build_ryu_mcp_server(mcp, None, vec![], "ryu".to_owned(), vec![]).await;
+        assert!(
+            result.is_some(),
+            "None allowlist should offer Shadow built-in tools + meta-tools"
+        );
+    }
+
+    #[tokio::test]
+    async fn composio_actions_appear_as_tools() {
+        // Per-agent Composio actions are offered as `composio__<slug>` function
+        // defs even when the static allowlist is empty (the bridge merges the
+        // composio ids into the effective allowlist so they are also callable).
+        let mcp = empty_registry();
+        let h = handler(
+            Arc::clone(&mcp),
+            Some(vec![]),
+            vec!["SLACK_SEND_MESSAGE".to_owned()],
+        )
+        .await;
+        let listed = h.build_tool_list();
+        let names = names_of(&listed);
+        assert!(
+            names.iter().any(|n| n == "composio__SLACK_SEND_MESSAGE"),
+            "composio action should be offered as a tool: {names:?}"
+        );
+        // And it is callable (merged into the effective allowlist).
+        assert!(
+            h.allowlist
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|e| e == "composio__SLACK_SEND_MESSAGE"),
+            "composio id must be merged into the effective allowlist"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_allowlist_still_offers_meta_tools_in_list() {
+        let mcp = empty_registry();
+        let h = handler(Arc::clone(&mcp), Some(vec![]), vec![]).await;
+        let names = names_of(&h.build_tool_list());
+        assert!(names.iter().any(|n| n == "tool_search"), "{names:?}");
+        assert!(names.iter().any(|n| n == "describe"), "{names:?}");
+    }
+
+    #[tokio::test]
+    async fn tool_search_dispatches_to_registry() {
+        // `tool_search` returns the bridge envelope `{ "results": [...] }`.
+        let mcp = empty_registry();
+        let h = handler(Arc::clone(&mcp), None, vec![]).await;
+        let out = h
+            .dispatch_tool_search(&json!({ "query": "capture screen", "limit": 5 }))
+            .await
+            .expect("tool_search");
+        assert!(
+            out.get("results").and_then(Value::as_array).is_some(),
+            "envelope must carry a `results` array: {out}"
+        );
+    }
+}

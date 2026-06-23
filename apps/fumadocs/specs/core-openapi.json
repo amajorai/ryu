@@ -1,0 +1,4106 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Ryu Core API",
+    "description": "The local Ryu Core orchestration backend. Default bind 127.0.0.1:7980 (override with --bind / RYU_BIND). When RYU_TOKEN is set, protected routes require `Authorization: Bearer <RYU_TOKEN>`; health and auth routes are public.",
+    "license": {
+      "name": "Apache-2.0"
+    },
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:7980",
+      "description": "Local Core"
+    }
+  ],
+  "paths": {
+    "/api/agents": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "List installed agents",
+        "operationId": "list_agents",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Create an agent",
+        "operationId": "create_agent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/catalog": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "List the agent catalog (detected CLIs)",
+        "operationId": "list_agent_catalog",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/catalog/install": {
+      "post": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Install an agent from the catalog",
+        "operationId": "install_agent_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/catalog/uninstall": {
+      "post": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Uninstall a catalog agent",
+        "operationId": "uninstall_agent_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/import": {
+      "post": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Import an agent from a template",
+        "description": "Creates a new agent from a portable agent template (as produced by\n`GET /api/agents/:id/export`). The imported agent always gets a fresh\nserver-assigned id and starts unlocked — the caller owns their copy and\ncan edit it freely. Name, version, system prompt, tools, engine, and\nper-attribute slots are all round-tripped from the template.",
+        "operationId": "import_agent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Get an agent by id",
+        "operationId": "get_agent",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Update an agent",
+        "operationId": "update_agent",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Delete an agent",
+        "operationId": "delete_agent",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/export": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Export an agent as a template",
+        "description": "Returns a portable agent template JSON that captures name, version, system\nprompt, tools, engine, and per-attribute slots. The template can be imported\nvia `POST /api/agents/import` to create a new, unlocked copy with a fresh id.",
+        "operationId": "export_agent",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/migrate-to-ryu": {
+      "post": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Migrate an agent onto the Ryu engine",
+        "description": "Reads the source agent (persona/tools/model), then creates-or-updates the\nRyu agent (id = \"ryu\", engine = \"acp:pi\") with those slots. The source\nagent is never modified; migration is a copy. Returns the updated Ryu agent\nand a summary of the fields that were carried over.",
+        "operationId": "migrate_to_ryu",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/tools": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "List an agent's tools + MCP tools",
+        "operationId": "list_tools",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Start the device authorization flow",
+        "operationId": "auth_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Clear the stored token",
+        "operationId": "auth_logout",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/status": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Device authorization status",
+        "operationId": "auth_status",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalog": {
+      "get": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "List the sidecar (engine/tool/agent) catalog",
+        "operationId": "get_catalog",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalog/sources": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "summary": "List catalog sources for a kind + the active one",
+        "operationId": "catalog_sources_list",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalog"
+        ],
+        "summary": "Add a custom catalog source",
+        "operationId": "catalog_sources_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/catalog/sources/select": {
+      "post": {
+        "tags": [
+          "Catalog"
+        ],
+        "summary": "Select the active source for a kind",
+        "operationId": "catalog_sources_select",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channels/run": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Run a channel-bot inbound message turn",
+        "description": "Channel bots (Telegram, Slack, WhatsApp, Discord) call this endpoint with a\n`(conversation_id, agent_id, text)` turn and receive the assembled reply as a\nplain JSON `{ \"reply\": \"...\" }`. Model calls still flow Core → Gateway so the\nmoat (firewall, DLP, budgets, audit) governs every bot-initiated call.",
+        "operationId": "channel_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/stream": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Stream a chat turn (SSE, Vercel AI format)",
+        "operationId": "chat_stream",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream"
+          }
+        }
+      }
+    },
+    "/api/conversations": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "List conversations",
+        "operationId": "list_conversations",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Get a conversation with messages",
+        "operationId": "get_conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Delete a conversation",
+        "operationId": "delete_conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/fork": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Fork a conversation",
+        "description": "ChatGPT-style \"Branch in new chat\": copy this conversation's history up to a\nchosen message into a fresh, independent conversation and return its summary.\nThe caller opens the returned conversation to continue the branch.",
+        "operationId": "fork_conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/goal": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Get the conversation goal state",
+        "operationId": "get_goal_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Set the conversation goal",
+        "operationId": "set_goal_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Clear the conversation goal",
+        "operationId": "clear_goal_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/goal/judge": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Judge whether the goal is met",
+        "operationId": "judge_goal_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/participants": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "List conversation participants",
+        "operationId": "get_participants_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Add a participant agent",
+        "operationId": "add_participant_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/participants/{agent_id}": {
+      "delete": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Remove a participant agent",
+        "operationId": "remove_participant_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/conversations/{id}/sessions": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "List a conversation's sessions",
+        "operationId": "list_sessions_for_conversation_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/delegate/stream": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Stream a sub-agent delegation (SSE)",
+        "description": "Each delegate's `started`/`finished` event is emitted as an SSE line as it\nhappens, so the client sees same-depth delegates progress concurrently. A\nterminal `done` event carries the ordered result array.",
+        "operationId": "delegate_stream",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream"
+          }
+        }
+      }
+    },
+    "/api/dependencies/check": {
+      "get": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Check for git/rust/bun/python on PATH",
+        "operationId": "check_dependencies",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dependencies/install": {
+      "post": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Best-effort install of missing deps",
+        "operationId": "install_dependencies",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/downloads": {
+      "get": {
+        "tags": [
+          "Downloads"
+        ],
+        "summary": "List downloads (download center)",
+        "operationId": "list_downloads",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/downloads/stream": {
+      "get": {
+        "tags": [
+          "Downloads"
+        ],
+        "summary": "Download center SSE stream",
+        "operationId": "downloads_stream",
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream"
+          }
+        }
+      }
+    },
+    "/api/downloads/{id}": {
+      "delete": {
+        "tags": [
+          "Downloads"
+        ],
+        "summary": "Clear a download entry",
+        "operationId": "download_clear",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/downloads/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Downloads"
+        ],
+        "summary": "Cancel a download",
+        "operationId": "download_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/downloads/{id}/pause": {
+      "post": {
+        "tags": [
+          "Downloads"
+        ],
+        "summary": "Pause a download",
+        "operationId": "download_pause",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/downloads/{id}/resume": {
+      "post": {
+        "tags": [
+          "Downloads"
+        ],
+        "summary": "Resume a download",
+        "operationId": "download_resume",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/downloads/{id}/retry": {
+      "post": {
+        "tags": [
+          "Downloads"
+        ],
+        "summary": "Retry a download",
+        "operationId": "download_retry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/embeddings/model": {
+      "get": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Get the active embedding model",
+        "operationId": "get_embedding_model",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Set the embedding model",
+        "operationId": "set_embedding_model",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/embeddings/reindex": {
+      "post": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Trigger a re-index",
+        "operationId": "trigger_reindex",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/embeddings/reindex/status": {
+      "get": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Re-index progress",
+        "operationId": "reindex_status",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engine/active": {
+      "get": {
+        "tags": [
+          "Engines"
+        ],
+        "summary": "Get the active resident engine",
+        "operationId": "get_active_engine",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Engines"
+        ],
+        "summary": "Swap the active resident engine",
+        "operationId": "set_active_engine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engines": {
+      "get": {
+        "tags": [
+          "Engines"
+        ],
+        "summary": "List engine runtimes",
+        "operationId": "list_engines",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gateway/audit": {
+      "get": {
+        "tags": [
+          "Gateway"
+        ],
+        "summary": "Query the gateway audit log (proxied)",
+        "operationId": "gateway_audit",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gateway/config": {
+      "get": {
+        "tags": [
+          "Gateway"
+        ],
+        "summary": "Get the gateway config (proxied)",
+        "operationId": "gateway_get_config",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Gateway"
+        ],
+        "summary": "Update the gateway config (proxied)",
+        "operationId": "gateway_put_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gateway/evals/run": {
+      "post": {
+        "tags": [
+          "Gateway"
+        ],
+        "summary": "Run a gateway eval dataset (proxied)",
+        "operationId": "gateway_run_evals",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gateway/providers": {
+      "put": {
+        "tags": [
+          "Gateway"
+        ],
+        "summary": "Set a BYOK provider key (proxied)",
+        "operationId": "gateway_set_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gateway/status": {
+      "get": {
+        "tags": [
+          "Gateway"
+        ],
+        "summary": "Gateway status (proxied)",
+        "description": "Always responds `200`. When the gateway is unreachable it returns\n`{ \"reachable\": false, ... }` rather than an error status, so the desktop\nstatus spine can distinguish \"gateway down (Core up)\" from \"Core down\" — the\ntyped client treats any non-2xx as Core being unreachable.\n\nForwards the gateway bearer token (`RYU_GATEWAY_TOKEN`) when configured, in\ncase the gateway runs with auth enabled.",
+        "operationId": "gateway_status",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Service health check",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/catalog": {
+      "get": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "Browse the MCP server catalog",
+        "operationId": "mcp_catalog_list",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/catalog/detail": {
+      "get": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "MCP server detail",
+        "operationId": "mcp_catalog_detail",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/catalog/install": {
+      "post": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "Install an MCP server from the catalog",
+        "description": "Security: the entry is written **disabled** so install never auto-launches a\nregistry-supplied command. The resolved command/url is returned in the\nresponse so the user can review it before enabling/starting the server through\nthe existing explicit path. The package identifier + version were validated by\n[`crate::mcp_catalog::plan_install`] (no shell metacharacters / path traversal).",
+        "operationId": "mcp_catalog_install",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/sandbox/disable": {
+      "post": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "Disable MCP tool sandboxing",
+        "operationId": "sandbox_disable",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/sandbox/enable": {
+      "post": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "Enable MCP tool sandboxing",
+        "operationId": "sandbox_enable",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/sandbox/status": {
+      "get": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "MCP sandbox availability + state",
+        "operationId": "sandbox_status",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/servers": {
+      "get": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "List configured MCP servers",
+        "operationId": "list_mcp_servers",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "Register an MCP server",
+        "description": "Validation:\n- `name` must be non-empty and must not contain `__` (the tool-id separator\n  that `split_tool_id` uses to route calls).\n- `command` must be non-empty.\n- `name` must not already be registered (built-ins included).\n\nWrite strategy: read the current `mcp.json` user map (parse-fail → 400 to\navoid clobbering a hand-edited file), insert the new entry, write back\natomically via `write_secret_file` + rename, then call `McpRegistry::reload`\nso the change takes effect without a restart.",
+        "operationId": "create_mcp_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/tools": {
+      "get": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "List available MCP tools",
+        "description": "## App-enable filtering (AC3)\n\nTools whose slug is *declared* by at least one loaded App manifest (via\n`permission_grants: [\"mcp:<slug>\"]`) are only included when at least one\napp that claims them is currently **enabled**. Tools not claimed by any\napp are always included — they are standalone/built-in MCP tools.\n\n## Core-vs-Gateway boundary\n\nThis is a list-time *visibility* filter, not a policy gate. Grant\n*enforcement* — whether the agent is actually allowed to call the tool —\nbelongs to the Gateway. Core decides what *runs*; Gateway decides what\nis *allowed*.",
+        "operationId": "list_mcp_tools",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mcp/tools/call": {
+      "post": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "Call an MCP tool",
+        "operationId": "call_mcp_tool",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mesh/status": {
+      "get": {
+        "tags": [
+          "Nodes"
+        ],
+        "summary": "Mesh (Tailscale/Headscale) reachability + peers",
+        "description": "Returns the canonical Contract 6 superset. When the mesh is disabled\n(`RYU_MESH_ENABLED` unset) this is the all-default object with HTTP 200\n(never 500), so a vanilla install reports `enabled:false` without amber.",
+        "operationId": "mesh_status",
+        "responses": {
+          "200": {
+            "description": "Mesh status",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/active": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Get the active served local chat model",
+        "description": "Reports the user-selected active model override (the local stem persisted in\npreferences and its originating Hugging Face repo when known) plus the\nregistry default it falls back to. `active` is the default when no override\nis set, so a client always learns the effective served model.",
+        "operationId": "get_active_model",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Switch the active served local chat model",
+        "description": "`id` is resolved to the local stem of a file present on disk; switching to a\nmodel the user never downloaded is refused (400). The choice is persisted in\npreferences, then the resident local engine (if any) is restarted so it\nreloads with the new `--model`, and the gateway's `local` provider is\nrefreshed. When no local engine is currently resident the choice still\npersists and takes effect on next start.",
+        "operationId": "set_active_model",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/catalog": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Browse the model catalog (HF GGUF)",
+        "operationId": "models_catalog_list",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/catalog/detail": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Model detail: README + per-quant files",
+        "operationId": "models_catalog_detail",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/catalog/install": {
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Install a GGUF model file",
+        "description": "Source-aware install. For an HF-compatible active model source (the default),\n`id` is the Hub `author/name` repo and `file` the GGUF filename, downloaded\nvia the HF resolve URL. For a Ryu **model-index** active source (#461), the\nsource resolves a descriptor (download URL + sha) for `id`; Core validates\nthe descriptor URL against the SSRF guard and downloads it through the same\nprivileged [`crate::model_catalog::install_from_descriptor`] path. Either\nway Core stays the only code that touches the disk.",
+        "operationId": "models_catalog_install",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/catalog/uninstall": {
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Uninstall a model file",
+        "description": "Delete a downloaded GGUF and clear its catalog provenance. Source-agnostic:\ninstalled models live in one on-disk dir regardless of which source fetched\nthem, so this routes straight to [`crate::model_catalog::uninstall_file`]\n(no per-source branch like install needs).",
+        "operationId": "models_catalog_uninstall",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/device": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Detect local device RAM/VRAM for fit verdicts",
+        "operationId": "models_device",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/node/init": {
+      "post": {
+        "tags": [
+          "Nodes"
+        ],
+        "summary": "Initialize or fetch this node's token",
+        "operationId": "node_init",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pi-config": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Get the Ryu-managed Pi configuration",
+        "operationId": "get_pi_config",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Update the Ryu-managed Pi configuration",
+        "operationId": "put_pi_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pi-config/catalog": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "List supported Pi providers and models",
+        "operationId": "get_pi_config_catalog",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "List installed plugins with state",
+        "description": "Each entry includes:\n- `id` — manifest id\n- `kinds` — deduplicated list of [`RunnableKind`] strings bundled by this app\n- `enabled` — current enabled flag from the lifecycle store\n- `permission_grants` — verbatim declared grants from `ryu.json` (declarations\n  only; enforcement is Gateway scope — Core never gates calls on grants)\n\nReturns the manifests loaded at startup via [`PluginManifestLoader`]. The list is\nstable for the lifetime of this Core process; a restart is required for newly\ninstalled apps to appear.",
+        "operationId": "list_apps",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins/catalog": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "List the plugin catalog",
+        "description": "TTL-cached in `ServerState::catalog_client`; falls back to a stale cache or\nan empty list when the registry is unreachable. Built-in apps are always\ndiscoverable via `GET /api/apps`, so an offline machine is never blank.",
+        "operationId": "list_apps_catalog",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins/install": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Install a plugin from a URL",
+        "description": "## Security (SSRF guard)\n\nOnly `https://` URLs are accepted. The host is resolved with `getaddrinfo`\nand rejected if *any* resolved IP is loopback / private / link-local / ULA /\nCGNAT (so a DNS name pointing at an internal address is caught, not just\nliteral IPs). The fetch client is then pinned to those validated IPs (no\nre-resolution, defeating DNS rebinding) and redirects are disabled so a\nremote cannot bounce the request to an internal host after the check.",
+        "operationId": "install_app_from_url",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins/reload": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Reload plugin manifests from disk",
+        "operationId": "reload_app_manifests",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins/{id}/disable": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Disable a plugin",
+        "operationId": "disable_app_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins/{id}/enable": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Enable a plugin (activate its runnables)",
+        "description": "Fails closed: if the Gateway is unreachable the app stays disabled and a\nclear 503 error is returned. If the Gateway denies a grant a 403 is returned.\n\nAfter a successful enable the manifest's Runnables are activated via\n[`crate::runnable::RunnableRegistry`]. Per-Runnable results are included in\nthe response so the caller can see which Runnables were registered and which\n(if any) encountered a partial failure. A partial failure does NOT roll back\nthe enable — Core-owned kinds (Agent, Workflow, Tool) are activated; kinds\nwithout a built-in handler (Policy, Engine — Gateway's domain) produce an\nobservable \"no handler\" error.",
+        "operationId": "enable_app_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins/{id}/install": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Install a built-in plugin by id",
+        "operationId": "install_app_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins/{id}/update": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Update a plugin",
+        "description": "Refuses a downgrade unless `force = true`.",
+        "operationId": "update_app_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/preferences/stream": {
+      "get": {
+        "tags": [
+          "Preferences"
+        ],
+        "summary": "Preferences SSE stream",
+        "operationId": "preferences_stream",
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream"
+          }
+        }
+      }
+    },
+    "/api/preferences/{key}": {
+      "get": {
+        "tags": [
+          "Preferences"
+        ],
+        "summary": "Get a preference value",
+        "operationId": "get_preference",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Preferences"
+        ],
+        "summary": "Set a preference value",
+        "operationId": "set_preference",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/retrieval/index": {
+      "post": {
+        "tags": [
+          "Retrieval"
+        ],
+        "summary": "Index a retrieval chunk",
+        "operationId": "index_retrieval_chunk",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/retrieval/search": {
+      "post": {
+        "tags": [
+          "Retrieval"
+        ],
+        "summary": "Search indexed chunks + memory",
+        "operationId": "search_retrieval",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "List runs",
+        "operationId": "list_runs_handler",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{id}/trace": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Get a run's trace spans",
+        "description": "`:id` is the `conversation_id` used as the run key.  Returns `{ \"spans\": [...] }`.\nReturns an empty list (not 404) when the run exists but has no recorded spans yet\nso the desktop can poll during an active run without error handling.",
+        "operationId": "get_run_trace_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Create a session",
+        "operationId": "create_session_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{id}": {
+      "get": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Get a session",
+        "operationId": "get_session_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{id}/status": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Update a session's status",
+        "operationId": "update_session_status_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/check/{name}": {
+      "get": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Check whether a sidecar is installed",
+        "operationId": "check_installed",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/list": {
+      "get": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "List installed sidecars",
+        "operationId": "list_installed",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/status": {
+      "get": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Install status for all sidecars",
+        "operationId": "get_install_status",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/status/{name}": {
+      "get": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Install status for one sidecar",
+        "operationId": "get_install_status_by_name",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/{name}/install": {
+      "post": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Install a sidecar (SSE progress)",
+        "operationId": "install_sidecar",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream"
+          }
+        }
+      }
+    },
+    "/api/setup/{name}/uninstall": {
+      "post": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Uninstall a sidecar",
+        "operationId": "uninstall_sidecar",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/{name}/uninstall-with-data": {
+      "post": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Uninstall a sidecar and its data",
+        "operationId": "uninstall_sidecar_with_data",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sidecar/start-all": {
+      "post": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Start all sidecars",
+        "operationId": "sidecar_start_all",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sidecar/status": {
+      "get": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Status of all sidecars",
+        "operationId": "sidecar_status",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sidecar/stop-all": {
+      "post": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Stop all sidecars",
+        "operationId": "sidecar_stop_all",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sidecar/{name}/restart": {
+      "post": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Restart a sidecar",
+        "operationId": "sidecar_restart",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sidecar/{name}/start": {
+      "post": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Start a sidecar",
+        "operationId": "sidecar_start",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sidecar/{name}/stop": {
+      "post": {
+        "tags": [
+          "Sidecars"
+        ],
+        "summary": "Stop a sidecar",
+        "operationId": "sidecar_stop",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "List installed skills",
+        "description": "Skills live in the universal `~/.claude/skills/<id>/SKILL.md`. This endpoint lets agents and\nUIs discover available skills (AC1). Each entry carries a `kind = \"skill\"`\nfield so the listing is heterogeneous-runnable compatible.",
+        "operationId": "list_skills",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/activate": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Toggle a skill active (injection gate)",
+        "operationId": "skills_activate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/catalog": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Browse the skills catalog (skills.sh)",
+        "description": "Source-aware (#463): the active Skill source (skills.sh by default, or a\ncustom Claude plugin marketplace) owns search. The installed-only view is\nalways source-agnostic (it scans the on-disk skills dir), so it uses the\nskills.sh helper which reads local state.",
+        "operationId": "skills_catalog_list",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/catalog/detail": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Skill detail: SKILL.md + file list",
+        "operationId": "skills_catalog_detail",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/catalog/install": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Install a skill from the catalog",
+        "description": "Source-aware (#463): skills.sh installs via the `owner/repo/slug` download\npath; a custom Claude marketplace source resolves the chosen item to its\nrepo+subdir and installs through Unit #462's from-source fetcher. Either way\nthe registry hot-reloads.",
+        "operationId": "skills_catalog_install",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/install-from-source": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Install a skill directly from a source spec",
+        "operationId": "skills_install_from_source",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces": {
+      "get": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "List spaces",
+        "operationId": "list_spaces",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Create a space",
+        "operationId": "create_space",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}": {
+      "delete": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Delete a space",
+        "operationId": "delete_space",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}/documents": {
+      "get": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "List documents in a space",
+        "operationId": "list_documents",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Ingest a document into a space",
+        "operationId": "ingest_document",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}/documents/{doc_id}": {
+      "get": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Get a document",
+        "operationId": "get_document",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Update a document",
+        "operationId": "update_document",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Delete a document",
+        "operationId": "delete_document",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}/pages": {
+      "post": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Create a page document",
+        "operationId": "create_page",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}/search": {
+      "post": {
+        "tags": [
+          "Spaces"
+        ],
+        "summary": "Search a space (RAG)",
+        "operationId": "search_space",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/info": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Live CPU/RAM/disk/GPU snapshot for this node",
+        "operationId": "system_info_handler",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/teams": {
+      "get": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "List agent teams",
+        "operationId": "list_teams",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Create a team",
+        "operationId": "create_team",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/teams/{id}": {
+      "get": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Get a team by id",
+        "operationId": "get_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Delete a team",
+        "operationId": "delete_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Update a team",
+        "operationId": "update_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/teams/{id}/members": {
+      "post": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Add a member agent to a team",
+        "operationId": "add_team_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/teams/{id}/members/{agent_id}": {
+      "delete": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Remove a member from a team",
+        "operationId": "remove_team_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tools/describe": {
+      "get": {
+        "tags": [
+          "Tools"
+        ],
+        "summary": "Describe a tool's argument schema",
+        "operationId": "tools_describe",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "description": "Fully-qualified tool id (<server>__<tool>)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Missing `id` query parameter"
+          },
+          "404": {
+            "description": "Unknown tool id"
+          }
+        }
+      }
+    },
+    "/api/tools/exec": {
+      "post": {
+        "tags": [
+          "Tools"
+        ],
+        "summary": "Run a programmatic tool-calling program",
+        "operationId": "tools_exec",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Terminal or paused outcome",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Missing/unknown agent or no backend"
+          }
+        }
+      }
+    },
+    "/api/tools/exec/resume": {
+      "post": {
+        "tags": [
+          "Tools"
+        ],
+        "summary": "Resume a paused programmatic execution",
+        "operationId": "tools_exec_resume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Terminal or paused outcome",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Missing/unknown agent or bad action"
+          },
+          "404": {
+            "description": "execution_not_found"
+          }
+        }
+      }
+    },
+    "/api/tools/search": {
+      "get": {
+        "tags": [
+          "Tools"
+        ],
+        "summary": "Search the unified tool catalog",
+        "operationId": "tools_search",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Natural-language capability query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "mcp|builtin|composio|app|any",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Max results (default 8)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "agent",
+            "in": "query",
+            "description": "Narrow to this agent's allowlist",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/update/apply": {
+      "post": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Download and apply an update (headless binaries)",
+        "operationId": "update_apply",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/update/check": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Compare installed version against the latest release",
+        "operationId": "update_check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/version": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Installed version and per-component builds",
+        "operationId": "get_version",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhook-ingress/backend": {
+      "get": {
+        "tags": [
+          "Nodes"
+        ],
+        "summary": "Get the configured webhook ingress backend",
+        "operationId": "webhook_ingress_get_backend",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Nodes"
+        ],
+        "summary": "Set the active webhook ingress backend",
+        "operationId": "webhook_ingress_set_backend",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhook-ingress/status": {
+      "get": {
+        "tags": [
+          "Nodes"
+        ],
+        "summary": "Webhook ingress backend + public URL",
+        "operationId": "webhook_ingress_status",
+        "responses": {
+          "200": {
+            "description": "Ingress status",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/worktree/{run_id}/apply": {
+      "post": {
+        "tags": [
+          "Worktree"
+        ],
+        "summary": "Apply/merge a run's worktree",
+        "operationId": "worktree_apply_handler",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/worktree/{run_id}/diff": {
+      "get": {
+        "tags": [
+          "Worktree"
+        ],
+        "summary": "Diff a run's worktree",
+        "operationId": "worktree_diff_handler",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "OpenAI-compatible chat completions (proxied)",
+        "operationId": "oai_chat_completions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows": {
+      "get": {
+        "tags": [
+          "Workflows"
+        ],
+        "summary": "List workflows",
+        "operationId": "list_workflows",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Workflows"
+        ],
+        "summary": "Create a workflow",
+        "operationId": "create_workflow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "Workflows"
+        ],
+        "summary": "Get a workflow run",
+        "operationId": "get_workflow_run",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/runs/{run_id}/resume": {
+      "post": {
+        "tags": [
+          "Workflows"
+        ],
+        "summary": "Resume a workflow run (HITL)",
+        "description": "Acceptance criteria:\n- 404 when the run does not exist.\n- 409 when the run is not in `awaiting_input` status.\n- Completes the Awakeable gate with the caller-supplied `payload`, persists,\n  re-invokes the executor (which skips all already-Completed nodes and\n  continues from the gate's successor), and returns the final run state.",
+        "operationId": "resume_workflow_run",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/{id}": {
+      "get": {
+        "tags": [
+          "Workflows"
+        ],
+        "summary": "Get a workflow",
+        "operationId": "get_workflow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Workflows"
+        ],
+        "summary": "Delete a workflow",
+        "operationId": "delete_workflow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/{id}/run": {
+      "post": {
+        "tags": [
+          "Workflows"
+        ],
+        "summary": "Run a workflow",
+        "description": "Routes through the durable engine selected by `durable::select_engine()`:\n  - `FallbackEngine` (default): in-process petgraph topological executor with\n    file-backed resumable state; crash-recoverable at the node checkpoint level.\n  - `RestateEngine` (opt-in via `RYU_RESTATE_ENABLED=1`): each node step runs\n    inside Restate's durable journal, surviving full process kills.\n\nReturns the same `WorkflowRun` shape regardless of backend (AC1).\nReturns 503 when the gateway is unreachable and fail-closed is in effect (AC3).",
+        "operationId": "run_workflow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {},
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Liveness, version, and updates."
+    },
+    {
+      "name": "Auth",
+      "description": "Device authorization flow."
+    },
+    {
+      "name": "Nodes",
+      "description": "Node initialization."
+    },
+    {
+      "name": "Sidecars",
+      "description": "Engine/tool/agent install + lifecycle."
+    },
+    {
+      "name": "Models",
+      "description": "Model catalog (HF GGUF) + device fit."
+    },
+    {
+      "name": "Catalog",
+      "description": "Per-kind catalog sources."
+    },
+    {
+      "name": "Skills",
+      "description": "Agent Skills install + activation."
+    },
+    {
+      "name": "Engines",
+      "description": "Engine runtimes + active-engine swap."
+    },
+    {
+      "name": "Plugins",
+      "description": "Plugin (app) catalog + lifecycle."
+    },
+    {
+      "name": "Agents",
+      "description": "Agent CRUD, catalog, import/export."
+    },
+    {
+      "name": "Teams",
+      "description": "Agent teams + members."
+    },
+    {
+      "name": "MCP",
+      "description": "MCP servers, tools, catalog, sandbox."
+    },
+    {
+      "name": "Tools",
+      "description": "Unified tool catalog (search/describe) + PTC exec."
+    },
+    {
+      "name": "Chat",
+      "description": "Chat, channels, delegation."
+    },
+    {
+      "name": "Retrieval",
+      "description": "Chunk indexing + search."
+    },
+    {
+      "name": "Conversations",
+      "description": "Conversations, sessions, goals, runs."
+    },
+    {
+      "name": "Spaces",
+      "description": "Spaces/RAG documents + embeddings."
+    },
+    {
+      "name": "Downloads",
+      "description": "Download center."
+    },
+    {
+      "name": "Worktree",
+      "description": "Per-run git worktrees."
+    },
+    {
+      "name": "Gateway",
+      "description": "Gateway config/status/audit (proxied)."
+    },
+    {
+      "name": "Workflows",
+      "description": "Workflow DAG engine."
+    },
+    {
+      "name": "Preferences",
+      "description": "Cross-surface preferences KV."
+    }
+  ]
+}

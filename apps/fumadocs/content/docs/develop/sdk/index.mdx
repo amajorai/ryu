@@ -1,0 +1,339 @@
+---
+title: "SDK Reference (@ryu/sdk)"
+description: "The full @ryu/sdk surface: the Runnable factories, the gateway-mandatory model client, the MCP bridge, and the CLI."
+---
+
+`@ryu/sdk` (`packages/sdk/`) is Ryu's own developer SDK. You author Runnables (agents, workflows,
+tools, and skills) as typed TypeScript, declare them in a `plugin.json`, and pack the result into a
+publish-ready bundle. The SDK references patterns from Mastra, the Vercel AI SDK, and ACP but
+depends on none of them, which is the point: building on theirs would defeat the "build your own
+agent" differentiation. The one invariant is that **every model call routes through the Gateway**.
+
+This is the exhaustive API reference. For a guided walkthrough that builds a plugin end to end, see
+[TypeScript SDK](/docs/develop/extensions/typescript-sdk). For the `plugin.json` schema, lifecycle
+endpoints, and signing, see [Plugin manifests](/docs/develop/extensions/plugin-json-manifest) and
+the [Plugin API](/docs/develop/sdk/plugin-api).
+
+<Callout type="warn">
+  The public npm release is in progress. Inside the Ryu monorepo `@ryu/sdk` resolves as
+  `workspace:*`; the package version is `0.1.0`. The model client depends on the native addon
+  `@ryu/sdk-native` (`workspace:*`), so a model call only runs where that addon has been built.
+</Callout>
+
+## Package layout
+
+The package (`packages/sdk/package.json`) exposes three entry points in its `exports` map:
+
+| Subpath | Resolves | Holds |
+|---|---|---|
+| `.` | the main API | factories, builders, model client, manifest types and schemas |
+| `./manifest` | the manifest schema | `PluginManifestSchema` and the manifest types |
+| `./cli` | the `ryu` CLI | also installed as the `ryu` bin |
+
+<Callout type="warn">
+  The MCP bridge (`McpServer`, `listTools`, `callTool`) lives in `packages/sdk/src/mcp/` but is not
+  yet in the public `exports` map. Inside the monorepo, import the source path directly until the
+  subpath export ships.
+</Callout>
+
+## The Runnable contract
+
+Every factory returns a value satisfying one shared interface (`packages/sdk/src/runnable/runnable-types.ts`).
+The four kinds are peers, not a hierarchy: an agent lists a workflow as a tool, a workflow lists an
+agent as a step.
+
+```typescript
+interface Runnable<TInput = unknown, TOutput = unknown> {
+  readonly id: string;
+  readonly kind: "agent" | "workflow" | "tool" | "skill";
+  readonly name: string;
+  run(input: TInput, ctx: RunnableContext): Promise<TOutput>;
+}
+
+interface RunnableContext {
+  gateway: GatewayClient;   // the only allowed path to a model; never null
+  sessionId?: string;       // optional Core session id for stateful runs
+  signal?: AbortSignal;     // optional abort for long-running runs
+}
+
+interface GatewayClient {
+  chat(messages: ChatMessage[]): Promise<ChatResult>;
+  stream(messages: ChatMessage[]): AsyncGenerator<ChatDelta>;
+}
+```
+
+`RunnableContext` always carries a `gateway`. There is no way to construct a context without one, so
+a Runnable cannot reach a model except through the Gateway. See
+[Gateway enforcement](#gateway-enforcement) below for how that is guaranteed at construction time.
+
+## Runnable factories
+
+Each factory takes an options object and returns a `Runnable` with a fixed `kind`. All four are
+exported from `.` (`packages/sdk/src/runnable/`).
+
+| Factory | `kind` | Distinct option | Returns |
+|---|---|---|---|
+| `defineAgent` | `agent` | `tools?: readonly Runnable[]` | `Runnable<TInput, TOutput>` |
+| `defineWorkflow` | `workflow` | `steps?: readonly Runnable[]` | `Runnable<TInput, TOutput>` |
+| `defineTool` | `tool` | `schema: ToolSchema` (required) | `ToolRunnable<TInput, TOutput>` |
+| `defineSkill` | `skill` | none | `Runnable<TInput, TOutput>` |
+
+Every options object shares `id`, `name`, and `run(input, ctx)`.
+
+### defineAgent
+
+```typescript
+function defineAgent<TInput, TOutput>(options: {
+  id: string;
+  name: string;
+  run(input: TInput, ctx: RunnableContext): Promise<TOutput>;
+  tools?: readonly Runnable[];
+}): Runnable<TInput, TOutput>;
+```
+
+Creates a `kind: "agent"` Runnable. The optional `tools` array lists other Runnables (including
+workflows) the agent can invoke as named tools.
+
+```typescript
+const myAgent = defineAgent({
+  id: "agent-researcher",
+  name: "Researcher",
+  async run({ query }, ctx) {
+    const result = await ctx.gateway.chat([{ role: "user", content: query }]);
+    return { answer: result.content };
+  },
+});
+```
+
+### defineWorkflow
+
+```typescript
+function defineWorkflow<TInput, TOutput>(options: {
+  id: string;
+  name: string;
+  run(input: TInput, ctx: RunnableContext): Promise<TOutput>;
+  steps?: readonly Runnable[];
+}): Runnable<TInput, TOutput>;
+```
+
+Creates a `kind: "workflow"` Runnable that orchestrates other Runnables as steps. A step is any
+`Runnable` (`WorkflowStep` is an alias), invoked directly with `step.run(input, ctx)`.
+
+### defineTool
+
+```typescript
+function defineTool<TInput extends Record<string, unknown>, TOutput>(options: {
+  id: string;
+  name: string;
+  schema: ToolSchema;        // JSON Schema, type: "object"
+  run(input: TInput, ctx: RunnableContext): Promise<TOutput>;
+}): ToolRunnable<TInput, TOutput>;
+```
+
+Creates a `kind: "tool"` Runnable with a JSON Schema. The input is validated against the schema at
+`run` time (`packages/sdk/src/runnable/tool.ts`), so a missing required field or a primitive-type
+mismatch throws a descriptive `Error` naming the failing field before the body executes. The schema
+shape mirrors Core's `ToolInfo.schema` (`apps/core/src/sidecar/adapters/mod.rs`), so a `defineTool`
+output is forwarded to Core's MCP/ACP layer with no transformation. Tools do not require a model
+call, but if one is needed it must use `ctx.gateway`.
+
+`ToolRunnable` extends `Runnable` with a public `schema` field. The schema types are:
+
+```typescript
+interface ToolSchema {
+  type: "object";
+  properties: Record<string, JsonSchemaProperty>;
+  required?: string[];
+}
+
+interface JsonSchemaProperty {
+  type: "string" | "number" | "integer" | "boolean" | "array" | "object";
+  description?: string;
+  enum?: unknown[];
+  items?: JsonSchemaProperty;
+  properties?: Record<string, JsonSchemaProperty>;
+  required?: string[];
+}
+```
+
+### defineSkill
+
+```typescript
+function defineSkill<TInput, TOutput>(options: {
+  id: string;
+  name: string;
+  run(input: TInput, ctx: RunnableContext): Promise<TOutput>;
+}): Runnable<TInput, TOutput>;
+```
+
+Creates a `kind: "skill"` Runnable that encapsulates a reusable prompt pattern. Like a tool it is
+stateless, but its job is a reusable prompt rather than a side-effectful function.
+
+## The model client
+
+`defineModel` builds a gateway-mandatory `ModelClient` (`packages/sdk/src/model/client.ts`). The
+client is a thin TypeScript wrapper over the `@ryu/sdk-native` addon, whose `ModelClient` is the
+`crates/ryu-sdk` Rust core. That means URL/token resolution and egress enforcement are the exact
+same implementation used by the Go and Python bindings and by Core itself, with no drift.
+
+```typescript
+function defineModel(modelId: string, options?: {
+  baseUrl?: string;   // defaults to RYU_GATEWAY_URL, then the Rust core default
+  token?: string;     // defaults to RYU_GATEWAY_TOKEN; the gateway token, never a provider key
+}): ModelClient;
+
+const model = defineModel("gemma4");
+const reply = await model.chat([{ role: "user", content: "hello" }]);
+console.log(reply.content);
+
+for await (const delta of model.stream(messages)) {
+  if (delta.content) process.stdout.write(delta.content);
+}
+```
+
+Constructing a `ModelClient` validates egress in the Rust core, so a direct-provider base URL throws
+immediately rather than at request time. The wire types are an OpenAI-compatible subset:
+
+```typescript
+interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
+interface ChatDelta   { content: string | null; finishReason: string | null }
+interface ChatResult  {
+  content: string;
+  finishReason: string | null;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+}
+```
+
+`usage` is present only when the gateway reports token counts; otherwise it is `undefined`.
+
+## Gateway enforcement
+
+The Gateway path is enforced by construction (`packages/sdk/src/model/gateway.ts`, backed by
+`crates/ryu-sdk/src/gateway.rs`):
+
+- Every `RunnableContext` carries a `GatewayClient`; there is no context without one.
+- The SDK ships **no provider bindings**, so credentials live in the Gateway, not in your code.
+- `assertAllowedEgressUrl(baseUrl)` rejects direct-provider hosts at construction time. Only the
+  configured gateway, loopback, or private addresses are allowed.
+- It fails closed: a client that cannot reach the Gateway throws rather than calling a provider
+  directly.
+
+These helpers are exported for advanced use:
+
+| Export | Resolves |
+|---|---|
+| `DEFAULT_GATEWAY_URL` | the constant `http://127.0.0.1:7981` |
+| `resolveGatewayUrl()` | `RYU_GATEWAY_URL` when non-empty, else `DEFAULT_GATEWAY_URL` |
+| `resolveGatewayToken()` | `RYU_GATEWAY_TOKEN`, or `undefined` when unset |
+| `assertAllowedEgressUrl(baseUrl)` | throws on a known direct-provider URL |
+
+For the architectural rule behind this (Core decides what runs, the Gateway decides what is allowed
+and paid for), see [Core vs Gateway](/docs/start-here/architecture/core-vs-gateway).
+
+## Builders and manifest schemas
+
+For declaring a `plugin.json` in code, the SDK exports a fluent `PluginBuilder` plus per-kind
+builders (`agent()`, `workflow()`, `tool()`, `skill()`) and their builder classes
+(`AgentBuilder`, `WorkflowBuilder`, `ToolBuilder`, `SkillBuilder`) from `.`.
+
+```typescript
+const manifest = new PluginBuilder()
+  .id("com.example.my-plugin")
+  .name("My Plugin")
+  .version("1.0.0")
+  .runnable(agent().id("agent-main").name("Main Agent").build())
+  .grant("mcp:web_search")
+  .build();
+```
+
+The Zod schemas and helpers behind the builders are also exported:
+
+| Export | Purpose |
+|---|---|
+| `PluginManifestSchema` | full `plugin.json` schema (also at `./manifest`) |
+| `RunnableKindSchema` | enums the four authorable kinds (`agent`, `workflow`, `tool`, `skill`) |
+| `RunnableMetaSchema` | per-runnable metadata block |
+| `CompanionSurfaceSchema` | optional Companion surface declaration |
+| `coreManifestJsonSchema` | the manifest as a plain JSON Schema |
+| `validateManifestStrict(value)` | strict parse helper |
+| `validatePluginId(id)` | plugin-id format check |
+
+`RunnableKindSchema` enumerates only the four authorable kinds because that is the SDK surface. Core
+validates all eight `RunnableKind` variants. The manifest schema itself is documented once, on
+[Plugin manifests](/docs/develop/extensions/plugin-json-manifest); do not duplicate field tables here.
+
+## MCP bridge
+
+The SDK can expose your Runnables as MCP tools and call other MCP servers
+(`packages/sdk/src/mcp/`). The protocol version is `2024-11-05`, matching Core's
+`apps/core/src/sidecar/mcp/client.rs`.
+
+`McpServer` is an stdio JSON-RPC server. `register()` advertises a local executable as a tool;
+`passthrough()` forwards `tools/list` and `tools/call` to an upstream MCP stdio server (for example
+Ghost), re-advertising its tools verbatim and degrading gracefully if the upstream is down.
+
+```typescript
+const server = new McpServer()
+  .register({ name: "greet", run: () => Promise.resolve("Hello!") })
+  .passthrough({ command: { command: "ghost" }, label: "ghost" });
+
+await server.serve();   // reads stdin, writes stdout until EOF
+```
+
+The stateless client functions spawn a server, complete the handshake, make one call, and tear the
+process down (the same per-request pattern Core uses):
+
+```typescript
+function listTools(cmd: McpStdioCommand): Promise<McpTool[]>;
+function callTool(cmd: McpStdioCommand, tool: string, args: unknown): Promise<unknown>;
+```
+
+`callTool` returns the full `tools/call` result object (`{ content: [{ type, text }], isError? }`);
+extract `.content[0].text` for the plain output.
+
+<Callout type="info">
+  This MCP server intentionally implements no tool-approval or policy. Approval stays in the chat
+  layer and policy stays in the Gateway, per the Core-vs-Gateway rule.
+</Callout>
+
+## The CLI
+
+The `ryu` CLI (`packages/sdk/src/cli.ts`) is installed as the `ryu` bin and has three commands:
+
+| Command | Does |
+|---|---|
+| `bunx ryu pack <dir>` | validate `<dir>/plugin.json`, emit `<dir>/dist/plugin.bundle.json` |
+| `bunx ryu publish <dir>` | validate, then POST the manifest to the Ryu Marketplace as `pending` |
+| `bunx ryu dev <entry>` | run a Runnable module locally with an interactive chat loop |
+
+`ryu pack` validates against `PluginManifestSchema` and exits non-zero with the failing field path
+on any error. `ryu publish` always publishes as kind `plugin` (a skill-kind publish would be
+uninstallable, since the skill install path needs an `install_source` a manifest does not carry),
+requires `RYU_AUTH_TOKEN`, and POSTs to `POST /api/marketplace/publish` (base URL
+`RYU_MARKETPLACE_API_URL`, else `http://localhost:3000`); the item lands `pending` until a moderator
+approves it. `ryu dev` resolves the gateway URL the same way `ModelClient` does, imports your module,
+and starts a terminal REPL that surfaces text, tool-call, tool-result, and error events; it fails
+non-zero with a clear message if the Gateway is unreachable, never falling back to a provider.
+
+Publishing is governed by the Gateway (grant validation and manifest signing). See
+[Marketplace](/docs/develop/extensions/marketplace) for the full publish flow.
+
+## Scaffold a project
+
+```bash
+npx create-ryu-app my-extension
+```
+
+`create-ryu-app` (`packages/create-ryu-app/`) generates a starter project: a `plugin.json` validated
+against the manifest schema, a `package.json` with `dev` and `pack` scripts, and a starter agent in
+`src/agent.ts` that streams one turn through the local Gateway. The project name must match
+`/^[a-z0-9][a-z0-9-_]*$/i`.
+
+## Next
+
+<Cards>
+  <DocCard href="/docs/develop/extensions/typescript-sdk" />
+  <DocCard href="/docs/develop/sdk/client" />
+  <DocCard href="/docs/develop/sdk/rust" />
+  <DocCard href="/docs/develop/sdk/plugin-api" />
+</Cards>

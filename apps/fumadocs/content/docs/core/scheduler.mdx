@@ -1,0 +1,170 @@
+---
+title: "Scheduler"
+description: "Cron and interval jobs for workflows, agents, and monitors that survive Core restarts"
+---
+
+The scheduler is Core's always-on tick loop. It fires persisted jobs on a cron expression or a
+fixed interval and runs a workflow, an agent prompt, a website-monitor check, or an Identity Vault
+health sweep. Per the Core-vs-Gateway rule it is Core - it decides *what runs and when*, and
+enforces no policy; each fired job hands its model calls to the normal chat and workflow routing
+path where the Gateway sits (`apps/core/src/scheduler/mod.rs`).
+
+Jobs are file-backed, so schedules survive a Core restart. On boot the scheduler reloads every job
+from disk and resumes ticking (`apps/core/src/scheduler/store.rs`).
+
+## The job model
+
+A `ScheduledJob` (`scheduler/store.rs`) is one persisted unit of work. It carries an id, a display
+name, a schedule, a target, an `enabled` flag, and a bounded execution history.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | Unique job id (also the on-disk filename). |
+| `name` | string | Display name, logged when the job fires. |
+| `schedule` | `Schedule` | Cron expression or fixed interval (see below). |
+| `target` | `JobTarget` | What the job runs (see below). |
+| `enabled` | bool | When false the tick loop skips the job without deleting it. Defaults to true. |
+| `created_at` / `updated_at` | string | RFC 3339 timestamps. |
+| `last_run_at` | string? | When the job last fired (success or failure). |
+| `last_outcome` | `success` \| `failure` | Outcome of the most recent run. |
+| `history` | `ExecRecord[]` | Bounded execution log, oldest first. |
+
+Each job is stored at `~/.ryu/scheduled-jobs/<id>.json`. The data folder root is configurable; see
+[Data and storage](/docs/using-ryu/user-guide/data-and-storage).
+
+## Schedules
+
+A `Schedule` is one of two shapes (`Schedule` enum, tagged on `kind`).
+
+| Kind | Field | Example | Behavior |
+|---|---|---|---|
+| `cron` | `expr` | `0 9 * * *` | Classic 5-field cron expression, evaluated in UTC. Fires at most once per matching minute. |
+| `every` | `interval` | `30s`, `5m`, `1h` | Fixed interval parsed by `humantime`. |
+
+Cron expressions are parsed by `CronSchedule::parse` (`apps/core/src/scheduler/cron.rs`) and a
+malformed expression makes the job never due rather than crashing the loop. Interval jobs that fail
+to parse are treated the same way.
+
+<Callout type="info">
+On first boot, an interval job has no recorded last-fired instant, so it fires once immediately and
+then debounces to its interval. Anchoring the interval without an initial fire would require extra
+persisted state; firing once on start is the pragmatic always-on behavior (`is_due` in
+`scheduler/mod.rs`).
+</Callout>
+
+## Job targets
+
+`JobTarget` (`scheduler/store.rs`) is tagged on `type` and has four variants.
+
+| Variant | Fields | What it runs |
+|---|---|---|
+| `workflow` | `workflow_id`, `input` map | Loads the persisted workflow and runs it (`workflow::executor::run_workflow`). Records the workflow run id on success. |
+| `agent` | `agent_id`, `prompt` | One chat turn against the configured agent via the global agent runner (its engine binding, gateway routing, tools, and persona). |
+| `monitor` | `monitor_id` | One website-monitor check (fetch then compare then alert) via the monitor engine. |
+| `identity_health` | none | Re-validates every `AUTHENTICATED` Identity Vault connection and flips stale ones to `NEEDS_AUTH`. |
+
+The `agent` target routes through `global_agent_runner()` so the *configured* agent handles the
+prompt on the real chat path. When no runner is published (headless or tests) it falls back to an
+ephemeral single-node `Prompt` workflow that still routes the agent correctly.
+
+<Callout type="warn">
+Agent and monitor runs fire with `persist = false`, so scheduled and triggered runs do not yet
+appear in chat history. This is a known caveat carried from the workflow engine.
+</Callout>
+
+### Most jobs are created for you
+
+Two of the four targets are never created by hand. They are reconciled automatically so they ride
+the same tick loop as everything else, using deterministic ids.
+
+| Source | Deterministic id | Reconciled by |
+|---|---|---|
+| A workflow schedule trigger | `wf-sched-<workflow_id>-<idx>` | `apps/core/src/workflow/triggers.rs` |
+| A website monitor | `monitor-<id>` | `apps/core/src/server/monitors_api.rs` |
+
+The ids are stable across re-saves so reconciliation is idempotent: editing a workflow's triggers
+converges the `wf-sched-*` jobs to the declared set and deletes stale ones, and deleting the
+workflow or monitor tears down its backing job. The `identity_health` job is a single fixed-id job
+ensured at startup. See [Workflows](/docs/core/workflows) for trigger reconciliation and
+[Website monitoring](/docs/core/website-monitoring) for the monitor lifecycle.
+
+## The tick loop
+
+The scheduler spawns one background loop that wakes on a fixed interval and evaluates every
+persisted job against the current time (`Scheduler::tick`).
+
+```
+TICK_INTERVAL    = 30s   // how often the loop wakes to evaluate due jobs
+MAX_CONCURRENT_JOBS = 8  // bound on jobs running concurrently
+```
+
+On each tick the loop lists all jobs from disk, skips the disabled ones, and fires those that are
+due. The 30-second cadence means a cron job that matches a given minute is caught within that
+minute; an interval finer than 30 seconds is effectively floored to the tick.
+
+Firing marks the job's last-fired instant *before* spawning the actual run, so a slow agent or
+workflow run never stalls other due jobs in the same tick. Spawned runs share a semaphore of
+`MAX_CONCURRENT_JOBS` permits, so a flood of due jobs queues rather than spawning unbounded tasks.
+
+<Mermaid chart={`flowchart TD
+  Tick["Tick every 30s"] --> List["List jobs from disk"]
+  List --> Enabled{"enabled?"}
+  Enabled -- no --> Skip["Skip"]
+  Enabled -- yes --> Due{"due now?"}
+  Due -- no --> Skip
+  Due -- yes --> Mark["Mark last_fired"]
+  Mark --> Permit["Acquire permit (max 8)"]
+  Permit --> Run["Run target"]
+  Run --> Record["Record outcome + persist"]
+`} />
+
+### Once-per-slot semantics
+
+The scheduler holds no mutable in-memory job state beyond a per-job last-fired instant, used to
+avoid double-firing (`SchedulerInner.last_fired`). A cron job fires at most once per matching
+minute; an interval job fires only once its interval has elapsed since the last firing.
+
+## Execution history
+
+Every run appends an `ExecRecord` to the job and persists it. The history is bounded to the last 50
+records (`MAX_HISTORY`), oldest dropped first.
+
+| Field | Meaning |
+|---|---|
+| `started_at` / `finished_at` | RFC 3339 timestamps for the run. |
+| `outcome` | `success` or `failure`. |
+| `run_id` | Workflow run id, when the target was a workflow. |
+| `error` | Human-readable error string, on failure. |
+
+A failed workflow or agent run records the failure and the loop continues; one failing job never
+blocks the others.
+
+## The API
+
+The scheduler is served under the `heartbeat` prefix (`apps/core/src/server/mod.rs`).
+
+| Action | Endpoint |
+|---|---|
+| List jobs | `GET /heartbeat/jobs` |
+| Create a job | `POST /heartbeat/jobs` |
+| Fetch a job | `GET /heartbeat/jobs/:id` |
+| Delete a job | `DELETE /heartbeat/jobs/:id` |
+
+Creating a job validates the cron expression or interval before persisting, so a malformed schedule
+is rejected up front rather than failing silently at run time. There is no update route; to change a
+job, recreate it under the same id (workflow and monitor jobs are reconciled for you).
+
+<Callout type="info">
+Most users never call these routes directly. You create scheduled work by adding a schedule trigger
+to a [workflow](/docs/core/workflows) or a [website monitor](/docs/core/website-monitoring), and the
+scheduler job is reconciled automatically.
+</Callout>
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/core/workflows" />
+  <DocCard href="/docs/core/website-monitoring" />
+  <DocCard href="/docs/core/identity-vault" />
+  <DocCard href="/docs/using-ryu/user-guide/data-and-storage" />
+</Cards>

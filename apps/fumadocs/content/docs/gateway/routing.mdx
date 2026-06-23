@@ -1,0 +1,109 @@
+---
+title: Routing
+description: How the Gateway picks a provider and model for every request.
+---
+
+The router (`apps/gateway/src/router/`) decides which provider and model handles each request.
+Routing is per-attribute: an agent's chat, image, and TTS calls can each go to a different provider.
+
+## Provider selection
+
+By default the router matches the model name against built-in prefix rules:
+
+| Model prefix | Provider |
+|---|---|
+| `gpt-`, `o1`, `o3`, `o4` | OpenAI |
+| `claude-` | Anthropic |
+| `openrouter/` | OpenRouter (its own routing runs after the Gateway's guardrails) |
+| `llama`, `mistral`, `mixtral`, `gemma`, `phi`, `qwen`, `deepseek` | Local engine |
+| `zeroclaw`, `openclaw` | Core agents |
+
+## The strategies
+
+On top of the prefix rules, several strategies layer in, all driven by `gateway.toml`.
+
+- **Static model map** (`routing.model_map`) remaps an exact model name and can override the
+  provider, for example rewriting a friendly name to a dated provider model.
+- **Fallback chain** (`routing.fallback_chain`) tries alternative providers in order when the primary
+  provider's circuit is open, emitting an `x-degraded` header when it does.
+- **Eval-driven routing** (`routing.eval_routing`) splits traffic across candidate providers using
+  their rolling eval scores: explore unscored candidates, then exploit the leader while reserving a
+  slice for others. Selection is deterministic (a counter, not a random number).
+- **Modality routing** (`routing.modality_map`) sends chat, image, TTS, and STT to different
+  providers and models.
+
+## Smart (classifier-driven) routing
+
+The strategies above pick a provider from the *requested* model. Smart routing picks the
+model itself, from plain-language rules. You write rules like *"coding or debugging → claude-sonnet-4-5"*
+and *"simple chit-chat → a local model"*, and a cheap classifier model decides which rule each
+request matches.
+
+It runs before the normal routing in `apply_smart_routing` (`apps/gateway/src/pipeline/mod.rs`):
+the classifier (`apps/gateway/src/router/smart.rs`) reads only the latest user message, enumerates
+the rules, and replies with a single rule number. The chosen rule's model rewrites `body["model"]`
+*before* `pre_process` runs, so the rewritten model then resolves its provider through the ordinary
+`ModelRouter`. Nothing about providers is hardcoded: the target is any routable model id, including
+local models and `openrouter/…` slugs, and the classifier model is itself resolved through the
+router (it can be local, hosted, or an `openrouter/…` slug).
+
+### Configuration
+
+Smart routing is configured under `routing.smart_routing` in `gateway.toml`
+(`SmartRoutingConfig` in `apps/gateway/src/config.rs`):
+
+| Field | Meaning | Default |
+|---|---|---|
+| `enabled` | Master switch | off |
+| `classifier_model` | The cheap model that sorts requests | empty (inert) |
+| `rules` | Ordered list of `{ description, model }` entries | empty (inert) |
+| `default_model` | Model to use when no rule matches | none (keep requested model) |
+| `cache_by_session` | Classify once per `x-ryu-session-id` and reuse the decision | on |
+| `timeout_ms` | Per-classification timeout | 4000 |
+
+Smart routing only runs when `enabled` is set with a non-empty `classifier_model` and at least one
+rule. Two env vars set the basics for a standalone Gateway: `GATEWAY_SMART_ROUTING_ENABLED` and
+`GATEWAY_SMART_ROUTING_MODEL`. The rules themselves are config-file-only. Like all routing config,
+changes are a startup snapshot and take effect on the next Gateway refresh/restart.
+
+On the desktop, edit smart routing under Gateway → Routing → Smart routing
+(`SmartRoutingCard` in `apps/desktop/src/components/gateway/GatewayDialog.tsx`), which reads and
+writes the routing config through the same config endpoint the rest of the dialog uses.
+
+### Behavior and guarantees
+
+- **Fails open everywhere.** An inactive config, an unparseable classifier reply, a classifier
+  error, or a timeout all keep the originally requested model, so a misconfiguration can never
+  break chat.
+- **Explicit pinning wins.** When Core forwards a carded agent's chat slot, that pinned model
+  is an explicit user choice and smart routing never overrides it.
+- **Eval routing is skipped** for a smart-routed request, so eval/A-B routing does not reassign
+  the classifier's chosen provider.
+- **Per-session cache.** With `cache_by_session` on (the default), the decision is cached against
+  `x-ryu-session-id` so a conversation is classified once rather than every turn.
+- **Observability.** The model that actually handled the request is returned in the
+  `x-routed-model` response header (`apps/gateway/src/api/chat.rs`).
+
+<Callout type="info">
+  Smart routing is off by default because the classifier adds a round-trip to every request. There
+  is no Google provider, so to route to Gemini use an `openrouter/google/…` slug as the rule's
+  target model.
+</Callout>
+
+## The model list
+
+```
+GET /v1/models
+```
+
+returns the routable models. The built-in list includes OpenAI models (`gpt-4o`, `gpt-4o-mini`,
+`gpt-4-turbo`, `o1`, `o3-mini`), Anthropic models (`claude-opus-4-5`, `claude-sonnet-4-5`,
+`claude-haiku-4-5`, and the dated 3.5 models), Core agents (`zeroclaw`, `openclaw`),
+`openrouter/auto`, and local models. Add your own with `routing.model_map`.
+
+## Providers and credentials
+
+Provider credentials come from environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`OPENROUTER_API_KEY`) or the config. The local provider's URL comes from `LOCAL_LLM_URL`, which Core
+sets to the active local engine when it spawns the Gateway. Set or clear provider keys at runtime
+through Core's `PUT /api/gateway/providers`.

@@ -1,0 +1,8 @@
+{
+  "title": "Evals",
+  "description": "Provider scoring and dataset eval runs.",
+  "pages": [
+    "getEvals",
+    "runEvals"
+  ]
+}

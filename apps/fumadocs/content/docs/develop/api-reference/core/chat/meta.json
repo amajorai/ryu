@@ -1,0 +1,10 @@
+{
+  "title": "Chat",
+  "description": "Chat, channels, delegation.",
+  "pages": [
+    "channel_run",
+    "chat_stream",
+    "delegate_stream",
+    "oai_chat_completions"
+  ]
+}

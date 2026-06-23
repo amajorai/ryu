@@ -1,0 +1,206 @@
+---
+title: "App Manifest & Lifecycle"
+description: "How plugin.json manifests are validated, installed, enabled, disabled, and updated"
+---
+
+A Ryu **plugin** is a bundle described by a `plugin.json` manifest: it names the
+[Runnables](/docs/start-here/architecture/runnable-model) it ships, the permission grants it needs,
+and an optional Companion surface. Core owns the lifecycle (what runs - load, validate, install,
+enable, disable, update). The Gateway owns enforcement (what is allowed - grant validation, signing).
+
+This page is the reference for the manifest validation rules, the lifecycle operations and their
+routes, the two-tier built-in registry, and activation events. For the full manifest field schema,
+see [/docs/develop/sdk/plugin-api](/docs/develop/sdk/plugin-api). For the grant and signing model,
+see [/docs/gateway/governance](/docs/gateway/governance).
+
+Source: `apps/core/src/plugin_manifest/` (manifest type, loader, per-kind schema) and
+`apps/core/src/plugins/` (lifecycle operations, built-in registry).
+
+## The manifest file
+
+The canonical file name is `plugin.json`. The legacy `ryu.json` is still read so plugins installed
+before the apps -> plugins rename keep loading (`MANIFEST_FILE_NAMES` in
+`apps/core/src/plugin_manifest/mod.rs`).
+
+The loader (`PluginManifestLoader`) merges two sources: the built-in manifests compiled into the
+binary, then user-installed manifests scanned from a directory resolved in this order.
+
+| Order | Source | Notes |
+|---|---|---|
+| 1 | `RYU_PLUGINS_DIR` | Explicit override, if set |
+| 2 | `RYU_APPS_DIR` | Legacy env var, still honoured |
+| 3 | `~/.ryu/plugins` | Default when present |
+| 4 | `~/.ryu/apps` | Legacy fallback only when the new dir is absent but the old one exists |
+
+Each plugin lives in its own subdirectory holding a `plugin.json` (preferred) or `ryu.json`
+(legacy). A manifest that fails to parse is skipped with a warning; the rest keep loading.
+
+A manifest carries the fields below. The serde shapes are owned by the SDK schema reference
+([/docs/develop/sdk/plugin-api](/docs/develop/sdk/plugin-api)); this table is orientation only.
+
+| Field | Required | Purpose |
+|---|---|---|
+| `id` | yes | Reverse-domain unique id (e.g. `com.example.my-app`), also the on-disk directory name |
+| `name` | yes | Display name in the store and launcher |
+| `version` | yes | Semver string |
+| `runnables` | yes | The bundled Runnables, each with a `kind` and per-kind `config` |
+| `permission_grants` | no | Grants the plugin declares it needs (declarations only here; the Gateway enforces) |
+| `companion` | no | An in-desktop overlay or sidebar panel surface |
+| `contributes` | no | VS Code-style contribution points, referenced by runnable id |
+| `activation_events` | no | Lazy-wake events (empty list means eager) |
+| `engines` | no | `engines.ryu` semver requirement the running Core must satisfy |
+| `runtime` | no | A declarative external runtime (e.g. a Python venv + pip deps + assets) |
+
+## Per-kind Runnable validation
+
+Every `RunnableEntry` carries a `kind` discriminant and an optional typed `config`. The loader runs
+`validate_runnable` (`apps/core/src/plugin_manifest/schema.rs`) on each entry and rejects the whole
+manifest if any entry fails its per-kind contract. There is no `_ =>` fallback arm, so every one of
+the eight [`RunnableKind`](/docs/start-here/architecture/runnable-model) variants is checked
+explicitly.
+
+| Kind | Config required | Required fields |
+|---|---|---|
+| `agent` | no | All fields default (`system_prompt`, `model`, `tools`) |
+| `workflow` | yes | `entry` (non-empty) |
+| `tool` | yes | `slug` (non-empty) |
+| `skill` | yes | `skill_id` (non-empty) |
+| `companion` | yes | `label` (non-empty) |
+| `channel` | yes | `platform` (non-empty) |
+| `engine` | yes | `engine_type` (non-empty) |
+| `policy` | yes | `policy_type` (non-empty) and `definition` |
+
+A missing required config, an empty required string, or a config blob that does not parse as the
+expected shape all produce a descriptive error that names the runnable id and kind.
+
+## Loader validation rules
+
+Beyond per-kind config, the loader (`parse_and_validate`) enforces these manifest-level rules. A
+violation rejects that manifest only; the others continue loading.
+
+| Rule | Behavior |
+|---|---|
+| Id format | Strict allowlist `[a-zA-Z0-9.-_]`, must contain a `.`, no `..`, no leading/trailing `.`, no leading `-`, max 128 bytes. The id is a filesystem path component, so this is path-traversal hardening (`validate_plugin_id`) |
+| Semver | `version` must parse as semver; otherwise rejected |
+| Duplicate id | Across built-ins and user manifests, the first occurrence with an id wins; later duplicates are rejected |
+| `engines.ryu` pin | When present, it must parse as a semver requirement and the running Core version (`CARGO_PKG_VERSION`) must satisfy it; otherwise rejected |
+| `contributes` cross-validation | Every runnable id referenced in `contributes` must resolve to an entry in `runnables` (declare-by-id); a typo is caught at load |
+
+## Lifecycle operations
+
+The four state transitions live in `apps/core/src/plugins/lifecycle.rs` and are backed by the
+SQLite `PluginStore`. Each maps to an HTTP handler in `apps/core/src/server/mod.rs`.
+
+| Operation | Behavior |
+|---|---|
+| `install_app` | Creates a `PluginRecord` with `enabled = false`. Re-validates semver. Fails if already installed |
+| `enable_app` | Validates the manifest's declared grants via the Gateway, then flips `enabled = true` and records the approved grants. Fails closed |
+| `disable_app` | Flips `enabled = false` and clears approved grants |
+| `update_app` | Compares semver. Refuses a downgrade (new < installed) unless `force = true`. A same-version update is a no-op. Does not re-enable a disabled plugin |
+
+Install always lands disabled. Enabling is the gated step: Core calls the Gateway's
+`/v1/grants/validate` for every grant the manifest declares and stores the result, applying no
+inline policy of its own. If the Gateway denies a grant the plugin stays disabled; if the Gateway is
+unreachable the enable fails closed rather than silently allowing. Enabling with an empty grant list
+always succeeds (nothing to validate). See [/docs/gateway/governance](/docs/gateway/governance) for
+how grants are authorised and signed.
+
+<Callout type="warn">
+`RYU_STUB_GRANT_VALIDATION=1` makes grant validation an allow-all stub for environments where the
+Gateway endpoint is not yet available. It is logged at WARN so it is visible in operator logs. The
+stub keeps the seam explicit; it is not a production setting.
+</Callout>
+
+### Routes
+
+`/api/plugins*` is canonical. `/api/apps*` is a deprecated one-release alias pointing at the same
+handlers, kept only so older clients keep working.
+
+```
+GET  /api/plugins                 list loaded manifests (built-in + user-installed)
+GET  /api/plugins/catalog         browse installable plugins from the remote registry
+POST /api/plugins/install         install by fetching plugin.json from a URL
+POST /api/plugins/reload          re-scan built-ins + the plugins dir (no restart)
+POST /api/plugins/:id/install     record as installed (disabled)
+POST /api/plugins/:id/enable      validate grants via Gateway, then enable
+POST /api/plugins/:id/disable     disable + clear approved grants
+POST /api/plugins/:id/update      update to a new manifest version
+```
+
+## Two-tier registry
+
+A plugin's trust tier is **derived from membership** in a constant, never asserted by a manifest
+field, so a plugin cannot promote itself. The lists live in `apps/core/src/plugins/builtins.rs`.
+
+| Tier | Meaning |
+|---|---|
+| `core` | First-party, shipped with Ryu. Listed in `CORE_PLUGINS`. Renders in the "Core" store section |
+| `community` | Everything else, including user-installed plugins and built-in fixtures not in `CORE_PLUGINS`. Always install-then-enable opt-in |
+
+A subset of Core plugins is seeded enabled on a fresh install. `CORE_DEFAULT_ON` is currently
+`io.ryu.engines` (local llama.cpp for zero-setup chat) and `io.ryu.durable` (the in-process durable
+workflow engine). The seed runs once at startup and respects user choice: it acts only when there is
+no prior record for that plugin, so a later disable survives a restart (`main.rs` default-on seeding,
+#444). The opt-in Core plugins (`firewall`, `routing`, `sandbox`, `headroom`) are Core-tier but
+deliberately excluded from default-on because they change gateway or sandbox behaviour.
+
+## Built-in manifests
+
+Built-in manifests are compiled into the binary (`BUILTIN_MANIFESTS`) and always load regardless of
+whether a user plugins directory exists.
+
+| Manifest | What it declares |
+|---|---|
+| `sample.plugin.json` | Research Assistant demo (first-run + integration tests) |
+| `spider.plugin.json` | Spider web-crawler tool |
+| `exa.plugin.json` | Exa neural search tool (BYOK) |
+| `ghost.plugin.json` | Ghost desktop-automation MCP tool |
+| `shadow.plugin.json` | Shadow screen and audio capture + semantic memory |
+| `headroom.plugin.json` | Gateway egress compression as a `compression` Policy runnable |
+| `firewall.plugin.json` | Gateway firewall on/off Policy (Core-tier, opt-in) |
+| `routing.plugin.json` | Smart classifier routing on/off Policy (Core-tier, opt-in) |
+| `sandbox.plugin.json` | Wasmtime ephemeral sandbox on/off Policy (Core-tier, opt-in) |
+| `engines.plugin.json` | Local engine bindings (llama.cpp + embeddings), default-on |
+| `durable.plugin.json` | Durable workflow execution engine, default-on |
+
+<Callout type="warn">
+Ghost and Shadow are **Windows-first** and **sidecar-managed**. Their lifecycle is sidecar-based
+(`POST /api/setup/:name/install` to install, `POST /api/sidecar/:name/start|stop` to run), not the
+`PluginStore` install/enable path, so they never appear in the SQLite plugins table. On other
+platforms the desktop renders a graceful unavailable state.
+</Callout>
+
+## Activation events
+
+A plugin can declare `activation_events` to be woken lazily instead of eagerly. An **empty** list
+means eager activation: every existing manifest keeps activating on enable, so this is back-compatible.
+
+| Token | Meaning |
+|---|---|
+| `*` | Always active (eager) |
+| `onStartup` | Fired once at boot, after `ServerState` exists |
+| `onChat` | Declared and gated; firing wiring is a follow-on |
+| `onCommand:<id>` | Declared and gated; firing wiring is a follow-on |
+| `onRunnable:<id>` | Declared and gated; firing wiring is a follow-on |
+
+When an event fires, `fire_activation_event` (`apps/core/src/server/mod.rs`) records it in a
+process-global monotonic set (`FIRED_ACTIVATION_EVENTS` in `apps/core/src/runnable/mod.rs`) and runs
+every installed-and-enabled plugin through `RunnableRegistry::register_active` against the new
+snapshot. Eager plugins activate unconditionally; a gated plugin activates only once one of its
+declared events has fired. The driver is idempotent and best-effort: a per-runnable failure is
+logged, never fatal.
+
+<Callout type="warn">
+Only `onStartup` actually fires today (from `main.rs` at boot). `onChat`, `onCommand:<id>`, and
+`onRunnable:<id>` are declared, validated, and gated, but the wiring that fires them from the chat
+and command-palette paths is a follow-on. Do not rely on them activating a plugin yet.
+</Callout>
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/start-here/architecture/runnable-model" />
+  <DocCard href="/docs/develop/sdk/plugin-api" />
+  <DocCard href="/docs/gateway/governance" />
+  <DocCard href="/docs/using-ryu/user-guide/store" />
+</Cards>

@@ -1,0 +1,50 @@
+{
+  "id": "com.example.research-assistant",
+  "name": "Research Assistant",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "agent-researcher",
+      "name": "Researcher",
+      "kind": "agent",
+      "config": {
+        "system_prompt": "You are a research assistant.",
+        "model": "gemma4",
+        "tools": ["web_search"]
+      }
+    },
+    {
+      "id": "wf-summarise",
+      "name": "Summarise Workflow",
+      "kind": "workflow",
+      "config": {
+        "entry": "step-summarise"
+      }
+    },
+    {
+      "id": "tool-web-search",
+      "name": "Web Search",
+      "kind": "tool",
+      "config": {
+        "slug": "web_search"
+      }
+    },
+    {
+      "id": "skill-research",
+      "name": "Research Skill",
+      "kind": "skill",
+      "config": {
+        "skill_id": "ryu:research/v1"
+      }
+    }
+  ],
+  "permission_grants": [
+    "mcp:web_search",
+    "mcp:file_read"
+  ],
+  "companion": {
+    "label": "Research Assistant",
+    "icon": "magnifying-glass",
+    "shortcut": "ctrl+shift+r"
+  }
+}

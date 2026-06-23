@@ -1,0 +1,4 @@
+# Built native artifacts (shipped via npm prebuilds, not committed)
+*.node
+target/
+node_modules/

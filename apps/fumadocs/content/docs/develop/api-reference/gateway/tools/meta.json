@@ -1,0 +1,7 @@
+{
+  "title": "Tools",
+  "description": "Configured tool integrations (Composio).",
+  "pages": [
+    "listComposioTools"
+  ]
+}

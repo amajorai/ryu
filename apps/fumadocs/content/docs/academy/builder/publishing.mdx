@@ -1,0 +1,103 @@
+---
+title: Publishing
+description: Sign and publish your app to the federated marketplace, governed by the Gateway.
+---
+
+When your app is ready, you publish it to the **marketplace** so others can find and install it. Publishing is governed by the Gateway, which means the platform checks and signs your app before it can go out.
+
+## Publish from the SDK
+
+The SDK exposes a `ryu publish` target:
+
+```bash
+ryu publish
+```
+
+That single command kicks off the governed flow.
+
+## What the Gateway does
+
+Publishing routes through the Gateway, which enforces three things:
+
+- **Grant validation** - it confirms the app's requested grants, and it is fail-closed (no valid grant, no publish).
+- **ed25519 signing** - the Gateway signs the manifest.
+- **Verification** - the signed manifest is verified against a pinned public key, not a key carried in the manifest itself.
+
+<Callout type="warn">
+  Because grant validation is fail-closed, anything unverified is rejected by default. The pinned public key means a tampered manifest cannot vouch for itself.
+</Callout>
+
+## The federated marketplace
+
+<TryInRyu page="marketplace" />
+
+The marketplace is federated. Every catalog (models, skills, MCP, and plugins) routes through one catalog-source seam, with built-in sources plus user-added sources and a persisted active selector.
+
+A key rule: sources return **descriptors only**, while Core keeps the privileged install. A source can describe what is available, but it never gets to run the install step itself.
+
+There is also a Ryu-hosted first-party marketplace. When you publish there, your app's status moves from **pending** to **live** before it is broadly listed.
+
+## Safe fetching
+
+Untrusted fetches are SSRF-guarded: https-only, IP-pinned, and size-capped. A malicious source cannot redirect Core to an internal address or hand it an oversized payload.
+
+## Knowledge check
+
+First, the reflection prompts. Answer them in your own words.
+
+- What three things does the Gateway enforce when you publish?
+- What is the difference between what a source does and what Core does at install time?
+- What does an app's status move from and to on the first-party marketplace?
+
+Then confirm the details with a quick self-test.
+
+<Quiz
+  questions={[
+    {
+      q: "What three things does the Gateway enforce when you publish?",
+      options: [
+        "Grant validation, ed25519 signing, and verification against a pinned public key",
+        "Payment, listing, and moderation",
+        "Compression, caching, and rate-limiting",
+      ],
+      answer: 0,
+      explain:
+        "Publishing routes through the Gateway, which enforces grant validation (fail-closed), ed25519 signing of the manifest, and verification against a pinned public key.",
+    },
+    {
+      q: "What is the difference between what a source does and what Core does at install time?",
+      options: [
+        "Sources install apps, and Core only lists them",
+        "Sources return descriptors only, while Core keeps the privileged install",
+        "They both run the install step together",
+      ],
+      answer: 1,
+      explain:
+        "A source can describe what is available, but it never runs the install step. Core keeps the privileged install.",
+    },
+    {
+      q: "What does an app's status move from and to on the first-party marketplace?",
+      options: [
+        "From draft to published",
+        "From pending to live",
+        "From installed to enabled",
+      ],
+      answer: 1,
+      explain:
+        "When you publish to the Ryu-hosted first-party marketplace, your app's status moves from pending to live before it is broadly listed.",
+    },
+    {
+      q: "How are untrusted fetches protected?",
+      options: [
+        "They are SSRF-guarded: https-only, IP-pinned, and size-capped",
+        "They are allowed only from a single hardcoded domain",
+        "They run inside a Docker sandbox",
+      ],
+      answer: 0,
+      explain:
+        "Untrusted fetches are SSRF-guarded, so a malicious source cannot redirect Core to an internal address or hand it an oversized payload.",
+    },
+  ]}
+/>
+
+Next: if you run agents for a business rather than build them, continue with [Ryu for Business](/docs/academy/cloud).

@@ -1,0 +1,28 @@
+{
+  "id": "io.ryu.sandbox",
+  "name": "Ephemeral Sandbox",
+  "version": "1.0.0",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
+  "runnables": [
+    {
+      "id": "policy-sandbox",
+      "name": "Wasmtime ephemeral sandbox (sandbox_exec)",
+      "kind": "policy",
+      "config": {
+        "policy_type": "sandbox",
+        "definition": {
+          "backend": "wasmtime",
+          "note": "On/off switch for the Core-local wasmtime sandbox tool (sandbox__sandbox_exec). Enabling this plugin makes the sandbox tool available; disabling marks it unavailable. Core-local — no gateway restart."
+        }
+      }
+    }
+  ],
+  "contributes": {
+    "policies": [
+      { "id": "policy-sandbox", "title": "Ephemeral Sandbox" }
+    ]
+  },
+  "permission_grants": []
+}

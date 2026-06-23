@@ -1,0 +1,18 @@
+{
+  "id": "io.ryu.spider",
+  "name": "Spider",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "tool-spider-crawl",
+      "name": "Spider Crawl",
+      "kind": "tool",
+      "config": {
+        "slug": "spider__crawl"
+      }
+    }
+  ],
+  "permission_grants": [
+    "mcp:spider"
+  ]
+}

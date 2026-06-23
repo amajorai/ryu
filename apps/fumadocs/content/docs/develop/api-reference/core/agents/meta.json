@@ -1,0 +1,21 @@
+{
+  "title": "Agents",
+  "description": "Agent CRUD, catalog, import/export.",
+  "pages": [
+    "list_agents",
+    "create_agent",
+    "list_agent_catalog",
+    "install_agent_handler",
+    "uninstall_agent_handler",
+    "import_agent",
+    "get_agent",
+    "delete_agent",
+    "update_agent",
+    "export_agent",
+    "migrate_to_ryu",
+    "list_tools",
+    "get_pi_config",
+    "put_pi_config",
+    "get_pi_config_catalog"
+  ]
+}

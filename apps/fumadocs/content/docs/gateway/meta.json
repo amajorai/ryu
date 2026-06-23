@@ -1,0 +1,23 @@
+{
+  "root": true,
+  "title": "Gateway",
+  "description": "The moat: routing, firewall, PII/DLP, budgets, evals, and audit.",
+  "icon": "ShieldCheck",
+  "pages": [
+    "index",
+    "---Traffic---",
+    "routing",
+    "reliability",
+    "compression",
+    "---Security & governance---",
+    "security",
+    "governance",
+    "evals-audit",
+    "---Tools---",
+    "tools",
+    "---Connect agents---",
+    "channels",
+    "gateway-for-any-agent",
+    "configuration"
+  ]
+}

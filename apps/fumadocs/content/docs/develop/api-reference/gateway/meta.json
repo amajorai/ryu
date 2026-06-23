@@ -1,0 +1,12 @@
+{
+  "pages": [
+    "inference",
+    "models",
+    "tools",
+    "evals",
+    "governance",
+    "audit",
+    "config",
+    "health"
+  ]
+}

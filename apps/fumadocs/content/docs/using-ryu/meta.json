@@ -1,0 +1,23 @@
+{
+  "root": true,
+  "title": "Using Ryu",
+  "description": "Run agents day to day: the app, engines, models, and skills.",
+  "icon": "BookOpen",
+  "pages": [
+    "index",
+    "---Basics---",
+    "user-guide",
+    "productivity",
+    "recipes",
+    "---Models & engines---",
+    "engines",
+    "models",
+    "---Capabilities---",
+    "skills",
+    "identities",
+    "---Clients---",
+    "clients",
+    "---Privacy---",
+    "transparency"
+  ]
+}

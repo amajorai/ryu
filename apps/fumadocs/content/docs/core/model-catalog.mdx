@@ -1,0 +1,153 @@
+---
+title: "Model Catalog"
+description: "Browse Hugging Face for GGUF/MLX models with device-fit verdicts, install, and switch the active model."
+---
+
+The model catalog is the Core subsystem that searches the Hugging Face Hub, computes a GPU-aware
+"runs on my device" verdict for every weight file, installs the chosen artifact with checksum
+verification, and switches which installed model the local engine serves. All logic lives in Core
+(`apps/core/src/model_catalog/`) so every client - desktop, mobile, extension - gets the same
+verdict from one place. Catalog entries are models only; the separate engine runtimes that serve
+them are documented under [Engines](/docs/using-ryu/engines).
+
+<Callout type="info">
+  Looking for the click-through how-to (browse, install, pick the active model)? See
+  [Models](/docs/using-ryu/models). This page is the Core internals and route reference.
+</Callout>
+
+## What it does
+
+Deciding whether a model *can run* on this machine is an orchestration question ("what runs"), so
+per the [Core vs Gateway](/docs/start-here/architecture/core-vs-gateway) rule it lives in Core,
+never the Gateway. The catalog has four responsibilities:
+
+- **Search** the HF Hub for models, filtered by task (`pipeline_tag`).
+- **Detail** a model: README, every quant file with real size and SHA-256, and a per-file device-fit
+  verdict.
+- **Install** a chosen artifact via the shared checksum-verified downloader, tracking provenance.
+- **Switch** which installed model the resident local engine serves (the active-model selection).
+
+## Routes
+
+| Route | Purpose |
+|---|---|
+| `GET /api/models/catalog` | Search the Hub. Query params `query`, `sort`, `limit`, `installed_only` |
+| `GET /api/models/catalog/detail` | Full detail for one repo: README, quant files, fit verdicts |
+| `POST /api/models/catalog/install` | Install a chosen file (or snapshot repo) |
+| `POST /api/models/catalog/uninstall` | Remove an installed file (also removes its vision adapter) |
+| `GET /api/models/device` | The detected machine spec used for fit verdicts |
+| `GET /api/models/engines` | Engines available to serve a given model format on this node |
+| `GET /api/models/active` | The current active-model selection |
+| `POST /api/models/active` | Switch the active model (`{ id }`); restarts the engine, refreshes the gateway |
+
+Handlers live in `apps/core/src/server/mod.rs` (routes registered around line 476); the catalog
+logic is in `apps/core/src/model_catalog/mod.rs`. A small in-process TTL cache in `mod.rs` makes
+repeat detail and list fetches fast for every client.
+
+## Device-fit verdicts
+
+`apps/core/src/model_catalog/device.rs` detects the machine and computes a plain-language fit
+verdict per file, with zero new dependencies. It probes total physical RAM and GPU VRAM using small
+platform-specific commands - PowerShell on Windows, `/proc/meminfo` on Linux, `sysctl` on macOS for
+RAM, and `nvidia-smi` for discrete NVIDIA VRAM. Apple Silicon is treated as unified memory, where
+RAM doubles as VRAM. Detection never fails: unknown fields stay `None` and the verdict degrades to
+`unknown` rather than erroring.
+
+The verdict is GPU-aware. A file that fits in VRAM runs fully on the GPU; one that only fits in
+VRAM plus system RAM runs with partial offload; one that fits in system RAM alone runs on CPU.
+
+| Verdict | Meaning |
+|---|---|
+| `great` | Fits in VRAM with headroom - runs fully on the GPU, fast |
+| `ok` | Fits comfortably in VRAM (or unified memory) - runs fully on the GPU |
+| `partial` | Fits in VRAM plus system RAM - partial GPU offload, slower than full-GPU |
+| `cpu` | Fits only in system RAM (no usable GPU) - runs, but on CPU and slower |
+| `too_big` | Would exhaust memory even spilling to system RAM - will not fit |
+| `unknown` | Memory could not be detected, so no verdict |
+
+The verdict enum is `FitVerdict` in `device.rs`, serialized snake_case. Because the verdict is
+computed on the Core node, it is authoritative even when the client is remote (a desktop pointed at
+a remote node sees that node's hardware, not its own).
+
+## Engine-aware formats
+
+The catalog is format-aware, not GGUF-only. Each model exposes a `ModelFormat` (GGUF, safetensors,
+MLX), and the engine that serves a model is *derived* from that format - the model is the slot you
+pick, the engine follows. `GET /api/models/engines` returns, per format, whether a serving engine is
+supported on this node and, when it is not, the human label of the engine that *would* serve it
+(`format_compat` in `apps/core/src/server/mod.rs`, backed by `crate::model_format`). MLX engines, for
+example, are Apple-Silicon-only, so a non-Apple node reports MLX formats as not-compatible with the
+engine that would be needed.
+
+## Artificial Analysis enrichment (optional)
+
+When `ARTIFICIAL_ANALYSIS_API_KEY` is set, `apps/core/src/model_catalog/aa.rs` enriches detail
+results with third-party model stats. The AA model list is cached to disk at
+`~/.ryu/aa-models-cache.json` with a daily TTL, so the rate-limited API is hit at most once a day.
+The `aa-mode` preference (desktop Settings -> Integrations "Live data" switch) toggles between the
+cached default and a live fetch.
+
+<Callout type="warn">
+  Artificial Analysis has no anonymous endpoint. Without `ARTIFICIAL_ANALYSIS_API_KEY` the
+  enrichment is skipped gracefully (the catalog still works); the key is free-tier.
+</Callout>
+
+## Install and provenance
+
+`POST /api/models/catalog/install` installs a chosen GGUF (or a multi-file snapshot for
+safetensors/MLX repos) via the shared checksum-verified downloader, with provenance recorded in
+`apps/core/src/model_catalog/installed.rs`. Installs surface in the Download Center and are tracked
+so the catalog can mark already-installed files. `installed_only=true` on the search route restricts
+results to what is on disk.
+
+### Vision adapters (mmproj)
+
+GGUF vision models pair a weight file with a multimodal projector (`mmproj-*.gguf`). The projector is
+an adapter, not a standalone model, so it is excluded from the quant list and installed alongside the
+model. llama.cpp loads it by the `<stem>.mmproj.gguf` convention. Uninstalling a model also removes
+its `*.mmproj.gguf` companion (`installed::mmproj_file_path`). The projector quant is selectable via
+`RYU_MMPROJ_QUANT` (default `f16`).
+
+## Switching the active model
+
+The local engine used to serve whatever the model registry resolved at startup, with no runtime
+knob. The active-model selection adds one. `POST /api/models/active` with `{ id }` (a repo id or an
+installed stem) persists the `local-chat-model` preference, restarts the resident local engine, and
+refreshes the gateway so the new model is served immediately. `GET /api/models/active` returns the
+current selection.
+
+The plumbing:
+
+- `installed.rs` owns `ACTIVE_MODEL_PREF`, `resolve_to_stem`, and `model_file_path`.
+- `apps/core/src/providers/llamacpp/mod.rs` `resolve_active_chat_model()` consults the preference,
+  overriding the launch config and `--model` flag, and falls back to the registry when no selection
+  is set.
+- `model_catalog::active_model_ref_for_engine(engine)` is the runtime-switch source feeding each
+  provider's `start()`, sitting below an explicit `with_model` override.
+
+The same switch is reachable from a [deep link](/docs/using-ryu/deep-links)
+(`ryu://models/<source>/<id>`) and from the desktop "Use this model" button (`ActiveModelControl`).
+
+## Behavior and guarantees
+
+- One source of fit truth: every client gets the verdict the Core node computed.
+- Checksum-verified installs (SHA-256), with provenance for the installed view.
+- Switching the active model is atomic from the caller's view: the route persists, restarts the
+  engine, and refreshes the gateway before returning.
+- Nothing hardcoded: the active model, the HF endpoint (swappable `HfEndpoint`, including ModelScope
+  and custom base URLs), and the serving engine are all config-driven defaults.
+
+<Callout type="warn">
+  Device detection relies on platform probes (`nvidia-smi`, PowerShell, `sysctl`,
+  `/proc/meminfo`). On a machine where those are unavailable the verdict is `unknown` rather than
+  wrong, but it is not a guarantee that a `great`-verdict model will perform well under real load.
+</Callout>
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/using-ryu/models" />
+  <DocCard href="/docs/using-ryu/engines" />
+  <DocCard href="/docs/core/skills-catalog" />
+  <DocCard href="/docs/using-ryu/deep-links" />
+</Cards>

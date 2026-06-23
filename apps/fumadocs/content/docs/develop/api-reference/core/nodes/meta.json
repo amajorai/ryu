@@ -1,0 +1,11 @@
+{
+  "title": "Nodes",
+  "description": "Node initialization.",
+  "pages": [
+    "mesh_status",
+    "node_init",
+    "webhook_ingress_get_backend",
+    "webhook_ingress_set_backend",
+    "webhook_ingress_status"
+  ]
+}

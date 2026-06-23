@@ -1,0 +1,41 @@
+---
+title: "Architecture"
+description: "The system at a glance: clients, Core, Gateway, and engines, and how one request flows through them."
+---
+
+Ryu is **the whole car built around AI agent engines**: the engines already exist (OpenAI, Claude
+Code, Gemma, any OpenAI-compatible runtime), and Ryu is the orchestration and control layer around
+them. This is the one-page map; every box on the diagram has its own deeper section.
+
+## How one request flows
+
+A request from any client travels down through the Gateway (which governs the model call) into
+Core (which decides what runs), out to an engine, and back.
+
+```
+Desktop / CLI / Web / Extension / Mobile / Island / Bots
+        |
+        v
+  Ryu Gateway     control: routing, firewall, PII/DLP, budgets, evals, audit
+        |            decides WHAT IS ALLOWED, SHARED, MEASURED, and PAID FOR
+        v
+  Ryu Core        orchestration: sessions, memory, tools, workflows, sub-agents, sidecars
+        |            decides WHAT RUNS, then hands every model call to the Gateway
+        v
+  Any engine      OpenAI, Claude Code, Pi, Gemma, vLLM, any OpenAI-compatible runtime
+```
+
+Two Rust services do the work: **Ryu Core** (`apps/core`, default `127.0.0.1:7980`) and **Ryu
+Gateway** (`apps/gateway`). They are split by one rule: if code decides *what runs* it is Core;
+if it decides *what is allowed, shared, measured, or paid for* it is Gateway. That split is the
+single most important design rule in the codebase.
+
+## Where to go next
+
+<AutoCards url="/docs/start-here/architecture" />
+
+<Callout type="info">
+  The boxes above each have their own realm. [Core](/docs/core) and [Gateway](/docs/gateway) hold
+  the full subsystem reference; [Engines](/docs/using-ryu/engines) covers the swappable runtimes
+  Core manages as sidecars.
+</Callout>

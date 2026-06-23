@@ -1,0 +1,8 @@
+{
+  "title": "Config",
+  "description": "Runtime gateway configuration (admin).",
+  "pages": [
+    "getConfig",
+    "putConfig"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "title": "Engines",
+  "description": "Engine runtimes + active-engine swap.",
+  "pages": [
+    "get_active_engine",
+    "set_active_engine",
+    "list_engines"
+  ]
+}

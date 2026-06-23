@@ -1,0 +1,32 @@
+{
+  "id": "io.ryu.engines",
+  "name": "Local Engines",
+  "version": "1.0.0",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
+  "runnables": [
+    {
+      "id": "engine-llamacpp",
+      "name": "llama.cpp (local chat)",
+      "kind": "engine",
+      "config": {
+        "engine_type": "llamacpp",
+        "base_url": "http://127.0.0.1:8080"
+      }
+    },
+    {
+      "id": "engine-llamacpp-embed",
+      "name": "llama.cpp embeddings",
+      "kind": "engine",
+      "config": {
+        "engine_type": "llamacpp_embed",
+        "base_url": "http://127.0.0.1:8081"
+      }
+    }
+  ],
+  "contributes": {
+    "agents": []
+  },
+  "permission_grants": []
+}

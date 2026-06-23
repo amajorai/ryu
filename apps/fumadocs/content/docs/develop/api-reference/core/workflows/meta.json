@@ -1,0 +1,13 @@
+{
+  "title": "Workflows",
+  "description": "Workflow DAG engine.",
+  "pages": [
+    "list_workflows",
+    "create_workflow",
+    "get_workflow_run",
+    "resume_workflow_run",
+    "get_workflow",
+    "delete_workflow",
+    "run_workflow"
+  ]
+}

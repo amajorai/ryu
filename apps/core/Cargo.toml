@@ -1,0 +1,150 @@
+[package]
+name = "ryu-core"
+version = "0.0.1"
+edition = "2021"
+
+# `voice-parakeet` is an opt-in feature whose deps are commented in [features]
+# (see the parakeet note below). Tell the compiler the cfg value is expected so
+# the dormant gated code doesn't trip the unexpected_cfgs lint in default builds.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("voice-parakeet"))'] }
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["ws", "multipart"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "0.8"
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+dirs = "5"
+anyhow = "1"
+notify = "6"
+url = "2"
+futures-util = "0.3"
+async-stream = "0.3"
+sha2 = "0.10"
+regex = "1"
+hex = "0.4"
+semver = { version = "1", features = ["serde"] }
+indicatif = "0.17"
+tokio-util = { version = "0.7", features = ["io"] }
+flate2 = "1"
+tar = "0.4"
+zip = "0.6"
+chrono = { version = "0.4", features = ["serde"] }
+temporalio-sdk = "0.1.0-alpha.1"
+temporalio-client = "0.1"
+temporalio-sdk-core = "0.1"
+temporalio-macros = "0.1"
+temporalio-common = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+sqlite-vec = "=0.1.6"
+humantime = "2"
+zstd = "0.13"
+urlencoding = "2"
+base64 = { version = "0.22", features = ["alloc"] }
+rand = "0.8"
+chacha20poly1305 = "0.10"
+# `unstable_session_model` exposes `SessionModelState`/`SetSessionModelRequest`
+# so the desktop can read+switch an ACP agent's models (Zed-style, but Zed does
+# not ship this for external agents). Stable session modes + config options
+# (effort) need no feature flag.
+agent-client-protocol = { version = "=0.11.1", features = ["unstable_session_model"] }
+agent-client-protocol-tokio = "=0.11.1"
+rmcp = { version = "1", features = ["server", "transport-io"] }
+schemars = "1"
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+petgraph = "0.8"
+serde_yml = "0.0.12"
+# Ghost recipe engine + types (record/parameterize/replay desktop automations).
+# Reused so Core and the ghost desktop-automation server agree on the recipe
+# schema and the `~/.ghost/recipes/` store path. ghost-core is cross-platform
+# (no native input-tap deps — those live in ghost-eyes/ghost-hands).
+ghost-core = { path = "../../crates/ghost-core" }
+# OpenAPI spec generated from the Axum handlers. `--dump-openapi` writes the spec
+# the docs site (apps/fumadocs) renders; see src/openapi.rs.
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+# Live system snapshot (CPU/RAM/disk) for the per-node hardware view, plus
+# per-process sampling (`process`) for the per-engine resource usage shown in the
+# node selector. GPU/VRAM still comes from device.rs.
+sysinfo = { version = "0.37", default-features = false, features = ["system", "disk"] }
+# OpenTelemetry seam (#539, P1): the vendor-neutral instrumentation export path.
+# `tracing-opentelemetry` 0.33 bridges the existing `tracing` spans into OTel; it
+# pins `opentelemetry` ^0.32, so the whole family is pinned to 0.32 to keep ONE
+# `opentelemetry` in the tree (a version skew pulls two and breaks the layer's
+# trait bounds). OTLP/HTTP-protobuf only (`http-proto` + `reqwest-client`) so we
+# avoid tonic/grpc — Axiom and most collectors speak OTLP/HTTP. The exporter is
+# installed ONLY on consent (see main.rs); with the pref off nothing egresses and
+# the local `trace.rs` SQLite sink is untouched. The backend is a swappable config
+# value (`diagnostics-otlp-endpoint` / `OTEL_EXPORTER_OTLP_ENDPOINT`), never a lock.
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
+tracing-opentelemetry = "0.33"
+
+# Crash reporting tier (#544, P3) — Sentry for Rust PANICS ONLY, gated on the
+# `crash-reports-enabled` pref (separate consent from product analytics) + a DSN
+# env (`SENTRY_DSN`/`RYU_SENTRY_DSN`); absent DSN => disabled, never crashes boot.
+# Deliberately NO `sentry-tracing`/`sentry-log` feature: those sweep `tracing`/log
+# events (which can hold prompt/agent content + `~/.ryu` paths) into Sentry. We
+# take only the `panic` integration + `backtrace`/`contexts`, and a `before_send`
+# scrubs home-dir paths from the panic message + frames. `reqwest`+`native-tls`
+# transport matches the tree's existing reqwest (no second TLS stack pulled).
+sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "native-tls"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal"] }
+
+# OS keychain for the at-rest master key (see src/crypto/mod.rs). Per-platform
+# native backend so the key lives outside ~/.ryu: Windows Credential Manager,
+# macOS Keychain, Linux Secret Service. Falls back to a file key when absent.
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.52"
+winapi = { version = "0.3", features = ["winuser"] }
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+# Optional: wasmtime sandbox backend (feature sandbox-wasmtime).
+# Binary-size delta (release): measured in docs/spikes/0188-wasmtime-wasi-ceiling.md
+wasmtime = { version = "45", optional = true }
+wasmtime-wasi = { version = "45", features = ["p1", "p2"], optional = true }
+
+# ── Parakeet v3 STT (ONNX) — opt-in, off by default ──────────────────────────
+# Parakeet inference runs in-process via transcribe-rs (git-only, pulls a heavy
+# native ONNX Runtime through `ort`). To keep the default Core build lean and
+# network-independent, the dependency and its feature are NOT enabled by default.
+# To build a Core with parakeet STT, UNCOMMENT the three deps below and the
+# `voice-parakeet` feature, then build with `--features voice-parakeet`:
+#
+#   transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "d97ae65debaa9bacd5d56aa7d308d13df43c97ec", default-features = false, features = ["onnx"], optional = true }
+#   once_cell = { version = "1", optional = true }
+#   tempfile = { version = "3", optional = true }
+#
+# The model download, catalog entry, lifecycle, and /api/voice/transcribe routing
+# are always compiled in; only the ONNX inference (src/sidecar/providers/parakeet
+# engine module) is gated behind `voice-parakeet`.
+
+[features]
+# Programmatic tool calling (PTC, #476). `tool-exec-deno` is the default
+# backend: a Deno subprocess (no crate dep — Deno is on PATH), deny-by-default
+# permissions, real process isolation. `tool-exec-quickjs` is an off-by-default
+# in-process backend gated until a `quickjs_smoke` probe passes on Windows.
+default = ["tool-exec-deno"]
+tool-exec-deno = []
+tool-exec-quickjs = []
+sandbox-wasmtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
+# Parakeet STT inference. Requires the commented transcribe-rs/once_cell/tempfile
+# optional deps above to be uncommented first:
+#   voice-parakeet = ["dep:transcribe-rs", "dep:once_cell", "dep:tempfile"]
+
+[dev-dependencies]
+tempfile = "3"

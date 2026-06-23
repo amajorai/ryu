@@ -1,0 +1,10 @@
+{
+  "title": "Tools",
+  "description": "Unified tool catalog (search/describe) + PTC exec.",
+  "pages": [
+    "tools_describe",
+    "tools_exec",
+    "tools_exec_resume",
+    "tools_search"
+  ]
+}

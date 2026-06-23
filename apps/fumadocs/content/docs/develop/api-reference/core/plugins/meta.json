@@ -1,0 +1,14 @@
+{
+  "title": "Plugins",
+  "description": "Plugin (app) catalog + lifecycle.",
+  "pages": [
+    "list_apps",
+    "list_apps_catalog",
+    "install_app_from_url",
+    "reload_app_manifests",
+    "disable_app_handler",
+    "enable_app_handler",
+    "install_app_handler",
+    "update_app_handler"
+  ]
+}

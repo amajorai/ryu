@@ -1,0 +1,11 @@
+{
+  "title": "Recipes",
+  "icon": "ChefHat",
+  "pages": [
+    "index",
+    "price-watch-to-slack",
+    "record-a-task-as-workflow",
+    "triage-with-coordinator-threads",
+    "meeting-notes-to-space"
+  ]
+}

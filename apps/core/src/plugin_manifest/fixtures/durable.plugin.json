@@ -1,0 +1,23 @@
+{
+  "id": "io.ryu.durable",
+  "name": "Durable Workflows",
+  "version": "1.0.0",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
+  "runnables": [
+    {
+      "id": "engine-durable-workflow",
+      "name": "Durable workflow execution engine",
+      "kind": "engine",
+      "config": {
+        "engine_type": "durable_workflow",
+        "base_url": "core://workflow/durable"
+      }
+    }
+  ],
+  "contributes": {
+    "workflows": []
+  },
+  "permission_grants": []
+}

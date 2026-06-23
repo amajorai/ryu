@@ -1,0 +1,112 @@
+---
+title: Install and first run
+description: Install the Ryu desktop app and understand what onboarding downloads for you.
+---
+
+Ryu is designed to work the moment it is installed, with no API key and no setup. This lesson walks
+through what happens the first time you launch the app.
+
+## Install the desktop app
+
+Download the Ryu desktop app for your platform and install it like any other application. The
+desktop app bundles **Ryu Core**, the local backend that does the real work, so you do not install
+anything separately.
+
+When the app starts for the first time, it runs **onboarding**. This is where Ryu sets up your local
+stack.
+
+## What onboarding downloads
+
+Onboarding installs a complete local stack so Ryu is private and fully functional offline. Each step
+is best-effort, so if one fails it warns you and never blocks chat.
+
+- **A local chat engine and model** - llama.cpp plus a default Gemma GGUF model that runs on most
+  machines. This is what answers your messages out of the box.
+- **An embedding model** - a local GGUF used for retrieval and memory, served by a dedicated
+  embeddings instance.
+- **A voice engine** - whisper.cpp plus a base speech model for speech to text.
+- **A speech model** - the parakeet ONNX model for an alternative transcription path.
+
+Everything above runs locally. No data leaves your machine unless you later choose a cloud model or
+connect an external service.
+
+<Callout type="info">
+  Onboarding detects which agent command-line tools you already have installed and offers to add
+  the matching agents. Only the default **Ryu** agent is installed automatically. Everything else is
+  opt-in.
+</Callout>
+
+## Sign in (optional)
+
+You can sign in to sync conversations, manage billing, and use cloud features. Signing in is not
+required to chat. The local stack works whether or not you have an account.
+
+## Where things live
+
+Two pieces matter for the rest of this course.
+
+- **Sidebar** on the left holds New chat, search, and quick links to Agents, Models, and Skills.
+- **Command palette** opens with **Ctrl+K** or **Cmd+K** and jumps you to any page in the app.
+
+If onboarding finished without errors, you already have a working agent. Let us go meet it.
+
+## Knowledge check
+
+First, the reflection prompts. Say the answers out loud or jot them down, in your own words.
+
+- Do you need an API key to start chatting with Ryu? Why or why not?
+- Name two things onboarding downloads on first run.
+- Which keyboard shortcut opens the command palette?
+
+Then confirm the details with a quick self-test.
+
+<Quiz
+  questions={[
+    {
+      q: "Do you need an API key to start chatting with Ryu out of the box?",
+      options: [
+        "Yes, you must add a provider key during onboarding",
+        "No, Ryu is designed to work the moment it is installed with no API key and no setup",
+        "Only if you want to chat offline",
+      ],
+      answer: 1,
+      explain:
+        "Ryu works the moment it is installed, with no API key and no setup, because onboarding installs a complete local stack.",
+    },
+    {
+      q: "What does the desktop app bundle so you do not install anything separately?",
+      options: [
+        "Ryu Core, the local backend that does the real work",
+        "A cloud account",
+        "The Gemini API",
+      ],
+      answer: 0,
+      explain:
+        "The desktop app bundles Ryu Core, the local backend, so you do not install the backend separately.",
+    },
+    {
+      q: "Which agent is installed automatically during onboarding?",
+      options: [
+        "Every agent whose command-line tool is detected",
+        "Only the default Ryu agent; everything else is opt-in",
+        "Claude Code and Codex",
+      ],
+      answer: 1,
+      explain:
+        "Only the default Ryu agent is installed automatically. Onboarding offers to add others, but they are opt-in.",
+    },
+    {
+      q: "Which keyboard shortcut opens the command palette?",
+      options: [
+        "Ctrl+P or Cmd+P",
+        "Ctrl+K or Cmd+K",
+        "Ctrl+Space",
+      ],
+      answer: 1,
+      explain:
+        "The command palette opens with Ctrl+K or Cmd+K and jumps you to any page in the app.",
+    },
+  ]}
+/>
+
+Next, meet the default agent in [Your first agent](/docs/academy/essentials/your-first-agent).

@@ -1,0 +1,7 @@
+{
+  "title": "Health",
+  "description": "Liveness and provider status.",
+  "pages": [
+    "health"
+  ]
+}

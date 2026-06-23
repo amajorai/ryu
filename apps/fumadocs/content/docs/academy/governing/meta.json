@@ -1,0 +1,5 @@
+{
+  "title": "Governing Ryu",
+  "icon": "ShieldCheck",
+  "pages": ["index", "core-vs-gateway", "routing", "guardrails", "budgets-and-keys", "evals-and-audit"]
+}

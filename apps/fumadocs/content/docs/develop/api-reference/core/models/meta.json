@@ -1,0 +1,13 @@
+{
+  "title": "Models",
+  "description": "Model catalog (HF GGUF) + device fit.",
+  "pages": [
+    "get_active_model",
+    "set_active_model",
+    "models_catalog_list",
+    "models_catalog_detail",
+    "models_catalog_install",
+    "models_catalog_uninstall",
+    "models_device"
+  ]
+}

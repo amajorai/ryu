@@ -1,0 +1,94 @@
+---
+title: "Reliability & Budgets"
+description: "Caching, rate limits, circuit breaking with fallback, and budget caps across user, agent, and session."
+---
+
+The Gateway keeps model calls fast, bounded, and resilient. Four mechanisms sit on the request path: two caches in front of the provider, a per-key rate limiter, a per-provider circuit breaker that drives the routing fallback chain, and budget enforcement across user, agent, and session scopes.
+
+## Caching
+
+Two caches sit in front of the provider.
+
+| Cache | Location | Keying | Default |
+|---|---|---|---|
+| Exact | `apps/gateway/src/cache/` | Hash of model plus messages, with a TTL and max-entries cap | On |
+| Semantic | `apps/gateway/src/semantic_cache/` | Cosine similarity of the embedded request against prior requests, above a threshold | Off |
+
+The exact cache evicts expired entries with a background task. The semantic cache embeds each request with a configured embedding model and returns a stored response when similarity clears the threshold. A cached response carries `x-cache: HIT` (`MISS` otherwise), set in `apps/gateway/src/api/chat.rs`.
+
+<Callout type="warn">
+  The semantic cache is off by default and needs a configured embedding model. It returns a prior
+  response when a new request is close enough, so enable it only where near-duplicate answers are
+  acceptable.
+</Callout>
+
+## Rate limiting
+
+The rate limiter (`apps/gateway/src/rate_limit/`) applies token-bucket limits per key across three dimensions: requests per minute, tokens per minute, and a per-second burst cap for bot detection. Per-key overrides in the auth config let one key have a higher ceiling than the global default. Idle buckets are evicted to bound memory.
+
+## Circuit breaker and fallback
+
+The circuit breaker (`apps/gateway/src/circuit_breaker/`) protects against a failing provider. After a threshold of consecutive failures it opens and rejects calls to that provider immediately. After a reset timeout it half-opens to probe with a single request, then closes on success or re-opens on failure.
+
+An open circuit is what drives the fallback chain. In `pipeline/mod.rs` the request walks `state.router.fallback_chain(&decision.provider)`, skipping any provider whose circuit is open. When a later provider serves a request the primary was skipped for, the response carries an `x-degraded: fallback:<provider>` header (`DegradedMode`, `apps/gateway/src/pipeline/mod.rs`) so clients and operators can observe the event. Provider health is reported on `/metrics`. The chain itself is defined in [routing](/docs/gateway/routing).
+
+## Budgets
+
+Budgets (`apps/gateway/src/budget/`) cap token usage and apply a graduated action when a cap is crossed. `BudgetScope` has three identity dimensions - `User`, `Agent`, and `Session` (`budget/mod.rs`). When more than one scope fires, the most severe action wins (`severity` ordering in `budget/mod.rs`).
+
+The four actions, in increasing severity (`BudgetAction`, `apps/gateway/src/config.rs`):
+
+| Action | Effect |
+|---|---|
+| `notify` | Allow the call, flag it in the `x-budget-*` response headers. Never blocks. The default |
+| `downgrade` | Swap the requested model for the rule's `downgrade_to` (a cheaper model). Falls back to `restrict` if no downgrade model is set |
+| `restrict` | Allow the call but clamp it - strip tool definitions and cap `max_tokens` |
+| `stop` | Reject with `402 budget_exceeded` |
+
+Per-user and per-agent rules are configured as maps under `[budgets.users]` and `[budgets.agents]` in `gateway.toml` and are hot-swappable. Every decision is surfaced in the response headers (scope, action, usage, limit).
+
+<Callout type="info">
+  All budget scopes are off unless configured. The counters are in-memory `DashMap`s that reset on a
+  Gateway restart, and the master key (`auth.master_key`) bypasses every budget gate. Durable,
+  cross-restart accounting is the audit log's job, covered in
+  [evals and audit](/docs/gateway/evals-audit).
+</Callout>
+
+### Identity headers and spoofing
+
+Per-user and per-agent budgets key on the `x-ryu-user-id` and `x-ryu-agent-id` headers Core forwards on the request. Those headers are only honored when the API key is marked `trusted_forwarder` (`ApiKeyConfig` in `apps/gateway/src/config.rs`). For an untrusted key the budget binds to the key's own name instead, so a caller cannot rotate identity headers to escape its quota (`authenticate` in `apps/gateway/src/pipeline/mod.rs`).
+
+### Per-session budget
+
+A single global per-session token cap applies to every session, with the running counter keyed by the `x-ryu-session-id` header. Unlike the `users` and `agents` maps, the session scope is not a per-id rule map: Core mints a fresh conversation id per chat, so a per-id map would be unpopulatable. One rule applies to all sessions.
+
+The session scope reuses the same machinery as the user and agent scopes. `evaluate_session` builds a transient `BudgetRule` from the `SessionBudgetConfig` and runs the shared `decide` path, so `notify` / `downgrade` / `restrict` / `stop` all behave identically (`budget/mod.rs`). Configuration:
+
+| Setting | `gateway.toml` | Env var | Default |
+|---|---|---|---|
+| Token cap | `[budgets.session] limit` | `GATEWAY_SESSION_BUDGET_LIMIT` | `0` (off) |
+| Action | `[budgets.session] action` | `GATEWAY_SESSION_BUDGET_ACTION` | `stop` |
+
+A `limit` of `0` turns the session scope off. Session ids are ephemeral, so the counter map (`session_usage`) is soft-capped at `MAX_SESSION_ENTRIES` and cleared wholesale on overflow (`record_session`, `budget/mod.rs`).
+
+<Callout type="warn">
+  The per-session cap (#510) is compile-verified and unit-tested but has not yet been exercised
+  against a running Core. It is off by default.
+</Callout>
+
+### Per-key lifetime budget
+
+Each statically configured API key can carry a lifetime token cap, `token_budget_total` (input plus output combined), with an optional `downgrade_to` model (`ApiKeyConfig`, `apps/gateway/src/config.rs`). Enforcement runs before the provider call in `pipeline/mod.rs`: it reads the key's running total from the audit log (`state.audit.token_usage`) and, once the cap is crossed, either downgrades to the configured model or rejects with `402 budget_exceeded`. Because the usage figure comes from the audit log, this cap depends on audit logging being enabled.
+
+### Exec budget for tools and sandboxes
+
+A separate exec budget bounds non-model executions - sandbox runs and MCP tool invocations - counting executions and wall-clock seconds over a rolling window. It is driven by the `POST /v1/exec/budget/check` pre-run gate and `POST /v1/exec/audit`, both fail-closed and `trusted_forwarder`-only. The exec budget is documented with the tool path on the [tools](/docs/gateway/tools) page.
+
+## Where to next
+
+<Cards>
+  <DocCard href="/docs/gateway/routing" />
+  <DocCard href="/docs/gateway/tools" />
+  <DocCard href="/docs/gateway/evals-audit" />
+  <DocCard href="/docs/gateway/configuration" />
+</Cards>

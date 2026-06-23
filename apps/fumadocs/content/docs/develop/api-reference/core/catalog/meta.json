@@ -1,0 +1,9 @@
+{
+  "title": "Catalog",
+  "description": "Per-kind catalog sources.",
+  "pages": [
+    "catalog_sources_list",
+    "catalog_sources_add",
+    "catalog_sources_select"
+  ]
+}

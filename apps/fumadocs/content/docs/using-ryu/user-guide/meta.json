@@ -1,0 +1,21 @@
+{
+  "title": "User Guide",
+  "pages": [
+    "index",
+    "---Chat & agents---",
+    "agents",
+    "chat",
+    "search-and-recall",
+    "git-workspace",
+    "teams",
+    "---Knowledge & tools---",
+    "spaces-memory",
+    "tools-and-connections",
+    "---Store & marketplace---",
+    "store",
+    "marketplace",
+    "---Data---",
+    "data-and-storage",
+    "deep-links"
+  ]
+}

@@ -1,0 +1,95 @@
+---
+title: "Git Workspace & Worktrees"
+description: "Run an agent against a folder on a branch, optionally in an isolated per-run worktree, and review the diff in chat."
+---
+
+Ryu can root a chat turn in a real working folder, run on a chosen git branch, and optionally isolate
+the run in its own git worktree so the agent's edits never touch your main checkout until you choose
+to apply them. The whole flow lives in the composer, with the diff and the apply actions surfaced in
+chat.
+
+## The workspace bar
+
+Directly above the composer is a **workspace bar** (`apps/desktop/src/components/chat/WorkspaceBar.tsx`)
+with up to three click-to-change segments, left to right:
+
+| Segment | What it sets | Component |
+|---|---|---|
+| Project folder | The active folder the run is rooted in (`cwd`) | `ProjectPicker.tsx` |
+| Git branch | The branch the folder is on, with a switcher | `WorkspaceHeader.tsx` |
+| Run mode | Run in place, or in an isolated worktree | `WorktreePicker.tsx` |
+
+The branch and run-mode segments render only when the selected folder is a git repository. For a
+plain folder (or no folder) the bar collapses to just the project picker.
+
+The branch segment polls `GET /api/git/status?cwd=<path>` for the current branch and dirty state
+(`apps/core/src/server/git.rs`), shows an amber dot when the working tree is dirty, and on click lists
+local branches from `GET /api/git/branches` so you can switch with `POST /api/git/checkout`. Checkout
+goes through `git switch` and is validated against the real branch list, so a typo or an injected
+argument is rejected.
+
+<Callout type="info">
+  The branch and worktree controls only apply to a folder that is a git repo. Pick a non-repo folder
+  and those segments disappear, leaving an ordinary folder-rooted chat with no isolation.
+</Callout>
+
+## Run mode: this folder vs an isolated worktree
+
+The run-mode picker offers two choices:
+
+- **Work in this folder** edits the selected folder directly.
+- **Isolated worktree** runs in a persistent git worktree dedicated to this conversation. When you
+  pick it, you can give the worktree a friendly branch name (the **Suggest a new name** button
+  regenerates one), defaulting to a `ryu/...` style name.
+
+The key behavior is that the worktree is **persistent per conversation, not per message**. Core
+creates the worktree on the conversation's first message and reuses it across every following turn,
+keyed by the conversation id. Once a chat has a live worktree the branch is fixed, and the picker
+shows it read-only with the count of changed files
+(`apps/desktop/src/components/chat/WorktreePicker.tsx`).
+
+On each turn the chat request carries `cwd`, `worktree_isolation`, and the desired `worktree_branch`
+(`apps/desktop/src/pages/ChatPage.tsx`). Worktree isolation is opt-in per the run-mode pick, not on by
+default for every folder.
+
+## What Core does with a worktree
+
+When a chat request arrives with `cwd` set, `worktree_isolation` true, and the folder is a git repo,
+Core creates a per-run worktree (`apps/core/src/server/worktree.rs`):
+
+- The worktree directory is placed under `<repo>/.ryu-worktrees/ryu-run-<uuid>`, inside the repo so
+  it stays below `.gitignore`.
+- The branch is your sanitized friendly name when you supplied one (with a short suffix appended on a
+  name collision), or the auto-generated `ryu/run-<uuid>` otherwise.
+- Core records the HEAD commit at creation time as the diff base.
+- The worktree is an RAII guard: when the run's stream finishes or the client disconnects, the
+  worktree directory and its branch are removed automatically.
+
+## Review the diff in chat
+
+After a run, the in-chat **diff panel** (`apps/desktop/src/components/chat/DiffReviewPane.tsx`) reads
+the aggregate worktree diff from `GET /api/worktree/:run_id/diff`, where `run_id` is the conversation
+id. It shows the changed-file list with per-file additions and deletions plus the unified diff. The
+diff captures both committed changes on the worktree branch and uncommitted working-tree edits, so
+files the agent created but never committed still appear (Core stages with `git add -A` before
+diffing).
+
+## Apply the changes
+
+From the diff panel you can apply the run's work via `POST /api/worktree/:run_id/apply` in one of two
+modes:
+
+| Mode | What it does |
+|---|---|
+| **Apply (merge)** | Commits the worktree's changes, then merges the worktree branch into the base branch with `git merge --no-ff`. |
+| **Open PR** | Commits, pushes the branch to `origin`, and opens a pull request with `gh pr create`. |
+
+On a clean merge the panel shows the resulting commit; for a PR it shows the created PR URL. If the
+merge cannot complete cleanly, Core runs `git merge --abort` so your base repo is never left
+mid-merge, returns the list of conflicted files (HTTP 409), and still cleans up the worktree.
+
+<Callout type="warn">
+  PR mode requires the GitHub CLI (`gh`) to be installed and authenticated on the machine running
+  Core. Merge mode needs only git. Both modes operate on the Core node, so for a remote node these run
+  against that node's repo and credentials.
+</Callout>

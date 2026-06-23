@@ -1,0 +1,23 @@
+{
+  "title": "Conversations",
+  "description": "Conversations, sessions, goals, runs.",
+  "pages": [
+    "list_conversations",
+    "get_conversation",
+    "delete_conversation",
+    "fork_conversation",
+    "get_goal_handler",
+    "clear_goal_handler",
+    "set_goal_handler",
+    "judge_goal_handler",
+    "get_participants_handler",
+    "add_participant_handler",
+    "remove_participant_handler",
+    "list_sessions_for_conversation_handler",
+    "list_runs_handler",
+    "get_run_trace_handler",
+    "create_session_handler",
+    "get_session_handler",
+    "update_session_status_handler"
+  ]
+}

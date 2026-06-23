@@ -1,0 +1,128 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+@import "fumadocs-openapi/css/preset.css";
+
+/*
+ * Ryu design-system match.
+ *
+ * The landing site (`apps/web`) and the desktop app share one palette defined in
+ * `packages/ui/src/styles/globals.css`: a neutral grayscale base (zero-chroma
+ * oklch), radius 0.625rem, Inter for everything. Fumadocs ships its own neutral
+ * preset with close-but-different values, so we remap its `--color-fd-*` tokens
+ * to the exact ryu values here. Keep these in sync with the shared globals.css.
+ */
+
+:root {
+  --radius: 0.625rem;
+
+  /* Headings use Geist (wired up in layout.tsx via next/font); body stays Inter. */
+  --font-heading: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+
+  --color-fd-background: oklch(1 0 0);
+  --color-fd-foreground: oklch(0.145 0 0);
+  --color-fd-muted: oklch(0.97 0 0);
+  --color-fd-muted-foreground: oklch(0.556 0 0);
+  --color-fd-popover: oklch(1 0 0);
+  --color-fd-popover-foreground: oklch(0.145 0 0);
+  --color-fd-card: oklch(1 0 0);
+  --color-fd-card-foreground: oklch(0.145 0 0);
+  --color-fd-border: oklch(0.922 0 0);
+  --color-fd-primary: oklch(0.205 0 0);
+  --color-fd-primary-foreground: oklch(0.985 0 0);
+  --color-fd-secondary: oklch(0.97 0 0);
+  --color-fd-secondary-foreground: oklch(0.205 0 0);
+  --color-fd-accent: oklch(0.97 0 0);
+  --color-fd-accent-foreground: oklch(0.205 0 0);
+  --color-fd-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --color-fd-background: oklch(0.145 0 0);
+  --color-fd-foreground: oklch(0.985 0 0);
+  --color-fd-muted: oklch(0.269 0 0);
+  --color-fd-muted-foreground: oklch(0.708 0 0);
+  --color-fd-popover: oklch(0.205 0 0);
+  --color-fd-popover-foreground: oklch(0.985 0 0);
+  --color-fd-card: oklch(0.205 0 0);
+  --color-fd-card-foreground: oklch(0.985 0 0);
+  --color-fd-border: oklch(1 0 0 / 10%);
+  --color-fd-primary: oklch(0.922 0 0);
+  --color-fd-primary-foreground: oklch(0.205 0 0);
+  --color-fd-secondary: oklch(0.269 0 0);
+  --color-fd-secondary-foreground: oklch(0.985 0 0);
+  --color-fd-accent: oklch(0.269 0 0);
+  --color-fd-accent-foreground: oklch(0.985 0 0);
+  --color-fd-ring: oklch(0.556 0 0);
+}
+
+/* Keep the sidebar in step with the remapped dark palette (the neutral preset
+ * sets its own muted/secondary here, which would otherwise drift). */
+.dark #nd-sidebar {
+  --color-fd-muted: oklch(0.269 0 0);
+  --color-fd-secondary: oklch(0.269 0 0);
+  --color-fd-muted-foreground: oklch(0.708 0 0);
+}
+
+/*
+ * Per-root accent colors (Fumadocs-style theming).
+ *
+ * The ui/headless/framework/brand values are taken straight from the official
+ * Fumadocs docs site; using-ryu (green) and core (cyan) are in-style additions
+ * for the two extra roots Ryu has. `data-docs-root` is set by DocsLayoutClient
+ * and switches the primary/ring tokens for the whole layout per active root.
+ */
+:root {
+  --start-here-color: hsl(217 100% 58%);
+  --using-ryu-color: hsl(150 65% 40%);
+  --academy-color: hsl(250 80% 54%);
+  --gateway-color: hsl(41 100% 40%);
+  --core-color: hsl(192 95% 38%);
+  --develop-color: hsl(26 73% 51%);
+}
+
+.dark {
+  --start-here-color: hsl(214 100% 84%);
+  --using-ryu-color: hsl(150 60% 64%);
+  --academy-color: hsl(250 100% 80%);
+  --gateway-color: hsl(53 100% 76%);
+  --core-color: hsl(192 80% 68%);
+  --develop-color: hsl(26 100% 72%);
+}
+
+[data-docs-root="start-here"] {
+  --color-fd-primary: var(--start-here-color);
+  --color-fd-ring: var(--start-here-color);
+}
+[data-docs-root="using-ryu"] {
+  --color-fd-primary: var(--using-ryu-color);
+  --color-fd-ring: var(--using-ryu-color);
+}
+[data-docs-root="academy"] {
+  --color-fd-primary: var(--academy-color);
+  --color-fd-ring: var(--academy-color);
+}
+[data-docs-root="gateway"] {
+  --color-fd-primary: var(--gateway-color);
+  --color-fd-ring: var(--gateway-color);
+}
+[data-docs-root="core"] {
+  --color-fd-primary: var(--core-color);
+  --color-fd-ring: var(--core-color);
+}
+[data-docs-root="develop"] {
+  --color-fd-primary: var(--develop-color);
+  --color-fd-ring: var(--develop-color);
+}
+
+/* Apply the Geist heading font everywhere fumadocs renders a heading: the prose
+ * content (h1–h6), the page TOC heading, and the doc title. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.prose :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--font-heading);
+}

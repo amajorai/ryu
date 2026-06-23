@@ -1,0 +1,11 @@
+{
+  "name": "gateway",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "cargo run",
+    "dev:watch": "cargo watch -x run",
+    "build": "cargo build --release",
+    "check": "cargo check"
+  }
+}

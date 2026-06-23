@@ -1,0 +1,61 @@
+---
+title: Skills
+description: Browse and install Agent Skills from skills.sh, loaded into Core's skill registry.
+---
+
+The skills catalog browses the public [skills.sh](https://skills.sh) directory of Agent Skills and
+installs them locally. Like the model catalog, all the logic lives in Core
+(`apps/core/src/skills_catalog/`), so clients are pure UI over the same endpoints.
+
+## What an Agent Skill is
+
+A skill is a reusable capability described by a `SKILL.md` file (a YAML front-matter block with a
+name and description, plus a markdown body). Installed skills load into Core's skill registry from
+`~/.ryu/skills/`, where agents can use them.
+
+## Browse
+
+```
+GET /api/skills/catalog
+```
+
+Search the directory with a `query` and a `limit`, or omit the query to get a featured default. The
+featured view runs a handful of seed searches (agent, react, next, typescript, python, security,
+database, testing), merges and de-duplicates the results, and sorts by install count. Pass
+`installed_only=true` to list what is on disk.
+
+Core uses the same anonymous endpoints the official skills.sh CLI uses. The token-gated `/api/v1`
+endpoints are deliberately not used.
+
+## Detail
+
+```
+GET /api/skills/catalog/detail?id=owner%2Frepo%2Fslug
+```
+
+The detail view downloads the skill package, finds `SKILL.md`, splits its YAML front-matter from the
+body, and returns the description, the README body, and the full file list.
+
+## Install
+
+```
+POST /api/skills/catalog/install
+```
+
+Installing downloads the package, writes `SKILL.md` to `~/.ryu/skills/<slug>.md`, hot-reloads the
+skill registry so the skill is usable immediately with no restart, and records provenance in
+`~/.ryu/skills-catalog-installed.json`. Any sibling docs are written alongside so references are not
+lost.
+
+To list every installed skill and its enabled state, use `GET /api/skills`.
+
+<Callout type="info">
+  Skills here are the catalog-installed `SKILL.md` capabilities loaded by Core. They are distinct from
+  the Gateway's skill-injection feature, which prepends prompt snippets to system messages at the
+  Gateway. See [The Gateway](/docs/gateway).
+</Callout>
+
+## In the desktop
+
+The Skills page is a thin browser over these endpoints, reachable from the command palette or the
+sidebar. See [The App Store](/docs/using-ryu/user-guide/store).

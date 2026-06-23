@@ -1,0 +1,82 @@
+{
+  "id": "com.example.multi-kind",
+  "name": "Multi-Kind Example",
+  "version": "0.1.0",
+  "runnables": [
+    {
+      "id": "agent-assistant",
+      "name": "Assistant Agent",
+      "kind": "agent",
+      "config": {
+        "system_prompt": "You are a helpful assistant.",
+        "model": "gemma4",
+        "tools": ["web_search"]
+      }
+    },
+    {
+      "id": "wf-research",
+      "name": "Research Workflow",
+      "kind": "workflow",
+      "config": {
+        "entry": "step-gather"
+      }
+    },
+    {
+      "id": "tool-search",
+      "name": "Web Search Tool",
+      "kind": "tool",
+      "config": {
+        "slug": "web_search"
+      }
+    },
+    {
+      "id": "skill-summarise",
+      "name": "Summarise Skill",
+      "kind": "skill",
+      "config": {
+        "skill_id": "ryu:summarise/v1"
+      }
+    },
+    {
+      "id": "companion-panel",
+      "name": "Research Panel",
+      "kind": "companion",
+      "config": {
+        "label": "Research Panel",
+        "icon": "magnifying-glass",
+        "shortcut": "ctrl+shift+p"
+      }
+    },
+    {
+      "id": "channel-telegram",
+      "name": "Telegram Bot",
+      "kind": "channel",
+      "config": {
+        "platform": "telegram"
+      }
+    },
+    {
+      "id": "engine-llamacpp",
+      "name": "llama.cpp Engine",
+      "kind": "engine",
+      "config": {
+        "engine_type": "llamacpp",
+        "base_url": "http://localhost:8080"
+      }
+    },
+    {
+      "id": "policy-pii-dlp",
+      "name": "PII / DLP Filter",
+      "kind": "policy",
+      "config": {
+        "policy_type": "pii_dlp",
+        "definition": {
+          "block_patterns": ["\\b\\d{16}\\b", "\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b"]
+        }
+      }
+    }
+  ],
+  "permission_grants": [
+    "mcp:web_search"
+  ]
+}

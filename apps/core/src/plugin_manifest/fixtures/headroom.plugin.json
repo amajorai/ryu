@@ -1,0 +1,22 @@
+{
+  "id": "io.ryu.headroom",
+  "name": "Headroom Compression",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "policy-headroom-compression",
+      "name": "Gateway egress compression (headroom)",
+      "kind": "policy",
+      "config": {
+        "policy_type": "compression",
+        "definition": {
+          "service": "headroom",
+          "url": "http://127.0.0.1:8787",
+          "timeout_ms": 4000,
+          "min_messages": 4
+        }
+      }
+    }
+  ],
+  "permission_grants": []
+}

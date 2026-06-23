@@ -1,0 +1,87 @@
+---
+title: Evals and audit
+description: How the Gateway measures output quality and keeps the trail that proves what every governed call and tool execution did.
+---
+
+Measurement and audit are Gateway responsibilities. Evals tell you whether an agent is good. Audit lets you prove what it did. Together they close the loop on governance.
+
+## Evals
+
+Evals measure output quality. The Gateway integrates an evals capability so you can replay prompts (with per-case variables) through the pipeline and score the outputs against a judge rubric. This is how you move from "the agent feels fine" to evidence that an agent meets a bar.
+
+## Audit
+
+Audit is the trail of what happened. Every governed call and every tool execution emits an audit record. When you need to answer what an agent did, when, and at what cost, the audit trail is the source of truth.
+
+<Callout type="info">
+  Evals plus audit answer two different questions. Evals answer "is this agent good?" Audit answers "what exactly did it do?" You want both.
+</Callout>
+
+## Observability on the way
+
+There is read-only observability in the form of per-run traces heading to the desktop. Be honest that this surface is still arriving: the measurement and audit responsibilities live in the Gateway today, and the per-run trace viewing experience is being surfaced.
+
+## A safety note on admin endpoints
+
+Admin endpoints like config and audit are loopback-restricted for safety. They are not meant to be reachable from across a network by default, which keeps the most sensitive control surfaces close to the machine that owns them.
+
+<Callout type="warn">
+  Do not assume admin surfaces are remotely reachable. The loopback restriction is a deliberate safety boundary, not a limitation to work around.
+</Callout>
+
+## Knowledge check
+
+First, the reflection prompts. Answer them in your own words.
+
+- What two questions do evals and audit each answer?
+- What emits an audit record in the Gateway?
+- Why are admin endpoints like config and audit loopback-restricted?
+
+Then confirm the details with a quick self-test.
+
+<Quiz
+  questions={[
+    {
+      q: "What question does an eval answer?",
+      options: [
+        "What exactly did the agent do?",
+        "Is this agent good?",
+        "Which provider served the request?",
+      ],
+      answer: 1,
+      explain:
+        "Evals measure output quality, answering whether an agent is good. Audit answers what it did.",
+    },
+    {
+      q: "What emits an audit record in the Gateway?",
+      options: [
+        "Only failed requests",
+        "Every governed call and every tool execution",
+        "Only requests that use a paid provider",
+      ],
+      answer: 1,
+      explain:
+        "Every governed call and every tool execution emits an audit record, making the trail the source of truth.",
+    },
+    {
+      q: "What does the Gateway use to score an eval output against a quality bar?",
+      options: ["A judge rubric", "Rate limiting", "Egress compression"],
+      answer: 0,
+      explain:
+        "The evals capability replays prompts and scores the output against a judge rubric, so you can measure whether an agent meets a bar.",
+    },
+    {
+      q: "Why are admin endpoints like config and audit loopback-restricted?",
+      options: [
+        "To make them faster",
+        "As a deliberate safety boundary, so they are not reachable across a network by default",
+        "Because they are not finished yet",
+      ],
+      answer: 1,
+      explain:
+        "The loopback restriction is a deliberate safety boundary that keeps the most sensitive control surfaces close to the machine that owns them.",
+    },
+  ]}
+/>
+
+Next: you have finished the Governing track. Put it to use by learning to build what the Gateway governs in [Building on Ryu](/docs/academy/builder).

@@ -1,0 +1,9 @@
+{
+  "title": "Auth",
+  "description": "Device authorization flow.",
+  "pages": [
+    "auth_login",
+    "auth_logout",
+    "auth_status"
+  ]
+}

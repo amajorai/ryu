@@ -1,0 +1,12 @@
+{
+  "title": "Gateway",
+  "description": "Gateway config/status/audit (proxied).",
+  "pages": [
+    "gateway_audit",
+    "gateway_get_config",
+    "gateway_put_config",
+    "gateway_run_evals",
+    "gateway_set_provider",
+    "gateway_status"
+  ]
+}

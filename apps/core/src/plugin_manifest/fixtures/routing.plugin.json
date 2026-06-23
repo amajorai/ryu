@@ -1,0 +1,28 @@
+{
+  "id": "io.ryu.routing",
+  "name": "Smart Model Routing",
+  "version": "1.0.0",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
+  "runnables": [
+    {
+      "id": "policy-smart-routing",
+      "name": "Smart (classifier) model routing",
+      "kind": "policy",
+      "config": {
+        "policy_type": "routing",
+        "definition": {
+          "feature": "smart_routing",
+          "note": "On/off switch over the gateway's classifier-driven smart routing. The model_map and ordered rules stay owned by GET/PUT /v1/config; enabling this plugin forces smart_routing.enabled on at the next gateway restart."
+        }
+      }
+    }
+  ],
+  "contributes": {
+    "policies": [
+      { "id": "policy-smart-routing", "title": "Smart Routing" }
+    ]
+  },
+  "permission_grants": []
+}

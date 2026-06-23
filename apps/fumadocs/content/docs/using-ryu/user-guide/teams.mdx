@@ -1,0 +1,41 @@
+---
+title: "Agent Teams"
+description: "Address several agents as one unit with a coordination strategy."
+---
+
+A **team** is a collection of agents plus a coordination strategy. You address the team as one
+unit, and Ryu fans your turn out to its members and merges their replies into a single, attributed
+answer. Teams are the counterpart to single-agent chat when you want several agents working
+together on the same turn.
+
+## Create a team
+
+Teams live in their own **Teams** section in the sidebar.
+
+1. Click **+** on the Teams section to create a team.
+2. Pick the **coordination strategy** (see below).
+3. Add members by **dragging an agent row onto the team**.
+
+## Talk to a team
+
+In chat, `@mention` the team by name in the composer to direct your turn to it. Every member's
+reply is folded into one streamed answer, each block prefixed with the member's name so you can
+see who said what. The user turn is persisted once, and the combined reply is attributed to the
+team.
+
+## Coordination strategies
+
+Four strategies are built in:
+
+- **Broadcast** - every member answers the turn independently.
+- **Round-robin** - each member sees the previous members' replies and builds on them.
+- **Debate / synthesis** - members answer, then the lead agent synthesizes one combined answer.
+- **Router** - the lead agent classifies the turn and routes it to a single best member.
+
+<Callout type="info">
+  Council chat (`@mention` of individual agents in one thread) and teams are related but distinct:
+  council chat targets agents one at a time, while a team is a named unit with a fixed roster and a
+  strategy. A team can also be the route target for a [channel bot](/docs/gateway/channels).
+</Callout>
+
+Next: [The App Store](/docs/using-ryu/user-guide/store).

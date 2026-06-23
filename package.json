@@ -1,0 +1,85 @@
+{
+  "name": "ryu",
+  "private": true,
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*",
+      "crates/ryu-sdk-napi",
+      "!apps/raycast",
+      "!apps/tts-sidecar",
+      "!apps/unsloth-sidecar"
+    ],
+    "catalog": {
+      "dotenv": "^17.2.2",
+      "zod": "^4.1.13",
+      "@types/bun": "^1.3.4",
+      "better-auth": "1.5.2",
+      "ai": "^6.0.3",
+      "lucide-react": "^0.546.0",
+      "next-themes": "^0.4.6",
+      "sileo": "latest",
+      "@tanstack/react-form": "^1.28.0",
+      "@polar-sh/better-auth": "^1.6.4",
+      "@ai-sdk/react": "^3.0.3",
+      "@types/react-dom": "^19.2.3",
+      "tailwindcss": "^4.1.18",
+      "@better-auth/expo": "1.5.2"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/free-ports.mjs",
+    "dev": "turbo dev --concurrency=20",
+    "kill-ports": "node scripts/free-ports.mjs",
+    "build": "turbo build",
+    "check-types": "turbo check-types",
+    "dev:native": "turbo -F native dev",
+    "dev:web": "turbo -F web dev",
+    "dev:server": "turbo -F server dev",
+    "migrate:list": "bun --filter server migrate:list",
+    "migrate:up": "bun --filter server migrate:up",
+    "migrate:down": "bun --filter server migrate:down",
+    "migrate:create": "bun --filter server migrate:create",
+    "dev:desktop": "turbo -F desktop dev",
+    "dev:island": "turbo -F island dev",
+    "dev:storyboard": "turbo -F storyboard dev",
+    "dev:fumadocs": "turbo run dev --filter=fumadocs",
+    "build:sdk": "turbo run build --filter=@ryu/sdk --filter=create-ryu-app --filter=@ryu/client",
+    "dev:core": "turbo -F core dev",
+    "dev:gateway": "turbo -F gateway dev",
+    "dev:tts": "cd apps/tts-sidecar && python -m ryu_tts",
+    "dev:unsloth": "cd apps/unsloth-sidecar && python -m ryu_unsloth",
+    "dev:cli": "cd apps/cli && cargo run",
+    "clean": "turbo clean && bun run clean:rust",
+    "clean:desktop": "turbo -F desktop clean",
+    "clean:rust": "cargo clean --manifest-path apps/desktop/src-tauri/Cargo.toml; cargo clean --manifest-path apps/core/Cargo.toml; cargo clean --manifest-path apps/cli/Cargo.toml; cargo clean --manifest-path apps/gateway/Cargo.toml; cargo clean --manifest-path apps/ghost/Cargo.toml; cargo clean --manifest-path apps/shadow/Cargo.toml; cargo clean --manifest-path apps/predict/Cargo.toml; cargo clean --manifest-path apps/predict-spike/Cargo.toml; cargo clean --manifest-path apps/web/src-tauri/Cargo.toml; cargo clean --manifest-path crates/ghost-core/Cargo.toml; cargo clean --manifest-path crates/ghost-eyes/Cargo.toml; cargo clean --manifest-path crates/ghost-hands/Cargo.toml; cargo clean --manifest-path crates/shadow-core/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-ffi/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-napi/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-uniffi/Cargo.toml",
+    "check": "ultracite check",
+    "fix": "ultracite fix",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@ryu/env": "workspace:*",
+    "dotenv": "catalog:",
+    "mermaid": "^11.15.0",
+    "next-themes": "^0.4.6",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.16",
+    "@ryu/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "husky": "latest",
+    "lint-staged": "latest",
+    "turbo": "^2.8.12",
+    "typescript": "^5",
+    "ultracite": "7.3.0"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,json,jsonc,css,scss,md,mdx}": [
+      "bun x ultracite fix"
+    ]
+  },
+  "packageManager": "bun@1.3.5",
+  "trustedDependencies": ["electron"]
+}

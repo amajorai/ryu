@@ -1,0 +1,14 @@
+{
+  "title": "Build an Extension",
+  "pages": [
+    "index",
+    "mcp-server",
+    "typescript-sdk",
+    "plugin-json-manifest",
+    "agent-skills",
+    "desktop-companion",
+    "channel-bot",
+    "author-workflows",
+    "marketplace"
+  ]
+}

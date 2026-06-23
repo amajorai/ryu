@@ -1,0 +1,111 @@
+---
+title: Your first chat
+description: Run your first conversation, watch tool use happen, and learn the basic chat controls.
+---
+
+Time to actually talk to your agent. This lesson gets you to a real conversation and shows you the
+moving parts you will use every day.
+
+## Start a conversation
+
+<TryInRyu page="chat" />
+
+1. Click **New chat** in the sidebar.
+2. Type a message and send it.
+
+Your message goes to Ryu Core, which routes it to the default **Ryu** agent. The agent generates a
+reply using your local model and streams it back token by token. That is the full loop, running
+entirely on your machine.
+
+## Watch a tool get used
+
+A plain reply is just text generation. The interesting part is when an agent **uses a tool**. Ask it
+to do something that needs one, for example to fetch a page or look something up.
+
+Under the hood the agent runs a loop - it decides it needs a tool, calls the tool, reads the result,
+and continues. You see the tool call and its result inline in the conversation. This is the
+chat-to-agent-to-tool-to-result loop, and it is what makes an agent more than a chatbot.
+
+<Callout type="info">
+  Which tools an agent may call is governed, not unlimited. The agent can only reach tools on its
+  allowlist, and every tool call is measured. You will learn to manage this in later courses.
+</Callout>
+
+## Useful controls
+
+A few things you will reach for right away.
+
+- **Stop** halts a running response.
+- **Voice input** - the microphone button captures speech, transcribes it locally, and drops the
+  text into the composer.
+- **Branch** - from a message you can fork the conversation into a new chat that copies the history
+  up to that point. Your conversations stay linear, and the branch opens in a new tab.
+- **Sessions** - a read-only view of the runs that make up a conversation.
+
+## What just happened
+
+You ran a request all the way through the stack - the desktop UI sent it to Core, Core routed it to
+an agent, the agent generated and optionally called a tool, and the result streamed back and was
+saved. That round trip is the heartbeat of everything Ryu does.
+
+## Knowledge check
+
+First, the reflection prompts. Say the answers out loud or jot them down, in your own words.
+
+- Describe the chat-to-agent-to-tool-to-result loop in your own words.
+- What limits which tools an agent can call?
+- How do you fork a conversation from a specific message?
+
+Then confirm the details with a quick self-test.
+
+<Quiz
+  questions={[
+    {
+      q: "When you send a message, what handles routing it to the default Ryu agent?",
+      options: [
+        "The Gateway, before anything else runs",
+        "Ryu Core",
+        "The cloud, which is why a network connection is required",
+      ],
+      answer: 1,
+      explain:
+        "Your message goes to Ryu Core, which routes it to the default Ryu agent. The whole loop can run on your machine.",
+    },
+    {
+      q: "What makes an agent more than a chatbot?",
+      options: [
+        "It streams its reply token by token",
+        "It runs a loop: decide a tool is needed, call it, read the result, continue",
+        "It uses a larger model than a chatbot",
+      ],
+      answer: 1,
+      explain:
+        "The chat-to-agent-to-tool-to-result loop is what separates an agent from plain text generation.",
+    },
+    {
+      q: "What limits which tools an agent can call?",
+      options: [
+        "Nothing, it can call any installed tool",
+        "The speed of your local model",
+        "Its allowlist, and every call is measured",
+      ],
+      answer: 2,
+      explain:
+        "Tool access is governed, not unlimited. An agent can only reach tools on its allowlist, and each call is measured.",
+    },
+    {
+      q: "What does Branch do?",
+      options: [
+        "Forks the conversation into a new chat that copies history up to a chosen message",
+        "Deletes every message after the one you pick",
+        "Switches the agent mid-conversation",
+      ],
+      answer: 0,
+      explain:
+        "Branching copies history up to that point into a new conversation that opens in a new tab. Conversations stay linear.",
+    },
+  ]}
+/>
+
+You have finished Ryu Essentials. Continue to [Operating Ryu](/docs/academy/operator) to start
+customizing.

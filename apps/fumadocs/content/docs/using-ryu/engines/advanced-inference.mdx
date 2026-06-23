@@ -1,0 +1,112 @@
+---
+title: "Advanced inference"
+description: "Per-request sampling and per-model launch settings, jan.ai and LM Studio parity."
+---
+
+Ryu exposes the "advanced model settings" surface you would expect from jan.ai or LM Studio, but
+implemented once and translated per engine (`apps/core/src/inference/mod.rs`). There are two distinct
+layers, with two lifetimes and two homes:
+
+- **Sampling** (`SamplingConfig`): per-request generation knobs (temperature, top_p, penalties,
+  mirostat, DRY, seed, and so on). These ride in the OpenAI-compat chat body on every call and need no
+  engine restart. They live on the agent record (per-agent defaults) and may be overridden per request.
+- **Launch** (`LaunchConfig`): engine-launch flags (context size, GPU layers, MoE offload, chat
+  template, speculative decoding, quantization). These are set when the engine process starts, so
+  changing them requires a respawn. They are keyed per model, since one resident engine serves every
+  agent, and are stored in the preferences KV.
+
+Both layers carry a raw passthrough escape hatch, so a sampler or flag the typed surface does not
+enumerate still works the day the engine build supports it, with no Core code change.
+
+## Sampling (per-request)
+
+`SamplingConfig::apply_to_body` merges these into the outbound `/v1/chat/completions` body, translating
+field names for the target engine. Every field is optional, an absent field means "use the engine
+default". The standard fields are safe on every engine, including a real remote OpenAI endpoint. The
+non-standard sampler fields are emitted only for local engines that read them from the body.
+
+| Field | Notes |
+|---|---|
+| `temperature`, `top_p`, `max_tokens`, `seed`, `stop` | OpenAI-standard, sent to every engine |
+| `frequency_penalty`, `presence_penalty` | OpenAI-standard penalties |
+| `top_k`, `min_p`, `typical_p`, `top_n_sigma` | Local-engine extensions (llama.cpp, vLLM, SGLang) |
+| `repeat_penalty`, `repeat_last_n` | Canonical repeat penalty, spelled `repetition_penalty` for vLLM, SGLang, and MLX |
+| `mirostat`, `mirostat_tau`, `mirostat_eta` | Entropy-targeting sampler (llama.cpp, Ollama) |
+| `dynatemp_range`, `dynatemp_exponent`, `xtc_probability`, `xtc_threshold` | llama.cpp dynamic-temperature and XTC |
+| `dry_multiplier`, `dry_base`, `dry_allowed_length`, `dry_penalty_last_n` | llama.cpp DRY repetition controls |
+| `samplers` | Sampler chain order, e.g. `penalties;dry;top_k;top_p;min_p;temperature` |
+| `extra` | Raw JSON object merged verbatim, overriding any typed field above |
+
+Per-agent sampling defaults live on the agent record's `inference` field, so they are saved with the
+agent (there is no separate sampling endpoint). A per-request override is merged on top of those
+defaults, with the override winning per field.
+
+<Callout type="info">
+  The non-standard samplers (top_k, min_p, mirostat, DRY, and so on) are emitted only for local
+  engines. A remote OpenAI endpoint receives the standard fields only, because it would reject an
+  unknown sampler field. The desktop mirrors this: those fields are gated behind a `localEngine` flag
+  in `AdvancedInferenceSection.tsx`, so they only appear when the agent's chat engine is llama.cpp,
+  Ollama, vLLM, or SGLang.
+</Callout>
+
+## Launch (per-model, engine-start)
+
+`LaunchConfig::to_args` builds the per-engine command-line argument vector for the engines Core
+spawns. Changing any field requires the engine process to restart, so these are stored per model and
+applied on the model's next load.
+
+| Field | Notes |
+|---|---|
+| `ctx_size` | Context window (`--ctx-size` for llama.cpp, `--max-model-len` for vLLM, `--context-length` for SGLang, `num_ctx` for Ollama) |
+| `gpu_layers` | GPU layers to offload (`-ngl` for llama.cpp, `num_gpu` for Ollama) |
+| `batch_size`, `ubatch_size`, `threads` | Batch and thread tuning |
+| `flash_attn`, `cache_type_k`, `cache_type_v` | Flash attention (`on`, `off`, `auto`) and KV cache types |
+| `mlock`, `no_mmap` | Lock the model in RAM, disable memory-mapping |
+| `cpu_moe`, `n_cpu_moe`, `override_tensor` | Mixture-of-experts offload to CPU (llama.cpp) |
+| `jinja`, `chat_template`, `chat_template_file` | Custom Jinja chat template (llama.cpp) |
+| `spec_type`, `draft_model`, `draft_max`, `draft_min`, `draft_p_min` | Speculative decoding: MTP (`draft-mtp`) or an n-gram variant, with an optional draft model |
+| `speculative_algorithm`, `speculative_config` | SGLang algorithm (eagle, ngram) and vLLM raw config |
+| `rope_scaling`, `rope_scale`, `rope_freq_base`, `rope_freq_scale` | RoPE and YaRN context extension (llama.cpp) |
+| `gpu_memory_utilization`, `mem_fraction_static`, `tensor_parallel` | vLLM and SGLang memory and parallelism |
+| `dtype`, `quantization`, `kv_cache_dtype`, `max_num_seqs`, `max_running_requests`, `enable_prefix_caching` | vLLM and SGLang serving knobs |
+| `extra_args` | Raw CLI args appended verbatim to the spawn command |
+
+<Callout type="info">
+  Launch config applies to the local engines Core spawns. llama.cpp has the richest surface, while
+  vLLM, SGLang, Ollama, and MLX each receive a per-engine subset (Ollama is configured through a
+  Modelfile rather than CLI flags, and MLX accepts only the raw `extra_args`). Remote or hosted
+  OpenAI-compat providers ignore launch config entirely, since Ryu does not start their process.
+</Callout>
+
+## Endpoints
+
+| Action | Endpoint |
+|---|---|
+| Read the stored launch config for a model | `GET /api/models/:id/launch-config` |
+| Persist the launch config for a model | `PUT /api/models/:id/launch-config` |
+| Report the format-to-engine capability map for this node | `GET /api/models/engines` |
+
+`GET /api/models/engines` returns, for each model format, the engines that can serve it and a
+per-engine `supported` flag computed on the Core node (so the verdict is authoritative even when Core
+is remote). The desktop uses it to render the format facet and compatibility badges. Per-agent sampling
+is saved as part of the agent record, not through a dedicated endpoint.
+
+## Desktop
+
+The desktop surfaces both layers in the model and agent editors.
+
+- **Advanced inference** (`apps/desktop/src/components/inference/AdvancedInferenceSection.tsx`): the
+  collapsible per-agent sampling editor. Standard fields show for every agent, and the non-standard
+  samplers appear only when the agent is bound to a local engine.
+- **Engine / Hardware** (`apps/desktop/src/components/inference/ModelLaunchConfigSection.tsx`): the
+  per-model launch-config editor in the model detail panel. Its header notes that changes apply the
+  next time the model is loaded, not live.
+- Both reuse the shared field widgets in `apps/desktop/src/components/inference/fields.tsx` and the
+  typed client in `apps/desktop/src/lib/api/inference.ts`.
+
+## Nothing hardcoded
+
+Every default here is a swappable default, never a lock. Both layers carry a raw passthrough,
+`SamplingConfig::extra` for arbitrary body fields and `LaunchConfig::extra_args` for raw CLI args, so
+a brand-new llama.cpp knob or a research flag the typed surface does not enumerate works as soon as the
+engine build supports it, with no Core change.

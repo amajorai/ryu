@@ -1,0 +1,85 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Build outputs
+dist
+build
+*.tsbuildinfo
+
+# Electron (electron-vite) outputs
+out
+dist-electron
+# electron-vite compiles its config to a timestamped .mjs at build time — build junk, never commit
+electron.vite.config.*.mjs
+
+# electron-builder packaged artifacts (apps/island)
+apps/island/artifacts
+
+# Rust
+target/
+
+# Environment variables
+.env
+.env*.local
+
+# IDEs and editors
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Turbo
+.turbo
+.nx
+
+# Better-T-Stack
+.alchemy
+
+# Testing
+coverage
+.nyc_output
+
+# Misc
+*.tgz
+.cache
+tmp
+temp
+
+# opensrc - source code for packages
+opensrc/
+
+# fallow
+*.fallow/
+
+# Workflow scripts (Claude Code artifacts)
+.wf-*.json
+.wf-*.mjs
+
+# Cargo build caches from worktrees
+.cargo-target-*/
+
+# Local worktree tracking
+.ryu-worktrees/
+.claude/worktrees/
+
+# Tauri Python sidecar build artifacts
+apps/desktop/src-tauri/Python/
+# Playwright MCP scratch artifacts (screenshots, console logs)
+.playwright-mcp/

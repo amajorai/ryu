@@ -1,0 +1,10 @@
+{
+  "title": "Inference",
+  "description": "OpenAI-compatible chat, image, and audio generation.",
+  "pages": [
+    "createChatCompletion",
+    "createImage",
+    "createSpeech",
+    "createTranscription"
+  ]
+}

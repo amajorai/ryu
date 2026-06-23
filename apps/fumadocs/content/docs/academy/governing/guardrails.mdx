@@ -1,0 +1,89 @@
+---
+title: Guardrails
+description: The firewall and data-protection surfaces of the Gateway that screen requests and govern what is safe to send on egress.
+---
+
+Guardrails are the firewall and data-protection surfaces of the Gateway. They are how you decide what is safe to send and what should be screened before it ever reaches a provider.
+
+## The firewall
+
+The firewall screens requests, including prompt-injection style protections. It draws on security tooling wired into the Gateway, so the protection is part of the control layer rather than something each agent has to add on its own.
+
+## PII and DLP
+
+PII and DLP controls govern what data is safe to send on egress. This is about keeping sensitive data from leaving on a model call you did not intend. Because these run at the Gateway, they apply across every governed call rather than being re-implemented per agent.
+
+These are Ryu's own user-level guardrails. They are distinct from anything an upstream provider offers, so you keep control even when the request is destined for a third-party model.
+
+<Callout type="warn">
+  Be honest about maturity: some of these config UIs are still being surfaced in the desktop. The data-plane wiring exists and the Gateway is on the path, so governed calls already flow through the control layer, but expect the configuration surfaces to keep filling in.
+</Callout>
+
+## Egress compression
+
+There is also an optional egress compression transform that can shrink request messages before the provider call. Like the rest of the guardrail surfaces, it fails open: if compression cannot run, the original request goes through unchanged rather than failing.
+
+<Callout type="info">
+  Failing open is a recurring theme across the Gateway. Guardrails and transforms improve safety and efficiency, but they are designed not to become a new way for requests to break.
+</Callout>
+
+## Knowledge check
+
+First, the reflection prompts. Answer them in your own words.
+
+- What kind of attack does the firewall screen requests for?
+- What do PII and DLP controls govern, and on which side of the call?
+- What does it mean that the egress compression transform fails open?
+
+Then confirm the details with a quick self-test.
+
+<Quiz
+  questions={[
+    {
+      q: "What kind of protection does the firewall provide on requests?",
+      options: [
+        "Prompt-injection style protections",
+        "Rate limiting only",
+        "Encryption of stored conversations",
+      ],
+      answer: 0,
+      explain:
+        "The firewall screens requests, including prompt-injection style protections, drawing on security tooling wired into the Gateway.",
+    },
+    {
+      q: "What do PII and DLP controls govern, and on which side of the call?",
+      options: [
+        "What data is safe to send on egress",
+        "What data a provider may return on ingress",
+        "How long conversations are retained",
+      ],
+      answer: 0,
+      explain:
+        "PII and DLP controls govern what data is safe to send on egress, keeping sensitive data from leaving on a model call you did not intend.",
+    },
+    {
+      q: "Because guardrails run at the Gateway, how widely do they apply?",
+      options: [
+        "Only to the default Ryu agent",
+        "Across every governed call, rather than re-implemented per agent",
+        "Only to requests that opt in per agent",
+      ],
+      answer: 1,
+      explain:
+        "Running at the Gateway means the controls apply across every governed call rather than being re-implemented per agent.",
+    },
+    {
+      q: "What does it mean that egress compression fails open?",
+      options: [
+        "If compression cannot run, the request fails with an error",
+        "If compression cannot run, the original request goes through unchanged",
+        "Compression is always applied, even when it errors",
+      ],
+      answer: 1,
+      explain:
+        "Failing open means that if compression cannot run, the original request goes through unchanged rather than failing.",
+    },
+  ]}
+/>
+
+Next: cap spend and manage keys in [Budgets and keys](/docs/academy/governing/budgets-and-keys).

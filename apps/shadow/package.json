@@ -1,0 +1,10 @@
+{
+  "name": "shadow",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "cargo build --release",
+    "check": "cargo check"
+  }
+}

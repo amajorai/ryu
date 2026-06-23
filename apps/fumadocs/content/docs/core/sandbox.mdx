@@ -1,0 +1,124 @@
+---
+title: "Sandbox"
+description: "Ephemeral, isolated WASI code execution with wasmtime, and where Docker fits"
+---
+
+Core can run untrusted code in an ephemeral, in-process sandbox. The default backend is
+[wasmtime](https://wasmtime.dev) running WASIp1 modules: no daemon, no external process, no
+network or filesystem access unless explicitly preopened. It is fast and Windows-native, which is
+why it is the M6 default. The implementation lives in `apps/core/src/sandbox/mod.rs`.
+
+Placement follows the Core-vs-Gateway rule (see [Core vs Gateway](/docs/start-here/architecture/core-vs-gateway)).
+Deciding *what runs* - which module, which capabilities - is Core. Deciding *what is allowed* -
+DLP on the module's stdout, network egress - is the Gateway. The sandbox module enforces only the
+structural default-deny; policy belongs upstream.
+
+## Two backends
+
+The `Sandbox` trait (`apps/core/src/sandbox/mod.rs`) abstracts two kinds of isolation. Only the
+first is wired today.
+
+| Backend | Isolation | What it runs | Status |
+|---|---|---|---|
+| **Ephemeral** (wasmtime + WASIp1) | In-process, default-deny, no FS or sockets | A single WASM module, run to completion | Built (feature `sandbox-wasmtime`) |
+| **Workspace** (Docker) | Long-lived container, persistent FS, native binaries, sockets | Multi-process POSIX workloads | Future, detect-only |
+
+<Callout type="warn">
+  The wasmtime ephemeral path is the only backend wired today. A Docker-backed workspace sandbox
+  (for full filesystem and network isolation of long-running work) is **detected and reported but
+  not yet executed**. The `GET /api/mcp/sandbox/status` route probes the Docker daemon for
+  availability; it never installs Docker and never runs a container.
+</Callout>
+
+## The execution contract
+
+`Sandbox::run` takes a `SandboxRequest` and returns a `SandboxOutput`.
+
+| `SandboxRequest` field | Type | Meaning |
+|---|---|---|
+| `wasm_bytes` | `Vec<u8>` | The WASM bytecode to execute |
+| `args` | `Vec<String>` | Command-line args (`argv[0]` is always `"wasm"`) |
+| `env` | `Vec<(String, String)>` | Environment variables |
+| `stdout_cap` | `usize` | Stdout/stderr size cap in bytes, default 1 MiB |
+
+| `SandboxOutput` field | Type | Meaning |
+|---|---|---|
+| `stdout` | `Vec<u8>` | Captured stdout, up to `stdout_cap` |
+| `stderr` | `Vec<u8>` | Captured stderr, up to `stdout_cap` |
+| `duration_ms` | `u128` | Wall-clock duration: instantiation plus run |
+
+## How the wasmtime backend behaves
+
+`WasmtimeSandbox` (behind the `sandbox-wasmtime` cargo feature) holds a shared `Engine`, so the
+Cranelift JIT initialization (roughly 10 to 30 ms) is paid once and reused across calls.
+
+Each `run` then:
+
+1. Compiles the module from `wasm_bytes` (the cold-start cost, roughly 40 to 120 ms for a small
+   module). A caller can pre-serialize with `Module::serialize` keyed on content hash to skip
+   recompilation on repeated calls.
+2. Wires WASIp1 into a `Linker` and redirects stdout and stderr to in-memory `MemoryOutputPipe`
+   buffers sized to `stdout_cap`, so the caller can inspect output.
+3. Passes `args` (after the synthetic `argv[0]`) and `env` into the WASI context.
+4. Invokes the module's default `_start` export.
+
+A clean exit, including `proc_exit(0)` (which WASI surfaces as a trap wrapping `I32Exit(0)`), is
+treated as success. A non-zero exit code surfaces as an error carrying the captured stderr. Total
+cold start is roughly 10 to 120 ms.
+
+The default-deny posture is structural: no filesystem preopens and no socket WASI ABI are wired,
+so a module cannot reach the host disk or network. Granting either is a deliberate, future
+capability decision.
+
+## The `sandbox_exec` tool
+
+The backend is exposed to agents as a single built-in MCP tool, `sandbox__sandbox_exec`
+(`apps/core/src/sidecar/mcp/sandbox.rs`), reachable through the same registry call surface as
+every other tool. See the [MCP registry](/docs/core/mcp-registry) for how built-in tools are
+listed and dispatched.
+
+The tool receives WASM bytecode as a base-64 string (`wasm_b64`) plus optional `args` and `env`
+arrays, and returns stdout, stderr, and the exit code. It is registered through the normal tool
+loop, so calls go through the existing tool-approval path in the ACP adapter; the sandbox adds no
+new approval UI of its own.
+
+## Enable, disable, and status
+
+The sandbox is enabled by default when the `sandbox-wasmtime` feature is compiled in. It is a
+default-on Policy toggle (#448) and can be flipped at runtime.
+
+| Action | Endpoint |
+|---|---|
+| Enable sandboxed tool execution | `POST /api/mcp/sandbox/enable` |
+| Disable it | `POST /api/mcp/sandbox/disable` |
+| Report availability and state | `GET /api/mcp/sandbox/status` |
+
+Under the hood these set or clear the `RYU_SANDBOX_DISABLED` environment variable
+(`RYU_SANDBOX_DISABLED=1` disables it). When disabled, the tool is still listed so the agent knows
+it exists, but a call returns an `{ available: false }` result. The status response reports three
+things:
+
+```json
+{
+  "enabled": true,
+  "available": true,
+  "docker": { "available": false, "reason": "..." }
+}
+```
+
+`enabled` is the runtime toggle, `available` reflects whether the `sandbox-wasmtime` feature was
+compiled in, and `docker` reflects the detect-only Docker probe described above.
+
+## Sandbox vs programmatic tool calling
+
+The wasmtime sandbox runs an arbitrary WASM module. It is distinct from
+[programmatic tool calling](/docs/core/programmatic-tool-calling), which runs model-authored
+JavaScript that fans out across tools. PTC uses a Deno-subprocess for real process isolation by
+default (with rquickjs behind a feature flag), not wasmtime. Reach for the sandbox when you have a
+WASM workload to run in isolation; reach for PTC when an agent needs to orchestrate many tool
+calls in code.
+
+## Where this sits on the roadmap
+
+The wasmtime ephemeral path is the M6 deliverable. The Docker-backed workspace sandbox is the
+remaining M6 work, currently detect-only. See [Core](/docs/core) for the full module map.

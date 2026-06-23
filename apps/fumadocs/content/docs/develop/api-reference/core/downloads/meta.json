@@ -1,0 +1,13 @@
+{
+  "title": "Downloads",
+  "description": "Download center.",
+  "pages": [
+    "list_downloads",
+    "downloads_stream",
+    "download_clear",
+    "download_cancel",
+    "download_pause",
+    "download_resume",
+    "download_retry"
+  ]
+}

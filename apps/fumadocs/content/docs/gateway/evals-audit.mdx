@@ -1,0 +1,166 @@
+---
+title: "Evals & Audit"
+description: "Score a sampled subset of responses for routing, and record every call in a queryable audit log."
+---
+
+Measurement is a Gateway concern. The Gateway scores a sampled fraction of responses to feed
+eval-driven [routing](/docs/gateway/routing), and records every model call (plus sandbox and
+identity events) in a local audit log you can query. Both run on the request path; neither blocks it.
+
+## Evals
+
+The eval runner (`apps/gateway/src/evals/mod.rs`, `EvalsRunner`) does two jobs: it passively scores
+sampled live responses and folds those scores into a rolling per-provider average, and it replays a
+dataset on demand for explicit eval runs. Passive scoring is off until `EvalsConfig.enabled` is set.
+
+### Dimensions
+
+Each scored response combines three normalized dimensions into one weighted `overall` value.
+
+| Dimension | Range | How it is computed |
+|---|---|---|
+| `latency_score` | 0 to 1 | `1 - (latency_ms / max_latency_ms)`, clamped. 1.0 is instant, 0.0 is at or beyond `max_latency_ms` |
+| `token_efficiency` | 0 to 1 | `output_tokens / input_tokens`, normalized so 2x output caps at 1.0 |
+| `policy_pass` | bool | Whether the request cleared all firewall and policy checks |
+
+The weighted score is `0.4 * latency + 0.3 * token_efficiency + 0.3 * policy`. A sampled response
+carries its `overall` value back in the `x-eval-score` response header.
+
+### Sampling
+
+Sampling is deterministic, with no RNG. `EvalsRunner::should_sample` increments a counter and keeps a
+request every `1/sample_rate` boundary, so a `sample_rate` of `0.25` scores exactly one request in
+four. A rate of `1.0` scores every request, `0.0` scores none. This keeps scoring overhead
+predictable and even rather than bursty.
+
+### Rolling scores
+
+Each sampled score is folded into a per-provider exponential moving average (`EMA_ALPHA = 0.2`),
+stored lock-free so the routing path reads it without a mutex. `eval_routing` consumes these averages
+to bias provider choice toward the current leader while reserving an `explore_ratio` of traffic for
+non-leaders, so scores stay fresh. See [Routing](/docs/gateway/routing) for the full A/B selection
+logic.
+
+```
+GET /v1/evals
+```
+
+returns the live config plus the current rolling score per provider:
+
+```json
+{
+  "enabled": true,
+  "sample_rate": 0.1,
+  "max_latency_ms": 10000,
+  "providers": { "openai": 0.84, "anthropic": 0.79 }
+}
+```
+
+When evals are disabled the endpoint still returns `200` with `enabled: false` and an empty
+`providers` map. It never panics and never returns a non-200 for a healthy gateway.
+
+### Dataset runs
+
+```
+POST /v1/evals/run
+```
+
+replays each prompt in `dataset` through the full pipeline (firewall, routing, provider call) and
+returns per-case scores plus an aggregate. An explicit run always scores, independent of whether
+passive evals are enabled, and cases run sequentially to keep provider load and budgets observable.
+
+| Field | Purpose |
+|---|---|
+| `model` | Model under test, forwarded to the router as-is. Defaults to `gpt-4o-mini` |
+| `models` | Run the whole dataset against each model and return a per-model breakdown |
+| `dataset` | Array of `EvalCase` (`prompt`, optional `expected`, `vars`, `assertions`). Empty uses a built-in 3-case dataset |
+| `system_prompt` | Run-level system prompt prepended to every case, with `{{vars}}` substituted per case |
+| `judge_model` | One fixed model that judges every `llm_judge` assertion (fair cross-model compare) |
+| `agent_id` | Optional id forwarded for per-agent budget tracking |
+
+Each case also supports `assertions` evaluated against the response text - `contains`, `not_contains`,
+`equals`, `regex`, `json_valid` (all deterministic), and `llm_judge` (a second pipeline call whose
+verdict is parsed defensively, with a missing verdict failing safe). Unlike `GET /v1/audit`, this
+endpoint authenticates with any valid API key, not the master key, because a dataset run is a normal
+metered call.
+
+From Core, `POST /api/gateway/evals/run` proxies the dataset run.
+
+<Callout type="warn">
+  Dataset runs are sequential and synchronous. A multi-model run with `llm_judge` fans out
+  `models * cases * (1 + judge_calls)` provider calls, all under Core's 120s proxy timeout, so a large
+  matrix can time out at the proxy even though no field is dropped. Keep matrices small. LLM-judge and
+  custom dataset scorers are v1 only; richer scoring strategies are deferred.
+</Callout>
+
+## Audit
+
+The audit log (`apps/gateway/src/audit/mod.rs`, `AuditLogger`) records every model call to a SQLite
+store, alongside sandbox exec events and identity-vault credential reads. Writes go to a background OS
+thread over a bounded channel, so the async request path never blocks on disk I/O; reads use a
+separate query-only connection under WAL mode. The store is off when `AuditConfig.enabled` is false,
+in which case writes are dropped and queries return empty.
+
+### Record schema
+
+Each row captures the request, its tenant attribution, usage, and quality. The `event_type`
+discriminator separates a `model_call` from an `exec_call` or a `credential_read`.
+
+| Field | Notes |
+|---|---|
+| `request_id` | Gateway-internal id, also returned as the `x-request-id` response header |
+| `api_key` | Redacted to a short prefix in query results; raw keys never leave the store |
+| `user_name`, `org_id`, `team_id`, `project_id` | Tenant attribution |
+| `provider`, `model` | Resolved route for the call |
+| `input_tokens`, `output_tokens`, `cache_hit`, `latency_ms` | Usage and timing |
+| `eval_score` | The `overall` eval score when this request was sampled, else null |
+| `skill_ids` | Comma-separated active Agent Skill ids, from `x-ryu-skill-ids` |
+| `session_id` | Core conversation/session id, from `x-ryu-session-id` |
+| `error` | Error message when the call failed |
+| `event_type`, `backend`, `command`, `duration_ms`, `exit_code` | Exec and credential-read fields, null for model calls |
+
+### Querying
+
+```
+GET /v1/audit
+```
+
+returns matching rows newest-first with `count` and `entries`. Every filter is an optional
+query-string parameter combined with `AND`. Filters cannot inject SQL (the WHERE clause is fully
+parameterized), and `limit` is clamped to a maximum of 1000 (default 100).
+
+| Filter | Matches on |
+|---|---|
+| `api_key` | The full (unredacted) API key |
+| `org_id`, `team_id`, `project_id` | Tenant scope |
+| `provider`, `model` | Resolved route |
+| `request_id` | A single gateway request |
+| `session_id` | All rows belonging to one Core session |
+| `errors_only` | Only rows that recorded an error |
+| `limit` | Row cap, 1 to 1000 |
+
+This endpoint is master-key only. Audit data is tenant-wide and sensitive, so a per-tenant key cannot
+read it. The one exception is no-auth mode from a loopback peer, and even that loopback trust is
+withdrawn when [mesh](/docs/core/node-and-presence) is enabled (a tailnet peer can appear as
+`127.0.0.1`). From Core, `GET /api/gateway/audit` proxies the supported filters and returns
+`reachable: false` rather than erroring when the Gateway is down.
+
+<Callout type="warn">
+  Observability today is read-only snapshots. The audit log records and the eval runner scores, but
+  there is no built-in retention, rotation, or alerting on this data yet. The desktop audit viewer and
+  org dashboards (M4) extend this surface but do not change what the Gateway persists.
+</Callout>
+
+<Callout type="info">
+  The Gateway records tokens, cost, and quality. Core records sequencing and latency. The two are
+  joined by `session_id`, which Core forwards as `x-ryu-session-id`. See
+  [Observability](/docs/core/observability).
+</Callout>
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/gateway/routing" />
+  <DocCard href="/docs/core/observability" />
+  <DocCard href="/docs/gateway/configuration" />
+</Cards>

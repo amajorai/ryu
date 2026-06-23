@@ -1,0 +1,26 @@
+pub mod docker_model_runner;
+pub mod llamacpp;
+pub mod mlx;
+pub mod mlx_vlm;
+pub mod ollama;
+pub mod omlx;
+pub mod outetts;
+pub mod parakeet;
+pub mod ryutts;
+pub mod sdcpp;
+pub mod sglang;
+pub mod vllm;
+pub mod whispercpp;
+
+pub use docker_model_runner::DockerModelRunnerManager;
+pub use llamacpp::LlamaCppManager;
+pub use mlx::MlxManager;
+pub use mlx_vlm::MlxVlmManager;
+pub use ollama::OllamaManager;
+pub use omlx::OmlxManager;
+pub use outetts::OuteTtsManager;
+pub use parakeet::ParakeetManager;
+pub use sdcpp::StableDiffusionManager;
+pub use sglang::SglangManager;
+pub use vllm::VllmManager;
+pub use whispercpp::WhisperCppManager;

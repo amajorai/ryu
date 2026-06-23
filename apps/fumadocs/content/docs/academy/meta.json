@@ -1,0 +1,17 @@
+{
+  "root": true,
+  "title": "Academy",
+  "description": "Learn Ryu the structured way, from first chat to certified builder.",
+  "icon": "GraduationCap",
+  "pages": [
+    "index",
+    "---Courses---",
+    "essentials",
+    "operator",
+    "governing",
+    "builder",
+    "cloud",
+    "---Get certified---",
+    "certifications"
+  ]
+}

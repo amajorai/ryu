@@ -1,0 +1,38 @@
+---
+title: "Identity Vault"
+description: "Per-domain logins an agent can use, governed by the Gateway and never shown to the model."
+---
+
+The **Identity Vault** lets an agent log in to a website on your behalf without ever handing the
+credential to the model. You store a connection for a domain once, attach a profile to an agent, and
+when a tool call targets that domain the agent uses the stored login under Gateway governance.
+
+Open **Identities** from the command palette to manage them.
+
+## Profiles and connections
+
+- A **profile** is a named set of connections you can attach to one or more agents.
+- A **connection** binds a profile to a domain (the site the agent may sign in to).
+- Each agent carries the profiles it is allowed to use; a tool call is only authorized against a
+  domain the agent's profiles cover.
+
+## How a login is used
+
+When an agent's tool call targets a bound domain, Ryu resolves the connection at the single
+tool-dispatch chokepoint:
+
+- If the connection needs authentication, the call pauses and prompts you to log in.
+- If it is authenticated, the credential is read under the Gateway's `identity.read` grant, used for
+  that call, and dropped.
+
+<Callout type="warn">
+  The credential is never sent to the model. Reads are governed by the Gateway and audited - this is
+  the Core-vs-Gateway rule in action: Core decides *what runs*, the Gateway decides *what is allowed*
+  (see [Core vs Gateway](/docs/start-here/architecture/core-vs-gateway)). Encrypted credentials stay
+  out of the LLM's context at every layer.
+</Callout>
+
+<Callout type="info">
+  Manual credential import works end to end today. Bringing connections in from a browser or from
+  Composio is being wired up; matching is exact-host in v1 (no subdomain fuzzing).
+</Callout>

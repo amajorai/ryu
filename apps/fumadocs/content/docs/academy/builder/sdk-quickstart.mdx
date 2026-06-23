@@ -1,0 +1,127 @@
+---
+title: SDK quickstart
+description: Scaffold a Ryu project and define your first agent and tool with the SDK.
+---
+
+Ryu ships its own developer SDK. It references patterns from Mastra, the AI SDK, and ACP, but it depends on none of them, because using theirs would defeat the point of building your own agent on Ryu.
+
+The SDK gives you factory functions, a gateway-mandatory model client, and an MCP server and client.
+
+## Scaffold a project
+
+Create a starter project with the `create-ryu-app` CLI:
+
+```bash
+create-ryu-app my-app
+```
+
+This generates a project with a `plugin.json` manifest that is validated against the plugin manifest schema, so you start from something that already passes the rules.
+
+## Define a tool
+
+A tool is a single typed function the model can call. The `defineTool` factory builds one.
+
+```ts
+const getWeather = defineTool({
+  id: "tool-get-weather",
+  name: "get_weather",
+  schema: {
+    type: "object",
+    required: ["city"],
+    properties: { city: { type: "string", description: "City name" } },
+  },
+  async run({ city }, _ctx) {
+    const res = await fetch(`https://api.example.com/weather?city=${city}`);
+    return await res.json();
+  },
+});
+```
+
+## Define an agent
+
+An agent wires a persona, a model, and tools together. The `defineAgent` factory builds one.
+
+```ts
+const assistant = defineAgent({
+  id: "agent-weather",
+  name: "Weather Helper",
+  tools: [getWeather],
+  async run({ query }, ctx) {
+    const res = await ctx.gateway.chat([{ role: "user", content: query }]);
+    return { answer: res.content };
+  },
+});
+```
+
+The model client is **gateway-mandatory** - every model call routes through the Gateway. You do not pick a provider URL or paste a key into your code; the Gateway decides what is allowed, routed, and measured.
+
+<Callout type="info">
+  The SDK also exposes `defineWorkflow` and `defineSkill`. They follow the same factory shape, because each one is just another Runnable.
+</Callout>
+
+## Run it
+
+The `ryu dev` command probes the Gateway, imports your Runnable module, and starts a terminal REPL so you can chat with what you built before packaging it.
+
+```bash
+ryu dev
+```
+
+For the full surface, including every factory and the MCP client and server, see the [SDK reference](/docs/develop/sdk).
+
+## Knowledge check
+
+First, the reflection prompts. Answer them in your own words.
+
+- Which command scaffolds a new Ryu project?
+- What does "gateway-mandatory model client" mean for your code?
+- What does `ryu dev` do before it opens the REPL?
+
+Then confirm the details with a quick self-test.
+
+<Quiz
+  questions={[
+    {
+      q: "Which command scaffolds a new Ryu project?",
+      options: ["ryu init my-app", "create-ryu-app my-app", "ryu dev my-app"],
+      answer: 1,
+      explain:
+        "create-ryu-app my-app generates a starter project with a plugin.json manifest that already passes the schema rules.",
+    },
+    {
+      q: "What does the gateway-mandatory model client mean for your code?",
+      options: [
+        "You paste a provider URL and API key into your code",
+        "Every model call routes through the Gateway, so you never pick a provider URL or paste a key",
+        "You must run the Gateway as a separate paid service",
+      ],
+      answer: 1,
+      explain:
+        "The model client is gateway-mandatory. The Gateway decides what is allowed, routed, and measured, so your code never carries a provider URL or key.",
+    },
+    {
+      q: "What does ryu dev do before it opens the REPL?",
+      options: [
+        "It publishes your app to the marketplace",
+        "It probes the Gateway and imports your Runnable module",
+        "It compiles your code into a signed manifest",
+      ],
+      answer: 1,
+      explain:
+        "ryu dev probes the Gateway, imports your Runnable module, and then starts a terminal REPL so you can chat with what you built.",
+    },
+    {
+      q: "Which factories does the SDK expose alongside defineTool and defineAgent?",
+      options: [
+        "defineWorkflow and defineSkill, following the same factory shape",
+        "defineModel and defineProvider",
+        "defineGateway and definePolicy",
+      ],
+      answer: 0,
+      explain:
+        "The SDK also exposes defineWorkflow and defineSkill, which follow the same factory shape because each one is just another Runnable.",
+    },
+  ]}
+/>
+
+Next: bundle your Runnables into an installable app in [Plugins and apps](/docs/academy/builder/plugins-and-apps).

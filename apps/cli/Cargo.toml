@@ -1,0 +1,25 @@
+[package]
+name = "ryu-cli"
+version = "0.0.1"
+edition = "2021"
+
+[[bin]]
+name = "ryu"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream", "socks"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+anyhow = "1"
+uuid = { version = "1", features = ["v4"] }
+open = "5"
+urlencoding = "2"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"

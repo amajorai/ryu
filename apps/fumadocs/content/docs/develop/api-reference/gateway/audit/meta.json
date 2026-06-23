@@ -1,0 +1,9 @@
+{
+  "title": "Audit",
+  "description": "Usage audit log and sandbox execution governance.",
+  "pages": [
+    "queryAudit",
+    "ingestExecAudit",
+    "checkExecBudget"
+  ]
+}

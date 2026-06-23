@@ -1,0 +1,166 @@
+---
+title: "Author Runnables in TypeScript"
+description: "Use @ryu/sdk to define agents, tools, skills, and workflows, then pack them into a plugin"
+---
+
+This is the task path for shipping an extension in TypeScript: scaffold a project, define one or
+more **Runnables** (agents, tools, skills, workflows), pack them into a `plugin.json` plugin, and
+install it. For the full factory and type surface see the [SDK reference](/docs/develop/sdk); for
+the manifest fields see the [plugin.json reference](/docs/develop/sdk/plugin-api).
+
+`@ryu/sdk` (`packages/sdk/src/`) is Ryu's own SDK. It references patterns from Mastra, the Vercel
+AI SDK, and ACP but depends on none of them. The one rule it enforces is that every model call
+routes through the Gateway (Core then Gateway then engine) - there are no first-party provider
+bindings. See [why that matters](/docs/start-here/architecture/core-vs-gateway).
+
+## 1. Scaffold
+
+```bash
+npx create-ryu-app my-extension
+cd my-extension
+```
+
+`create-ryu-app` (`packages/create-ryu-app/`) generates a starter project with a `plugin.json`
+already validated against the manifest schema plus a working starter agent, so you have a
+runnable Runnable from the first command.
+
+<Callout type="warn">
+  npm publish of `@ryu/sdk` and `create-ryu-app` is in progress. Inside the Ryu monorepo both
+  resolve as `workspace:*` today; the public npm package links are added here once released.
+</Callout>
+
+## 2. Define your Runnables
+
+The SDK has four factories - one per Runnable kind. Each takes an `id`, a `name`, and an async
+`run(input, ctx)`. They are peers: an agent can list a workflow or tool in its `tools` array, and
+a workflow can call an agent as a step.
+
+### An agent
+
+An agent drives a multi-turn model loop. Reach the model only through `ctx.gateway`, never a
+direct provider import:
+
+```typescript
+import { defineAgent } from "@ryu/sdk";
+
+export const researcher = defineAgent({
+  id: "agent-researcher",
+  name: "Researcher",
+  async run({ query }, ctx) {
+    const result = await ctx.gateway.chat([{ role: "user", content: query }]);
+    return { answer: result.content };
+  },
+});
+```
+
+### A tool
+
+A tool is a stateless function with a JSON Schema for its input. The schema is validated at
+`run()` time and is compatible with Core's `ToolInfo.schema`, so it forwards verbatim into the
+[unified tool catalog](/docs/core/unified-tool-catalog):
+
+```typescript
+import { defineTool } from "@ryu/sdk";
+
+export const search = defineTool({
+  id: "tool-web-search",
+  name: "Web Search",
+  schema: {
+    type: "object",
+    properties: { query: { type: "string", description: "Search query" } },
+    required: ["query"],
+  },
+  async run({ query }) {
+    return { results: [`Result for: ${query}`] };
+  },
+});
+```
+
+A tool does not need a model, so `ctx` is optional in the body. If it does call a model (say, to
+rerank), it still goes through `ctx.gateway`.
+
+### A skill and a workflow
+
+`defineSkill` encapsulates a reusable prompt pattern (stateless like a tool, but its job is the
+prompt, not a side effect). `defineWorkflow` orchestrates other Runnables as steps. Both follow
+the same `run(input, ctx)` shape. The full signatures and `ctx` surface live in the
+[SDK reference](/docs/develop/sdk).
+
+<Callout type="info">
+  Every Runnable receives a `GatewayClient` as `ctx.gateway`, and there is no way to build a
+  context without one. The SDK ships no provider SDKs and fails closed if it cannot reach the
+  configured Gateway rather than falling back to a direct call - the same `via_gateway` rule Core
+  enforces in `apps/core/src/sidecar/adapters/mod.rs`. The Gateway URL defaults to the local
+  managed Gateway sidecar and is overridable via `RYU_GATEWAY_URL`.
+</Callout>
+
+## 3. Run it locally
+
+`ryu dev` (`packages/sdk/src/cli/dev.ts`) runs a single Runnable entry point in an interactive
+chat loop, so you can drive it before packing:
+
+```bash
+bunx ryu dev ./src/researcher.ts
+```
+
+## 4. Declare it in the manifest
+
+List your Runnables in `plugin.json` so Core knows what the plugin contributes and what Gateway
+grants it needs. The schema, the per-kind fields, and the `contributes` / `activation_events`
+blocks are documented once in the [plugin.json reference](/docs/develop/sdk/plugin-api).
+
+## 5. Pack and publish
+
+The `ryu` CLI (`packages/sdk/src/cli.ts`) has three commands:
+
+| Command | What it does |
+|---|---|
+| `bunx ryu dev <entry>` | Run a Runnable locally with an interactive chat loop |
+| `bunx ryu pack <dir>` | Validate the `plugin.json` and emit `<dir>/dist/plugin.bundle.json` |
+| `bunx ryu publish <dir>` | Validate, then POST the bundle to the Ryu Marketplace publish endpoint |
+
+```bash
+bunx ryu pack .
+```
+
+`pack` validates against the manifest schema and exits non-zero with the failing field if the
+manifest is invalid. `publish` (`POST /api/marketplace/publish`) requires an auth token in
+`RYU_AUTH_TOKEN` and submits the bundle as a `plugin` kind for moderation (`status: pending`).
+Publishing is Gateway-governed: grant validation plus ed25519 signing run before the item goes
+live. See the [marketplace publishing guide](/docs/develop/extensions/marketplace).
+
+<Callout type="warn">
+  An SDK-authored extension always publishes as a `plugin` (a `plugin.json` bundle of Runnables),
+  never as a `skill`: a skill install expects the universal Agent Skills layout
+  (`~/.claude/skills/<slug>/SKILL.md`), which a `plugin.json` manifest does not carry. To ship a
+  standalone skill instead, follow the [Agent Skills guide](/docs/develop/extensions/agent-skills).
+</Callout>
+
+## 6. Install the plugin
+
+Install the packed bundle through the [app manifest lifecycle](/docs/core/app-manifest-lifecycle)
+(`POST /api/plugins`), which validates Gateway grants on install and enables the contributed
+Runnables. Once enabled, its tools appear in [tool search](/docs/core/unified-tool-catalog) on
+both the ACP and OpenAI-compatible planes.
+
+## MCP bridge
+
+The SDK also ships an `McpServer` (expose your tools over MCP) and an `McpClient` (call external
+MCP servers) in `packages/sdk/src/mcp/`.
+
+<Callout type="warn">
+  These live in SDK source but are not yet in the package's public `exports` map (only `.`,
+  `./manifest`, and `./cli` are exported today). To ship an MCP server now, use the `McpServer`
+  pattern in `packages/sdk/src/mcp/server.ts` directly - see the
+  [MCP server guide](/docs/develop/extensions/mcp-server). The public `@ryu/sdk` MCP subpath
+  export is pending.
+</Callout>
+
+## Next steps
+
+<Cards>
+  <DocCard href="/docs/develop/sdk" />
+  <DocCard href="/docs/develop/sdk/plugin-api" />
+  <DocCard href="/docs/develop/extensions/marketplace" />
+  <DocCard href="/docs/develop/extensions/mcp-server" />
+</Cards>

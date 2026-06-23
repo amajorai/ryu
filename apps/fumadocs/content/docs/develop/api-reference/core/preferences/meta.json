@@ -1,0 +1,9 @@
+{
+  "title": "Preferences",
+  "description": "Cross-surface preferences KV.",
+  "pages": [
+    "preferences_stream",
+    "get_preference",
+    "set_preference"
+  ]
+}

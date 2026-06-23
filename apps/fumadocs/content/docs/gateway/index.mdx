@@ -1,0 +1,112 @@
+---
+title: "Gateway"
+description: "The control layer between every model call and the outside world: routing, firewall, budgets, evals, and audit."
+---
+
+The Ryu Gateway (`apps/gateway`) is the control layer that sits between every model call and the
+outside world. It speaks the full OpenAI-compatible API, and on each request it applies routing,
+firewall and PII/DLP, caching, budgets, evals, and audit before the call reaches an upstream
+provider.
+
+## Why a separate sidecar
+
+The Gateway decides *what is allowed, shared, measured, and paid for*. Core decides *what runs*.
+Keeping that boundary in its own process is the [Core vs Gateway rule](/docs/start-here/architecture/core-vs-gateway):
+Core runs the Gateway as a managed sidecar (`apps/core/src/sidecar/gateway.rs`) and forwards every
+default-route model call through it (`via_gateway: true` in `apps/core/src/sidecar/adapters/mod.rs`).
+The gateway binary defaults to bind `0.0.0.0:7981`, reached on the loopback at `http://127.0.0.1:7981`
+(`DEFAULT_GATEWAY_URL`). The same binary also runs standalone in front of any agent framework - see
+[Gateway for any agent](/docs/gateway/gateway-for-any-agent).
+
+## What it does on every request
+
+A request flows through one pipeline, roughly in this order:
+
+1. **Authenticate** - resolve the API key, its org or team, and its limits.
+2. **Route** - pick the provider and model (static map, fallback chain, eval-driven, smart, or per-modality).
+3. **Firewall (inbound)** - scan the prompt for PII, secrets, and prompt injection.
+4. **Budget** - check user, agent, and session budgets, then notify, restrict, downgrade, or stop.
+5. **Cache** - serve an exact or semantic cache hit if there is one.
+6. **Compress** - optionally shrink the context (see [Compression](/docs/gateway/compression)).
+7. **Call the provider**, with a circuit breaker and fallback chain for reliability.
+8. **Firewall (outbound)** - scan or redact the response for secrets and PII.
+9. **Audit and eval** - record the call, and score a sampled subset.
+
+## Is the Gateway a reverse proxy?
+
+Yes, it is a reverse proxy. More precisely, it runs in **two reverse-proxy modes**, and which one
+a request uses depends on how the agent talks to its model provider.
+
+### Mode 1: the translating gateway (the default path)
+
+`POST /v1/chat/completions` (`apps/gateway/src/pipeline/mod.rs`) is a *translating, governing*
+reverse proxy, not a transparent one. It:
+
+- accepts the **OpenAI-compatible** wire format on the front, regardless of which upstream it routes to,
+- **substitutes its own provider key** (BYOK), so the caller's credential is replaced rather than forwarded,
+- **can change the request and the response**: smart routing rewrites the target model, the firewall
+  redacts inbound and outbound bytes, compression rewrites context, and the cache can answer without
+  calling a provider at all.
+
+This is the path everything on Core's default route uses (`via_gateway: true`). It is more than a
+proxy: it translates formats, re-authenticates, routes, and enforces policy.
+
+### Mode 2: the transparent passthrough (subscription agents)
+
+`apps/gateway/src/passthrough/mod.rs` is a *transparent, same-format* reverse proxy. It is for agents
+that speak a provider-native format and authenticate with the user's **own** subscription credential,
+which the translating path cannot govern without breaking their billing. It:
+
+- **does not translate the format** (Anthropic in, Anthropic out to `api.anthropic.com`; OpenAI
+  Responses for Codex),
+- **forwards the caller's own `Authorization` bearer unchanged** and never injects a BYOK key, so
+  subscription billing is preserved,
+- leaves model-visible bytes intact unless the firewall is explicitly enabled, in which case it
+  applies request-side and response-side DLP.
+
+The mechanics, routes, and per-agent opt-in for this mode are documented under
+[Gateway for any agent → Subscription-preserving passthrough](/docs/gateway/gateway-for-any-agent#subscription-preserving-passthrough-claude-code-codex).
+
+### Which mode does what
+
+| | Translating gateway (`/v1/chat/completions`) | Transparent passthrough (`/passthrough/*`) |
+|---|---|---|
+| Wire format | OpenAI-compatible (translated) | Native, never translated |
+| Caller's own auth | Replaced with a BYOK provider key | Forwarded unchanged |
+| Model-visible bytes | May be routed, compressed, cached, redacted | Unchanged unless the firewall redacts |
+| Binding | `127.0.0.1:7981` (or remote) | **Loopback-only** (never carries a subscription bearer remotely) |
+| Typical caller | Default Core route, any OpenAI-compatible framework | Claude Code, Codex (ChatGPT-login) |
+
+<Callout type="info">
+  Both modes are reverse proxies and both emit an audit record. The difference is governance posture:
+  the default path trades transparency for control (it owns auth, routing, and the bytes), while the
+  passthrough trades control for transparency (it preserves auth and bytes so subscription agents keep
+  working). With the firewall off, the passthrough is a clean transparent forwarder plus an audit log.
+</Callout>
+
+## The endpoints
+
+The Gateway serves an OpenAI-compatible surface plus management routes. See the
+[API reference](/docs/develop/api-reference) for the full, interactive list.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /v1/chat/completions` | Chat (streaming and non-streaming) |
+| `POST /v1/images/generations` | Image generation |
+| `POST /v1/audio/speech`, `/v1/audio/transcriptions` | TTS and STT |
+| `GET /v1/models`, `/v1/modalities` | List routable models and modalities |
+| `POST /v1/exec/tool` | Governed tool execution (allowlist, budget, audit) |
+| `GET /metrics`, `/v1/evals` | Metrics and rolling eval scores |
+| `GET /v1/audit` | Query the audit log (master key) |
+| `GET`/`PUT /v1/config` | Read and hot-swap runtime config (master key) |
+| `GET /health` | Status and provider list |
+
+## The sections
+
+<AutoCards url="/docs/gateway" />
+
+<Callout type="info">
+  Everything the Gateway does is configured through `gateway.toml` and environment variables, and
+  most of it is hot-swappable at runtime through `PUT /v1/config`. Nothing is hardcoded - see
+  [Configuration](/docs/gateway/configuration).
+</Callout>

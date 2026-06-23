@@ -1,0 +1,36 @@
+---
+title: "Course: Governing Ryu"
+description: Own the control layer. Learn the Gateway surfaces that decide what is allowed, shared, measured, and paid for.
+---
+
+Agents are commoditized. The control layer around them is not. This course is for the person who owns policy: the Gateway is where you decide what an agent is allowed to do, what data is safe to send, which model serves a request, what it costs, and how you prove what happened.
+
+The good news is that the Gateway is already on the default chat path. This course is not about turning it on, it is about learning its surfaces and using them well.
+
+## Who this is for
+
+- Platform and developer teams who run agents for others and need a single control point.
+- Anyone responsible for security, spend, model choice, or compliance across a team or organization.
+- The owner who wants the moat layer (the part a team adopts and an enterprise buys) to actually be configured.
+
+## What you will learn
+
+- The single most important design rule: Core decides what runs, the Gateway decides what is allowed.
+- How model routing works, including smart classifier-driven routing from plain-language rules.
+- How the firewall and PII/DLP guardrails protect requests and egress.
+- How budgets cap spend, how BYOK stores keys, and how BYOA points any agent at the Gateway.
+- How evals measure output quality and audit proves what happened.
+
+## Lessons
+
+<Cards>
+  <Card title="1. Core vs Gateway" href="/docs/academy/governing/core-vs-gateway" description="The one rule that decides where every piece of code belongs." />
+  <Card title="2. Routing" href="/docs/academy/governing/routing" description="Pick the right model per request, including smart routing." />
+  <Card title="3. Guardrails" href="/docs/academy/governing/guardrails" description="The firewall and PII/DLP surfaces that protect requests and egress." />
+  <Card title="4. Budgets and keys" href="/docs/academy/governing/budgets-and-keys" description="Cap spend, bring your own keys, bring your own agent." />
+  <Card title="5. Evals and audit" href="/docs/academy/governing/evals-and-audit" description="Know an agent is good and prove what it did." />
+</Cards>
+
+## When you finish
+
+You will know how to reach every Gateway surface and where each policy lives. Next, learn to build the things the Gateway governs: [Building on Ryu](/docs/academy/builder).

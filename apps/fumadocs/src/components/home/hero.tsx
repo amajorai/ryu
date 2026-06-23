@@ -1,0 +1,375 @@
+"use client";
+
+import { useSearchContext } from "fumadocs-ui/contexts/search";
+import {
+  ArrowRight,
+  BookOpen,
+  Code,
+  Cpu,
+  GraduationCap,
+  type LucideIcon,
+  Rocket,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+
+import { RyuLogo } from "@/components/ryu-logo";
+
+type Realm = {
+  slug: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  accent: string;
+};
+
+const REALMS: Realm[] = [
+  {
+    slug: "start-here",
+    title: "Start Here",
+    description: "Orientation, install, and the big picture.",
+    icon: Rocket,
+    accent: "var(--start-here-color)",
+  },
+  {
+    slug: "using-ryu",
+    title: "Using Ryu",
+    description: "Run agents day to day: the app, engines, models, and skills.",
+    icon: BookOpen,
+    accent: "var(--using-ryu-color)",
+  },
+  {
+    slug: "academy",
+    title: "Academy",
+    description:
+      "Learn Ryu the structured way, from first chat to certified builder.",
+    icon: GraduationCap,
+    accent: "var(--academy-color)",
+  },
+  {
+    slug: "gateway",
+    title: "Gateway",
+    description:
+      "The moat: routing, firewall, PII/DLP, budgets, evals, and audit.",
+    icon: ShieldCheck,
+    accent: "var(--gateway-color)",
+  },
+  {
+    slug: "core",
+    title: "Core internals",
+    description:
+      "Orchestration: sessions, memory, RAG, workflows, sandboxes, and MCP.",
+    icon: Cpu,
+    accent: "var(--core-color)",
+  },
+  {
+    slug: "develop",
+    title: "Develop",
+    description: "Build on Ryu: extensions, the SDK, and the HTTP API.",
+    icon: Code,
+    accent: "var(--develop-color)",
+  },
+];
+
+type QuickLink = {
+  id: string;
+  label: string;
+  href: string;
+};
+
+const QUICK_LINKS: QuickLink[] = [
+  { id: "install", label: "Install", href: "/docs/start-here/getting-started" },
+  {
+    id: "architecture",
+    label: "Architecture",
+    href: "/docs/start-here/architecture",
+  },
+  { id: "recipes", label: "Recipes", href: "/docs/using-ryu/recipes" },
+  { id: "api", label: "API reference", href: "/docs/develop/api-reference" },
+];
+
+type Stat = {
+  id: string;
+  value: string;
+  label: string;
+};
+
+const STATS: Stat[] = [
+  { id: "guides", value: "116", label: "hand-written guides" },
+  { id: "endpoints", value: "176", label: "API endpoints" },
+  { id: "realms", value: "6", label: "themed realms" },
+  { id: "diagrams", value: "34", label: "architecture diagrams" },
+  { id: "lessons", value: "21", label: "interactive lessons" },
+];
+
+type Featured = {
+  id: string;
+  href: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+  accent: string;
+};
+
+const FEATURED: Featured[] = [
+  {
+    id: "architecture",
+    href: "/docs/start-here/architecture",
+    eyebrow: "Start Here",
+    title: "The architecture, end to end",
+    description:
+      "How a request travels App to Gateway to Core to any engine, and why each layer exists.",
+    accent: "var(--start-here-color)",
+  },
+  {
+    id: "gateway",
+    href: "/docs/gateway",
+    eyebrow: "Gateway",
+    title: "The moat: govern every model call",
+    description:
+      "Routing, firewall, PII/DLP, budgets, evals, and audit: what is allowed, shared, and paid for.",
+    accent: "var(--gateway-color)",
+  },
+  {
+    id: "workflows",
+    href: "/docs/core/workflows",
+    eyebrow: "Core internals",
+    title: "Workflows and the DAG engine",
+    description:
+      "Compose agents, tools, and sub-workflows into durable, resumable runs with retries and HITL gates.",
+    accent: "var(--core-color)",
+  },
+  {
+    id: "recipes",
+    href: "/docs/using-ryu/recipes",
+    eyebrow: "Using Ryu",
+    title: "Recipes: real flows, start to finish",
+    description:
+      "Watch a price into Slack, record a chore into a workflow, triage a backlog with worker threads.",
+    accent: "var(--using-ryu-color)",
+  },
+];
+
+/** The centered fake-search button that opens the built-in command palette. */
+function SearchTrigger() {
+  const { setOpenSearch } = useSearchContext();
+  const [isMac, setIsMac] = useState(false);
+
+  useEffect(() => {
+    const platform = navigator.userAgent || navigator.platform || "";
+    setIsMac(/Mac|iPhone|iPad|iPod/i.test(platform));
+  }, []);
+
+  return (
+    <button
+      aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
+      aria-label="Search the documentation"
+      className="group flex w-full items-center gap-3 rounded-xl border border-fd-border bg-fd-card px-4 py-3.5 text-left shadow-sm transition-colors hover:border-fd-ring/60 hover:bg-fd-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
+      onClick={() => setOpenSearch(true)}
+      type="button"
+    >
+      <Search
+        aria-hidden="true"
+        className="size-5 shrink-0 text-fd-muted-foreground transition-colors group-hover:text-fd-foreground"
+      />
+      <span className="flex-1 text-base text-fd-muted-foreground">
+        Search 116 guides and 176 endpoints…
+      </span>
+      <kbd className="hidden shrink-0 items-center gap-1 rounded-md border border-fd-border bg-fd-muted px-2 py-1 font-medium font-mono text-fd-muted-foreground text-xs sm:inline-flex">
+        {isMac ? "⌘" : "Ctrl"} K
+      </kbd>
+    </button>
+  );
+}
+
+function QuickLinks() {
+  return (
+    <nav aria-label="Common destinations">
+      <ul className="flex flex-wrap items-center justify-center gap-2">
+        {QUICK_LINKS.map((link) => (
+          <li key={link.id}>
+            <Link
+              className="inline-flex items-center rounded-full border border-fd-border bg-fd-card px-3.5 py-1.5 font-medium text-fd-muted-foreground text-sm transition-colors hover:border-fd-ring/60 hover:bg-fd-accent hover:text-fd-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
+              href={link.href}
+            >
+              {link.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+function StatStrip() {
+  return (
+    <dl className="mt-12 flex flex-wrap justify-center gap-x-8 gap-y-6 sm:gap-x-12">
+      {STATS.map((stat) => (
+        <div className="flex flex-col items-center text-center" key={stat.id}>
+          <dt className="font-heading font-semibold text-2xl text-fd-foreground tabular-nums sm:text-3xl">
+            {stat.value}
+          </dt>
+          <dd className="mt-1 max-w-[7.5rem] text-fd-muted-foreground text-xs leading-tight sm:text-sm">
+            {stat.label}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+export function Hero() {
+  return (
+    <section className="mx-auto flex w-full max-w-4xl flex-col items-center px-4 pt-16 pb-8 text-center sm:pt-24">
+      <span className="inline-flex items-center gap-2 rounded-full border border-fd-border bg-fd-muted px-3 py-1 font-medium text-fd-muted-foreground text-xs">
+        <RyuLogo size={14} />
+        Ryu Documentation
+      </span>
+
+      <h1 className="mt-6 text-balance font-bold font-heading text-4xl text-fd-foreground tracking-tight sm:text-5xl md:text-6xl">
+        Find anything in Ryu, in seconds.
+      </h1>
+
+      <p className="mt-6 max-w-2xl text-balance text-base text-fd-muted-foreground leading-relaxed sm:text-lg">
+        The orchestration and control layer for AI agents. Ryu is the whole car
+        built around any engine (OpenAI, Claude Code, Gemma, any
+        OpenAI-compatible runtime): local-first, BYO-everything, nothing
+        hardcoded.
+      </p>
+
+      <div className="mt-9 flex w-full max-w-xl flex-col items-center gap-4">
+        <SearchTrigger />
+        <QuickLinks />
+      </div>
+
+      <StatStrip />
+    </section>
+  );
+}
+
+function RealmCard({ realm }: { realm: Realm }) {
+  const Icon = realm.icon;
+  return (
+    <Link
+      className="group relative flex flex-col gap-3 rounded-xl border bg-fd-card p-5 transition-all hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
+      href={`/docs/${realm.slug}`}
+      style={{
+        borderColor: `color-mix(in oklab, ${realm.accent} 22%, var(--color-fd-border))`,
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <span
+          aria-hidden="true"
+          className="flex size-10 items-center justify-center rounded-lg border"
+          style={{
+            backgroundColor: `color-mix(in oklab, ${realm.accent} 12%, transparent)`,
+            borderColor: `color-mix(in oklab, ${realm.accent} 35%, transparent)`,
+            color: realm.accent,
+          }}
+        >
+          <Icon className="size-5" />
+        </span>
+        <ArrowRight
+          aria-hidden="true"
+          className="size-4 text-fd-muted-foreground opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-100"
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <h3 className="font-heading font-semibold text-fd-foreground text-lg">
+          {realm.title}
+        </h3>
+        <p className="text-fd-muted-foreground text-sm leading-relaxed">
+          {realm.description}
+        </p>
+      </div>
+    </Link>
+  );
+}
+
+export function Realms() {
+  return (
+    <section
+      aria-labelledby="realms-heading"
+      className="mx-auto w-full max-w-4xl px-4 py-12"
+    >
+      <h2
+        className="font-heading font-semibold text-fd-foreground text-xl"
+        id="realms-heading"
+      >
+        Explore by realm
+      </h2>
+      <p className="mt-1 text-fd-muted-foreground text-sm">
+        Six themed sections, each with its own accent and depth.
+      </p>
+      <nav
+        aria-label="Documentation realms"
+        className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+      >
+        {REALMS.map((realm) => (
+          <RealmCard key={realm.slug} realm={realm} />
+        ))}
+      </nav>
+    </section>
+  );
+}
+
+function FeaturedCard({ item }: { item: Featured }) {
+  return (
+    <Link
+      className="group flex flex-col gap-2 rounded-xl border border-fd-border bg-fd-card p-5 transition-colors hover:bg-fd-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring sm:flex-row sm:items-center sm:gap-5 sm:p-6"
+      href={item.href}
+    >
+      <span
+        aria-hidden="true"
+        className="hidden h-12 w-1 shrink-0 rounded-full sm:block"
+        style={{
+          backgroundColor: `color-mix(in oklab, ${item.accent} 55%, transparent)`,
+        }}
+      />
+      <div className="flex flex-1 flex-col gap-1">
+        <span
+          className="font-heading font-semibold text-xs uppercase tracking-wide"
+          style={{ color: item.accent }}
+        >
+          {item.eyebrow}
+        </span>
+        <h3 className="font-heading font-semibold text-base text-fd-foreground sm:text-lg">
+          {item.title}
+        </h3>
+        <p className="text-fd-muted-foreground text-sm leading-relaxed">
+          {item.description}
+        </p>
+      </div>
+      <ArrowRight
+        aria-hidden="true"
+        className="hidden size-5 shrink-0 text-fd-muted-foreground transition-all group-hover:translate-x-1 group-hover:text-fd-foreground sm:block"
+      />
+    </Link>
+  );
+}
+
+export function FeaturedRail() {
+  return (
+    <section
+      aria-labelledby="featured-heading"
+      className="mx-auto w-full max-w-4xl border-fd-border border-t px-4 py-12"
+    >
+      <h2
+        className="font-heading font-semibold text-fd-foreground text-xl"
+        id="featured-heading"
+      >
+        Featured
+      </h2>
+      <p className="mt-1 text-fd-muted-foreground text-sm">
+        Hand-picked deep pages to get you oriented fast.
+      </p>
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+        {FEATURED.map((item) => (
+          <FeaturedCard item={item} key={item.id} />
+        ))}
+      </div>
+    </section>
+  );
+}

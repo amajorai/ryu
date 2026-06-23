@@ -1,0 +1,9 @@
+{
+  "extends": "@ryu/config/tsconfig.base.json",
+  "compilerOptions": {
+    "strictNullChecks": true
+  },
+  "exclude": [
+    "opensrc"
+  ]
+}

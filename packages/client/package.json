@@ -1,0 +1,26 @@
+{
+  "name": "@ryu/client",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "TypeScript client SDK for embedding a Ryu Core agent in any app",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "src", "README.md"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup",
+    "check-types": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "typescript": "^5"
+  }
+}

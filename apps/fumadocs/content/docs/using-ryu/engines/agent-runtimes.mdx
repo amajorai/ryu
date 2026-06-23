@@ -1,0 +1,146 @@
+---
+title: "Agent Runtimes"
+description: "The ACP agents Ryu can run - the Ryu flagship, Claude Code, Codex, Gemini, Pi, and the registry agents"
+---
+
+An agent runtime is the engine behind an agent. Core drives full coding agents over the **Agent
+Client Protocol (ACP)**: each runs as a subprocess and streams events back to Core in the Vercel AI
+SDK format, with the full tool loop that lets it read files, run commands, and edit code.
+
+This is the reference for the ACP agent runtimes Core knows about and the catalog that installs
+them. The registry lives in `AcpAgentRegistry` (`apps/core/src/sidecar/adapters/acp.rs`); only the
+`ryu` flagship is installed by default, and every other agent is opt-in through the agents catalog.
+
+## How agents reach Core
+
+Core routes chat through two adapters (`apps/core/src/sidecar/adapters/`):
+
+- The **ACP adapter** (`acp.rs`) spawns ACP agents and streams their tool calls and output. This is
+  the path every agent on this page uses.
+- The **OpenAI-compat adapter** (`openai_compat.rs`) does a single non-streaming POST with no tools.
+  Only ZeroClaw (local server on `:42617`) still binds this way.
+
+The default agent id is `ryu` (`DEFAULT_AGENT_ID`), resolved through the registry and overridable.
+
+## Curated first-class agents
+
+These are the hand-curated entries in `AcpAgentRegistry`. The `ryu` and `codex` agents get Gateway
+env-injection so their model calls can be governed; the others make their own provider calls.
+
+| Agent | Runtime | Gateway egress |
+|---|---|---|
+| `ryu` | The flagship: Pi with the Gateway on top, managing its own Pi binary | Governed by default (see below) |
+| Claude Code | Anthropic's coding agent | Bypass by default; opt-in passthrough |
+| Codex | OpenAI's coding agent | Opt-in passthrough; env-injected |
+| Gemini CLI | Google's CLI agent | Bypass (not wirable, see caveat) |
+| Pi | A minimal local coding agent (the managed binary) | Governed when routed through `ryu` |
+
+The flagship `ryu` is Pi plus the Gateway. It is the only agent installed on first run, it is
+self-sufficient because it manages its own Pi binary, and you configure its model and provider
+through a dedicated panel. See [Configure the Ryu Pi agent](#configure-the-ryu-pi-agent) below and
+[Agents](/docs/using-ryu/user-guide/agents) for the broader picture.
+
+<Callout type="warn">
+  An ACP agent's own LLM calls happen inside its subprocess, so for most agents that **chat egress
+  does not traverse the Gateway**. Claude Code and Codex can be opted into a subscription-preserving
+  passthrough proxy (request-side firewall, DLP, and audit) via the `claude-gateway-routing` /
+  `codex-gateway-routing` preferences (`apps/gateway/src/passthrough/mod.rs`,
+  `apps/core/src/codex_config/mod.rs`). **Gemini is not wirable**: the Gemini CLI exposes no
+  base-URL hook, so it stays bypass. Tool execution, by contrast, is governed on both planes. See
+  [Gateway for any agent](/docs/gateway/gateway-for-any-agent).
+</Callout>
+
+## Registry agents (self-fetching)
+
+Beyond the curated set, Core pulls agents from the official ACP registry
+(`https://cdn.agentclientprotocol.com/registry/v1/latest`). OpenClaw and Hermes are now native ACP
+entries, alongside roughly 18 more `npx`/`uvx` agents.
+
+| Agent | Spawn | Notes |
+|---|---|---|
+| OpenClaw | `openclaw acp` | A Gateway-backed bridge to the user's own OpenClaw Gateway |
+| Hermes | `hermes acp` | Self-contained from `~/.hermes` |
+| `acp:cline`, `acp:auggie`, `acp:qwen`, `acp:copilot`, `acp:kilo`, `acp:grok`, `acp:droid`, `acp:fast-agent`, `acp:minion`, and more | `npx -y …` / `uvx …` | Added as `acp:` catalog entries |
+
+Every registry agent carries `gateway_bypass: true` in its `AgentInfo` (`acp.rs`) because it makes
+its own provider calls. Clients surface this so you know the egress is not seen by the Gateway.
+
+## Binary-only registry agents
+
+Fourteen registry agents ship as platform binaries rather than `npx`/`uvx` packages (goose,
+opencode, cursor, kimi, devin, and others). They are wired to a per-platform archive downloader
+(#516): `apps/core/src/sidecar/agents/archive_agent/mod.rs` (`ArchiveAgentSpec` + `ensure_installed`
++ `archive_platform_tag()`), surfaced as the `AcpDist::Archive` variant and an `archive_spec` field
+on `AcpAgentEntry`. When you install one of these from the catalog, Core fetches and extracts the
+binary into `~/.ryu/bin` before flipping the installed flag.
+
+<Callout type="info">
+  NanoClaw (#509) was abandoned: it is a message-driven Node orchestrator with no HTTP or ACP
+  endpoint Core can route to, so it was removed from `startup_order` (`apps/core/src/main.rs`). Its
+  install machinery is left registered but it is not a routable agent.
+</Callout>
+
+## Configure the Ryu Pi agent
+
+The flagship `ryu` agent is Pi with the Gateway on top, and you can edit the model and provider the
+managed Pi uses. That configuration lives in an isolated directory, `~/.ryu/pi-agent` (the
+`PI_CODING_AGENT_DIR`, overridable with `RYU_PI_AGENT_DIR`), never the user's own `~/.pi/agent`.
+`apps/core/src/pi_config/mod.rs` is the single owner of that directory and reads or writes the three
+files Pi understands.
+
+| File | What Ryu manages |
+|---|---|
+| `settings.json` | `defaultProvider`, `defaultModel`, `defaultThinkingLevel`, plus a Ryu routing marker. Unmanaged keys are preserved verbatim |
+| `models.json` | Custom OpenAI-compatible providers (Ollama, LM Studio, vLLM, a proxy) and per-model overrides |
+| `auth.json` | Per-provider api-key credentials, in the `{ "type": "api_key", "key": ... }` shape Pi expects |
+
+The routing choice is folded into the provider picker. Selecting the Ryu Gateway keeps egress
+governed: Core pins Pi's built-in `openai` provider at the local Gateway, so every model call routes
+through the firewall, budget, and audit layers. Picking any other provider switches to direct
+egress, a deliberate user-chosen bypass where Pi talks to that provider directly and the api-key
+credential is written to `auth.json`. Gateway routing is the default until you choose otherwise.
+
+`auth.json` and `models.json` can hold credentials, so on Unix they are written with `0600`
+permissions. Credentials are never returned when you read the config back.
+
+| Action | Endpoint |
+|---|---|
+| Read the current Pi config | `GET /api/pi-config` |
+| Apply a provider, model, or thinking-level change | `PUT /api/pi-config` |
+| List supported providers, thinking levels, and api types | `GET /api/pi-config/catalog` |
+
+In the desktop, this is the `RyuPiConfig` panel
+(`apps/desktop/src/components/agents/RyuPiConfig.tsx`), shown on the agent edit page for the `ryu`
+agent only. Other agents are edited through the ordinary agent record.
+
+<Callout type="info">
+  This editor targets only the Ryu-managed Pi in its isolated directory, not any Pi you have
+  installed yourself. Your own `~/.pi/agent` configuration is left untouched.
+</Callout>
+
+## The agents catalog
+
+Onboarding detects which agent CLIs you already have on PATH and offers to add the matching agent.
+Catalog entries seed in opt-in (installed = 0); only `ryu` is installed by default.
+
+| Action | Endpoint |
+|---|---|
+| List the installable catalog | `GET /api/agents/catalog` |
+| Add a built-in agent to the picker | `POST /api/agents/catalog/install` |
+| Remove one | `POST /api/agents/catalog/uninstall` |
+| List the agents you can pick | `GET /api/agents` |
+
+"Installing" a catalog agent adds it to the agent picker (and, for a binary-only registry agent,
+downloads its binary into `~/.ryu/bin`). The catalog entry reports whether the agent's binary was
+detected on PATH and whether it is already added. The `ryu` agent is always present and cannot be
+uninstalled.
+
+<TryInRyu page="agents" />
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/using-ryu/user-guide/agents" />
+  <DocCard href="/docs/gateway/gateway-for-any-agent" />
+  <DocCard href="/docs/start-here/architecture/core-vs-gateway" />
+</Cards>

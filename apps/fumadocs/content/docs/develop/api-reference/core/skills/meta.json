@@ -1,0 +1,12 @@
+{
+  "title": "Skills",
+  "description": "Agent Skills install + activation.",
+  "pages": [
+    "list_skills",
+    "skills_activate",
+    "skills_catalog_list",
+    "skills_catalog_detail",
+    "skills_catalog_install",
+    "skills_install_from_source"
+  ]
+}

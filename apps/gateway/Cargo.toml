@@ -1,0 +1,64 @@
+[package]
+name = "ryu-gateway"
+version = "0.0.1"
+edition = "2021"
+
+[[bin]]
+name = "ryu-gateway"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "timeout"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+genai = "0.6.5"
+async-trait = "0.1"
+anyhow = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures-util = "0.3"
+regex = "1"
+dashmap = "6"
+bytes = "1"
+tokio-util = { version = "0.7", features = ["io"] }
+toml = "0.8"
+dirs = "5"
+http = "1"
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+base64 = "0.22"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+
+# OpenTelemetry seam (#540, P1): mirrors Core's seam (apps/core/Cargo.toml). The
+# vendor-neutral instrumentation export path. `tracing-opentelemetry` 0.33 bridges
+# the existing `tracing` spans into OTel; it pins `opentelemetry` ^0.32, so the
+# whole family is pinned to 0.32 to keep ONE `opentelemetry` in the tree (a version
+# skew pulls two and breaks the layer's trait bounds). OTLP/HTTP-protobuf only
+# (`http-proto` + `reqwest-client`) so we avoid tonic/grpc — Axiom and most
+# collectors speak OTLP/HTTP. The exporter is installed ONLY on consent (see
+# main.rs); with the flag off nothing egresses and the local `audit/` SQLite sink
+# is untouched. The backend is a swappable config value (`OTEL_EXPORTER_OTLP_ENDPOINT`),
+# never a lock.
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
+tracing-opentelemetry = "0.33"
+
+# Crash reporting tier (#544, P3) — Sentry for Rust PANICS ONLY. The gateway has no
+# `PreferencesStore`, so it reads `RYU_CRASH_REPORTS_ENABLED` + a DSN from env;
+# Core's `gateway_spawn_env()` forwards the user's desktop consent + DSN into these
+# env vars when it spawns the gateway as a sidecar, so the gateway tier follows the
+# same `crash-reports-enabled` pref. Same minimal feature set as Core (panic
+# integration only, NO `sentry-tracing`/`sentry-log`) + a home-dir path scrub.
+sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "native-tls"] }

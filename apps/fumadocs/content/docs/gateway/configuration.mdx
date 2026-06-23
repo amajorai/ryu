@@ -1,0 +1,205 @@
+---
+title: "Configuration & Auth"
+description: "gateway.toml sections, API keys and auth, environment variables, and runtime config over the API"
+---
+
+The Gateway reads one TOML file, layers environment variables on top, and exposes a thin runtime
+API for live edits. When Core runs the Gateway as a managed sidecar, most of this is set for you;
+when you run it standalone in front of your own agents, you own the file. For that standalone
+setup, see [Gateway for any agent](/docs/gateway/gateway-for-any-agent).
+
+## Where config comes from
+
+The Gateway resolves `gateway.toml` from `GATEWAY_CONFIG` if set, otherwise from
+`$config_dir/ryu/gateway.toml` (`GatewayConfig::config_path`, `apps/gateway/src/config.rs`). Values
+from the file are the base; specific environment variables override individual keys at load time
+(`from_env` in the same file). Writes through the API are persisted back to the same path using a
+temp-file rename so a crash mid-write never corrupts the file (`GatewayConfig::save`).
+
+```
+gateway.toml          base config (TOML)
+  + environment vars   per-key overrides applied at startup
+  + PUT /v1/config      runtime edits, persisted back to the file
+```
+
+## The config sections
+
+`gateway.toml` has one section per subsystem. Each subsystem documents its own fields on its page;
+this table is the map.
+
+| Section | Controls | Page |
+|---|---|---|
+| `[auth]`, `[[auth.api_keys]]` | Base auth, per-key limits, trusted forwarders | this page |
+| `[providers.*]` | Per-provider API keys and base URLs | [Routing](/docs/gateway/routing) |
+| `[routing]` | Model map, fallback chain, smart routing | [Routing](/docs/gateway/routing) |
+| `[firewall]` | Detection toggles and policy | [Security](/docs/gateway/security) |
+| `[budgets]` | Per-user, per-agent, and per-session token budgets | [Governance](/docs/gateway/governance) |
+| `[rate_limit]` | Request, token, and burst limits | [Reliability](/docs/gateway/reliability) |
+| `[cache]`, `[semantic_cache]` | Exact and semantic caching | [Reliability](/docs/gateway/reliability) |
+| `[evals]`, `[audit]` | Sampling and the audit DB path | [Evals and audit](/docs/gateway/evals-audit) |
+| `[compression]` | Egress compression | [Context compression](/docs/gateway/compression) |
+| `[channels.*]` | Bot tokens and webhooks | [Channels](/docs/gateway/channels) |
+| `[control_plane]` | Control-plane URL and gateway key for org policy | [Governance](/docs/gateway/governance) |
+
+## Auth and API keys
+
+The `[auth]` block (`AuthConfig`, `apps/gateway/src/config.rs`) controls who may call the Gateway.
+
+```toml
+[auth]
+require_auth = true
+master_key = "ryu-master-secret"   # also GATEWAY_MASTER_KEY
+
+[[auth.api_keys]]
+key = "ryu-sk-your-secret-key"
+name = "my-app"
+org_id = "org_abc"
+team_id = "team_xyz"
+requests_per_minute = 10000        # per-key override of the global rate limit
+tokens_per_minute = 500000         # per-key override
+token_budget_total = 1000000000    # lifetime token cap (0 = unlimited)
+downgrade_to = "gpt-4o-mini"       # model used once the lifetime cap is hit
+trusted_forwarder = false          # honor x-ryu-user-id / x-ryu-agent-id for budgets
+```
+
+Every request carries its key as a bearer token:
+
+```
+Authorization: Bearer ryu-sk-your-secret-key
+```
+
+### Field reference
+
+| Field | Type | Meaning |
+|---|---|---|
+| `require_auth` | bool | When `false`, all requests are accepted regardless of key. Default `false` (local dev) |
+| `master_key` | string | A single key that bypasses all per-key limits and gates the admin surface |
+| `api_keys[].key` | string | The bearer token clients send |
+| `api_keys[].name` | string | Human label, surfaced in `GET /v1/config` |
+| `api_keys[].org_id` / `team_id` / `project_id` | string | Tenancy tags carried through to budgets and audit |
+| `api_keys[].requests_per_minute` | int | Per-key override of the global request rate limit |
+| `api_keys[].tokens_per_minute` | int | Per-key override of the global token rate limit |
+| `api_keys[].token_budget_total` | int | Lifetime token cap (input + output). `0` is unlimited |
+| `api_keys[].downgrade_to` | string | Model swapped in once `token_budget_total` is exceeded. If unset, the request is rejected with `BudgetExceeded` |
+| `api_keys[].trusted_forwarder` | bool | See below. Default `false` |
+
+### Trusted forwarders
+
+By default a key's budgets are keyed to the key itself, and any client-supplied `x-ryu-user-id` /
+`x-ryu-agent-id` headers are ignored, so an untrusted caller cannot rotate identity headers to
+evade its quota. Set `trusted_forwarder = true` only for an intermediary you control (Ryu Core
+relaying a real end-user identity): those keys are allowed to pass `x-ryu-user-id` and
+`x-ryu-agent-id`, which then drive per-user and per-agent budgets (`apps/gateway/src/config.rs`,
+`ApiKeyConfig::trusted_forwarder`). Per-user and per-agent budget rules live under `[budgets]` and
+are documented on [Governance](/docs/gateway/governance).
+
+<Callout type="warn">
+`require_auth` and `master_key` are environment-variable-only by design. The runtime API will not
+change them (see below), preventing an accidental lockout where you disable auth or rotate the
+master key over the wire and lock yourself out.
+</Callout>
+
+## Key environment variables
+
+These override `gateway.toml` keys at load time. Setting `GATEWAY_MASTER_KEY` also forces
+`require_auth = true` (`apps/gateway/src/config.rs`).
+
+| Variable | Purpose |
+|---|---|
+| `GATEWAY_CONFIG` | Explicit path to `gateway.toml`; otherwise `$config_dir/ryu/gateway.toml` |
+| `GATEWAY_BIND` | The address the Gateway binds |
+| `GATEWAY_MASTER_KEY` | The master key; also flips `require_auth` on |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` | OpenAI provider credentials |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` | Anthropic provider credentials |
+| `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` | OpenRouter provider credentials |
+| `LOCAL_LLM_URL` | The local engine URL (Core sets this to the active engine) |
+| `CORE_URL` / `CORE_TOKEN` | Reach Core for tool execution (set by Core's `gateway_spawn_env`) |
+| `GATEWAY_FIREWALL_ENABLED` / `GATEWAY_FIREWALL_POLICY` | Firewall toggle and policy |
+| `GATEWAY_COMPRESSION_ENABLED` / `GATEWAY_COMPRESSION_URL` | Egress compression (Core sets these) |
+| `GATEWAY_SMART_ROUTING_ENABLED` / `GATEWAY_SMART_ROUTING_MODEL` | Smart routing toggle and classifier |
+| `CONTROL_PLANE_URL` / `CONTROL_PLANE_KEY` | Org policy relay |
+| `TELEGRAM_BOT_TOKEN`, `SLACK_APP_TOKEN`, `DISCORD_BOT_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, … | Channel bot credentials (see [Channels](/docs/gateway/channels)) |
+
+## Runtime config over the API
+
+Read and edit config without restarting the process:
+
+```
+GET /v1/config
+PUT /v1/config
+```
+
+`GET /v1/config` returns the live firewall, budgets, routing, and a redacted view of providers and
+auth - provider `api_key` fields become `"***"` and API key values are masked, so secrets never
+leave the process (`ConfigView` / `redact_providers` / `redact_auth`, `apps/gateway/src/api/config.rs`).
+
+`PUT /v1/config` accepts a partial patch with any of `firewall`, `budgets`, `auth`, or `routing`
+(`ConfigPatch`). It persists first, then applies the live changes, so a failed file write leaves
+the running config untouched.
+
+### What applies live vs on restart
+
+This is the rule that bites, so it is explicit:
+
+| Patch field | Effect |
+|---|---|
+| `firewall` | Hot-swapped live |
+| `budgets` | Hot-swapped live |
+| `auth.api_keys` | Hot-swapped live (full replacement: any key not in the list is removed) |
+| `routing` | Persisted, but takes effect only on the next Gateway restart |
+
+The `ModelRouter` holds a snapshot of `RoutingConfig` taken at startup and is not live-swappable, so
+every routing change (model map, fallback chain, smart routing) is a write-then-restart operation.
+Provider credentials, `master_key`, and `require_auth` are not writable through `PUT /v1/config` at
+all - they require an environment-variable change.
+
+<Callout type="info">
+Routing changes follow a write-then-restart pattern: persist via `PUT /v1/config`, then restart the
+Gateway. When Core manages the Gateway it does the restart for you via `gateway.refresh()` after a
+routing or compression policy change, so the desktop surfaces feel live even though the process
+re-snapshots its routing config on the way back up.
+</Callout>
+
+### Admin authorization
+
+Both `GET` and `PUT /v1/config` are admin surfaces gated the same way as `GET /v1/audit`. The master
+key always passes. Without it, the only path through is a loopback peer while `require_auth = false`
+- a remote caller always needs the master key (`require_local_admin`, `apps/gateway/src/api/config.rs`).
+
+<Callout type="warn">
+Loopback trust is neutralized when the mesh is on. Under userspace networking, inbound tailnet peers
+appear as `127.0.0.1`, so `admin_loopback_allowed` returns false when `mesh_enabled()` is true and
+the admin surface then requires the master key (#478). Do not rely on no-auth loopback access on a
+node with `RYU_MESH_ENABLED` set.
+</Callout>
+
+## From Core
+
+When the Gateway runs as a Core sidecar, the desktop never talks to `/v1/config` directly. Core
+relays it:
+
+| Core route | Relays to | Notes |
+|---|---|---|
+| `GET /api/gateway/config` | `GET /v1/config` | Proxies the Gateway's exact status; returns a `502` with `reachable: false` when the Gateway is down |
+| `PUT /api/gateway/config` | `PUT /v1/config` | Writes a validated TOML subset (firewall, budgets, auth, routing) |
+| `GET /api/gateway/status` | read-only | Health, metrics, and the effective config; always `200`, with `reachable: false` when the Gateway is down |
+
+Core attaches the gateway token as a bearer when relaying (`gateway_get_config`,
+`apps/core/src/server/mod.rs`), so the desktop config surfaces work without the operator handling
+the master key by hand.
+
+<Callout type="warn">
+The standalone front-of-agent setup (binding the Gateway, pointing an agent at its base URL, and
+owning `gateway.toml` yourself) is documented on
+[Gateway for any agent](/docs/gateway/gateway-for-any-agent). Some of that path is opt-in and not
+yet live-verified end to end; carry the caveats on that page forward.
+</Callout>
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/gateway/gateway-for-any-agent" />
+  <DocCard href="/docs/gateway/routing" />
+  <DocCard href="/docs/gateway/governance" />
+  <DocCard href="/docs/gateway/security" />
+</Cards>

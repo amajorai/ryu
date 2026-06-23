@@ -1,0 +1,119 @@
+---
+title: Docker Model Runner
+description: Run any Hugging Face GGUF (Llama, Qwen, Gemma, …) or Docker Hub model through Docker Model Runner as a swappable Ryu chat engine.
+---
+
+[Docker Model Runner](https://docs.docker.com/ai/model-runner/) (DMR) is Docker's built-in,
+OpenAI-compatible model server. Ryu can use it as a chat engine just like `llamacpp` or `ollama` -
+you pick it as the active engine and the Gateway routes local model calls to it.
+
+DMR's appeal is its model reach: it pulls and runs **any llama.cpp-compatible GGUF from Hugging Face**
+(Llama, Qwen, Gemma, Mistral, and more) as well as models from Docker Hub's `ai/` namespace and any
+OCI registry.
+
+<Callout type="warn">
+  DMR is **adopt-only**. Unlike `llamacpp`, Ryu does not download or start it for you - it is part of
+  Docker Desktop, which you install and enable yourself. "Installing" DMR in Ryu just verifies it is
+  running and registers it. There is no auto-install on first run.
+</Callout>
+
+## 1. Enable Docker Model Runner
+
+You need **Docker Desktop 4.40 or later** (macOS / Windows), or Docker Engine with the `model` CLI
+plugin (Linux).
+
+1. Install or update [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+2. Enable Model Runner with **host-side TCP access on port `12434`** (Ryu talks to DMR over TCP, not
+   the in-container socket):
+   - In Docker Desktop: **Settings → AI → Enable Docker Model Runner**, then turn on **Enable
+     host-side TCP support** and set the port to `12434`.
+   - Or from the CLI:
+     ```bash
+     docker desktop enable model-runner --tcp 12434
+     ```
+3. Confirm it is reachable:
+   ```bash
+   curl http://localhost:12434/engines/v1/models
+   ```
+   A JSON response (even an empty model list) means DMR is up. Its OpenAI-compatible API lives under
+   `http://localhost:12434/engines/v1`.
+
+## 2. Pull a model
+
+DMR manages its own models with the `docker model` CLI. Pull from **Hugging Face** with the `hf.co/`
+prefix, optionally pinning a quantization as a tag:
+
+```bash
+# A small Llama from Hugging Face
+docker model pull hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_S
+
+# Any other HF GGUF works the same way
+docker model pull hf.co/ggml-org/gemma-3-1b-it-GGUF
+docker model pull hf.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF
+```
+
+Or pull from Docker Hub's curated `ai/` namespace:
+
+```bash
+docker model pull ai/llama3.2:1B-Q8_0
+docker model pull ai/qwen2.5-coder
+```
+
+List what you have, and verify a model answers:
+
+```bash
+docker model ls
+docker model run --detach hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_S
+```
+
+<Callout type="info">
+  The model id you pull is also the id you chat with. Keep it handy - Ryu needs the exact DMR model
+  id (for example `hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF` or `ai/llama3.2`), not a local file
+  name. See [the caveat below](#choosing-the-model).
+</Callout>
+
+## 3. Register and activate it in Ryu
+
+With DMR running, install and activate it like any other engine. In the desktop **Store → Engines**
+(under the **Text** group), find **Docker Model Runner** and click install - this verifies DMR is
+reachable and registers it. Then set it as the active chat engine.
+
+The equivalent API calls:
+
+```bash
+# Verify + register (fails with guidance if DMR is not reachable on :12434)
+curl -X POST http://localhost:7980/api/setup/docker-model-runner/install
+
+# Make it the resident chat engine
+curl -X POST http://localhost:7980/api/engine/active \
+  -H 'content-type: application/json' \
+  -d '{"name":"docker-model-runner"}'
+```
+
+Swapping stops the previous engine and points the Gateway's `local` provider at DMR's
+`http://127.0.0.1:12434/engines/v1` endpoint. The choice persists in `~/.ryu/active-engine.json`, so
+it survives a restart - Ryu re-detects the registered DMR on boot.
+
+## Choosing the model
+
+DMR serves the models **it** has pulled, addressed by **DMR's own ids** (`ai/<name>` or `hf.co/<repo>`),
+not by a local GGUF file stem. So after swapping to DMR, point your agent's chat model at a model DMR
+has pulled - otherwise the request errors with an unknown-model response.
+
+This is the same constraint `ollama` has: the engine owns its model namespace. Set the agent's chat
+model to the exact id from `docker model ls`.
+
+## How Ryu talks to DMR
+
+You do not need this to use DMR, but for the curious: DMR's OpenAI API is under `/engines/v1` rather
+than the usual `/v1`. Ryu absorbs that in its engine URL mapping
+(`apps/core/src/sidecar/active_engine.rs`) so no routing code special-cases DMR - both the direct
+Core path and the governed Gateway path resolve to `http://127.0.0.1:12434/engines/v1/chat/completions`.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Install fails with "not reachable on :12434" | DMR isn't enabled or TCP host access is off. Re-check step 1 and `curl` the models endpoint. |
+| `docker: 'model' is not a docker command` | The Model Runner plugin isn't installed - update Docker Desktop, or symlink the plugin (Linux/Engine). |
+| Chat errors with an unknown model | The agent's chat model isn't one DMR has pulled. Run `docker model ls` and set the agent to that exact id. |

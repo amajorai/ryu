@@ -1,0 +1,44 @@
+---
+title: "Meetings"
+description: "Record a call, get a live transcript and AI notes, with automatic meeting detection."
+---
+
+Ryu records a call, transcribes it live, and generates structured AI notes - a summary, key points,
+action items, and decisions. It can also detect when a meeting starts on its own and offer to begin
+recording.
+
+## Record a meeting
+
+The **Meetings** section in the sidebar is your meeting list.
+
+- Click **+** (or open **Meetings** from the command palette) to reach the record screen and start
+  a meeting.
+- A row shows a pulsing red dot while it is recording.
+- Open a row to see that meeting's live transcript and, after finalizing, its notes.
+
+Audio is captured from both your **microphone and system loopback** (so you get both sides of the
+call), mixed down, and transcribed in chunks as the meeting runs.
+
+## Automatic detection
+
+Ryu can notice a meeting in progress by watching the operating system for **a process actively
+using the microphone** - not which window is in focus. When it detects one, it surfaces a prompt so
+you can start recording with one click.
+
+Turn auto-detection on or off, and edit the list of apps that count as meeting apps, in
+**Settings → Meetings**.
+
+<Callout type="info">
+  Mic capture and mic-in-use detection are **Windows-first**. On other platforms recording falls
+  back to mic-only and detection is not yet available.
+</Callout>
+
+## Notes
+
+When you **finalize** a meeting, Ryu generates the notes with a model call and writes them, together
+with the transcript, as a document in an auto-created **Meetings** Space. That means you view and
+edit notes in the same editor as the rest of your [Spaces](/docs/using-ryu/user-guide/spaces-memory),
+and they are searchable for retrieval. The meeting detail's **Open notes** button takes you straight
+to the document.
+
+Choose the notes model, reasoning effort, and prompt in **Settings → Meetings**.

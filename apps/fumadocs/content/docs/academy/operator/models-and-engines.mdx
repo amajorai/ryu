@@ -1,0 +1,109 @@
+---
+title: Models and engines
+description: Engines are runtimes that serve models. The built-in browser lets you find, install, and switch the active model.
+---
+
+Two ideas often get confused, so it helps to keep them apart. An **engine** is a runtime that serves models. A **model** is the weights it loads. You choose both, and you can swap either one.
+
+## Engines are runtimes
+
+Engines run as managed sidecars with a start and stop lifecycle. Ryu can install and run several kinds:
+
+- llama.cpp, ollama, vllm, sglang for text.
+- mlx on Apple Silicon.
+- stable-diffusion.cpp for images.
+- whisper.cpp and OuteTTS for speech.
+
+You manage these from the **Services** or **Engines** area. One rule to remember about resources - text engines are mutually exclusive, so only one is resident at a time. Image, speech, and embedding engines run alongside the text engine, so you can start and stop them freely.
+
+<Callout type="info">
+  The mlx engines are Apple Silicon only. On other hardware their install and swap controls are disabled with a reason shown.
+</Callout>
+
+## Models are the weights
+
+<TryInRyu page="models" />
+
+Separate from engines, **Models** is a Hugging Face GGUF browser built right into Core. From it you can:
+
+- Search the Hub for GGUF models.
+- See a device-fit verdict for each quant file (great, ok, partial-offload, cpu, or too-big), computed from your detected RAM and VRAM.
+- Install a chosen GGUF.
+- Switch the active served model with a "Use this model" button.
+
+The device-fit verdict is the fastest way to avoid downloading something your machine cannot run. Look for great or ok before committing to a large quant.
+
+The default local model is a Gemma GGUF that is installed for you during onboarding, so chat works the moment Ryu is set up.
+
+## Nothing is hardcoded
+
+Every model and every engine is a swappable default. There is no single model Ryu is locked to. Switching the active model is a deliberate action you take in the Models browser, and the local engine restarts to serve your choice.
+
+## Deep links from the web
+
+You will also see `ryu://` links on the web. Clicking one opens the desktop app and offers to install or switch to a specific model, so a page can hand you a ready-to-run setup with one click.
+
+<Callout type="warn">
+  Switching the active text model restarts the resident local engine. Finish any in-flight chat before you swap.
+</Callout>
+
+## Knowledge check
+
+First, the reflection prompts. Answer them in your own words.
+
+- What is the difference between an engine and a model in Ryu?
+- Why can only one text engine be resident at a time, while a speech engine can run alongside it?
+- What does a device-fit verdict of "partial-offload" tell you before you install a quant?
+
+Then confirm the details with a quick self-test.
+
+<Quiz
+  questions={[
+    {
+      q: "What is the difference between an engine and a model?",
+      options: [
+        "An engine is the weights, a model is the runtime",
+        "An engine is a runtime that serves models, a model is the weights it loads",
+        "They are two names for the same thing",
+      ],
+      answer: 1,
+      explain:
+        "An engine is a runtime that serves models, and a model is the weights it loads. You choose both and can swap either.",
+    },
+    {
+      q: "How many text engines can be resident at once?",
+      options: [
+        "Only one, because text engines are mutually exclusive",
+        "As many as you install",
+        "Exactly two, one primary and one backup",
+      ],
+      answer: 0,
+      explain:
+        "Text engines are mutually exclusive, so only one is resident at a time. Image, speech, and embedding engines run alongside it.",
+    },
+    {
+      q: "What does the device-fit verdict help you avoid?",
+      options: [
+        "Installing a model on the wrong engine",
+        "Downloading a quant your machine cannot run",
+        "Switching the active model by mistake",
+      ],
+      answer: 1,
+      explain:
+        "The device-fit verdict, computed from your detected RAM and VRAM, is the fastest way to avoid downloading something your machine cannot run.",
+    },
+    {
+      q: "What happens when you switch the active text model?",
+      options: [
+        "Nothing restarts; the swap is instant and silent",
+        "The resident local engine restarts to serve your choice",
+        "Every installed engine restarts at once",
+      ],
+      answer: 1,
+      explain:
+        "Switching the active model is a deliberate action, and the local engine restarts to serve your choice.",
+    },
+  ]}
+/>
+
+Next: extend what an agent can do in [Skills and tools](/docs/academy/operator/skills-and-tools).

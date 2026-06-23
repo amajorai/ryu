@@ -1,0 +1,17 @@
+{
+  "root": true,
+  "title": "Develop",
+  "description": "Build on Ryu: extensions, the SDK, and the HTTP API.",
+  "icon": "Code",
+  "pages": [
+    "index",
+    "---Quickstart---",
+    "quickstart",
+    "---Build---",
+    "extensions",
+    "sdk",
+    "agent-inboxes",
+    "---Reference---",
+    "api-reference"
+  ]
+}

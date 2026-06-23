@@ -1,0 +1,57 @@
+---
+title: "Install an Agent Runtime"
+description: "Install agent runtimes (sidecars) like Claude Code and Codex from the Services page."
+---
+
+Ryu drives agents through their real runtimes. Each runtime is a **sidecar**: a separate
+process that Ryu Core downloads, checksum-verifies, installs, starts, and health-checks for
+you. You manage all of them from one place.
+
+## What sidecars are
+
+A sidecar is an agent runtime (or a provider or tool) that Ryu Core manages on your behalf.
+Core handles the full lifecycle - download, verification, install, start/stop, and health
+checks - so you never touch a terminal or a package manager. Once a runtime is installed and
+running, its agent becomes available in the chat agent picker.
+
+## Open the Services page
+
+Open the **Services** page from the command palette (**Ctrl+K**, then type "Services") or the
+navigation. The page lists the available runtimes with their install and run state, and gives
+you controls to install, start, and stop each one.
+
+## Install Claude Code
+
+1. Find **Claude Code** in the Services list and click **Install**. Core downloads and
+   verifies the runtime.
+2. Provide your **Anthropic API key** so the agent can reach Claude.
+3. Start the runtime.
+
+## Install Codex
+
+1. Find **Codex** in the Services list and click **Install**.
+2. Provide your **OpenAI API key**.
+3. Start the runtime.
+
+<Callout type="info">
+  Claude Code and Codex are ACP agents: they run as subprocesses and make their own provider
+  calls using the key you supply. Keep your API keys in the runtime configuration, not in chat
+  messages.
+</Callout>
+
+## Pi needs no key
+
+**Pi** is the built-in default and runs entirely locally through llama.cpp with a bundled
+Gemma model. There is nothing to install and no key to provide - it works on first launch and
+offline. It is the best choice when you want privacy or have no API keys.
+
+## After install
+
+Once a runtime is installed and running:
+
+- Its agent appears in the **agent picker** in the chat sidebar.
+- Select it to route your next message through that runtime.
+- You can stop the runtime from the Services page at any time to free resources.
+
+To browse and install **local models** instead of cloud runtimes, see
+[The App Store](/docs/using-ryu/user-guide/store).

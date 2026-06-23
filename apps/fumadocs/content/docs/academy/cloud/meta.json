@@ -1,0 +1,5 @@
+{
+  "title": "Ryu for Business",
+  "icon": "Building2",
+  "pages": ["index", "deployment", "channel-bots", "multi-node"]
+}

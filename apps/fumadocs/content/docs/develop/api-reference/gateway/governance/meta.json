@@ -1,0 +1,10 @@
+{
+  "title": "Governance",
+  "description": "Grant validation and manifest signing/verification.",
+  "pages": [
+    "validateGrants",
+    "signManifest",
+    "verifyManifest",
+    "getManifestPubkey"
+  ]
+}

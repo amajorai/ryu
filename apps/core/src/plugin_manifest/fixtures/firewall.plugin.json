@@ -1,0 +1,28 @@
+{
+  "id": "io.ryu.firewall",
+  "name": "Gateway Firewall",
+  "version": "1.0.0",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
+  "runnables": [
+    {
+      "id": "policy-firewall",
+      "name": "Gateway firewall (prompt-injection / PII block)",
+      "kind": "policy",
+      "config": {
+        "policy_type": "firewall",
+        "definition": {
+          "service": "gateway",
+          "note": "On/off switch over the gateway firewall. The pattern set / policy mode stay owned by GET/PUT /v1/config; enabling this plugin forces firewall.enabled on at the next gateway restart."
+        }
+      }
+    }
+  ],
+  "contributes": {
+    "policies": [
+      { "id": "policy-firewall", "title": "Gateway Firewall" }
+    ]
+  },
+  "permission_grants": []
+}

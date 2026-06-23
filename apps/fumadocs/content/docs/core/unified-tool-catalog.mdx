@@ -1,0 +1,150 @@
+---
+title: "Unified Tool Catalog"
+description: "Cross-server tool search and describe, with Composio as a searchable source, on both planes"
+---
+
+The unified tool catalog is one searchable index over every tool Core can reach: MCP servers,
+built-in tool servers, plugin tools, and Composio actions. There is no parallel registry. Search
+ranks descriptors with a swappable ranker, and describe returns a tool's argument schema. Both
+operations are exposed as HTTP routes and as meta-tools on both chat planes, so a model discovers
+capabilities the same way whether it runs on the ACP plane or the OpenAI-compatible plane.
+
+Discovering *what tools exist* and ranking them is orchestration, so it lives in Core. The
+allowlist verdict, budget, and audit on execution are Gateway concerns. See
+[Gateway tools](/docs/gateway/tools) for the execution governance and
+[MCP registry](/docs/core/mcp-registry) for how servers and built-ins register in the first place.
+
+Source: `apps/core/src/sidecar/mcp/catalog.rs`, `apps/core/src/sidecar/mcp/composio.rs`.
+
+## Tool kinds
+
+Every catalog entry carries a `kind` classifying its source plane. The kind is derived from the
+tool's server segment (`classify_kind` in `catalog.rs`) and serializes lowercase.
+
+| `kind` | Source | Notes |
+|---|---|---|
+| `mcp` | An external MCP server | The default for any non-built-in, non-Composio server |
+| `builtin` | A reserved built-in tool server | shadow, spider, exa, sandbox, notify, channel, `search_conversations`, plus the self-build server |
+| `composio` | A Composio action | Searchable, never listed (see below) |
+| `app` | A plugin tool exposed as a Runnable | The synthetic `app` server segment |
+
+## Search
+
+```
+GET /api/tools/search?q=&kind=&limit=&agent=
+```
+
+Searches the unified catalog and returns a ranked list. Handler `tools_search` in
+`apps/core/src/server/mod.rs`.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `q` | empty | The free-text query. An empty query ranks nothing meaningfully |
+| `kind` | `any` | One of `mcp`, `builtin`, `composio`, `app`, `any`. Unknown values fall back to `any` |
+| `limit` | `8` | Result cap, clamped to a maximum of `25` |
+| `agent` | none | Narrows results to the agent's allowlist (search is not a grant; see below) |
+
+The response is an OpenAI-style list envelope:
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "spider__crawl",
+      "name": "crawl",
+      "description": "Crawl a URL and return extracted content.",
+      "kind": "builtin",
+      "arg_names": ["url", "depth"],
+      "arg_descriptions": ["page url", ""],
+      "score": 8.42
+    }
+  ]
+}
+```
+
+The `id` is the fully-qualified `<server>__<tool>` (or `composio__<slug>` for a Composio action)
+and is the allowlist key end to end.
+
+### Ranking
+
+Ranking uses a swappable `ToolRanker`, selected by the `tools.active_ranker` preference and
+defaulting to BM25.
+
+| Ranker | Strategy | Fallback |
+|---|---|---|
+| `Bm25` | Lexical BM25 over id, name, description, and arg names; an exact id or name match is boosted to sort first | none |
+| `Semantic` | Embeds the query and each candidate via the registry embedder, ranks by cosine similarity | BM25 ordering when the embedder is unreachable or the query is empty |
+
+Nothing about the ranker is hardcoded: it is one pref key (`RANKER_PREF_KEY`) mirroring the
+catalog source selector. The semantic ranker degrades to BM25 rather than erroring when no
+embedder is reachable.
+
+### The `agent` filter narrows, it does not gate
+
+Passing `?agent=` retains only descriptors that match that agent's allowlist, using the same
+match logic as the execution gate (`ToolDescriptor::matches_allowlist`): an MCP, built-in, or app
+tool matches on the fully-qualified id, the bare tool name, or the server segment; a Composio tool
+matches on the fully-qualified id only. The handler over-fetches before narrowing so allowed tools
+ranked below the top `limit` are not lost to truncation. This is a view filter for UIs. It is not
+the security boundary: search is open, execution is allowlist-gated on the call path.
+
+## Describe
+
+```
+GET /api/tools/describe?id=
+```
+
+Describes one tool by its fully-qualified id, returning a `DescribedTool` object as the body root
+or `404` when the id is unknown. Handler `tools_describe` in `apps/core/src/server/mod.rs`.
+
+A `DescribedTool` carries the resolved argument schema as a list of `DescribedArg`
+(`name`, `type`, `description`, `required`), plus a `shallow` flag set when the schema could not be
+fully resolved and the raw `parameters` JSON schema when available.
+
+## Composio is searchable, not listed
+
+Composio actions are never returned by the registry's `list_all_tools`, so they do not bloat the
+default tool set. They are pulled into `search` live and capped at 50 per query, only when a
+Composio key is configured (`composio::is_configured`) and the `kind` filter includes Composio.
+See `apps/core/src/sidecar/mcp/composio.rs`.
+
+- A search result for a Composio action has id `composio__<slug>`.
+- `describe` on a `composio__*` id returns a `shallow: true` result with a single freeform
+  `arguments` object argument, because the action's full schema is not enumerated.
+- On the call path, Composio dispatch uses a per-`user_id` Composio entity, and a connection that
+  is not yet linked returns a `__ryu_elicitation__` envelope so the client can prompt the user to
+  connect the account.
+
+<Callout type="info">
+  Composio results only appear when a Composio key is configured. Without a key, `search` returns
+  no `composio` descriptors, by design (verified by the catalog's `search_excludes_composio_without_key`
+  test).
+</Callout>
+
+## Both planes get the same meta-tools
+
+The catalog is not just an HTTP surface. The same discovery is offered to the model on both chat
+planes so behavior is identical regardless of engine:
+
+- The OpenAI-compatible plane exposes a `tool_search` meta-tool through the Gateway tool-search
+  front. See [Gateway tools](/docs/gateway/tools).
+- The ACP plane offers the same meta-tools via the MCP bridge
+  (`apps/core/src/sidecar/adapters/mcp_bridge.rs`): `tool_search` and `describe` are always on
+  because discovery is open, and `execute` and `resume` are offered when a programmatic-tool-calling
+  backend is available (`tool_exec::is_available`).
+
+The bridge offers `tool_search` and `describe` even when an agent's static allowlist is empty:
+discovery is open, but executing any tool the search surfaced still passes through
+`McpRegistry::call_tool`'s allowlist check. Search is not a grant. See
+[Programmatic tool calling](/docs/core/programmatic-tool-calling) for `execute` and `resume`, and
+[Gateway tools](/docs/gateway/tools) for the exec-budget and exec-audit applied on the call path.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/core/mcp-registry" />
+  <DocCard href="/docs/gateway/tools" />
+  <DocCard href="/docs/core/programmatic-tool-calling" />
+  <DocCard href="/docs/core/identity-vault" />
+</Cards>

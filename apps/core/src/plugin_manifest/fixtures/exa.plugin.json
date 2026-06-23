@@ -1,0 +1,26 @@
+{
+  "id": "io.ryu.exa",
+  "name": "Exa Search",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "tool-exa-search",
+      "name": "Exa Neural Search",
+      "kind": "tool",
+      "config": {
+        "slug": "exa__search"
+      }
+    },
+    {
+      "id": "tool-exa-find-similar",
+      "name": "Exa Find Similar",
+      "kind": "tool",
+      "config": {
+        "slug": "exa__find_similar"
+      }
+    }
+  ],
+  "permission_grants": [
+    "mcp:exa"
+  ]
+}
