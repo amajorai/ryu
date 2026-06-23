@@ -15,7 +15,7 @@
   "scripts": {
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
-    "prepare": "command -v cargo >/dev/null 2>&1 && napi build --platform || echo 'skipping napi build (no cargo toolchain)'"
+    "prepare": "node -e \"try{require('child_process').execSync('napi build --platform',{stdio:'inherit',shell:true})}catch(e){console.log('[sdk-native] napi build skipped (no toolchain or build failed)')}\""
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4"
