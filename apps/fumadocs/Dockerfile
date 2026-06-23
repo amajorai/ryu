@@ -7,7 +7,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
 # --ignore-scripts skips native postinstalls (napi/electron) the docs never use;
 # fumadocs-mdx (normally a postinstall) is run explicitly below in the right order.
-RUN bun install --frozen-lockfile --ignore-scripts
+# No --frozen-lockfile: this is a single-install -> standalone build (no
+# builder/runner version skew), and frozen breaks on registry drift of
+# unpinned transitive ranges.
+# --linker hoisted: flat node_modules so the native @takumi-rs/image-response
+# binding (used by the /og route) is resolvable; bun's default isolated linker
+# leaves the platform binding unfindable ("Cannot find native binding").
+RUN bun install --ignore-scripts --linker hoisted
 # Build order: generate the OpenAPI reference pages -> generate the MDX .source
 # index (gitignored, so it must be built here) -> next build (standalone output).
 RUN cd apps/fumadocs \
