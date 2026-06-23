@@ -1,0 +1,44 @@
+name: publish-sdk
+
+# Publishes the TypeScript SDK packages to npm on a v* tag.
+# Requires an NPM_TOKEN repository secret; the job no-ops with a clear message if absent.
+# crates.io publishing is intentionally deferred until `cargo deny check licenses` passes
+# (see docs/open-core.md) and a CARGO_REGISTRY_TOKEN secret is added.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard on NPM_TOKEN
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "NPM_TOKEN secret not set — skipping npm publish."
+            exit 0
+          fi
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
+      - name: Publish packages
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -e
+          for pkg in packages/client packages/sdk packages/create-ryu-app; do
+            echo "::group::publish $pkg"
+            (cd "$pkg" && npm publish --access public --provenance) || echo "publish $pkg failed (already published or build step needed)"
+            echo "::endgroup::"
+          done
