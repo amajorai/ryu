@@ -4,6 +4,10 @@
 //! sidecar binaries (zeroclaw, temporal, etc.) accessible from the terminal.
 
 use std::path::Path;
+#[cfg(not(target_os = "windows"))]
+use std::io::Write;
+#[cfg(not(target_os = "windows"))]
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
