@@ -18,7 +18,7 @@ const geist = Geist({
 export const metadata: Metadata = {
   title: "Ryu Docs",
   description:
-    "Documentation for Ryu — the orchestration and control layer for AI agents",
+    "Documentation for Ryu — end-to-end infrastructure for AI agents",
 };
 
 export default function Layout({ children }: LayoutProps<"/">) {

@@ -4,13 +4,14 @@
 @import "fumadocs-openapi/css/preset.css";
 
 /*
- * Ryu design-system match.
+ * Official Fumadocs docs palette.
  *
- * The landing site (`apps/web`) and the desktop app share one palette defined in
- * `packages/ui/src/styles/globals.css`: a neutral grayscale base (zero-chroma
- * oklch), radius 0.625rem, Inter for everything. Fumadocs ships its own neutral
- * preset with close-but-different values, so we remap its `--color-fd-*` tokens
- * to the exact ryu values here. Keep these in sync with the shared globals.css.
+ * These are the exact `--color-fd-*` token values the official Fumadocs docs
+ * site ships in its neutral preset (`fumadocs-ui/css/lib/default-colors.css`):
+ * a soft off-white light theme (background 96%, card 94.7%) and a near-black
+ * dark theme (background 7%, card 9.8%). We pin them here so the look matches
+ * fumadocs.dev rather than the flatter Ryu app grayscale. Radius and the Geist
+ * heading font stay as Ryu's.
  */
 
 :root {
@@ -19,49 +20,49 @@
   /* Headings use Geist (wired up in layout.tsx via next/font); body stays Inter. */
   --font-heading: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
 
-  --color-fd-background: oklch(1 0 0);
-  --color-fd-foreground: oklch(0.145 0 0);
-  --color-fd-muted: oklch(0.97 0 0);
-  --color-fd-muted-foreground: oklch(0.556 0 0);
-  --color-fd-popover: oklch(1 0 0);
-  --color-fd-popover-foreground: oklch(0.145 0 0);
-  --color-fd-card: oklch(1 0 0);
-  --color-fd-card-foreground: oklch(0.145 0 0);
-  --color-fd-border: oklch(0.922 0 0);
-  --color-fd-primary: oklch(0.205 0 0);
-  --color-fd-primary-foreground: oklch(0.985 0 0);
-  --color-fd-secondary: oklch(0.97 0 0);
-  --color-fd-secondary-foreground: oklch(0.205 0 0);
-  --color-fd-accent: oklch(0.97 0 0);
-  --color-fd-accent-foreground: oklch(0.205 0 0);
-  --color-fd-ring: oklch(0.708 0 0);
+  --color-fd-background: hsl(0, 0%, 96%);
+  --color-fd-foreground: hsl(0, 0%, 3.9%);
+  --color-fd-muted: hsl(0, 0%, 96.1%);
+  --color-fd-muted-foreground: hsl(0, 0%, 45.1%);
+  --color-fd-popover: hsl(0, 0%, 98%);
+  --color-fd-popover-foreground: hsl(0, 0%, 15.1%);
+  --color-fd-card: hsl(0, 0%, 94.7%);
+  --color-fd-card-foreground: hsl(0, 0%, 3.9%);
+  --color-fd-border: hsla(0, 0%, 80%, 50%);
+  --color-fd-primary: hsl(0, 0%, 9%);
+  --color-fd-primary-foreground: hsl(0, 0%, 98%);
+  --color-fd-secondary: hsl(0, 0%, 93.1%);
+  --color-fd-secondary-foreground: hsl(0, 0%, 9%);
+  --color-fd-accent: hsla(0, 0%, 82%, 50%);
+  --color-fd-accent-foreground: hsl(0, 0%, 9%);
+  --color-fd-ring: hsl(0, 0%, 63.9%);
 }
 
 .dark {
-  --color-fd-background: oklch(0.145 0 0);
-  --color-fd-foreground: oklch(0.985 0 0);
-  --color-fd-muted: oklch(0.269 0 0);
-  --color-fd-muted-foreground: oklch(0.708 0 0);
-  --color-fd-popover: oklch(0.205 0 0);
-  --color-fd-popover-foreground: oklch(0.985 0 0);
-  --color-fd-card: oklch(0.205 0 0);
-  --color-fd-card-foreground: oklch(0.985 0 0);
-  --color-fd-border: oklch(1 0 0 / 10%);
-  --color-fd-primary: oklch(0.922 0 0);
-  --color-fd-primary-foreground: oklch(0.205 0 0);
-  --color-fd-secondary: oklch(0.269 0 0);
-  --color-fd-secondary-foreground: oklch(0.985 0 0);
-  --color-fd-accent: oklch(0.269 0 0);
-  --color-fd-accent-foreground: oklch(0.985 0 0);
-  --color-fd-ring: oklch(0.556 0 0);
+  --color-fd-background: hsl(0, 0%, 7.04%);
+  --color-fd-foreground: hsl(0, 0%, 92%);
+  --color-fd-muted: hsl(0, 0%, 12.9%);
+  --color-fd-muted-foreground: hsla(0, 0%, 70%, 0.8);
+  --color-fd-popover: hsl(0, 0%, 11.6%);
+  --color-fd-popover-foreground: hsl(0, 0%, 86.9%);
+  --color-fd-card: hsl(0, 0%, 9.8%);
+  --color-fd-card-foreground: hsl(0, 0%, 98%);
+  --color-fd-border: hsla(0, 0%, 40%, 20%);
+  --color-fd-primary: hsl(0, 0%, 98%);
+  --color-fd-primary-foreground: hsl(0, 0%, 9%);
+  --color-fd-secondary: hsl(0, 0%, 12.9%);
+  --color-fd-secondary-foreground: hsl(0, 0%, 92%);
+  --color-fd-accent: hsla(0, 0%, 40.9%, 30%);
+  --color-fd-accent-foreground: hsl(0, 0%, 90%);
+  --color-fd-ring: hsl(0, 0%, 54.9%);
 }
 
-/* Keep the sidebar in step with the remapped dark palette (the neutral preset
- * sets its own muted/secondary here, which would otherwise drift). */
+/* Sidebar values from the official neutral preset's own `.dark #nd-sidebar`
+ * block (slightly lifted muted/secondary so the sidebar reads against the page). */
 .dark #nd-sidebar {
-  --color-fd-muted: oklch(0.269 0 0);
-  --color-fd-secondary: oklch(0.269 0 0);
-  --color-fd-muted-foreground: oklch(0.708 0 0);
+  --color-fd-muted: hsl(0, 0%, 16%);
+  --color-fd-secondary: hsl(0, 0%, 18%);
+  --color-fd-muted-foreground: hsl(0, 0%, 72%);
 }
 
 /*
@@ -131,4 +132,55 @@ h5,
 h6,
 .prose :is(h1, h2, h3, h4, h5, h6) {
   font-family: var(--font-heading);
+}
+
+/*
+ * Ryu docs visual direction: no bordered chrome, and nothing heavier than
+ * medium (500). Fumadocs renders most of its UI with Tailwind utility classes
+ * (`border`, `font-bold`, …) inside compiled components we cannot edit, so both
+ * rules are enforced here. SVG diagram strokes and background-based dividers are
+ * not CSS borders, so this leaves the architecture diagrams untouched.
+ */
+
+/* Cap every weight at medium, including markdown bold and preset headings. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.prose :is(h1, h2, h3, h4, h5, h6),
+strong,
+b,
+th,
+dt,
+[class*="font-bold"],
+[class*="font-semibold"] {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat fumadocs' Tailwind font-weight utilities in compiled components */
+  font-weight: 500 !important;
+}
+
+/* Hide visible borders everywhere; fills and shadows carry separation. Keeping
+ * the border-width (only the color goes transparent) avoids any layout shift. */
+*,
+::before,
+::after {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat fumadocs' Tailwind border utilities in compiled components */
+  border-color: transparent !important;
+}
+
+/* Restore the few separators that were doing real work, as background fills
+ * rather than borders: horizontal rules and table rows/headers. */
+.prose hr {
+  border: 0;
+  height: 1px;
+  background-color: var(--color-fd-border);
+}
+
+.prose thead {
+  background-color: var(--color-fd-muted);
+}
+
+.prose tbody tr:nth-child(even) {
+  background-color: color-mix(in oklab, var(--color-fd-muted) 55%, transparent);
 }

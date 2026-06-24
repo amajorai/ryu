@@ -29,6 +29,8 @@
   "type": "module",
   "scripts": {
     "predev": "node scripts/free-ports.mjs",
+    "mirror:public": "bash tools/mirror-push.sh",
+    "release:local": "bash scripts/release/release-local.sh",
     "dev": "turbo dev --concurrency=20",
     "kill-ports": "node scripts/free-ports.mjs",
     "build": "turbo build",

@@ -1,0 +1,15 @@
+{
+  "name": "@ryu/core-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./*": "./src/*.ts"
+  },
+  "devDependencies": {
+    "@ryu/config": "workspace:*",
+    "typescript": "^5"
+  }
+}

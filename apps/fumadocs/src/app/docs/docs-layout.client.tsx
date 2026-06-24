@@ -50,11 +50,10 @@ export function DocsLayoutClient({
                 ...option,
                 icon: (
                   <div
-                    className="size-full rounded-md border p-1 [&_svg]:size-full max-md:p-1.5"
+                    className="size-full rounded-md p-1 [&_svg]:size-full max-md:p-1.5"
                     style={{
                       color,
-                      backgroundColor: `color-mix(in oklab, ${color} 16%, transparent)`,
-                      borderColor: `color-mix(in oklab, ${color} 35%, transparent)`,
+                      backgroundColor: `color-mix(in oklab, ${color} 18%, transparent)`,
                     }}
                   >
                     {node.icon}

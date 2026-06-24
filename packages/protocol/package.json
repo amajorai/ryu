@@ -1,0 +1,15 @@
+{
+  "name": "@ryu/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./agent-rules": "./src/agent-rules.ts",
+    "./deep-link": "./src/deep-link.ts"
+  },
+  "devDependencies": {
+    "@ryu/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "typescript": "^5"
+  }
+}

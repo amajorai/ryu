@@ -1,0 +1,30 @@
+[project]
+name = "ryu-unsloth-sidecar"
+version = "0.1.0"
+description = "Ryu's Core-managed Unsloth fine-tuning sidecar (LoRA/QLoRA training runtime)"
+requires-python = ">=3.10"
+# Base server deps only. The heavy training stack (unsloth + torch + CUDA + trl)
+# is an optional extra so the server boots and serves /health on any machine; a
+# missing training dep turns into a clear per-job error, never a boot crash.
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic>=2.6",
+    "anyio>=4.0",
+]
+
+[project.optional-dependencies]
+# `pip install -e ".[train]"` — the training stack. Unsloth pulls torch,
+# transformers, peft, bitsandbytes; install the CUDA-matched torch first
+# (Core's external_runtime handles per-machine CUDA matching at spawn).
+train = ["unsloth", "trl>=0.9", "datasets>=2.16"]
+
+[project.scripts]
+ryu-unsloth = "ryu_unsloth.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ryu_unsloth"]

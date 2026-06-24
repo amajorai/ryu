@@ -1,0 +1,7 @@
+# Base server runtime only. The training stack (unsloth, trl, datasets, torch +
+# CUDA) installs separately via the `train` extra — see pyproject.toml — because
+# torch/CUDA must be matched per machine (Core's external_runtime does this).
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.6
+anyio>=4.0

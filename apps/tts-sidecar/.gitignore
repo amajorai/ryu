@@ -1,0 +1,9 @@
+# Python sidecar — local runtime artifacts, never committed.
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+# Smoke-test output WAVs.
+.smoke_*.wav
