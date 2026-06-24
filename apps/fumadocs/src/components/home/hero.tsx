@@ -4,6 +4,7 @@ import { useSearchContext } from "fumadocs-ui/contexts/search";
 import {
   ArrowRight,
   BookOpen,
+  ChefHat,
   Code,
   Cpu,
   GraduationCap,
@@ -39,6 +40,14 @@ const REALMS: Realm[] = [
     description: "Run agents day to day: the app, engines, models, and skills.",
     icon: BookOpen,
     accent: "var(--using-ryu-color)",
+  },
+  {
+    slug: "cookbook",
+    title: "Cookbook",
+    description:
+      "Real, end-to-end recipes: the app, the SDK, the CLI, and the gateway.",
+    icon: ChefHat,
+    accent: "var(--cookbook-color)",
   },
   {
     slug: "academy",
@@ -86,7 +95,7 @@ const QUICK_LINKS: QuickLink[] = [
     label: "Architecture",
     href: "/docs/start-here/architecture",
   },
-  { id: "recipes", label: "Recipes", href: "/docs/using-ryu/recipes" },
+  { id: "cookbook", label: "Cookbook", href: "/docs/cookbook" },
   { id: "api", label: "API reference", href: "/docs/develop/api-reference" },
 ];
 
@@ -97,9 +106,9 @@ type Stat = {
 };
 
 const STATS: Stat[] = [
-  { id: "guides", value: "116", label: "hand-written guides" },
+  { id: "guides", value: "128", label: "hand-written guides" },
   { id: "endpoints", value: "176", label: "API endpoints" },
-  { id: "realms", value: "6", label: "themed realms" },
+  { id: "realms", value: "7", label: "themed realms" },
   { id: "diagrams", value: "34", label: "architecture diagrams" },
   { id: "lessons", value: "21", label: "interactive lessons" },
 ];
@@ -142,13 +151,13 @@ const FEATURED: Featured[] = [
     accent: "var(--core-color)",
   },
   {
-    id: "recipes",
-    href: "/docs/using-ryu/recipes",
-    eyebrow: "Using Ryu",
+    id: "cookbook",
+    href: "/docs/cookbook",
+    eyebrow: "Cookbook",
     title: "Recipes: real flows, start to finish",
     description:
-      "Watch a price into Slack, record a chore into a workflow, triage a backlog with worker threads.",
-    accent: "var(--using-ryu-color)",
+      "Watch a price into Slack, give a model a tool, route coding to Claude, ship an SDK agent.",
+    accent: "var(--cookbook-color)",
   },
 ];
 
@@ -175,7 +184,7 @@ function SearchTrigger() {
         className="size-5 shrink-0 text-fd-muted-foreground transition-colors group-hover:text-fd-foreground"
       />
       <span className="flex-1 text-base text-fd-muted-foreground">
-        Search 116 guides and 176 endpoints…
+        Search 128 guides and 176 endpoints…
       </span>
       <kbd className="hidden shrink-0 items-center gap-1 rounded-md border border-fd-border bg-fd-muted px-2 py-1 font-medium font-mono text-fd-muted-foreground text-xs sm:inline-flex">
         {isMac ? "⌘" : "Ctrl"} K
@@ -301,7 +310,7 @@ export function Realms() {
         Explore by realm
       </h2>
       <p className="mt-1 text-fd-muted-foreground text-sm">
-        Six themed sections, each with its own accent and depth.
+        Seven themed sections, each with its own accent and depth.
       </p>
       <nav
         aria-label="Documentation realms"

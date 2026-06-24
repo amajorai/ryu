@@ -2,6 +2,9 @@
 //!
 //! Backend implementations live in sub-modules:
 //! - [`wasmtime`] — wasmtime/WASI in-process ephemeral exec (M6 default)
+//! - [`docker`] — Docker/OCI containers via the `docker` CLI (detect-only)
+//! - [`microsandbox`] — microVMs via the `msb` CLI (detect-only)
+//! - [`opensandbox`] — gVisor/Kata/Firecracker via the `osb` CLI (detect-only)
 //!
 //! Sandboxing is "what runs" (an execution context), so this lives in Core per
 //! the Core-vs-Gateway rule (CLAUDE.md §1). Policy over *what is allowed* inside
@@ -22,6 +25,8 @@
 //! unknown backend silently — it errors out so callers can surface the problem.
 
 pub mod docker;
+pub mod microsandbox;
+pub mod opensandbox;
 pub mod wasmtime;
 
 use std::collections::HashSet;
@@ -214,6 +219,56 @@ pub fn default_backend() -> SandboxBackend {
     SandboxBackend::Wasmtime
 }
 
+/// Env var that overrides the default sandbox backend node-wide.
+///
+/// Accepts any name [`SandboxBackend::from_name`] understands (`wasmtime`,
+/// `docker`, `microsandbox`, `opensandbox`, …). Empty/unset keeps the
+/// [`default_backend`] (wasmtime). A per-call `backend` argument always wins
+/// over this node default.
+pub const ENV_SANDBOX_BACKEND: &str = "RYU_SANDBOX_BACKEND";
+
+/// The node's configured default backend: `RYU_SANDBOX_BACKEND` when set to a
+/// recognised name, otherwise [`default_backend`] (wasmtime). Never errors — a
+/// bad/empty value silently falls back to the wasm default, since this is a
+/// "swappable default, never a lock" knob (CLAUDE.md §1).
+pub fn configured_backend() -> SandboxBackend {
+    std::env::var(ENV_SANDBOX_BACKEND)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .and_then(|s| SandboxBackend::from_name(s.trim()).ok())
+        .unwrap_or_else(default_backend)
+}
+
+/// Build a process/command sandbox backend (one that runs a `command` + `args`,
+/// as opposed to the wasmtime backend, which runs a WASM module).
+///
+/// Returns `Err` for [`SandboxBackend::Wasmtime`] (use the wasmtime path with a
+/// WASM module instead), for [`SandboxBackend::Subprocess`] (no host-process
+/// backend is built yet), and for unknown `Custom` names. Recognised command
+/// backends: `docker`, `microsandbox`, `opensandbox`.
+///
+/// All three are detect-only CLI wrappers — construction does no I/O and never
+/// installs anything; reachability is a runtime probe via each backend's
+/// `detect()`.
+pub fn build_command_backend(backend: &SandboxBackend) -> Result<Box<dyn Sandbox>> {
+    match backend {
+        SandboxBackend::Docker => Ok(Box::new(docker::DockerSandbox::new())),
+        SandboxBackend::Custom(name) if name == "microsandbox" => {
+            Ok(Box::new(microsandbox::MicrosandboxSandbox::new()))
+        }
+        SandboxBackend::Custom(name) if name == "opensandbox" => {
+            Ok(Box::new(opensandbox::OpenSandboxSandbox::new()))
+        }
+        SandboxBackend::Wasmtime => Err(anyhow!(
+            "wasmtime is not a command backend — pass a WASM module via `wasm_b64`"
+        )),
+        SandboxBackend::Subprocess => Err(anyhow!(
+            "the subprocess backend is not implemented yet"
+        )),
+        SandboxBackend::Custom(other) => Err(anyhow!("unknown sandbox backend '{other}'")),
+    }
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -329,5 +384,46 @@ mod tests {
         assert!(spec.capabilities.fs_write_paths.is_empty());
         assert!(spec.stdin.is_none());
         assert!(spec.timeout_secs.is_none());
+    }
+
+    // ── build_command_backend ─────────────────────────────────────────────────
+
+    #[test]
+    fn build_command_backend_recognises_cli_backends() {
+        assert_eq!(
+            build_command_backend(&SandboxBackend::Docker)
+                .unwrap()
+                .name(),
+            "docker"
+        );
+        assert_eq!(
+            build_command_backend(&SandboxBackend::from_name("microsandbox").unwrap())
+                .unwrap()
+                .name(),
+            "microsandbox"
+        );
+        assert_eq!(
+            build_command_backend(&SandboxBackend::from_name("opensandbox").unwrap())
+                .unwrap()
+                .name(),
+            "opensandbox"
+        );
+    }
+
+    #[test]
+    fn build_command_backend_rejects_wasmtime_and_unknown() {
+        assert!(build_command_backend(&SandboxBackend::Wasmtime).is_err());
+        assert!(build_command_backend(&SandboxBackend::Subprocess).is_err());
+        assert!(
+            build_command_backend(&SandboxBackend::from_name("nope").unwrap()).is_err()
+        );
+    }
+
+    // ── configured_backend ────────────────────────────────────────────────────
+
+    #[test]
+    fn configured_backend_defaults_to_wasmtime() {
+        std::env::remove_var(ENV_SANDBOX_BACKEND);
+        assert_eq!(configured_backend(), SandboxBackend::Wasmtime);
     }
 }

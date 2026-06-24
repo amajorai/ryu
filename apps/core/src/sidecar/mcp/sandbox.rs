@@ -37,11 +37,17 @@
 //! structural default-deny (no FS preopens, no socket WASI ABI) — policy
 //! belongs in the Gateway.
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use base64::Engine as _;
 use serde_json::{json, Value};
 
 use super::RegistryTool;
+use crate::sidecar::sandbox::{
+    build_command_backend, configured_backend, ExecSpec, Sandbox as _, SandboxBackend,
+    SandboxCapabilities,
+};
 
 /// Reserved registry server name for the built-in sandbox provider.
 pub const SERVER_NAME: &str = "sandbox";
@@ -83,14 +89,25 @@ fn sandbox_exec_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
+            "backend": {
+                "type": "string",
+                "enum": ["wasmtime", "docker", "microsandbox", "opensandbox"],
+                "description": "Which sandbox backend to run in. Omit to use the node default \
+                                (RYU_SANDBOX_BACKEND, or 'wasmtime'). 'wasmtime' runs a WASM \
+                                module (`wasm_b64`); the others run a `command` in a container/microVM."
+            },
             "wasm_b64": {
                 "type": "string",
-                "description": "Base-64 encoded WASM/WASI module bytecode to execute."
+                "description": "Base-64 encoded WASM/WASI module bytecode. Required for the 'wasmtime' backend."
+            },
+            "command": {
+                "type": "string",
+                "description": "Program to run (argv[0]). Required for the docker/microsandbox/opensandbox backends."
             },
             "args": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Command-line arguments passed to the WASM module (after argv[0])."
+                "description": "Command-line arguments (after argv[0] / the WASM module)."
             },
             "env": {
                 "type": "array",
@@ -102,10 +119,31 @@ fn sandbox_exec_schema() -> Value {
                     },
                     "required": ["key", "value"]
                 },
-                "description": "Environment variables available to the WASM module."
+                "description": "Environment variables available to the workload (wasmtime backend)."
+            },
+            "network": {
+                "type": "boolean",
+                "description": "Allow outbound network (process backends). Defaults to false (deny-all)."
+            },
+            "read_paths": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Host paths the sandbox may read (process backends). Defaults to none."
+            },
+            "write_paths": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Host paths the sandbox may write (process backends). Defaults to none."
+            },
+            "stdin_b64": {
+                "type": "string",
+                "description": "Base-64 encoded bytes piped to the command's stdin (process backends)."
+            },
+            "timeout_secs": {
+                "type": "integer",
+                "description": "Hard wall-clock cap in seconds. Defaults to 30."
             }
-        },
-        "required": ["wasm_b64"]
+        }
     })
 }
 
@@ -116,9 +154,11 @@ pub fn tools() -> Vec<RegistryTool> {
         server: SERVER_NAME.to_owned(),
         name: "sandbox_exec".to_owned(),
         description: Some(
-            "Execute a WASM/WASI module in an isolated sandbox (wasmtime, default-deny). \
-             Pass the module as base-64 encoded bytes (`wasm_b64`). No FS or network access \
-             unless explicitly granted via capabilities. Returns stdout, stderr, and exit code."
+            "Execute code in an isolated, swappable sandbox backend (default-deny). \
+             `backend` selects the runtime: 'wasmtime' (default) runs a base-64 WASM module \
+             (`wasm_b64`); 'docker', 'microsandbox', or 'opensandbox' run a `command` in a \
+             container/microVM. No FS or network access unless explicitly granted \
+             (`network`/`read_paths`/`write_paths`). Returns stdout, stderr, and exit code."
                 .to_owned(),
         ),
         input_schema: Some(sandbox_exec_schema()),
@@ -143,11 +183,19 @@ pub async fn dispatch(tool: &str, arguments: Value) -> Result<Value> {
 async fn run_sandbox_exec(arguments: Value) -> Result<Value> {
     if !is_enabled() {
         return Ok(unavailable(
-            "The wasmtime sandbox is disabled. \
+            "The sandbox is disabled. \
              Enable it from the Services page or unset RYU_SANDBOX_DISABLED.",
         ));
     }
 
+    // Resolve which backend to run in: explicit `backend` arg wins, else the
+    // node default (RYU_SANDBOX_BACKEND, falling back to wasmtime).
+    let backend = resolve_backend(&arguments);
+    if !matches!(backend, SandboxBackend::Wasmtime) {
+        return run_process_exec(backend, arguments).await;
+    }
+
+    // ── wasmtime path (default): a base-64 WASM module ───────────────────────
     // Decode the WASM bytes.
     let wasm_b64 = arguments
         .get("wasm_b64")
@@ -307,6 +355,152 @@ async fn run_sandbox_exec(arguments: Value) -> Result<Value> {
     }
 }
 
+// ── Backend resolution + process-backend path ─────────────────────────────────
+
+/// Resolve the backend from the call args, falling back to the node default.
+///
+/// A non-empty `backend` string always parses (unknown names become
+/// `Custom(name)` and surface a clear error when built); empty/absent uses
+/// [`configured_backend`].
+fn resolve_backend(arguments: &Value) -> SandboxBackend {
+    match arguments.get("backend").and_then(Value::as_str) {
+        Some(name) if !name.trim().is_empty() => {
+            SandboxBackend::from_name(name.trim()).unwrap_or_else(|_| configured_backend())
+        }
+        _ => configured_backend(),
+    }
+}
+
+/// Parse a `["a","b"]` string array argument, defaulting to empty.
+fn parse_str_array(arguments: &Value, key: &str) -> Vec<String> {
+    arguments
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Build deny-by-default [`SandboxCapabilities`] from the call args.
+fn parse_capabilities(arguments: &Value) -> SandboxCapabilities {
+    let mut caps = SandboxCapabilities::default();
+    caps.network = arguments
+        .get("network")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    for p in parse_str_array(arguments, "read_paths") {
+        caps.fs_read_paths.insert(PathBuf::from(p));
+    }
+    for p in parse_str_array(arguments, "write_paths") {
+        caps.fs_write_paths.insert(PathBuf::from(p));
+    }
+    caps
+}
+
+/// Run a `command` in a process/container/microVM backend (docker /
+/// microsandbox / opensandbox), gated through the same Gateway exec budget +
+/// audit as the wasmtime path.
+///
+/// A malformed call (missing `command`) is a hard `Err`; an environment that
+/// is simply not ready (backend not installed/reachable) returns a graceful
+/// `unavailable` so the agent gets a clean signal instead of a tool error.
+async fn run_process_exec(backend: SandboxBackend, arguments: Value) -> Result<Value> {
+    use crate::sidecar::gateway::{check_exec_budget, report_exec_audit, ExecBudgetOutcome};
+
+    let backend_label = backend.as_str().to_owned();
+
+    let command = arguments
+        .get("command")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("missing required argument 'command' for backend '{backend_label}'")
+        })?
+        .to_owned();
+
+    let args = parse_str_array(&arguments, "args");
+    let capabilities = parse_capabilities(&arguments);
+    let timeout_secs = Some(
+        arguments
+            .get("timeout_secs")
+            .and_then(Value::as_u64)
+            .unwrap_or(30),
+    );
+    let stdin = arguments
+        .get("stdin_b64")
+        .and_then(Value::as_str)
+        .map(|b64| {
+            base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|e| anyhow::anyhow!("invalid base64 in 'stdin_b64': {e}"))
+        })
+        .transpose()?;
+
+    // ── Step 1: pre-run gateway budget gate (fail-closed) ────────────────────
+    match check_exec_budget(&backend_label, &command).await {
+        ExecBudgetOutcome::Allow => {}
+        ExecBudgetOutcome::Deny(reason) => {
+            return Err(anyhow::anyhow!("exec budget exhausted: {reason}"));
+        }
+    }
+
+    // Build the backend. An unknown/unsupported backend is a graceful
+    // unavailable (e.g. "wasmtime is not a command backend").
+    let sandbox = match build_command_backend(&backend) {
+        Ok(s) => s,
+        Err(e) => return Ok(unavailable(e.to_string())),
+    };
+
+    let spec = ExecSpec {
+        command: command.clone(),
+        args,
+        capabilities,
+        stdin,
+        timeout_secs,
+    };
+
+    // ── Step 2: run the backend ──────────────────────────────────────────────
+    let start = std::time::Instant::now();
+    let result = sandbox.exec(spec).await;
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    // ── Step 3: post-run audit report (best-effort) ──────────────────────────
+    match &result {
+        Ok(output) => {
+            report_exec_audit(&backend_label, &command, duration_ms, output.exit_code, None, None)
+                .await;
+        }
+        Err(e) => {
+            report_exec_audit(
+                &backend_label,
+                &command,
+                duration_ms,
+                -1,
+                None,
+                Some(e.to_string()),
+            )
+            .await;
+        }
+    }
+
+    match result {
+        Ok(output) => Ok(json!({
+            "backend": backend_label,
+            "exit_code": output.exit_code,
+            "stdout": String::from_utf8_lossy(&output.stdout),
+            "stderr": String::from_utf8_lossy(&output.stderr),
+        })),
+        // A backend that is not installed/reachable is reported as unavailable,
+        // not a hard tool error — callers can fall back.
+        Err(e) => Ok(unavailable(format!(
+            "{backend_label} backend not available: {e}"
+        ))),
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -332,8 +526,42 @@ mod tests {
 
     #[tokio::test]
     async fn missing_wasm_b64_is_an_error() {
+        std::env::remove_var(crate::sidecar::sandbox::ENV_SANDBOX_BACKEND);
         let err = dispatch("sandbox_exec", json!({})).await;
         assert!(err.is_err(), "missing wasm_b64 must be Err");
+    }
+
+    #[test]
+    fn resolve_backend_reads_arg_then_default() {
+        std::env::remove_var(crate::sidecar::sandbox::ENV_SANDBOX_BACKEND);
+        assert_eq!(resolve_backend(&json!({})), SandboxBackend::Wasmtime);
+        assert_eq!(
+            resolve_backend(&json!({ "backend": "docker" })),
+            SandboxBackend::Docker
+        );
+        assert_eq!(
+            resolve_backend(&json!({ "backend": "microsandbox" })),
+            SandboxBackend::from_name("microsandbox").unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_capabilities_is_deny_all_by_default() {
+        let caps = parse_capabilities(&json!({}));
+        assert!(!caps.network);
+        assert!(caps.fs_read_paths.is_empty());
+        assert!(caps.fs_write_paths.is_empty());
+
+        let caps = parse_capabilities(&json!({ "network": true, "write_paths": ["/tmp/x"] }));
+        assert!(caps.network);
+        assert_eq!(caps.fs_write_paths.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn process_backend_missing_command_is_error() {
+        // `command` is parsed before the budget gate, so this is gateway-free.
+        let err = dispatch("sandbox_exec", json!({ "backend": "docker" })).await;
+        assert!(err.is_err(), "process backend without command must be Err");
     }
 
     #[tokio::test]

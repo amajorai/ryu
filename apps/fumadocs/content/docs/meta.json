@@ -1,4 +1,4 @@
 {
   "title": "Docs",
-  "pages": ["start-here", "using-ryu", "academy", "gateway", "core", "develop"]
+  "pages": ["start-here", "using-ryu", "cookbook", "academy", "gateway", "core", "develop"]
 }

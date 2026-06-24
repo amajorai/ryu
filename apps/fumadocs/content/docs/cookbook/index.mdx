@@ -1,0 +1,58 @@
+---
+title: Cookbook
+description: Short, end-to-end recipes that string real Ryu features together to get one thing done, across the app, the SDK, and the gateway.
+---
+
+The Cookbook is practical, start-to-finish recipes. Each one takes a real goal, "watch a price and
+ping Slack", "give a model a tool it can call", "route coding to Claude and chat to a local model",
+and shows the exact features that get you there, linking the canonical docs for depth. Nothing here
+is hypothetical: every step uses a capability Ryu ships today.
+
+## With the app
+
+No terminal required. Pick a model, give an agent a skill, build an agent by chatting, ground it in
+your own docs, and let recordings and coordinators do the work.
+
+<DocCard href="/docs/cookbook/chat-with-a-local-model" />
+<DocCard href="/docs/cookbook/give-an-agent-a-skill" />
+<DocCard href="/docs/cookbook/build-an-agent-by-chatting" />
+<DocCard href="/docs/cookbook/ground-an-agent-in-your-docs" />
+<DocCard href="/docs/cookbook/meeting-notes-to-space" />
+<DocCard href="/docs/cookbook/triage-with-coordinator-threads" />
+
+## Automations
+
+Set something running and walk away: a monitor that pings a channel, a recorded chore replayed as a
+workflow, a workflow on a schedule.
+
+<DocCard href="/docs/cookbook/price-watch-to-slack" />
+<DocCard href="/docs/cookbook/record-a-task-as-workflow" />
+<DocCard href="/docs/cookbook/schedule-a-workflow" />
+
+## Gateway & governance
+
+The control layer: route each request to the right model, cap what it can spend, and drop an agent
+into a chat channel.
+
+<DocCard href="/docs/cookbook/route-by-task" />
+<DocCard href="/docs/cookbook/cap-spend-with-a-budget" />
+<DocCard href="/docs/cookbook/put-a-bot-in-a-channel" />
+
+## With the SDK
+
+Build on Ryu in code: a first agent whose every call routes through the gateway, a tool the model
+can call, a workflow that orchestrates agents, and your Runnables exposed over MCP.
+
+<DocCard href="/docs/cookbook/first-sdk-agent" />
+<DocCard href="/docs/cookbook/a-tool-the-model-can-call" />
+<DocCard href="/docs/cookbook/a-workflow-of-agents" />
+<DocCard href="/docs/cookbook/expose-an-mcp-server" />
+
+## Have one to add?
+
+These are the kinds of flows that compose well: a [monitor](/docs/core/website-monitoring) that feeds
+a [webhook](/docs/gateway/channels), a [workflow](/docs/core/workflows) that calls a
+[delegate fan-out](/docs/core/delegation), a [coordinator](/docs/core/coordinator-threads) that drives
+a fleet of worker threads, or an [SDK Runnable](/docs/develop/sdk) whose every call routes through the
+[gateway](/docs/gateway). Mix the building blocks in the [Core](/docs/core),
+[Using Ryu](/docs/using-ryu), and [Develop](/docs/develop) sections to make your own.

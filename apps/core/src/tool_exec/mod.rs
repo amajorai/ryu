@@ -44,6 +44,12 @@ mod deno_backend;
 #[cfg(feature = "tool-exec-quickjs")]
 mod rquickjs_backend;
 
+#[cfg(feature = "tool-exec-securexec")]
+mod securexec_backend;
+
+#[cfg(feature = "tool-exec-justbash")]
+mod justbash_backend;
+
 // `detect_elicitation`/`tool_path_to_id` are re-exported as part of the public
 // Contract 4 surface (P3 imports them); not used inside Core yet.
 #[allow(unused_imports)]
@@ -77,6 +83,14 @@ pub const BACKEND_DENO: &str = "deno";
 /// The rquickjs backend label (gated behind `tool-exec-quickjs`).
 #[cfg(feature = "tool-exec-quickjs")]
 pub const BACKEND_QUICKJS: &str = "quickjs";
+
+/// The secure-exec backend label (gated behind `tool-exec-securexec`).
+#[cfg(feature = "tool-exec-securexec")]
+pub const BACKEND_SECUREXEC: &str = securexec_backend::BACKEND_SECUREXEC;
+
+/// The just-bash backend label (gated behind `tool-exec-justbash`).
+#[cfg(feature = "tool-exec-justbash")]
+pub const BACKEND_JUSTBASH: &str = justbash_backend::BACKEND_JUSTBASH;
 
 /// A single tool call the sandbox program made (`tools.<server>.<tool>(args)`).
 #[derive(Debug, Clone)]
@@ -177,6 +191,14 @@ pub enum CodeExecutor {
     /// [`rquickjs_backend`]).
     #[cfg(feature = "tool-exec-quickjs")]
     Quickjs(rquickjs_backend::QuickjsExecutor),
+    /// secure-exec V8-isolate backend (gated behind `tool-exec-securexec`; a stub
+    /// until the Node/Bun runtime + tool-bridge harness land).
+    #[cfg(feature = "tool-exec-securexec")]
+    SecureExec(securexec_backend::SecureExecExecutor),
+    /// just-bash in-memory bash backend (gated behind `tool-exec-justbash`; a
+    /// stub until the Node runtime + tool bridge land).
+    #[cfg(feature = "tool-exec-justbash")]
+    JustBash(justbash_backend::JustBashExecutor),
     /// Always-present fallback so the type is non-empty even with no backend
     /// feature; it reports unavailability instead of running anything.
     Unavailable,
@@ -190,6 +212,10 @@ impl CodeExecutor {
             CodeExecutor::Deno(_) => BACKEND_DENO,
             #[cfg(feature = "tool-exec-quickjs")]
             CodeExecutor::Quickjs(_) => BACKEND_QUICKJS,
+            #[cfg(feature = "tool-exec-securexec")]
+            CodeExecutor::SecureExec(_) => BACKEND_SECUREXEC,
+            #[cfg(feature = "tool-exec-justbash")]
+            CodeExecutor::JustBash(_) => BACKEND_JUSTBASH,
             CodeExecutor::Unavailable => "none",
         }
     }
@@ -206,7 +232,29 @@ impl CodeExecutor {
         {
             CodeExecutor::Quickjs(rquickjs_backend::QuickjsExecutor::new())
         }
-        #[cfg(not(any(feature = "tool-exec-deno", feature = "tool-exec-quickjs")))]
+        #[cfg(all(
+            not(feature = "tool-exec-deno"),
+            not(feature = "tool-exec-quickjs"),
+            feature = "tool-exec-securexec"
+        ))]
+        {
+            CodeExecutor::SecureExec(securexec_backend::SecureExecExecutor::new())
+        }
+        #[cfg(all(
+            not(feature = "tool-exec-deno"),
+            not(feature = "tool-exec-quickjs"),
+            not(feature = "tool-exec-securexec"),
+            feature = "tool-exec-justbash"
+        ))]
+        {
+            CodeExecutor::JustBash(justbash_backend::JustBashExecutor::new())
+        }
+        #[cfg(not(any(
+            feature = "tool-exec-deno",
+            feature = "tool-exec-quickjs",
+            feature = "tool-exec-securexec",
+            feature = "tool-exec-justbash"
+        )))]
         {
             CodeExecutor::Unavailable
         }
@@ -226,7 +274,29 @@ pub fn is_available() -> bool {
     {
         rquickjs_backend::quickjs_available()
     }
-    #[cfg(not(any(feature = "tool-exec-deno", feature = "tool-exec-quickjs")))]
+    #[cfg(all(
+        not(feature = "tool-exec-deno"),
+        not(feature = "tool-exec-quickjs"),
+        feature = "tool-exec-securexec"
+    ))]
+    {
+        securexec_backend::securexec_available()
+    }
+    #[cfg(all(
+        not(feature = "tool-exec-deno"),
+        not(feature = "tool-exec-quickjs"),
+        not(feature = "tool-exec-securexec"),
+        feature = "tool-exec-justbash"
+    ))]
+    {
+        justbash_backend::justbash_available()
+    }
+    #[cfg(not(any(
+        feature = "tool-exec-deno",
+        feature = "tool-exec-quickjs",
+        feature = "tool-exec-securexec",
+        feature = "tool-exec-justbash"
+    )))]
     {
         false
     }
@@ -276,6 +346,10 @@ pub async fn execute_code(
         CodeExecutor::Deno(exec) => exec.execute(&code, invoker, agent_id).await,
         #[cfg(feature = "tool-exec-quickjs")]
         CodeExecutor::Quickjs(exec) => exec.execute(&code, invoker, agent_id).await,
+        #[cfg(feature = "tool-exec-securexec")]
+        CodeExecutor::SecureExec(exec) => exec.execute(&code, invoker, agent_id).await,
+        #[cfg(feature = "tool-exec-justbash")]
+        CodeExecutor::JustBash(exec) => exec.execute(&code, invoker, agent_id).await,
         CodeExecutor::Unavailable => {
             ExecOutcome::error("no code-execution backend is built (enable feature tool-exec-deno)")
         }
@@ -358,7 +432,29 @@ pub async fn resume_execution_opt(
         {
             rquickjs_backend::resume_parked(&execution_id, agent_id, decision, content).await
         }
-        #[cfg(not(any(feature = "tool-exec-deno", feature = "tool-exec-quickjs")))]
+        #[cfg(all(
+            not(feature = "tool-exec-deno"),
+            not(feature = "tool-exec-quickjs"),
+            feature = "tool-exec-securexec"
+        ))]
+        {
+            securexec_backend::resume_parked(&execution_id, agent_id, decision, content).await
+        }
+        #[cfg(all(
+            not(feature = "tool-exec-deno"),
+            not(feature = "tool-exec-quickjs"),
+            not(feature = "tool-exec-securexec"),
+            feature = "tool-exec-justbash"
+        ))]
+        {
+            justbash_backend::resume_parked(&execution_id, agent_id, decision, content).await
+        }
+        #[cfg(not(any(
+            feature = "tool-exec-deno",
+            feature = "tool-exec-quickjs",
+            feature = "tool-exec-securexec",
+            feature = "tool-exec-justbash"
+        )))]
         {
             let _ = (&execution_id, agent_id, decision, content);
             None

@@ -4517,6 +4517,7 @@ mod tests {
             &fallback,
             &AgentSlots::default(),
             false, // not companion-sourced
+            false, // not background fan-out
             &crate::inference::SamplingConfig::default(),
             crate::inference::Engine::Other,
         )
@@ -4551,6 +4552,7 @@ mod tests {
             &[],  // empty fallback chain
             &AgentSlots::default(),
             false, // not companion-sourced
+            false, // not background fan-out
             &crate::inference::SamplingConfig::default(),
             crate::inference::Engine::Other,
         )

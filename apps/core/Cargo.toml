@@ -138,9 +138,15 @@ wasmtime-wasi = { version = "45", features = ["p1", "p2"], optional = true }
 # backend: a Deno subprocess (no crate dep — Deno is on PATH), deny-by-default
 # permissions, real process isolation. `tool-exec-quickjs` is an off-by-default
 # in-process backend gated until a `quickjs_smoke` probe passes on Windows.
+# `tool-exec-securexec` (rivet secure-exec, V8 isolate) and `tool-exec-justbash`
+# (just-bash in-memory shell) are off-by-default alternative PTC backends:
+# registered/selectable but gated as stubs until their Node/Bun runtime + stdio
+# tool-bridge harness land (same posture as tool-exec-quickjs).
 default = ["tool-exec-deno"]
 tool-exec-deno = []
 tool-exec-quickjs = []
+tool-exec-securexec = []
+tool-exec-justbash = []
 sandbox-wasmtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
 # Parakeet STT inference. Requires the commented transcribe-rs/once_cell/tempfile
 # optional deps above to be uncommented first:

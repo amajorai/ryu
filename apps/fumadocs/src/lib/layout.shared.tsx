@@ -24,7 +24,7 @@ export function baseOptions(): BaseLayoutProps {
     // search are the primary ways in.
     links: [
       { text: "Docs", url: "/docs/start-here" },
-      { text: "Recipes", url: "/docs/using-ryu/recipes" },
+      { text: "Cookbook", url: "/docs/cookbook" },
       { text: "Academy", url: "/docs/academy" },
       { text: "API", url: "/docs/develop/api-reference" },
     ],

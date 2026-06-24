@@ -28,6 +28,18 @@ const config = {
         destination: "/docs/start-here",
         permanent: false,
       },
+      // The recipes gallery became its own "Cookbook" root. Keep the old
+      // /docs/using-ryu/recipes URLs (and every recipe under it) alive.
+      {
+        source: "/docs/using-ryu/recipes",
+        destination: "/docs/cookbook",
+        permanent: true,
+      },
+      {
+        source: "/docs/using-ryu/recipes/:path*",
+        destination: "/docs/cookbook/:path*",
+        permanent: true,
+      },
     ];
   },
 };
