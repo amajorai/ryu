@@ -846,7 +846,7 @@ export function Architecture() {
 
         <FlowConnector />
 
-        <div className="rounded-2xl bg-fd-muted p-5">
+        <div className="rounded-2xl bg-fd-secondary p-5">
           <p className="font-medium text-[10px] text-fd-muted-foreground uppercase tracking-widest">
             Orchestration
           </p>
@@ -886,7 +886,7 @@ function FlowConnector() {
 
 function RailRow({ label, items }: { label: string; items: string[] }) {
   return (
-    <div className="rounded-2xl bg-fd-muted/50 p-4">
+    <div className="rounded-2xl bg-fd-secondary p-4">
       <p className="mb-2 font-medium text-[10px] text-fd-muted-foreground uppercase tracking-widest">
         {label}
       </p>

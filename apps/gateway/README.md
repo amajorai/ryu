@@ -7,9 +7,9 @@
 
 Ryu Gateway is the moat: a full LLM gateway that decides *what is allowed, shared, measured, and paid for*. It exposes an OpenAI-compatible API and sits in front of any agent, applying routing, caching, rate limiting, a firewall, evals, and audit to every request. Core runs it as a managed sidecar, and all default-route chat traffic flows through it.
 
-**Tier:** OSS, self-hostable — AGPL-3.0
+**Tier:** OSS, self-hostable, AGPL-3.0
 
-> **AGPL note (deliberate):** the Gateway is copyleft. Under AGPL §13, running a *modified* Gateway as a network service obligates you to offer its source to your users. This is intentional — it keeps the control-layer moat open and prevents a SaaS competitor from forking it and closing the source. Unmodified self-hosting carries no such obligation.
+> **AGPL note (deliberate):** the Gateway is copyleft. Under AGPL §13, running a *modified* Gateway as a network service obligates you to offer its source to your users. This is intentional: it keeps the control-layer moat open and prevents a SaaS competitor from forking it and closing the source. Unmodified self-hosting carries no such obligation.
 
 ## Stack
 
@@ -31,23 +31,23 @@ Configuration is loaded from `~/.ryu/gateway.toml` (providers, cache, rate limit
 
 Key environment variables:
 
-- `RUST_LOG` — log level (e.g. `ryu_gateway=debug,info`)
+- `RUST_LOG`: log level (e.g. `ryu_gateway=debug,info`)
 
 Admin and exec endpoints are loopback-gated regardless of bind address.
 
 ## What it does
 
-- **OpenAI-compat API** — `POST /v1/chat/completions` with streaming
-- **Multi-provider routing + fallback** — OpenAI, Anthropic, OpenRouter, local, and Core upstreams
-- **Smart routing** — a cheap classifier picks the model per request from plain-language rules
-- **Rate limiting** — per-user/per-endpoint buckets
-- **Circuit breaker** — per-provider fault tolerance
-- **Caching** — exact (SHA-256) and semantic (vector similarity)
-- **Firewall** — request validation and content filtering
-- **Skills + Composio** — custom handlers and external integrations
-- **Evals + audit** — response-quality evaluation and request/response logging
-- **Tool gateway** — a tool-search front plus `POST /v1/exec/tool` (allowlist + exec-budget + exec-audit)
+- **OpenAI-compat API:** `POST /v1/chat/completions` with streaming
+- **Multi-provider routing + fallback:** OpenAI, Anthropic, OpenRouter, local, and Core upstreams
+- **Smart routing:** a cheap classifier picks the model per request from plain-language rules
+- **Rate limiting:** per-user/per-endpoint buckets
+- **Circuit breaker:** per-provider fault tolerance
+- **Caching:** exact (SHA-256) and semantic (vector similarity)
+- **Firewall:** request validation and content filtering
+- **Skills + Composio:** custom handlers and external integrations
+- **Evals + audit:** response-quality evaluation and request/response logging
+- **Tool gateway:** a tool-search front plus `POST /v1/exec/tool` (allowlist + exec-budget + exec-audit)
 
 ## License
 
-AGPL-3.0 — see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+AGPL-3.0. See [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.

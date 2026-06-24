@@ -7,7 +7,7 @@
 
 `ryu-sdk-ffi` exposes a stable C-ABI surface over [`ryu-sdk`](../ryu-sdk), so the kernel's Runnable/manifest logic, gateway egress rules, and model/embedding clients can be called from any C-FFI consumer, including the Go (cgo) binding. It duplicates no logic; the single Rust kernel stays the source of truth.
 
-**Tier:** OSS — Apache-2.0
+**Tier:** OSS, Apache-2.0
 
 ## Install / Build
 
@@ -20,12 +20,12 @@ The generated C header lives in `include/ryu_sdk.h` (regenerate via cbindgen; se
 
 ## What it provides
 
-- **Manifest + schema** — `ryu_validate_plugin_id`, `ryu_parse_and_validate_manifest`, `ryu_plugin_manifest_json_schema`.
-- **Gateway** — `ryu_resolve_gateway_url`, `ryu_assert_allowed_egress` (rejects direct-provider URLs).
-- **Model + embedding clients** — opaque-handle `*_new` / `*_chat` / `*_embed` / `*_free`, blocking on a shared Tokio runtime.
-- **Memory + errors** — every returned `char*` is heap-owned and freed via `ryu_string_free`; thread-local `ryu_last_error` carries the message.
+- **Manifest + schema:** `ryu_validate_plugin_id`, `ryu_parse_and_validate_manifest`, `ryu_plugin_manifest_json_schema`.
+- **Gateway:** `ryu_resolve_gateway_url`, `ryu_assert_allowed_egress` (rejects direct-provider URLs).
+- **Model + embedding clients:** opaque-handle `*_new` / `*_chat` / `*_embed` / `*_free`, blocking on a shared Tokio runtime.
+- **Memory + errors:** every returned `char*` is heap-owned and freed via `ryu_string_free`; thread-local `ryu_last_error` carries the message.
 - `staticlib` / `cdylib` / `rlib` outputs for static linking, dynamic loading, and Rust-side tests.
 
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0; see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.

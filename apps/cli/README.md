@@ -5,9 +5,9 @@
 [![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
 [![Stack](https://shieldcn.dev/badge/Rust-ratatui-dea584.svg?logo=rust&logoColor=white)](../../README.md)
 
-Ryu CLI is a Rust + ratatui terminal interface over Ryu Core. It offers chat, sidecar management, device login, session control, and automatic discovery of Ryu nodes on the LAN — all without leaving the terminal.
+Ryu CLI is a Rust + ratatui terminal interface over Ryu Core. It offers chat, sidecar management, device login, session control, and automatic discovery of Ryu nodes on the LAN, all without leaving the terminal.
 
-**Tier:** OSS, self-hostable — Apache-2.0
+**Tier:** OSS, self-hostable (Apache-2.0)
 
 ## Stack
 
@@ -28,17 +28,17 @@ The CLI talks to a running [Ryu Core](../core/README.md) (default `http://localh
 
 Key environment variables:
 
-- `RYU_AUTH_URL` — backend URL for auth (default `http://localhost:3000`)
+- `RYU_AUTH_URL`: backend URL for auth (default `http://localhost:3000`)
 
 ## What it does
 
-- **Chat** — multi-turn AI chat; the default chat routes to the web `/ai` endpoint, while `Ctrl+A` routes to Core (`:7980`)
-- **Sidecar management** — view status and start/stop/restart sidecars, plus a setup wizard
-- **Device login** — browser-based OAuth (`login`/`logout`/`whoami`), session listing and revocation
-- **Sessions** — list and manage active sessions
-- **Node management** — add/remove/select Ryu nodes (`~/.ryu/nodes.json`), with LAN node auto-discovery and per-command node targeting (`--node <name>`)
-- **Mouse support** — clickable tabs, buttons, and list items
+- **Chat:** multi-turn AI chat; the default chat routes to the web `/ai` endpoint, while `Ctrl+A` routes to Core (`:7980`)
+- **Sidecar management:** view status and start/stop/restart sidecars, plus a setup wizard
+- **Device login:** browser-based OAuth (`login`/`logout`/`whoami`), session listing and revocation
+- **Sessions:** list and manage active sessions
+- **Node management:** add/remove/select Ryu nodes (`~/.ryu/nodes.json`), with LAN node auto-discovery and per-command node targeting (`--node <name>`)
+- **Mouse support:** clickable tabs, buttons, and list items
 
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0. See [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.

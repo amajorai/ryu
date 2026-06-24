@@ -48,7 +48,7 @@ export function TryInRyu({
   const label = children ?? `Open ${PAGE_LABELS[page] ?? page} in Ryu`;
   return (
     <a
-      className="not-prose my-4 inline-flex items-center gap-2 rounded-lg bg-fd-primary/10 px-3.5 py-2 font-medium text-fd-primary text-sm no-underline transition-colors hover:bg-fd-primary/15"
+      className="not-prose my-4 inline-flex items-center gap-2 rounded-lg border border-fd-primary/30 bg-fd-primary/10 px-3.5 py-2 font-medium text-fd-primary text-sm no-underline transition-colors hover:bg-fd-primary/15"
       href={`ryu://open/${encodeURIComponent(page)}`}
     >
       {label}

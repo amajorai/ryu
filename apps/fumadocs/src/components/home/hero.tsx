@@ -175,7 +175,7 @@ function SearchTrigger() {
     <button
       aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
       aria-label="Search the documentation"
-      className="group flex w-full items-center gap-3 rounded-xl bg-fd-muted px-4 py-3.5 text-left shadow-sm transition-colors hover:bg-fd-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
+      className="group flex w-full items-center gap-3 rounded-xl border border-fd-border bg-fd-card px-4 py-3.5 text-left shadow-sm transition-colors hover:border-fd-ring/60 hover:bg-fd-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
       onClick={() => setOpenSearch(true)}
       type="button"
     >
@@ -186,7 +186,7 @@ function SearchTrigger() {
       <span className="flex-1 text-base text-fd-muted-foreground">
         Search 128 guides and 176 endpoints…
       </span>
-      <kbd className="hidden shrink-0 items-center gap-1 rounded-md bg-fd-background px-2 py-1 font-medium font-mono text-fd-muted-foreground text-xs sm:inline-flex">
+      <kbd className="hidden shrink-0 items-center gap-1 rounded-md border border-fd-border bg-fd-muted px-2 py-1 font-medium font-mono text-fd-muted-foreground text-xs sm:inline-flex">
         {isMac ? "⌘" : "Ctrl"} K
       </kbd>
     </button>
@@ -200,7 +200,7 @@ function QuickLinks() {
         {QUICK_LINKS.map((link) => (
           <li key={link.id}>
             <Link
-              className="inline-flex items-center rounded-full bg-fd-muted px-3.5 py-1.5 font-medium text-fd-muted-foreground text-sm transition-colors hover:bg-fd-accent hover:text-fd-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
+              className="inline-flex items-center rounded-full border border-fd-border bg-fd-card px-3.5 py-1.5 font-medium text-fd-muted-foreground text-sm transition-colors hover:border-fd-ring/60 hover:bg-fd-accent hover:text-fd-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
               href={link.href}
             >
               {link.label}
@@ -217,7 +217,7 @@ function StatStrip() {
     <dl className="mt-12 flex flex-wrap justify-center gap-x-8 gap-y-6 sm:gap-x-12">
       {STATS.map((stat) => (
         <div className="flex flex-col items-center text-center" key={stat.id}>
-          <dt className="font-heading font-medium text-2xl text-fd-foreground tabular-nums sm:text-3xl">
+          <dt className="font-heading font-semibold text-2xl text-fd-foreground tabular-nums sm:text-3xl">
             {stat.value}
           </dt>
           <dd className="mt-1 max-w-[7.5rem] text-fd-muted-foreground text-xs leading-tight sm:text-sm">
@@ -232,20 +232,20 @@ function StatStrip() {
 export function Hero() {
   return (
     <section className="mx-auto flex w-full max-w-4xl flex-col items-center px-4 pt-16 pb-8 text-center sm:pt-24">
-      <span className="inline-flex items-center gap-2 rounded-full bg-fd-muted px-3 py-1 font-medium text-fd-muted-foreground text-xs">
+      <span className="inline-flex items-center gap-2 rounded-full border border-fd-border bg-fd-muted px-3 py-1 font-medium text-fd-muted-foreground text-xs">
         <RyuLogo size={14} />
         Ryu Documentation
       </span>
 
-      <h1 className="mt-6 text-balance font-medium font-heading text-4xl text-fd-foreground tracking-tight sm:text-5xl md:text-6xl">
+      <h1 className="mt-6 text-balance font-bold font-heading text-4xl text-fd-foreground tracking-tight sm:text-5xl md:text-6xl">
         Find anything in Ryu, in seconds.
       </h1>
 
       <p className="mt-6 max-w-2xl text-balance text-base text-fd-muted-foreground leading-relaxed sm:text-lg">
-        End-to-end infrastructure for AI agents. The engines already exist
-        (OpenAI, Claude Code, Gemma, any OpenAI-compatible runtime); Ryu is the
-        whole stack around them, so any agent works everywhere, as easily as
-        installing an app.
+        The orchestration and control layer for AI agents. Ryu is the whole car
+        built around any engine (OpenAI, Claude Code, Gemma, any
+        OpenAI-compatible runtime): local-first, BYO-everything, nothing
+        hardcoded.
       </p>
 
       <div className="mt-9 flex w-full max-w-xl flex-col items-center gap-4">
@@ -262,15 +262,19 @@ function RealmCard({ realm }: { realm: Realm }) {
   const Icon = realm.icon;
   return (
     <Link
-      className="group relative flex flex-col gap-3 rounded-xl bg-fd-muted p-5 transition-all hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
+      className="group relative flex flex-col gap-3 rounded-xl border bg-fd-card p-5 transition-all hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring"
       href={`/docs/${realm.slug}`}
+      style={{
+        borderColor: `color-mix(in oklab, ${realm.accent} 22%, var(--color-fd-border))`,
+      }}
     >
       <div className="flex items-center justify-between">
         <span
           aria-hidden="true"
-          className="flex size-10 items-center justify-center rounded-lg"
+          className="flex size-10 items-center justify-center rounded-lg border"
           style={{
-            backgroundColor: `color-mix(in oklab, ${realm.accent} 16%, transparent)`,
+            backgroundColor: `color-mix(in oklab, ${realm.accent} 12%, transparent)`,
+            borderColor: `color-mix(in oklab, ${realm.accent} 35%, transparent)`,
             color: realm.accent,
           }}
         >
@@ -282,7 +286,7 @@ function RealmCard({ realm }: { realm: Realm }) {
         />
       </div>
       <div className="flex flex-col gap-1">
-        <h3 className="font-heading font-medium text-fd-foreground text-lg">
+        <h3 className="font-heading font-semibold text-fd-foreground text-lg">
           {realm.title}
         </h3>
         <p className="text-fd-muted-foreground text-sm leading-relaxed">
@@ -300,7 +304,7 @@ export function Realms() {
       className="mx-auto w-full max-w-4xl px-4 py-12"
     >
       <h2
-        className="font-heading font-medium text-fd-foreground text-xl"
+        className="font-heading font-semibold text-fd-foreground text-xl"
         id="realms-heading"
       >
         Explore by realm
@@ -323,7 +327,7 @@ export function Realms() {
 function FeaturedCard({ item }: { item: Featured }) {
   return (
     <Link
-      className="group flex flex-col gap-2 rounded-xl bg-fd-muted p-5 transition-colors hover:bg-fd-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring sm:flex-row sm:items-center sm:gap-5 sm:p-6"
+      className="group flex flex-col gap-2 rounded-xl border border-fd-border bg-fd-card p-5 transition-colors hover:bg-fd-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring sm:flex-row sm:items-center sm:gap-5 sm:p-6"
       href={item.href}
     >
       <span
@@ -335,12 +339,12 @@ function FeaturedCard({ item }: { item: Featured }) {
       />
       <div className="flex flex-1 flex-col gap-1">
         <span
-          className="font-heading font-medium text-xs uppercase tracking-wide"
+          className="font-heading font-semibold text-xs uppercase tracking-wide"
           style={{ color: item.accent }}
         >
           {item.eyebrow}
         </span>
-        <h3 className="font-heading font-medium text-base text-fd-foreground sm:text-lg">
+        <h3 className="font-heading font-semibold text-base text-fd-foreground sm:text-lg">
           {item.title}
         </h3>
         <p className="text-fd-muted-foreground text-sm leading-relaxed">
@@ -359,10 +363,10 @@ export function FeaturedRail() {
   return (
     <section
       aria-labelledby="featured-heading"
-      className="mx-auto w-full max-w-4xl px-4 py-12"
+      className="mx-auto w-full max-w-4xl border-fd-border border-t px-4 py-12"
     >
       <h2
-        className="font-heading font-medium text-fd-foreground text-xl"
+        className="font-heading font-semibold text-fd-foreground text-xl"
         id="featured-heading"
       >
         Featured

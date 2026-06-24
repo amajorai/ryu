@@ -45,10 +45,10 @@ export function Quiz({ questions }: { questions: QuizQuestion[] }) {
   return (
     <section
       aria-label="Knowledge check quiz"
-      className="not-prose my-6 rounded-xl bg-fd-card p-4 shadow-sm sm:p-5"
+      className="not-prose my-6 rounded-xl border border-fd-border bg-fd-card p-4 sm:p-5"
     >
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h4 className="m-0 font-medium text-fd-card-foreground text-sm">
+        <h4 className="m-0 font-semibold text-fd-card-foreground text-sm">
           Check yourself
         </h4>
         <span className="text-fd-muted-foreground text-xs tabular-nums">
@@ -74,15 +74,17 @@ export function Quiz({ questions }: { questions: QuizQuestion[] }) {
                       <button
                         aria-pressed={isPicked}
                         className={twMerge(
-                          "flex items-center gap-2.5 rounded-lg bg-fd-muted px-3 py-2 text-left text-sm transition-colors",
-                          !isAnswered && "hover:bg-fd-accent",
+                          "flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm transition-colors",
+                          "border-fd-border",
+                          !isAnswered &&
+                            "hover:border-fd-primary/40 hover:bg-fd-accent",
                           isAnswered &&
                             isCorrect &&
-                            "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                            "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
                           isAnswered &&
                             isPicked &&
                             !isCorrect &&
-                            "bg-red-500/10 text-red-700 dark:text-red-300",
+                            "border-red-500/50 bg-red-500/10 text-red-700 dark:text-red-300",
                           isAnswered &&
                             !(isCorrect || isPicked) &&
                             "opacity-60",
@@ -126,16 +128,16 @@ export function Quiz({ questions }: { questions: QuizQuestion[] }) {
       </ol>
 
       {allAnswered && (
-        <div className="mt-5 flex items-center justify-between gap-3 pt-4">
+        <div className="mt-5 flex items-center justify-between gap-3 border-fd-border border-t pt-4">
           <p className="m-0 text-fd-card-foreground text-sm">
             You got{" "}
-            <span className="font-medium tabular-nums">
+            <span className="font-semibold tabular-nums">
               {correctCount} of {questions.length}
             </span>
             . Re-read anything you missed before moving on.
           </p>
           <button
-            className="inline-flex items-center gap-1.5 rounded-lg bg-fd-muted px-3 py-1.5 text-fd-muted-foreground text-xs transition-colors hover:bg-fd-accent"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-fd-border px-3 py-1.5 text-fd-muted-foreground text-xs transition-colors hover:bg-fd-accent"
             onClick={reset}
             type="button"
           >

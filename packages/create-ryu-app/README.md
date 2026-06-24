@@ -28,4 +28,4 @@ bun test
 
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0. See [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
