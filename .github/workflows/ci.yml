@@ -1,0 +1,59 @@
+name: ci
+
+# Build / test + secret scan on push and PR.
+#
+# Scoped to the units that build standalone today (gateway, cli). Broader coverage
+# (core/ghost/shadow build, and a TypeScript workspace job) is pending the root-manifest
+# prune transform that lets the OSS subset `bun install` without the closed packages.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: rust (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [gateway, cli]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/${{ matrix.dir }}
+      - name: Build
+        run: cargo build --manifest-path apps/${{ matrix.dir }}/Cargo.toml --all-targets
+      - name: Test
+        run: cargo test --manifest-path apps/${{ matrix.dir }}/Cargo.toml
+      - name: Clippy (advisory)
+        continue-on-error: true
+        run: cargo clippy --manifest-path apps/${{ matrix.dir }}/Cargo.toml --all-targets
+
+  secret-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks (CLI — no org license required)
+        run: |
+          set -e
+          VER=8.30.1
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" | tar -xz gitleaks
+          ./gitleaks dir . --no-banner

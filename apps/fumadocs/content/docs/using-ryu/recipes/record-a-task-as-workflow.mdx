@@ -1,0 +1,101 @@
+---
+title: "Record a desktop task once, replay it as a workflow"
+description: "Capture your clicks and typing one time, then run them on demand as a workflow."
+---
+
+You have a small desktop chore you repeat by hand: filling the same form, pasting into the same app,
+clicking through the same panels. This recipe captures it once and turns it into a workflow you can
+run again. It is for anyone on the desktop app who wants a repeatable automation without writing one
+node at a time.
+
+## What you'll use
+
+- [Recorded Automations](/docs/using-ryu/productivity/recipes): record a desktop task into workflow steps.
+- [Workflows](/docs/core/workflows): the DAG engine that runs the recorded steps.
+
+<Callout type="warn">
+  Recording and replay are Windows-first and need the Ghost desktop-automation sidecar installed. The
+  input capture is Windows-native, so on other platforms recording and replay report a clear error
+  until the sidecar is available, and replay needs a display.
+</Callout>
+
+## Steps
+
+<Steps>
+
+<Step>
+
+### Open the Workflows surface
+
+In the desktop app, open the **Workflows** page. This is where both authoring and recording live.
+
+</Step>
+
+<Step>
+
+### Start recording
+
+Click **Record a task**, describe what you are about to do, then start recording. Ryu begins
+capturing your input on screen.
+
+</Step>
+
+<Step>
+
+### Perform the task
+
+Do the chore once, exactly as you normally would: clicks, typing, scrolls. Ryu records each action as
+you go.
+
+</Step>
+
+<Step>
+
+### Stop recording
+
+Click stop. Ryu mints the captured actions into a **visible workflow**: an `Input` node, one node per
+action, and an `Output` node. Each captured action becomes a `ghost_action` step node, so the
+automation is a real DAG you can read and edit, not an opaque macro.
+
+</Step>
+
+<Step>
+
+### Review the minted workflow
+
+Look at the canvas. You should see the actions in order, for example a click step labelled from its
+target ("click to Compose") followed by a type step. Each `ghost_action` node carries an action verb,
+a target, and any params. You can edit, reorder, or delete steps before running. Because the steps are
+ordinary workflow nodes, you can also feed them upstream data with `{{...}}` template tokens, the same
+way other workflow nodes resolve values (see [Template variables](/docs/core/workflows#template-variables)).
+
+</Step>
+
+<Step>
+
+### Run it
+
+Run the workflow with **Run now**, or trigger it via the Core API:
+
+```http
+POST /api/workflows/:id/run
+```
+
+Each `ghost_action` step maps to the matching Ghost action (click, type, scroll, ...) and replays it
+through the Ghost engine, mirroring how a recorded recipe replays step by step.
+
+</Step>
+
+</Steps>
+
+<Callout type="info">
+  New in-canvas recordings produce per-action step nodes that you edit on the canvas. If you would
+  rather keep a whole automation as one unit, Ghost's recipe engine can also save and replay a
+  complete recipe as a single `recipe` node. See [Recorded Automations](/docs/using-ryu/productivity/recipes).
+</Callout>
+
+## Going further
+
+- Add reliability to a flaky step: per-node retry and timeout in [Workflows](/docs/core/workflows#reliability-and-durable-execution).
+- Fire the workflow on a schedule or a webhook: [Triggers and schedules](/docs/core/workflows#triggers-and-schedules).
+- Chain a recorded automation after a model step or a tool call: [Workflows](/docs/core/workflows).

@@ -1,0 +1,90 @@
+name: release
+
+# Builds the headless binaries and attaches them to a GitHub Release.
+# Triggers on a pushed v* tag, or manually via workflow_dispatch with a tag input.
+#
+# NOTE: first-run validation pending — the build matrix has not yet run on CI.
+# ghost/shadow are Windows-first; their non-Windows builds may need platform tweaks.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and attach binaries to (e.g. v0.0.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.bin }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # headless trio — all three desktop OSes
+          - { os: ubuntu-latest,  dir: core,    bin: ryu-core,    ext: "" }
+          - { os: macos-latest,   dir: core,    bin: ryu-core,    ext: "" }
+          - { os: windows-latest, dir: core,    bin: ryu-core,    ext: ".exe" }
+          - { os: ubuntu-latest,  dir: gateway, bin: ryu-gateway, ext: "" }
+          - { os: macos-latest,   dir: gateway, bin: ryu-gateway, ext: "" }
+          - { os: windows-latest, dir: gateway, bin: ryu-gateway, ext: ".exe" }
+          - { os: ubuntu-latest,  dir: cli,     bin: ryu,         ext: "" }
+          - { os: macos-latest,   dir: cli,     bin: ryu,         ext: "" }
+          - { os: windows-latest, dir: cli,     bin: ryu,         ext: ".exe" }
+          # Windows-first sidecars
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Linux build deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+
+      - name: macOS build deps (Core)
+        if: runner.os == 'macOS' && matrix.dir == 'core'
+        run: brew install dbus pkg-config
+
+      - name: Install protoc (Core needs prost-build)
+        if: matrix.dir == 'core'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/${{ matrix.dir }}
+
+      - name: Build
+        run: cargo build --release --manifest-path apps/${{ matrix.dir }}/Cargo.toml
+
+      - name: Package
+        shell: bash
+        run: |
+          set -e
+          src="apps/${{ matrix.dir }}/target/release/${{ matrix.bin }}${{ matrix.ext }}"
+          name="${{ matrix.bin }}"; [ "$name" = "ryu" ] && name="ryu-cli"
+          # Accurate os-arch labels matching Core's updater (update::platform_match_score);
+          # macos-latest is Apple Silicon, so aarch64 — not x64.
+          case "${{ runner.os }}" in
+            Linux)   plat="linux-x86_64" ;;
+            macOS)   plat="macos-aarch64" ;;
+            Windows) plat="windows-x86_64" ;;
+          esac
+          asset="${name}-${plat}${{ matrix.ext }}"
+          mkdir -p dist
+          cp "$src" "dist/$asset"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*
+          fail_on_unmatched_files: true
