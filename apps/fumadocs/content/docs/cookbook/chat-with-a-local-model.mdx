@@ -1,0 +1,93 @@
+---
+title: "Chat with a local model, fully offline"
+description: "Install a model from the catalog, make it the active engine's model, and chat with no API key and no network."
+---
+
+You want a private assistant that runs on your own machine, no API key, no data leaving the box.
+This recipe picks a local model, makes it the one your engine serves, and chats with it offline. It
+is for anyone who wants Ryu working on install without signing up for a provider.
+
+## What you'll use
+
+- [Models](/docs/using-ryu/models): browse the Hugging Face catalog and install a GGUF.
+- [Chat engines](/docs/using-ryu/engines/chat-engines): the active engine that serves your model.
+- [Transparency](/docs/using-ryu/transparency): why this stays private (no telemetry by default).
+
+## Steps
+
+<Steps>
+
+<Step>
+
+### Start from the bundled model, or pick your own
+
+A fresh install already downloads a local engine (llama.cpp) and a default chat model during
+onboarding, so you can chat offline immediately with zero setup. To use a different model, open the
+**Models** tab.
+
+<TryInRyu page="models" />
+
+</Step>
+
+<Step>
+
+### Install a model from the catalog
+
+The Models tab browses the Hugging Face Hub for GGUF models. Each file shows its real size, a
+SHA-256, and a **device-fit verdict** (great / ok / partial-offload / cpu / too_big) computed from
+your machine's RAM and VRAM, so you can pick a quant that actually fits. Choose one and install it;
+the bytes are checksum-verified on the way down. Over the API the same flow is:
+
+```http
+GET  /api/models/catalog
+POST /api/models/catalog/install
+```
+
+<Callout type="info">
+A device-fit verdict of `partial-offload` or `cpu` still runs, just slower. Prefer a quant marked
+`great` or `ok` for your machine for a responsive chat.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Make it the active model
+
+The chat engine serves one model at a time. In the installed model's detail, click **Use this
+model** to make it the served model and restart the local engine onto it. Over the API:
+
+```http
+POST /api/models/active
+{ "id": "unsloth/gemma-3-12b-it-GGUF" }
+```
+
+The `id` is a repo id or an installed stem. Core writes the preference, restarts the resident local
+engine onto the new model, and refreshes the gateway so routing picks it up.
+
+</Step>
+
+<Step>
+
+### Chat
+
+Open **Chat** and talk to it. The default `ryu` agent routes to your active local engine through the
+gateway, so the conversation runs entirely on your machine.
+
+<TryInRyu page="chat" />
+
+</Step>
+
+</Steps>
+
+<Callout type="info">
+Want a model installed straight from a web page? A `ryu://models/<source>/<id...>` deep link opens
+the desktop app to a confirm dialog and installs the model: nothing installs without your
+confirmation. See [Models](/docs/using-ryu/models).
+</Callout>
+
+## Going further
+
+- Add a vision model and send it images: the `mmproj` projector convention in [Models](/docs/using-ryu/models).
+- Swap to a faster runtime (Ollama, vLLM, MLX on Apple Silicon): [Chat engines](/docs/using-ryu/engines/chat-engines).
+- Give your local agent your own documents to answer from: [Ground an agent in your docs](/docs/cookbook/ground-an-agent-in-your-docs).

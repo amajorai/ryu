@@ -1,0 +1,22 @@
+# UniFFI binding configuration.
+#
+# `cdylib_name` is the base name of the compiled shared library the generated
+# bindings will dlopen at runtime (`libryu_sdk_uniffi.{so,dylib}` /
+# `ryu_sdk_uniffi.dll`). Per-language sections below tune the emitted package
+# shape. PR-1 ships Python only; the Swift/Kotlin/C#/Go sections are documented
+# placeholders consumed when those languages land (see the per-language
+# feasibility matrix in docs/multi-language-bindings-spec.md).
+
+[bindings.python]
+# The generated module is imported as `ryu_sdk` by the smoke test
+# (`python -c "import ryu_sdk; ryu_sdk.validate_plugin_id('io.ryu.ok')"`).
+cdylib_name = "ryu_sdk_uniffi"
+
+[bindings.swift]
+# Future slice. module_name kept stable so a published Swift package name does
+# not churn when it lands.
+module_name = "RyuSdk"
+
+[bindings.kotlin]
+# Future slice.
+package_name = "com.ryu.sdk"

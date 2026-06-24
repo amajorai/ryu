@@ -1,0 +1,74 @@
+# Multi-language SDK bindings — pipeline proof.
+#
+# Builds the crates/ryu-sdk-uniffi cdylib, generates the Python binding from it,
+# and runs a smoke test that exercises the shared Rust rules through the
+# generated module. Proves the end-to-end UniFFI pipeline with ONE language
+# (Python: built into UniFFI, zero third-party bindgen). Go (cgo) and C#
+# (uniffi-bindgen-cs) are out of scope for PR-1 — see
+# docs/multi-language-bindings-spec.md for the per-language rollout + supply-chain
+# caveats.
+name: SDK bindings
+
+on:
+  push:
+    paths:
+      - "crates/ryu-sdk/**"
+      - "crates/ryu-sdk-uniffi/**"
+      - "bindings/python/**"
+      - ".github/workflows/sdk-bindings.yml"
+  pull_request:
+    paths:
+      - "crates/ryu-sdk/**"
+      - "crates/ryu-sdk-uniffi/**"
+      - "bindings/python/**"
+      - ".github/workflows/sdk-bindings.yml"
+  workflow_dispatch:
+
+jobs:
+  python:
+    name: Python binding (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # ryu-sdk-uniffi is a standalone crate (its own Cargo.lock, not in a
+        # workspace), so all cargo commands run from inside it.
+        working-directory: crates/ryu-sdk-uniffi
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/ryu-sdk-uniffi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Rust-side guarantee: the wrapper enforces the same egress/manifest/semver
+      # rules the C-ABI binding does. No foreign toolchain needed for this gate.
+      - name: cargo test (shared-rule parity)
+        run: cargo test --release
+
+      - name: Build cdylib
+        run: cargo build --release
+
+      - name: Generate Python binding
+        run: |
+          # Standalone crate: `target/` is under the crate dir (the cwd), so the
+          # cdylib is cwd-relative `target/release/...`; the out-dir is repo-root
+          # `../../bindings/python/ryu_sdk`.
+          cargo run --release --bin uniffi-bindgen -- \
+            generate --library target/release/libryu_sdk_uniffi.so \
+            --language python \
+            --out-dir ../../bindings/python/ryu_sdk
+          # The generated module dlopens the compiled library at import time, so
+          # it must sit next to the module.
+          cp target/release/libryu_sdk_uniffi.so ../../bindings/python/ryu_sdk/
+
+      - name: Smoke test the generated binding
+        working-directory: bindings/python
+        run: PYTHONPATH=. python smoke_test.py

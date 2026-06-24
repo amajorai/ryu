@@ -1,0 +1,120 @@
+---
+title: "Expose your tools to any agent over MCP"
+description: "Wrap your Runnables in an MCP stdio server with the Ryu SDK, register it with Core, and call it from chat."
+---
+
+A tool you build with the SDK can power your own agent, but exposing it over the **Model Context
+Protocol** makes it callable by *any* MCP host, including Ryu Core's registry, with no manifest and
+no restart. This recipe wraps a Runnable in an MCP stdio server, registers it with Core, and calls
+it from chat. It is for developers who want one tool to serve every agent.
+
+## What you'll use
+
+- [The SDK](/docs/develop/sdk): `defineTool` and the SDK's `McpServer`.
+- [Register an MCP server](/docs/develop/extensions/mcp-server): the canonical guide for the registration handshake and allowlisting.
+- [MCP registry](/docs/core/mcp-registry): how Core discovers and dispatches the tools.
+
+## Steps
+
+<Steps>
+
+<Step>
+
+### Write the server
+
+The SDK's `McpServer` handles the MCP `initialize` handshake, `tools/list`, `tools/call`, and the
+content-block envelope. You register objects with a `name`, an optional `inputSchema`, and a `run`
+function, then call `serve()` to read JSON-RPC from stdin and write responses to stdout:
+
+```ts
+// src/server.ts
+import { McpServer } from "@ryu/sdk/mcp/server";
+
+const server = new McpServer();
+
+server.register({
+  name: "word_count",
+  description: "Count the words in a piece of text.",
+  inputSchema: {
+    type: "object",
+    properties: { text: { type: "string", description: "Text to count" } },
+    required: ["text"],
+  },
+  run({ text }: { text: string }) {
+    return { words: text.trim().split(/\s+/).filter(Boolean).length };
+  },
+});
+
+await server.serve(); // reads process.stdin, writes process.stdout
+```
+
+<Callout type="warn">
+`McpServer` lives in SDK source but is not yet in the package's public `exports` map (only `.`,
+`./manifest`, and `./cli` are exported today). Inside the monorepo import it from the source path as
+above; the public `@ryu/sdk` MCP subpath export is pending. See the
+[TypeScript SDK guide](/docs/develop/extensions/typescript-sdk#mcp-bridge).
+</Callout>
+
+</Step>
+
+<Step>
+
+### Register it with Core
+
+Core exposes `POST /api/mcp/servers`. It appends the server to `~/.ryu/mcp.json` and hot-reloads the
+registry, so the tools become callable with no restart. Point `command`/`args` at how your server
+runs:
+
+```bash
+curl -X POST http://localhost:7980/api/mcp/servers \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "mytools",
+    "command": "bun",
+    "args": ["run", "src/server.ts"],
+    "description": "My SDK tools over MCP."
+  }'
+```
+
+<Callout type="info">
+`name` must be non-empty and must not contain `__`: Core uses `__` as the tool-id separator, so your
+tool ends up namespaced as `mytools__word_count`. The `command` must be on Core's PATH, or point it
+at an absolute path.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Allowlist the tool for an agent
+
+Registration alone does not grant access. The MCP bridge filters every registered tool through each
+agent's allowlist before injecting it into a session, so add your tool to the allowlist of the
+agents that should use it on their edit page Tools tab. An empty allowlist on the flagship `ryu`
+agent already offers all enabled tools, so it reaches your tool with no extra config.
+
+</Step>
+
+<Step>
+
+### Call it from chat
+
+With the server registered and allowlisted, its tools are injected into ACP agent sessions through
+Core's MCP bridge. When an agent emits a tool call for `mytools__word_count`, Core dispatches it and
+feeds the result back into the chat loop, the same closed tool loop the built-ins use. You can also
+list and call tools directly:
+
+```http
+GET  /api/mcp/servers
+POST /api/mcp/tools/call
+```
+
+</Step>
+
+</Steps>
+
+## Going further
+
+- Re-advertise Ghost or Shadow tools through the same server: `McpServer` supports a passthrough registration, covered in the [MCP server guide](/docs/develop/extensions/mcp-server).
+- Compress every model call automatically instead of as a tool: [Context compression](/docs/gateway/compression).
+- Bundle the tools as an installable plugin instead of a loose server: [Quickstart](/docs/develop/quickstart).

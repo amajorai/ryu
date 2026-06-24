@@ -1,0 +1,95 @@
+---
+title: "Cap what an agent can spend with a budget"
+description: "Put a lifetime token cap on a gateway key, then downgrade or reject once it is hit, so a runaway agent cannot burn unbounded tokens."
+---
+
+An agent that loops or fans out can burn tokens fast. This recipe puts a token budget on the gateway,
+so once a cap is reached the gateway either swaps in a cheaper model or rejects the request, instead
+of spending without limit. It is for anyone running agents who wants a hard ceiling on cost.
+
+## What you'll use
+
+- [Configuration](/docs/gateway/configuration): where keys and budgets are defined and how config is written.
+- [Security and governance](/docs/gateway/governance): the broader policy surface the gateway enforces.
+
+## Steps
+
+<Steps>
+
+<Step>
+
+### Pick the budget scope
+
+The gateway tracks token usage at three scopes. Pick the one that matches what you want to bound:
+
+- **Per key**: a lifetime cap on a single gateway API key. The simplest ceiling.
+- **Per user / per agent**: rules under `[budgets]`, keyed by the `x-ryu-user-id` / `x-ryu-agent-id`
+  a *trusted forwarder* passes (Ryu Core relaying a real end-user identity).
+- **Per session**: a running cap per `x-ryu-session-id`, so a single conversation cannot overrun.
+
+</Step>
+
+<Step>
+
+### Set a lifetime cap on a key
+
+The most direct ceiling is a lifetime token cap on an API key. In `gateway.toml`, give the key a
+`token_budget_total` and decide what happens when it is hit:
+
+```toml
+[[auth.api_keys]]
+key = "ryu-sk-your-secret-key"
+name = "my-app"
+token_budget_total = 5000000     # lifetime cap, input + output (0 = unlimited)
+downgrade_to = "gpt-4o-mini"     # swap to this model once the cap is hit
+```
+
+With `downgrade_to` set, requests keep working on the cheaper model after the cap. Leave it unset and
+the gateway instead rejects the request with `BudgetExceeded` once the cap is reached, a hard stop
+rather than a quiet downgrade.
+
+</Step>
+
+<Step>
+
+### Drive per-user and per-agent budgets safely
+
+Per-user and per-agent budgets only apply when a *trusted forwarder* supplies the identity. By
+default the gateway ignores client-supplied `x-ryu-user-id` / `x-ryu-agent-id` headers, so an
+untrusted caller cannot rotate identities to evade its quota. Set `trusted_forwarder = true` only on
+a key for an intermediary you control:
+
+```toml
+[[auth.api_keys]]
+key = "ryu-sk-core-relay"
+name = "core-relay"
+trusted_forwarder = true   # this intermediary may pass x-ryu-user-id / x-ryu-agent-id
+```
+
+The per-user and per-agent rules themselves live under `[budgets]`. See [Configuration](/docs/gateway/configuration#trusted-forwarders).
+
+</Step>
+
+<Step>
+
+### Apply it
+
+Budgets are hot-swapped live: a `PUT /api/gateway/config` (which relays `PUT /v1/config`) with a
+`budgets` patch takes effect without a restart, unlike routing. `GET /v1/config` returns the live
+budget view.
+
+<Callout type="info">
+The desktop Gateway dialog's budgets card is read-only today: it shows the live budgets but does not
+create or edit them. Author budget rules through the gateway config (`PUT /api/gateway/config`) or
+the web dashboard, then watch them in the desktop dialog.
+</Callout>
+
+</Step>
+
+</Steps>
+
+## Going further
+
+- Pair budgets with smart routing so cheap requests never touch an expensive model in the first place: [Route by task](/docs/cookbook/route-by-task).
+- Watch per-run cost and latency after the fact: [Evals and audit](/docs/gateway/evals-audit).
+- Require a human to approve high-risk runs before they execute: the workflow HITL gates in [Workflows](/docs/core/workflows) and the approval step in [Schedule a workflow](/docs/cookbook/schedule-a-workflow).

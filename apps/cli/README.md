@@ -1,4 +1,4 @@
-# Ryu CLI
+# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="center" alt="" />&nbsp; Ryu CLI
 
 > A terminal UI for chatting with Ryu and managing the local stack. Part of [Ryu](../../README.md).
 

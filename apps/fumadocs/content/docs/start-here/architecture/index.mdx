@@ -12,18 +12,7 @@ them. This is the one-page map; every box on the diagram has its own deeper sect
 A request from any client travels down through the Gateway (which governs the model call) into
 Core (which decides what runs), out to an engine, and back.
 
-```
-Desktop / CLI / Web / Extension / Mobile / Island / Bots
-        |
-        v
-  Ryu Gateway     control: routing, firewall, PII/DLP, budgets, evals, audit
-        |            decides WHAT IS ALLOWED, SHARED, MEASURED, and PAID FOR
-        v
-  Ryu Core        orchestration: sessions, memory, tools, workflows, sub-agents, sidecars
-        |            decides WHAT RUNS, then hands every model call to the Gateway
-        v
-  Any engine      OpenAI, Claude Code, Pi, Gemma, vLLM, any OpenAI-compatible runtime
-```
+<Architecture />
 
 Two Rust services do the work: **Ryu Core** (`apps/core`, default `127.0.0.1:7980`) and **Ryu
 Gateway** (`apps/gateway`). They are split by one rule: if code decides *what runs* it is Core;

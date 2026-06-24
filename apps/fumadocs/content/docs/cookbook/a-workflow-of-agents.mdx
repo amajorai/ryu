@@ -1,0 +1,107 @@
+---
+title: "Orchestrate agents with a workflow"
+description: "Use the Ryu SDK to define a workflow that calls agents as steps, composing them into one run."
+---
+
+One agent answers a question; a workflow coordinates several to do a job. This recipe defines a
+workflow with the Ryu SDK that calls agents as steps, a researcher feeding a writer, and returns one
+result. It is for developers who want to compose Runnables in code rather than wire a canvas.
+
+## What you'll use
+
+- [The SDK](/docs/develop/sdk): the `defineWorkflow` and `defineAgent` factories.
+- [Workflows](/docs/core/workflows): the Core DAG engine, for when you want a workflow as data rather than code.
+
+## Steps
+
+<Steps>
+
+<Step>
+
+### Define the agents
+
+Each step is a [Runnable](/docs/start-here/architecture/runnable-model). Start with two agents, each
+calling the model through `ctx.gateway`:
+
+```ts
+import { defineAgent } from "@ryu/sdk";
+
+export const researcher = defineAgent({
+  id: "agent-researcher",
+  name: "Researcher",
+  async run({ topic }: { topic: string }, ctx) {
+    const { content } = await ctx.gateway.chat([
+      { role: "user", content: `List the key facts about: ${topic}` },
+    ]);
+    return { facts: content };
+  },
+});
+
+export const writer = defineAgent({
+  id: "agent-writer",
+  name: "Writer",
+  async run({ facts }: { facts: string }, ctx) {
+    const { content } = await ctx.gateway.chat([
+      { role: "user", content: `Write a short paragraph from these facts:\n\n${facts}` },
+    ]);
+    return { paragraph: content };
+  },
+});
+```
+
+</Step>
+
+<Step>
+
+### Define the workflow
+
+A workflow is a Runnable with `kind = "workflow"`. List the agents in `steps` and call each one's
+`run()` in order inside the workflow body, threading one step's output into the next:
+
+```ts
+import { defineWorkflow } from "@ryu/sdk";
+import { researcher, writer } from "./agents";
+
+export const report = defineWorkflow({
+  id: "workflow-report",
+  name: "Report",
+  steps: [researcher, writer],
+  async run({ topic }: { topic: string }, ctx) {
+    const { facts } = await researcher.run({ topic }, ctx);
+    const { paragraph } = await writer.run({ facts }, ctx);
+    return { report: paragraph };
+  },
+});
+```
+
+The workflow and its agents are peers, not a hierarchy: a workflow calls an agent's `run()`, and an
+agent could equally list a workflow as a tool. The shared `ctx` carries the gateway client to every
+step, so every model call stays governed.
+
+</Step>
+
+<Step>
+
+### Run and bundle
+
+```bash
+bunx ryu dev src/workflow.ts
+bun run pack
+```
+
+</Step>
+
+</Steps>
+
+<Callout type="info">
+This is the *code* way to compose Runnables, ideal when the orchestration is simple sequencing. When
+you want triggers, retries, human-in-the-loop gates, durable resume, or a visual canvas, model the
+workflow as data with the [Core workflow engine](/docs/core/workflows) instead, and let your agents
+be its `prompt`/`agent_delegate` nodes.
+</Callout>
+
+## Going further
+
+- Add a fan-out so steps run in parallel instead of in sequence: [Delegation](/docs/core/delegation).
+- Drive a Core workflow on a schedule or a webhook: [Schedule a workflow](/docs/cookbook/schedule-a-workflow).
+- Expose the whole workflow to an MCP host as one callable tool: [Expose your Runnables over MCP](/docs/cookbook/expose-an-mcp-server).

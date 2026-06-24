@@ -1,0 +1,112 @@
+---
+title: "Build your first agent in code"
+description: "Write an agent with the Ryu SDK whose every model call routes through the gateway, then run it locally."
+---
+
+You want to build an agent in TypeScript, not click one together in the app. This recipe scaffolds a
+project with the Ryu SDK, writes a `defineAgent` whose every model call goes through the gateway (no
+provider key in your code), and runs it locally. It is for developers who want the Runnable contract
+and gateway-mandatory model access from the first line.
+
+## What you'll use
+
+- [Quickstart](/docs/develop/quickstart): scaffold a plugin with `create-ryu-app`.
+- [The SDK](/docs/develop/sdk): the `defineAgent` factory and the gateway-mandatory model client.
+- [Gateway](/docs/gateway): what governs every model call your agent makes.
+
+## Steps
+
+<Steps>
+
+<Step>
+
+### Scaffold a project
+
+Ryu uses [Bun](https://bun.sh) across the monorepo, so `bun` and `bunx` are assumed on your PATH.
+Scaffold a new plugin, passing a lowercase project name:
+
+```bash
+bunx create-ryu-app my-first-agent
+cd my-first-agent
+bun install
+```
+
+`create-ryu-app` writes a valid `plugin.json`, a starter `src/agent.ts`, and a `package.json` that
+depends on `@ryu/sdk`. See [Quickstart](/docs/develop/quickstart) for what each file is.
+
+</Step>
+
+<Step>
+
+### Write the agent
+
+An agent is a [Runnable](/docs/start-here/architecture/runnable-model): an object with an `id`, a
+`name`, and a `run()` method. The one rule is that every model call goes through `ctx.gateway`,
+never a provider SDK. Replace `src/agent.ts` with:
+
+```ts
+import { defineAgent } from "@ryu/sdk";
+
+export const researcher = defineAgent({
+  id: "agent-researcher",
+  name: "Researcher",
+  async run({ query }: { query: string }, ctx) {
+    const result = await ctx.gateway.chat([
+      { role: "system", content: "You answer concisely." },
+      { role: "user", content: query },
+    ]);
+    return { answer: result.content };
+  },
+});
+```
+
+There is no API key and no base URL here. `ctx.gateway` is injected for you, and it is the only
+allowed path to a model. The gateway resolves the provider, applies routing and budgets, and
+returns the reply. See [the gateway overview](/docs/gateway) for what that buys you.
+
+</Step>
+
+<Step>
+
+### Run it locally
+
+The `ryu` CLI runs a Runnable with an interactive chat loop:
+
+```bash
+bunx ryu dev src/agent.ts
+```
+
+The model client targets `RYU_GATEWAY_URL` (default `http://127.0.0.1:7981`). If your gateway
+requires auth, set `RYU_GATEWAY_TOKEN` first. A running local Core runs the gateway as a managed
+sidecar, so with a fresh install there is already something to call.
+
+<Callout type="warn">
+The agent needs a model the gateway can route. A fresh install ships a local engine and a default
+model, but if the gateway cannot resolve the model id the turn fails. Point your call at a model
+your gateway can route, for example a local model id or an `openrouter/...` slug.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Bundle it for the store
+
+When the agent works, bundle the plugin so the desktop plugin store can install it:
+
+```bash
+bun run pack
+```
+
+This runs `bunx ryu pack .`, validates `plugin.json` against the same schema the store reads, and
+writes `dist/plugin.bundle.json`. An invalid manifest exits non-zero and names the failing field.
+
+</Step>
+
+</Steps>
+
+## Going further
+
+- Give the agent a tool the model can call: [A tool the model can call](/docs/cookbook/a-tool-the-model-can-call).
+- Orchestrate several agents as steps: [A workflow that orchestrates agents](/docs/cookbook/a-workflow-of-agents).
+- Stream the reply token by token instead of awaiting it: use `ctx.gateway.stream(...)`, covered in [the SDK reference](/docs/develop/sdk).

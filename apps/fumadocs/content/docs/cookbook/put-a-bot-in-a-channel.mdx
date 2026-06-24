@@ -1,0 +1,82 @@
+---
+title: "Put an agent in Telegram, Slack, or Discord"
+description: "Bind a Ryu agent or team to a chat platform so anyone in the channel talks to it, with the same memory, tools, and gateway governance."
+---
+
+You have an agent you like talking to in the desktop, and you want your team (or your customers) to
+reach it from Telegram, Slack, WhatsApp, or Discord. This recipe binds an agent, or a whole team, to
+a channel bot. The bot answers with the same memory, tools, and gateway governance the desktop uses.
+It is for anyone who wants their agent reachable where people already chat.
+
+## What you'll use
+
+- [Channel bots](/docs/gateway/channels): how the gateway runs the platform listeners and routes turns to Core.
+- [Agent teams](/docs/core/agent-teams): the coordination strategies a team uses when a channel routes to one.
+
+## Steps
+
+<Steps>
+
+<Step>
+
+### Get a bot token
+
+From the platform, create a bot and copy its token: a Telegram BotFather token, a Slack bot token, a
+WhatsApp Cloud API token, or a Discord bot token.
+
+</Step>
+
+<Step>
+
+### Open Gateway -> Channels
+
+Channels are configured in **Gateway settings**, not on a Core node, and they are account-global.
+
+<TryInRyu page="channels" />
+
+In the desktop, open **Gateway -> Channels**. You can also reach it from the command palette, a
+`ryu://...channels` deep link, or **Settings -> Advanced**: all open the gateway dialog at the
+Channels section.
+
+</Step>
+
+<Step>
+
+### Add the channel and choose what it routes to
+
+Add a channel: pick the platform, paste the token, and set the **Routes to** target. The picker lists
+your agents and your teams.
+
+- Route to an **agent** and every inbound message runs that single agent (`run_reply_text`).
+- Route to a **team** and the team's lead orchestrates its members per the team's coordination
+  strategy and returns one combined, attributed reply (`run_team_reply_text`).
+
+A team is selected with a `team:` sentinel and persisted as `teamId` (otherwise `agentId`) on the
+channel config.
+
+<Callout type="info">
+A channel with neither an agent nor a team falls back to a legacy single-call gateway path with the
+channel's configured model and prompt. Binding an agent or team is the recommended setup: it
+persists each sender's conversation and reaches Core memory and tools.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Save and talk to it
+
+Save. Now each inbound message is normalized by the platform adapter and POSTed to Core's
+`POST /api/channels/run` with the channel's `agent_id` or `team_id`. The sender's id becomes the Core
+`conversation_id`, so every sender keeps a persistent conversation, and the model calls still flow
+Core to Gateway, so routing, firewall, budgets, and audit stay on the path.
+
+</Step>
+
+</Steps>
+
+## Going further
+
+- Make the bot a multi-agent team instead of one agent: [Agent teams](/docs/core/agent-teams).
+- Govern what the bot's model calls are allowed to do: [Security and governance](/docs/gateway/governance).
+- Have a monitor or workflow ping the same channel via a webhook: [Watch a price and ping Slack](/docs/cookbook/price-watch-to-slack).

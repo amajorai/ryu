@@ -1,0 +1,103 @@
+---
+title: "Route coding to Claude and chat to a local model"
+description: "Use the gateway's smart routing to send each request to the right model from plain-language rules."
+---
+
+You want your hard requests on a strong model and your casual ones on a cheap local model, without
+picking by hand each time. This recipe turns on the gateway's smart routing, writes plain-language
+rules like *coding goes to Claude, chit-chat goes local*, and lets a cheap classifier sort each
+request. It is for anyone who wants cost and quality balanced automatically.
+
+## What you'll use
+
+- [Routing](/docs/gateway/routing): the routing strategies and the smart (classifier-driven) router.
+- [Configuration](/docs/gateway/configuration): how gateway config is read and written.
+
+## Steps
+
+<Steps>
+
+<Step>
+
+### Understand what smart routing does
+
+Ordinary routing picks a *provider* for the model you asked for. Smart routing picks the *model
+itself*, before provider routing runs. A cheap classifier model reads only your latest user message,
+matches it against your ordered rules, and rewrites the request's model to the winning rule's target.
+That target then resolves its provider through the normal router, so nothing is hardcoded: a rule can
+point at a local model id or an `openrouter/...` slug.
+
+</Step>
+
+<Step>
+
+### Turn it on and write rules
+
+On the desktop, edit it under **Gateway -> Routing -> Smart routing**, which reads and writes the
+same gateway config the rest of the dialog uses. The config (under `routing.smart_routing`) has:
+
+| Field | Meaning |
+|---|---|
+| `enabled` | Master switch (off by default) |
+| `classifier_model` | The cheap model that sorts each request |
+| `rules` | Ordered `{ description, model }` entries |
+| `default_model` | Used when no rule matches (else the requested model is kept) |
+| `cache_by_session` | Classify once per `x-ryu-session-id` and reuse the decision |
+| `timeout_ms` | Per-classification timeout (default 4000) |
+
+A rule set reads like plain language:
+
+```toml
+[routing.smart_routing]
+enabled = true
+classifier_model = "gemma-3-4b"   # a cheap, local classifier
+default_model = "gemma-3-4b"
+
+[[routing.smart_routing.rules]]
+description = "coding, debugging, or writing code"
+model = "claude-sonnet-4-5"
+
+[[routing.smart_routing.rules]]
+description = "simple chit-chat or greetings"
+model = "gemma-3-4b"
+```
+
+Smart routing only runs when `enabled` is set with a non-empty `classifier_model` and at least one
+rule. For a standalone gateway, `GATEWAY_SMART_ROUTING_ENABLED` and `GATEWAY_SMART_ROUTING_MODEL` set
+the basics, but the rules themselves are config-only.
+
+<Callout type="warn">
+There is no Google provider in the gateway. To route to Gemini, use an `openrouter/google/...` slug
+as the rule's model, not a bare `gemini-...` id.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Apply it
+
+Like all routing config, a change is a startup snapshot: it takes effect on the next gateway
+refresh/restart. Over the API the same edit is a `PUT /api/gateway/config` (which relays
+`PUT /v1/config`); see [Configuration](/docs/gateway/configuration).
+
+</Step>
+
+<Step>
+
+### Confirm which model answered
+
+The gateway returns the model it actually routed to in the `x-routed-model` response header, so you
+can verify a request landed on the model you expected. Smart routing fails open everywhere: an
+inactive config, an unparseable classifier reply, a classifier error, or a timeout all keep the
+model you requested, and a per-agent chat-slot override always wins over a rule.
+
+</Step>
+
+</Steps>
+
+## Going further
+
+- Cap what any of these models can spend: [Cap spend with a budget](/docs/cookbook/cap-spend-with-a-budget).
+- Add a firewall and PII/DLP in front of every routed call: [Security and governance](/docs/gateway/governance).
+- Add fallbacks and circuit breaking so a down provider degrades gracefully: [Reliability](/docs/gateway/reliability).
