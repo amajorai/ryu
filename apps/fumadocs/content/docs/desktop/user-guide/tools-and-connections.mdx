@@ -1,0 +1,104 @@
+---
+title: "Tools & Connections"
+description: "Give agents tools: MCP servers, the unified tool catalog, and Composio integrations"
+---
+
+Tools are how an agent does things beyond talking: read a page, run a command, file a GitHub issue, search the web. In Ryu every tool comes from one of three sources, all surfaced on the desktop **Tools** page:
+
+- **MCP servers** you register, plus the built-in ones that ship with Core.
+- The **unified tool catalog**, which makes every tool searchable by query.
+- **Composio**, a hosted catalog of third-party actions (Gmail, GitHub, Slack, and more) that is searchable but never listed in full.
+
+Whatever the source, an agent only sees the tools on its **allowlist**. For how the registry and catalog work under the hood, see [MCP registry](/docs/core/mcp-registry) and the [unified tool catalog](/docs/core/unified-tool-catalog).
+
+## Browse and allowlist tools
+
+Open **Tools** in the desktop sidebar. The page lists every registered server and the tools each exposes, backed by `GET /api/mcp/servers` and `GET /api/mcp/tools`.
+
+To scope tools to one agent, use the **agent filter** at the top of the page. Picking an agent re-fetches the tool list narrowed to that agent's allowlist — Core resolves `GET /api/mcp/tools?agent=<id>` against the agent's allowlist. An empty allowlist means the agent sees every enabled tool; a non-empty allowlist is the intersection with what is enabled.
+
+You edit the allowlist itself in the **agent editor** (open an agent, then the Tools section), not on the Tools page. The Tools page is for browsing, testing, and connecting servers.
+
+The allowlist key is the **fully-qualified tool id** - `<server>__<tool>`, for example `spider__crawl` or `ghost__ghost_click`. The same id is what you grant, what you test, and what the agent calls.
+
+<Callout type="info">
+Tool execution is governed on both planes. Whether a tool is invoked by an ACP agent or through the OpenAI-compatible chat path, it is allowlist-gated and emits a Gateway exec-budget plus exec-audit entry. See [unified tool catalog](/docs/core/unified-tool-catalog) for the governance path.
+</Callout>
+
+### Test a tool
+
+On the Tools page, pick an agent and a tool, supply JSON arguments, and run it. The call goes to `POST /api/mcp/tools/call` with the chosen agent as the invoker, so it exercises the same allowlist and governance an agent would hit.
+
+## Connect an MCP server
+
+To add your own MCP server, use **Add server** on the Tools page. It registers the server via `POST /api/mcp/servers` with a command and arguments:
+
+| Field | Meaning |
+|---|---|
+| `name` | The server name; becomes the `<server>__` prefix on its tool ids |
+| `command` | The executable Core spawns to run the server |
+| `args` | Arguments passed to the command |
+
+Once registered the server and its tools appear immediately in the lists, with no manual refresh. Each server row shows an availability indicator so a missing binary is visible before an agent tries to call it.
+
+For installing servers from a catalog (the official MCP registry, Smithery, or the Ryu-hosted marketplace) rather than hand-registering a command, see the [Store](/docs/desktop/user-guide/store) and [MCP registry](/docs/core/mcp-registry). Catalog installs land as a **disabled** `~/.ryu/mcp.json` entry that you explicitly enable — Core never auto-launches an installed registry command.
+
+## Search the catalog
+
+The unified tool catalog turns "which tool do I need" into a query instead of a scroll. It backs two routes:
+
+```
+GET /api/tools/search?q=<text>
+GET /api/tools/describe?id=<tool-id>
+```
+
+`search` returns ranked descriptors across MCP servers, built-ins, plugin tools, and Composio in one `{ object, data }` envelope; `describe` returns the full schema for one tool. Both accept `?agent=` or `?kind=` to narrow the results. Agents use this same search-then-describe-then-call loop so they can reach a large tool surface without every tool being loaded up front.
+
+## Connect Composio
+
+Composio gives agents third-party actions across a wide range of apps. It is **searchable, not listed** — it is never registered as an MCP server and never dumped into the full tool list. Instead a capped slice of Composio actions is pulled live into `search()` when a key is configured, and an action is called by its fully-qualified id `composio__<slug>` (for example `composio__GITHUB_CREATE_ISSUE`).
+
+To enable it:
+
+1. Open **Settings → Integrations** and paste your Composio API key. Saving the key makes Composio actions available in search.
+2. In the **agent editor**, add the Composio actions you want to that agent's allowlist.
+
+### The connection-required prompt
+
+Composio actions run against a per-user entity. The first time an agent calls an action for an app you have not yet authorized, Composio returns a connection-required response and Core surfaces it as a `__ryu_elicitation__` envelope — a pause that asks you to log in to that app before the action proceeds. This is the same elicitation pattern the [Identity Vault](/docs/core/identity-vault) uses, so a tool never silently fails on a missing connection.
+
+<Callout type="warn">
+Composio actions require a configured API key. With no key, Composio does not appear in search.
+</Callout>
+
+## Built-in tool servers
+
+Core ships a set of always-on tool servers that need no registration. They appear alongside config-registered servers:
+
+| Server | What it does | Notes |
+|---|---|---|
+| `ghost` | Desktop automation (click, type, screenshot, recipes) | Windows-first; needs the Ghost sidecar installed |
+| `shadow` | Screen and audio capture, search | Windows-first; needs the Shadow sidecar on :3030 |
+| `spider` | Web scraping | Needs the Spider sidecar installed |
+| `exa` | Web search | Set `RYU_EXA_API_KEY`; degrades gracefully when absent |
+| `web_fetch` | Fetch a page, optionally as the logged-in user | Uses [Identity Vault](/docs/core/identity-vault) credentials when bound |
+| `search_conversations` | Semantic search over past chats | See [search and recall](/docs/desktop/user-guide/search-and-recall) |
+| `threads` | Spawn and manage worker conversations | Opt-in per agent; see [coordinator threads](/docs/core/coordinator-threads) |
+| `delegate` | Fan out subtasks to sub-agents in parallel (ephemeral) | For durable workers, use `threads` instead |
+| `skills` | Discover and load Agent Skills on demand | Progressive disclosure via `skills__search` / `skills__load` |
+| `notify` | Show a native desktop notification | |
+| `channel` | Post a message to a Slack or Discord webhook | |
+| `sandbox` | Run WASM/WASI modules with default-deny capabilities | Requires the wasmtime feature; toggle from the Services page |
+
+<Callout type="info">
+Ghost and Shadow are Windows-first and require their respective sidecars. The `threads` tools are allowlist-opt-in — only an agent granted `threads__*` can spawn worker conversations.
+</Callout>
+
+## Where to go next
+
+<Cards>
+  <DocCard href="/docs/core/mcp-registry" />
+  <DocCard href="/docs/core/unified-tool-catalog" />
+  <DocCard href="/docs/core/identity-vault" />
+  <DocCard href="/docs/desktop/user-guide/agents" />
+</Cards>

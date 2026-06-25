@@ -29,10 +29,7 @@ pub fn load_token() -> Option<AuthData> {
 
 pub fn save_token(data: &AuthData) -> Result<()> {
     let path = auth_file_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).context("creating ~/.ryu directory")?;
-    }
-    std::fs::write(&path, serde_json::to_string_pretty(data)?).context("writing auth.json")?;
+    write_secret_file(&path, &serde_json::to_string_pretty(data)?).context("writing auth.json")?;
     Ok(())
 }
 
@@ -70,10 +67,16 @@ pub async fn run_login(backend_url: &str) -> Result<()> {
     let payload: serde_json::Value = resp.json().await.context("invalid JSON from Core")?;
     let auth_url = payload["authUrl"]
         .as_str()
+        .or_else(|| payload["verificationUriComplete"].as_str())
+        .or_else(|| payload["verificationUri"].as_str())
         .ok_or_else(|| anyhow!("no authUrl in Core response"))?;
+    let user_code = payload["userCode"].as_str();
 
     println!("Opening browser for login...");
     println!("If the browser does not open, visit:\n  {auth_url}");
+    if let Some(code) = user_code {
+        println!("Device code: {code}");
+    }
     let _ = open::that(auth_url);
     println!("Waiting for authentication (Ctrl+C to cancel)...");
 
@@ -87,7 +90,11 @@ pub async fn run_login(backend_url: &str) -> Result<()> {
 
     let auth_data = fetch_user_info(backend_url, &token)
         .await
-        .unwrap_or(AuthData { token: token.clone(), email: None, name: None });
+        .unwrap_or(AuthData {
+            token: token.clone(),
+            email: None,
+            name: None,
+        });
 
     save_token(&auth_data)?;
     println!("Authentication successful!");
@@ -112,13 +119,51 @@ async fn poll_core_status(core_url: &str) -> Result<String> {
         {
             if let Ok(data) = r.json::<serde_json::Value>().await {
                 if data["authenticated"].as_bool().unwrap_or(false) {
-                    if let Some(t) = data["token"].as_str() {
-                        return Ok(t.to_owned());
+                    if let Some(auth_data) = load_token() {
+                        return Ok(auth_data.token);
                     }
                 }
             }
         }
     }
+}
+
+fn write_secret_file(path: &std::path::Path, body: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("creating ~/.ryu directory")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+                .context("setting ~/.ryu permissions")?;
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .context("opening auth.json")?;
+        file.write_all(body.as_bytes())
+            .context("writing auth.json")?;
+        file.sync_all().context("syncing auth.json")?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .context("setting auth.json permissions")?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, body).context("writing auth.json")?;
+    }
+
+    Ok(())
 }
 
 // ── Background login for TUI ──────────────────────────────────────────────
@@ -136,8 +181,12 @@ pub fn spawn_login_background(
 
     tokio::spawn(async move {
         match run_login(&backend_url).await {
-            Ok(()) => { let _ = tx.send(LoginEvent::Success); }
-            Err(e) => { let _ = tx.send(LoginEvent::Error(e.to_string())); }
+            Ok(()) => {
+                let _ = tx.send(LoginEvent::Success);
+            }
+            Err(e) => {
+                let _ = tx.send(LoginEvent::Error(e.to_string()));
+            }
         }
     });
 
@@ -164,8 +213,7 @@ async fn fetch_user_info(backend_url: &str, token: &str) -> Result<AuthData> {
 
 // ── Authenticated HTTP helpers ────────────────────────────────────────────
 
-static HTTP: std::sync::LazyLock<reqwest::Client> =
-    std::sync::LazyLock::new(reqwest::Client::new);
+static HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(reqwest::Client::new);
 
 fn extract_error(body: &serde_json::Value) -> &str {
     body.get("error")
@@ -174,7 +222,9 @@ fn extract_error(body: &serde_json::Value) -> &str {
 }
 
 fn require_token() -> Result<AuthData> {
-    load_token().ok_or_else(|| anyhow!("Not logged in. Run `ryu login` or press l in the Account tab to authenticate."))
+    load_token().ok_or_else(|| {
+        anyhow!("Not logged in. Run `ryu login` or press l in the Account tab to authenticate.")
+    })
 }
 
 pub fn require_token_and_url() -> Result<(AuthData, String)> {
@@ -234,28 +284,19 @@ async fn authed_put_json(
 
 // ── Full session (richer than fetch_user_info) ────────────────────────────
 
-pub async fn fetch_full_session(
-    backend_url: &str,
-    token: &str,
-) -> Result<serde_json::Value> {
+pub async fn fetch_full_session(backend_url: &str, token: &str) -> Result<serde_json::Value> {
     authed_get(backend_url, "/api/auth/get-session", token).await
 }
 
 // ── Password status ──────────────────────────────────────────────────────
 
-pub async fn fetch_password_status(
-    backend_url: &str,
-    token: &str,
-) -> Result<serde_json::Value> {
+pub async fn fetch_password_status(backend_url: &str, token: &str) -> Result<serde_json::Value> {
     authed_get(backend_url, "/api/user/password-status", token).await
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────
 
-pub async fn fetch_sessions(
-    backend_url: &str,
-    token: &str,
-) -> Result<Vec<serde_json::Value>> {
+pub async fn fetch_sessions(backend_url: &str, token: &str) -> Result<Vec<serde_json::Value>> {
     let resp = authed_get(backend_url, "/api/sessions", token).await?;
     let sessions = resp
         .get("sessions")
@@ -265,19 +306,12 @@ pub async fn fetch_sessions(
     Ok(sessions)
 }
 
-pub async fn revoke_session(
-    backend_url: &str,
-    token: &str,
-    session_id: &str,
-) -> Result<()> {
+pub async fn revoke_session(backend_url: &str, token: &str, session_id: &str) -> Result<()> {
     authed_delete(backend_url, &format!("/api/sessions/{session_id}"), token).await?;
     Ok(())
 }
 
-pub async fn revoke_all_other_sessions(
-    backend_url: &str,
-    token: &str,
-) -> Result<()> {
+pub async fn revoke_all_other_sessions(backend_url: &str, token: &str) -> Result<()> {
     authed_delete(backend_url, "/api/sessions", token).await?;
     Ok(())
 }
@@ -291,10 +325,7 @@ pub async fn fetch_subscription_status(
     authed_get(backend_url, "/api/billing/subscription-status", token).await
 }
 
-pub async fn fetch_invoices(
-    backend_url: &str,
-    token: &str,
-) -> Result<Vec<serde_json::Value>> {
+pub async fn fetch_invoices(backend_url: &str, token: &str) -> Result<Vec<serde_json::Value>> {
     let resp = authed_get(backend_url, "/api/billing/invoices", token).await?;
     let invoices = resp
         .get("invoices")
@@ -306,11 +337,7 @@ pub async fn fetch_invoices(
 
 // ── Profile ──────────────────────────────────────────────────────────────
 
-pub async fn update_display_name(
-    backend_url: &str,
-    token: &str,
-    name: &str,
-) -> Result<()> {
+pub async fn update_display_name(backend_url: &str, token: &str, name: &str) -> Result<()> {
     authed_put_json(
         backend_url,
         "/api/profile/name",
@@ -337,15 +364,36 @@ pub async fn fetch_auth_info() -> Option<crate::app::AuthInfo> {
     let session = session_res.ok()?;
     let user = session.get("user")?;
 
-    let name = user.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown").to_owned();
-    let email = user.get("email").and_then(|v| v.as_str()).unwrap_or("—").to_owned();
-    let verified = user.get("emailVerified").and_then(|v| v.as_bool()).unwrap_or(false);
-    let two_factor = user.get("twoFactorEnabled").and_then(|v| v.as_bool()).unwrap_or(false);
+    let name = user
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown")
+        .to_owned();
+    let email = user
+        .get("email")
+        .and_then(|v| v.as_str())
+        .unwrap_or("—")
+        .to_owned();
+    let verified = user
+        .get("emailVerified")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let two_factor = user
+        .get("twoFactorEnabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let (has_password, auth_method) = pw_res
         .map(|pw| {
-            let hp = pw.get("hasPassword").and_then(|v| v.as_bool()).unwrap_or(false);
-            let am = pw.get("authMethod").and_then(|v| v.as_str()).unwrap_or("unknown").to_owned();
+            let hp = pw
+                .get("hasPassword")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let am = pw
+                .get("authMethod")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_owned();
             (hp, am)
         })
         .unwrap_or((false, "unknown".to_owned()));

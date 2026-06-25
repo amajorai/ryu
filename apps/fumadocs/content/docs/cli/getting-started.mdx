@@ -1,0 +1,75 @@
+---
+title: "Getting started"
+description: "Build and run the ryu CLI, log in, start a chat, and learn the chat commands and command palette"
+---
+
+This page gets you from a checkout to a running terminal UI. The CLI is the `ryu` binary in the
+`ryu-cli` crate, and it talks to the same Core (`:7980`) the desktop app uses.
+
+<Callout type="info">
+What you need: a running Core on `:7980` and a real TTY. The binary builds and links on its own
+(`cargo build -p ryu-cli`), but the live behaviors (streaming chat, installs, transcripts, judge
+verdicts) all round-trip to Core, so nothing exercises end to end without one. Run the CLI in an
+actual terminal, not a captured or piped context.
+</Callout>
+
+## Build and run
+
+Build the crate, then run the binary with no arguments to open the control-panel TUI:
+
+```bash
+cargo build -p ryu-cli
+ryu
+```
+
+Running `ryu` with a subcommand instead of opening the TUI runs that command and exits. Run it with
+no arguments to get the full terminal UI; run `ryu` with an unknown command (or none in a
+non-interactive context) to print the usage list of subcommands.
+
+## Log in
+
+Authentication goes through Core. Run:
+
+```bash
+ryu login
+```
+
+This opens your browser to authenticate against Core's `/api/auth/login`. On success the token is
+saved to `~/.ryu/auth.json` and reused on later runs. You can also start the same flow from the
+Account tab inside the TUI (press `l`). Related auth subcommands: `whoami`, `sessions`,
+`sessions revoke <id>`, `sessions revoke-all`, `plan`, `account`, and `logout`.
+
+## Start your first chat
+
+Open the TUI (`ryu`), land on the Chat tab, type a message, and press Enter. The CLI mints a stable
+`conversation_id` for the chat and sends it on every turn, so Core persists the conversation: the
+same chat is resumable here and visible in the desktop app. With no agent selected, Core routes to
+its default agent. Press `Ctrl+A` to pick a different agent.
+
+## Chat commands
+
+The typed slash commands available in a chat:
+
+| Command | What it does |
+|---|---|
+| `/goal` | Set or clear a persistent completion condition, then run a judge loop until it is met (capped). |
+| `/check` | Arm the per-turn double-check review for the next turn. |
+| `/model <id>` | Override the model for the turn. |
+| `/team <id>` | Route the turn to an agent team. |
+| `/sessions` | Show the run history of the current conversation. |
+| `/btw` | Ask a quick, ephemeral side question that never enters history. |
+
+## The command palette
+
+Press `Ctrl+P` to open the fuzzy command palette, the terminal analog of the desktop Cmd+K. Type to
+filter, then jump to any tab or run a global action (new chat, sessions, toggle double-check, switch
+node). Two more chords are worth knowing: `Ctrl+A` for the agent picker and `Ctrl+N` for the node
+picker.
+
+## Where to next
+
+<Cards>
+  <DocCard href="/docs/cli/parity" />
+  <DocCard href="/docs/cli/index" />
+  <DocCard href="/docs/core/conversations-sessions" />
+</Cards>

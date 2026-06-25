@@ -24,22 +24,27 @@ gateway.toml          base config (TOML)
 
 ## The config sections
 
-`gateway.toml` has one section per subsystem. Each subsystem documents its own fields on its page;
-this table is the map.
+`gateway.toml` has one section per subsystem.
 
-| Section | Controls | Page |
+| Section | Controls | Documented |
 |---|---|---|
 | `[auth]`, `[[auth.api_keys]]` | Base auth, per-key limits, trusted forwarders | this page |
 | `[providers.*]` | Per-provider API keys and base URLs | [Routing](/docs/gateway/routing) |
 | `[routing]` | Model map, fallback chain, smart routing | [Routing](/docs/gateway/routing) |
 | `[firewall]` | Detection toggles and policy | [Security](/docs/gateway/security) |
-| `[budgets]` | Per-user, per-agent, and per-session token budgets | [Governance](/docs/gateway/governance) |
+| `[budgets]` | Per-user, per-agent, and per-session token budgets | [Reliability](/docs/gateway/reliability) |
 | `[rate_limit]` | Request, token, and burst limits | [Reliability](/docs/gateway/reliability) |
 | `[cache]`, `[semantic_cache]` | Exact and semantic caching | [Reliability](/docs/gateway/reliability) |
+| `[circuit_breaker]` | Per-provider failure thresholds and reset timeout | [Reliability](/docs/gateway/reliability) |
 | `[evals]`, `[audit]` | Sampling and the audit DB path | [Evals and audit](/docs/gateway/evals-audit) |
 | `[compression]` | Egress compression | [Context compression](/docs/gateway/compression) |
 | `[channels.*]` | Bot tokens and webhooks | [Channels](/docs/gateway/channels) |
-| `[control_plane]` | Control-plane URL and gateway key for org policy | [Governance](/docs/gateway/governance) |
+| `[concurrency]` | Local-engine admission control | this page |
+| `[exec_budget]` | Sandbox / tool execution rate caps | this page |
+| `[tools]` | Unified tool loop (search-based) | this page |
+| `[composio]` | Composio integration and action allowlist | this page |
+| `[credits]` | Platform-credits wallet debit hook | this page |
+| `[control_plane]` | Control-plane relay, shared budgets, reporting | this page |
 
 ## Auth and API keys
 
@@ -91,12 +96,160 @@ evade its quota. Set `trusted_forwarder = true` only for an intermediary you con
 relaying a real end-user identity): those keys are allowed to pass `x-ryu-user-id` and
 `x-ryu-agent-id`, which then drive per-user and per-agent budgets (`apps/gateway/src/config.rs`,
 `ApiKeyConfig::trusted_forwarder`). Per-user and per-agent budget rules live under `[budgets]` and
-are documented on [Governance](/docs/gateway/governance).
+are documented on [Reliability](/docs/gateway/reliability).
 
 <Callout type="warn">
 `require_auth` and `master_key` are environment-variable-only by design. The runtime API will not
 change them (see below), preventing an accidental lockout where you disable auth or rotate the
 master key over the wire and lock yourself out.
+</Callout>
+
+## Concurrency
+
+`[concurrency]` admits requests to the **local** inference engine (llama.cpp, Ollama, etc.) up to a
+configured slot limit and queues the rest with priority. Remote providers are not gated. This config
+is **snapshotted at startup** and is not editable over `PUT /v1/config` - a change requires a
+Gateway restart.
+
+```toml
+[concurrency]
+enabled = true
+local_max_in_flight = 4   # match the engine's --parallel slot count
+local_max_queued = 64     # max waiting before 503 engine_overloaded
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | Master switch. When `false`, all local requests pass through ungated |
+| `local_max_in_flight` | `4` | Max concurrent requests to the local provider. Set to your engine's `--parallel`. `0` = unlimited |
+| `local_max_queued` | `64` | Max requests queued before the gateway returns `503 engine_overloaded` |
+
+Interactive requests are served ahead of background fan-out (delegate calls, thread workers, scheduler). The gate is in the Gateway because it governs a shared resource; Core cannot see other callers' in-flight requests.
+
+## Exec budget
+
+`[exec_budget]` limits sandbox runs and MCP tool invocations over a rolling time window. Unlike
+token budgets, this counts executions and wall-clock time, not tokens. Counters reset at each window
+boundary.
+
+```toml
+[exec_budget]
+max_count = 0             # 0 = unlimited
+max_wall_clock_secs = 0   # 0 = unlimited
+window_secs = 3600
+action = "notify"         # "notify" | "stop"
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `max_count` | `0` | Max sandbox/tool executions per `window_secs`. `0` = unlimited |
+| `max_wall_clock_secs` | `0` | Max total execution wall-clock seconds per window. `0` = unlimited |
+| `window_secs` | `3600` | Rolling window size in seconds |
+| `action` | `notify` | `notify` - log but allow; `stop` - deny with `429 budget_exceeded` |
+
+## Tools
+
+`[tools]` controls the unified search-based tool loop on the OpenAI-compat plane. The loop is
+injected only when a request opts in via `x-ryu-tools` / `x-ryu-tool-search`; plain chat streams
+are unaffected.
+
+```toml
+[tools]
+enabled = true
+max_rounds = 6
+describe_top_n = 5
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | Master switch. Also overridable via `GATEWAY_TOOLS_ENABLED` |
+| `max_rounds` | `6` | Maximum tool-call rounds before returning the last turn |
+| `describe_top_n` | `5` | How many top search hits to describe per `tool_search` call |
+| `always_on` | `[]` | Tool definitions always injected for every tool-active request |
+
+## Composio
+
+`[composio]` wires in the Composio action-execution backend. Disabled unless `api_key` is set (or
+`COMPOSIO_API_KEY` is in the environment).
+
+```toml
+[composio]
+enabled = true
+api_key = "..."         # also COMPOSIO_API_KEY
+entity_id = "default"  # also COMPOSIO_ENTITY_ID
+max_rounds = 3
+actions = ["GMAIL_SEND_EMAIL", "GITHUB_CREATE_ISSUE"]
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Auto-enabled when `COMPOSIO_API_KEY` is set |
+| `api_key` | - | Composio API key |
+| `entity_id` | `"default"` | Per-user entity scoping connected accounts. The pipeline prefers `x-ryu-user-id` at runtime |
+| `max_rounds` | `3` | Max agentic loop rounds |
+| `actions` | `[]` | Allowlist of Composio action names the gateway may execute |
+
+## Credits
+
+`[credits]` enables the platform-credits wallet debit hook. After each metered model call, the
+gateway debits the request's org wallet in the control plane. The hook is a no-op when `enabled =
+false` or when no `internal_secret` is configured.
+
+```toml
+[credits]
+enabled = false
+base_url = "http://127.0.0.1:3000/api"  # defaults to control_plane.base_url
+internal_secret = "..."                 # also RYU_CREDITS_INTERNAL_SECRET
+markup_bps = 0                          # platform markup in basis points (0 = pass-through)
+wallet_empty_action = "stop"            # "stop" | "downgrade"
+wallet_empty_downgrade_to = ""
+timeout_ms = 3000
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Master switch. Also `GATEWAY_CREDITS_ENABLED` |
+| `base_url` | inherits `control_plane.base_url` | Credits endpoint base. Also `GATEWAY_CREDITS_URL` |
+| `internal_secret` | - | Shared secret sent as `x-ryu-internal-secret` to authenticate service-to-service debits. Required for the hook to be active. Also `RYU_CREDITS_INTERNAL_SECRET` |
+| `markup_bps` | `0` | Platform markup in basis points applied to `costMicroUsd`. `0` = pass-through at cost. Also `GATEWAY_CREDITS_MARKUP_BPS` |
+| `wallet_empty_action` | `stop` | `stop` - reject next request with `402`; `downgrade` - reroute to `wallet_empty_downgrade_to` |
+| `wallet_empty_downgrade_to` | - | Model to route to on `downgrade`. Falls back to `stop` if unset |
+| `timeout_ms` | `3000` | Per-debit POST timeout in milliseconds |
+
+The debit is **post-call** (after the model call completes) and the budget gate is **pre-call**, so
+an empty wallet blocks the next request rather than the one that exhausted it.
+
+## Control plane
+
+`[control_plane]` connects the gateway to the control-plane API for shared budget reconciliation and
+usage reporting. Disabled unless `gateway_key` is set (or `CONTROL_PLANE_KEY` is in the
+environment).
+
+```toml
+[control_plane]
+enabled = false
+base_url = "http://127.0.0.1:3000/api"  # also CONTROL_PLANE_URL
+gateway_key = "..."                      # also CONTROL_PLANE_KEY; also flips enabled
+report_interval_secs = 60
+audit_limit = 200
+shared_budget_id = ""                    # also CONTROL_PLANE_SHARED_BUDGET_ID
+cost_per_1k_micro_usd = 2000
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Auto-enabled when `CONTROL_PLANE_KEY` is set |
+| `base_url` | `http://127.0.0.1:3000/api` | Control-plane API base URL |
+| `gateway_key` | - | Gateway credential (sent as `X-Gateway-Key`) to authenticate and resolve the org |
+| `report_interval_secs` | `60` | How often to push a usage/audit report |
+| `audit_limit` | `200` | Max audit rows per report push |
+| `shared_budget_id` | - | Optional shared-budget ID to reconcile cross-gateway spend caps through the coordinator |
+| `cost_per_1k_micro_usd` | `2000` | Estimated cost in micro-USD per 1k tokens for spend attribution |
+
+<Callout type="info">
+The `[control_plane]` section handles **reporting and shared budgets only**. Grant validation and
+manifest signing (marketplace governance) are separate endpoints documented on
+[Grants and Manifest Signing](/docs/gateway/governance).
 </Callout>
 
 ## Key environment variables
@@ -112,13 +265,24 @@ These override `gateway.toml` keys at load time. Setting `GATEWAY_MASTER_KEY` al
 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` | OpenAI provider credentials |
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` | Anthropic provider credentials |
 | `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` | OpenRouter provider credentials |
+| `MODAL_API_KEY` / `MODAL_BASE_URL` | Modal serverless GPU provider. Both required; no default URL. Provider is only constructed when both are non-empty |
 | `LOCAL_LLM_URL` | The local engine URL (Core sets this to the active engine) |
 | `CORE_URL` / `CORE_TOKEN` | Reach Core for tool execution (set by Core's `gateway_spawn_env`) |
+| `COMPOSIO_API_KEY` / `COMPOSIO_ENTITY_ID` | Composio integration; `api_key` also flips `composio.enabled` |
+| `CONTROL_PLANE_URL` / `CONTROL_PLANE_KEY` | Control-plane relay; `CONTROL_PLANE_KEY` also flips `control_plane.enabled` |
+| `CONTROL_PLANE_SHARED_BUDGET_ID` | Cross-gateway shared budget coordinator ID |
 | `GATEWAY_FIREWALL_ENABLED` / `GATEWAY_FIREWALL_POLICY` | Firewall toggle and policy |
-| `GATEWAY_COMPRESSION_ENABLED` / `GATEWAY_COMPRESSION_URL` | Egress compression (Core sets these) |
+| `GATEWAY_TOOLS_ENABLED` | Unified tool loop master switch |
+| `GATEWAY_COMPRESSION_ENABLED` / `GATEWAY_COMPRESSION_URL` | Egress compression toggle and service URL |
+| `GATEWAY_COMPRESSION_TOKEN` | Bearer token for the compression service |
+| `GATEWAY_COMPRESSION_TIMEOUT_MS` / `GATEWAY_COMPRESSION_MIN_MESSAGES` | Compression timeout and minimum message count |
+| `GATEWAY_CREDITS_ENABLED` / `GATEWAY_CREDITS_URL` | Credits debit hook toggle and endpoint |
+| `RYU_CREDITS_INTERNAL_SECRET` | Shared secret for service-to-service credit debits |
+| `GATEWAY_CREDITS_MARKUP_BPS` | Platform markup on metered usage in basis points |
 | `GATEWAY_SMART_ROUTING_ENABLED` / `GATEWAY_SMART_ROUTING_MODEL` | Smart routing toggle and classifier |
-| `CONTROL_PLANE_URL` / `CONTROL_PLANE_KEY` | Org policy relay |
-| `TELEGRAM_BOT_TOKEN`, `SLACK_APP_TOKEN`, `DISCORD_BOT_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, … | Channel bot credentials (see [Channels](/docs/gateway/channels)) |
+| `RYU_CRASH_REPORTS_ENABLED` | Opt-out crash reporting (default on). Core forwards the user's desktop privacy preference here |
+| `RYU_DIAGNOSTICS_EXPORT_ENABLED` | OpenTelemetry diagnostics export (default off). Core sets this to `1` when the user enables telemetry |
+| `TELEGRAM_BOT_TOKEN`, `SLACK_APP_TOKEN` + `SLACK_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, `WHATSAPP_ACCESS_TOKEN` | Channel bot credentials (see [Channels](/docs/gateway/channels)) |
 
 ## Runtime config over the API
 
@@ -139,8 +303,6 @@ the running config untouched.
 
 ### What applies live vs on restart
 
-This is the rule that bites, so it is explicit:
-
 | Patch field | Effect |
 |---|---|
 | `firewall` | Hot-swapped live |
@@ -150,6 +312,10 @@ This is the rule that bites, so it is explicit:
 
 The `ModelRouter` holds a snapshot of `RoutingConfig` taken at startup and is not live-swappable, so
 every routing change (model map, fallback chain, smart routing) is a write-then-restart operation.
+
+`[concurrency]` is also snapshotted at startup and is not patchable over the API. Changes to
+`local_max_in_flight` or `local_max_queued` require a Gateway restart.
+
 Provider credentials, `master_key`, and `require_auth` are not writable through `PUT /v1/config` at
 all - they require an environment-variable change.
 

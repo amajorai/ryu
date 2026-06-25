@@ -1,4 +1,4 @@
-// @ryu/protocol — the canonical agent system-prompt "rules" format.
+// @ryuhq/protocol — the canonical agent system-prompt "rules" format.
 //
 // An agent has a single stored `systemPrompt`, but editors present "Instructions"
 // (free-form markdown) and "Rules" (a +/- list of one-liners) as separate UI

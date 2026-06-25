@@ -1,6 +1,6 @@
 // packages/client/src/index.ts
 //
-// Public surface of @ryu/client. Import createRyuClient and any types you need
+// Public surface of @ryuhq/client. Import createRyuClient and any types you need
 // from this single entry point.
 
 export { AgentsAPI } from "./agents";

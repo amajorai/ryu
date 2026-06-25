@@ -89,6 +89,13 @@ pub enum MeetingSource {
 pub struct Meeting {
     pub id: String,
     pub title: String,
+    /// Whether the title was chosen by the user (manual rename) rather than the
+    /// default/auto-generated one. Gates the background auto-namer the same way
+    /// `title_custom` does for conversations: once the user renames a meeting,
+    /// auto-naming from the transcript leaves it alone. Defaults false so older
+    /// rows (and freshly-started meetings with a default title) stay eligible.
+    #[serde(default)]
+    pub title_custom: bool,
     /// The detected meeting app (e.g. `zoom`, `teams`), when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<String>,
@@ -175,24 +182,25 @@ impl MeetingEngine {
     /// Start a new meeting: persist it as `recording` and best-effort tell Shadow
     /// to begin device-local capture (mic + system loopback) streaming chunks
     /// back to `POST /api/meetings/:id/chunk`. Returns the created meeting.
-    ///
-    /// `core_ingest_base` is the URL Shadow should POST chunks to (e.g. Core's own
-    /// reachable base); when `None`, Shadow uses its configured default.
     pub async fn start(
         &self,
         title: String,
         app: Option<String>,
         source: MeetingSource,
-        core_ingest_base: Option<String>,
     ) -> Result<Meeting, String> {
         let now = chrono::Utc::now().to_rfc3339();
+        // A user-supplied start title counts as custom (no auto-rename); an empty
+        // one falls back to the app default and stays eligible for auto-naming
+        // once the transcript gives the model something to work with.
+        let user_titled = !title.trim().is_empty();
         let meeting = Meeting {
             id: format!("mtg_{}", uuid::Uuid::new_v4().simple()),
-            title: if title.trim().is_empty() {
-                default_title(app.as_deref())
-            } else {
+            title: if user_titled {
                 title
+            } else {
+                default_title(app.as_deref())
             },
+            title_custom: user_titled,
             app,
             source,
             status: MeetingStatus::Recording,
@@ -214,8 +222,7 @@ impl MeetingEngine {
         });
         // Best-effort: drive Shadow capture. A missing/absent Shadow must not fail
         // the meeting — the user can also feed chunks from the GUI mic.
-        self.notify_shadow_start(&meeting.id, core_ingest_base)
-            .await;
+        self.notify_shadow_start(&meeting.id).await;
         Ok(meeting)
     }
 
@@ -394,15 +401,9 @@ impl MeetingEngine {
 
     // ---- Shadow capture control (best-effort) -----------------------------
 
-    async fn notify_shadow_start(&self, meeting_id: &str, core_ingest_base: Option<String>) {
+    async fn notify_shadow_start(&self, meeting_id: &str) {
         let url = format!("{}/meeting/start", shadow_url().trim_end_matches('/'));
-        let mut body = serde_json::json!({ "meeting_id": meeting_id });
-        if let Some(base) = core_ingest_base {
-            body["ingest_url"] = serde_json::json!(format!(
-                "{}/api/meetings/{meeting_id}/chunk",
-                base.trim_end_matches('/')
-            ));
-        }
+        let body = serde_json::json!({ "meeting_id": meeting_id });
         if let Err(e) = self
             .http
             .post(&url)

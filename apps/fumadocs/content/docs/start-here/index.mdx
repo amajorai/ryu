@@ -1,44 +1,40 @@
 ---
-title: Overview
-description: The orchestration and control layer for AI agents.
+title: Start Here
+description: Install Ryu, understand how the pieces fit together, and send your first message.
 ---
 
-**Agents are powerful. Using them shouldn't be.**
+This section takes you from zero to a working agent. You will install the desktop app, learn the
+two-service split that every request flows through, and understand how Ryu stays engine-agnostic
+by design. Nothing here is aspirational - every step maps to a surface you can open today.
 
-Ryu is end-to-end managed infrastructure for AI agents, the whole car built around the engines that
-already exist (OpenAI, Claude Code, Gemma, any OpenAI-compatible runtime).
+<Callout type="info">
+  New to Ryu? Start with [Getting Started](/docs/start-here/getting-started) and come back to
+  Architecture once you have sent your first message.
+</Callout>
 
-## What Ryu offers
-
-- **For individuals and small teams** - Download, pick an agent, go. No terminal, no API keys, no MCP
-  wiring.
-- **For developers** - One config change puts a gateway firewall in front of any agent you already
-  run.
-- **For businesses** - We audit, build, deploy, and host; ship bots into Telegram, Slack, WhatsApp,
-  and Discord.
-
-## Start here
+## Set up
 
 <Cards>
   <DocCard href="/docs/start-here/getting-started" />
+  <DocCard href="/docs/start-here/getting-started/install-sidecar" />
+  <DocCard href="/docs/start-here/getting-started/first-chat" />
+</Cards>
+
+## Understand the architecture
+
+<Cards>
   <DocCard href="/docs/start-here/architecture" />
-  <DocCard href="/docs/using-ryu/user-guide" />
+  <DocCard href="/docs/start-here/architecture/why-ryu" />
+  <DocCard href="/docs/start-here/architecture/core-vs-gateway" />
+  <DocCard href="/docs/start-here/architecture/runnable-model" />
+  <DocCard href="/docs/start-here/architecture/batteries-included" />
 </Cards>
 
-## Go deep
+## Essentials guides
 
 <Cards>
-  <DocCard href="/docs/core" />
-  <DocCard href="/docs/using-ryu/engines" />
-  <DocCard href="/docs/using-ryu/models" />
-  <DocCard href="/docs/using-ryu/skills" />
-  <DocCard href="/docs/gateway" />
-  <DocCard href="/docs/develop/api-reference" />
-</Cards>
-
-## Build on Ryu
-
-<Cards>
-  <DocCard href="/docs/develop/extensions" />
-  <DocCard href="/docs/develop/sdk" />
+  <DocCard href="/docs/start-here/essentials/what-is-ryu" />
+  <DocCard href="/docs/start-here/essentials/install-and-setup" />
+  <DocCard href="/docs/start-here/essentials/your-first-chat" />
+  <DocCard href="/docs/start-here/essentials/your-first-agent" />
 </Cards>

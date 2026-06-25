@@ -1333,6 +1333,19 @@ impl GatewayConfig {
                 config.compression.token = Some(token);
             }
         }
+        // The compression *service* is plugin-defined: Core forwards the policy
+        // definition's `timeout_ms` / `min_messages` here so the whole config is
+        // data-driven (any compression plugin, not just the bundled headroom one).
+        if let Ok(raw) = std::env::var("GATEWAY_COMPRESSION_TIMEOUT_MS") {
+            if let Ok(v) = raw.trim().parse::<u64>() {
+                config.compression.timeout_ms = v;
+            }
+        }
+        if let Ok(raw) = std::env::var("GATEWAY_COMPRESSION_MIN_MESSAGES") {
+            if let Ok(v) = raw.trim().parse::<usize>() {
+                config.compression.min_messages = v;
+            }
+        }
 
         // Unified tool loop (#475). The client is keyed off CORE_URL (above);
         // this only toggles the master switch (default true).

@@ -66,7 +66,7 @@ The worker's agent and working folder are resolved from its stored conversation 
 (`apps/core/src/sidecar/agent_runner.rs`) into `adapters::run_text_turn_in`. The worktree is
 created lazily and reused across turns by `route_chat_stream`'s persistent-session logic, keyed on
 `conversation_id`, so a worker keeps the same checkout across instructions. See
-[Git Workspace](/docs/using-ryu/user-guide/git-workspace) for how per-conversation worktrees work.
+[Git Workspace](/docs/desktop/user-guide/git-workspace) for how per-conversation worktrees work.
 
 ```mermaid
 sequenceDiagram
@@ -127,7 +127,7 @@ surfaces the working folder, while the worktree itself is created lazily on the 
 
 <Cards>
   <DocCard href="/docs/core/conversations-sessions" />
-  <DocCard href="/docs/using-ryu/user-guide/git-workspace" />
+  <DocCard href="/docs/desktop/user-guide/git-workspace" />
   <DocCard href="/docs/core/unified-tool-catalog" />
   <DocCard href="/docs/core/agent-teams" />
 </Cards>

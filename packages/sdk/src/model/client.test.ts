@@ -1,7 +1,7 @@
 /**
  * Unit tests for the gateway-mandatory model client (TS layer).
  *
- * The transport is now the Rust core (`@ryu/sdk-native` → `crates/ryu-sdk`), so
+ * The transport is now the Rust core (`@ryuhq/sdk-native` → `crates/ryu-sdk`), so
  * the wire-shape and SSE-parsing assertions live in the Rust crate's tests
  * (`cargo test -p ryu-sdk`) — they cannot be exercised here by mocking JS
  * `fetch`, because the native client uses reqwest, not `fetch`. These tests

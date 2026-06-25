@@ -377,10 +377,25 @@ impl Sidecar for TailscaleManager {
                     "up".to_owned(),
                     format!("--authkey=file:{}", keyfile.display()),
                 ];
-                if let Some(login) = std::env::var(ENV_LOGIN_SERVER)
+                // Env var takes precedence; fall back to the persisted pref so
+                // the desktop UI setting is honoured without restarting Core.
+                let login_server = std::env::var(ENV_LOGIN_SERVER)
                     .ok()
-                    .filter(|s| !s.is_empty())
-                {
+                    .filter(|s| !s.is_empty());
+                let login_server = if login_server.is_some() {
+                    login_server
+                } else {
+                    match crate::server::preferences::PreferencesStore::open_default() {
+                        Ok(store) => store
+                            .get("mesh-login-server")
+                            .await
+                            .ok()
+                            .flatten()
+                            .filter(|s| !s.is_empty()),
+                        Err(_) => None,
+                    }
+                };
+                if let Some(login) = login_server {
                     up_args.push(format!("--login-server={login}"));
                 }
                 let bin = tailscale_bin();

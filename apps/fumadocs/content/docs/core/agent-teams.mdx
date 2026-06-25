@@ -7,7 +7,7 @@ A team is a persisted, ordered collection of agent ids plus a coordination strat
 
 A team is not an agent. It is a thin record (`apps/core/src/teams/mod.rs`) over a list of agent ids; the orchestration that interprets the strategy lives in Core's chat path (`apps/core/src/sidecar/adapters/mod.rs`). Because Core is the layer that decides what runs, teams live in Core, not the Gateway.
 
-For the desktop how-to (creating a team, dragging agents in, `@team` mentions), see [Teams (user guide)](/docs/using-ryu/user-guide/teams). This page is the reference for the store, the strategies, and the dispatch.
+For the desktop how-to (creating a team, dragging agents in, `@team` mentions), see [Teams (user guide)](/docs/desktop/user-guide/teams). This page is the reference for the store, the strategies, and the dispatch.
 
 ## TeamStore
 
@@ -77,7 +77,7 @@ flowchart TD
 
 In the merged output, each member block is prefixed with a bold `**Name**` markdown header (and a qualifier such as `(synthesis)`, `(routed)`, for those strategies). An empty member reply renders as `_(no response)_` and an errored member as `_(error: ...)_`, so one member failing never aborts the whole team turn.
 
-Team members run with auto-recall off: one user message fanned out to N members would otherwise trigger N redundant retrievals on the same query. See [Search and recall](/docs/using-ryu/user-guide/search-and-recall) for where recall is wired (the single-agent chat handler).
+Team members run with auto-recall off: one user message fanned out to N members would otherwise trigger N redundant retrievals on the same query. See [Search and recall](/docs/desktop/user-guide/search-and-recall) for where recall is wired (the single-agent chat handler).
 
 <Callout type="info">
 A team turn invokes each member through the standard chat path, so a member's own engine, tools, skills, and Gateway routing all apply. Full member replies require a running engine or Gateway; CRUD and dispatch are verified headlessly, but the model output of a member is the normal ACP / OpenAI-compat path.
@@ -86,7 +86,7 @@ A team turn invokes each member through the standard chat path, so a member's ow
 ## Related
 
 <Cards>
-  <DocCard href="/docs/using-ryu/user-guide/teams" />
+  <DocCard href="/docs/desktop/user-guide/teams" />
   <DocCard href="/docs/core/conversations-sessions" />
   <DocCard href="/docs/core/delegation" />
   <DocCard href="/docs/gateway/channels" />

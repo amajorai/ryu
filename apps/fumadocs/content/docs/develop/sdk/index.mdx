@@ -1,23 +1,22 @@
 ---
-title: "SDK Reference (@ryu/sdk)"
-description: "The full @ryu/sdk surface: the Runnable factories, the gateway-mandatory model client, the MCP bridge, and the CLI."
+title: "TypeScript SDK Reference"
+description: "The full @ryuhq/sdk surface: the Runnable factories, the gateway-mandatory model client, the MCP bridge, and the CLI."
 ---
 
-`@ryu/sdk` (`packages/sdk/`) is Ryu's own developer SDK. You author Runnables (agents, workflows,
+`@ryuhq/sdk` (`packages/sdk/`) is Ryu's developer SDK. You author Runnables (agents, workflows,
 tools, and skills) as typed TypeScript, declare them in a `plugin.json`, and pack the result into a
-publish-ready bundle. The SDK references patterns from Mastra, the Vercel AI SDK, and ACP but
-depends on none of them, which is the point: building on theirs would defeat the "build your own
-agent" differentiation. The one invariant is that **every model call routes through the Gateway**.
+publish-ready bundle. The one invariant is that **every model call routes through the Gateway**.
 
-This is the exhaustive API reference. For a guided walkthrough that builds a plugin end to end, see
+This is the API reference. For a guided walkthrough that builds a plugin end to end, see
 [TypeScript SDK](/docs/develop/extensions/typescript-sdk). For the `plugin.json` schema, lifecycle
 endpoints, and signing, see [Plugin manifests](/docs/develop/extensions/plugin-json-manifest) and
 the [Plugin API](/docs/develop/sdk/plugin-api).
 
 <Callout type="warn">
-  The public npm release is in progress. Inside the Ryu monorepo `@ryu/sdk` resolves as
-  `workspace:*`; the package version is `0.1.0`. The model client depends on the native addon
-  `@ryu/sdk-native` (`workspace:*`), so a model call only runs where that addon has been built.
+  The public npm release is in progress. Inside the Ryu monorepo `@ryuhq/sdk` resolves as
+  `workspace:*`; the package version is `0.0.1`. The model client depends on the native addon
+  `@ryuhq/sdk-native` (`workspace:*`, version `0.1.0`), so a model call only runs where that addon
+  has been built.
 </Callout>
 
 ## Package layout
@@ -131,11 +130,9 @@ function defineTool<TInput extends Record<string, unknown>, TOutput>(options: {
 ```
 
 Creates a `kind: "tool"` Runnable with a JSON Schema. The input is validated against the schema at
-`run` time (`packages/sdk/src/runnable/tool.ts`), so a missing required field or a primitive-type
-mismatch throws a descriptive `Error` naming the failing field before the body executes. The schema
-shape mirrors Core's `ToolInfo.schema` (`apps/core/src/sidecar/adapters/mod.rs`), so a `defineTool`
-output is forwarded to Core's MCP/ACP layer with no transformation. Tools do not require a model
-call, but if one is needed it must use `ctx.gateway`.
+`run` time, so a missing required field or a primitive-type mismatch throws a descriptive `Error`
+naming the failing field before the body executes. Tools do not require a model call, but if one is
+needed it must use `ctx.gateway`.
 
 `ToolRunnable` extends `Runnable` with a public `schema` field. The schema types are:
 
@@ -172,9 +169,8 @@ stateless, but its job is a reusable prompt rather than a side-effectful functio
 ## The model client
 
 `defineModel` builds a gateway-mandatory `ModelClient` (`packages/sdk/src/model/client.ts`). The
-client is a thin TypeScript wrapper over the `@ryu/sdk-native` addon, whose `ModelClient` is the
-`crates/ryu-sdk` Rust core. That means URL/token resolution and egress enforcement are the exact
-same implementation used by the Go and Python bindings and by Core itself, with no drift.
+client is a thin TypeScript wrapper over the `@ryuhq/sdk-native` addon, whose `ModelClient` is the
+`crates/ryu-sdk` Rust core.
 
 ```typescript
 function defineModel(modelId: string, options?: {
@@ -259,8 +255,8 @@ The Zod schemas and helpers behind the builders are also exported:
 | `validatePluginId(id)` | plugin-id format check |
 
 `RunnableKindSchema` enumerates only the four authorable kinds because that is the SDK surface. Core
-validates all eight `RunnableKind` variants. The manifest schema itself is documented once, on
-[Plugin manifests](/docs/develop/extensions/plugin-json-manifest); do not duplicate field tables here.
+validates all eight `RunnableKind` variants. The manifest schema itself is documented on
+[Plugin manifests](/docs/develop/extensions/plugin-json-manifest).
 
 ## MCP bridge
 
@@ -281,7 +277,7 @@ await server.serve();   // reads stdin, writes stdout until EOF
 ```
 
 The stateless client functions spawn a server, complete the handshake, make one call, and tear the
-process down (the same per-request pattern Core uses):
+process down:
 
 ```typescript
 function listTools(cmd: McpStdioCommand): Promise<McpTool[]>;
@@ -307,13 +303,11 @@ The `ryu` CLI (`packages/sdk/src/cli.ts`) is installed as the `ryu` bin and has 
 | `bunx ryu dev <entry>` | run a Runnable module locally with an interactive chat loop |
 
 `ryu pack` validates against `PluginManifestSchema` and exits non-zero with the failing field path
-on any error. `ryu publish` always publishes as kind `plugin` (a skill-kind publish would be
-uninstallable, since the skill install path needs an `install_source` a manifest does not carry),
-requires `RYU_AUTH_TOKEN`, and POSTs to `POST /api/marketplace/publish` (base URL
-`RYU_MARKETPLACE_API_URL`, else `http://localhost:3000`); the item lands `pending` until a moderator
-approves it. `ryu dev` resolves the gateway URL the same way `ModelClient` does, imports your module,
-and starts a terminal REPL that surfaces text, tool-call, tool-result, and error events; it fails
-non-zero with a clear message if the Gateway is unreachable, never falling back to a provider.
+on any error. `ryu publish` requires `RYU_AUTH_TOKEN` and POSTs to `POST /api/marketplace/publish`
+(base URL `RYU_MARKETPLACE_API_URL`, else `http://localhost:3000`); the item lands `pending` until a
+moderator approves it. `ryu dev` resolves the gateway URL the same way `ModelClient` does, imports
+your module, and starts a terminal REPL; it fails non-zero with a clear message if the Gateway is
+unreachable, never falling back to a provider.
 
 Publishing is governed by the Gateway (grant validation and manifest signing). See
 [Marketplace](/docs/develop/extensions/marketplace) for the full publish flow.
@@ -326,8 +320,7 @@ npx create-ryu-app my-extension
 
 `create-ryu-app` (`packages/create-ryu-app/`) generates a starter project: a `plugin.json` validated
 against the manifest schema, a `package.json` with `dev` and `pack` scripts, and a starter agent in
-`src/agent.ts` that streams one turn through the local Gateway. The project name must match
-`/^[a-z0-9][a-z0-9-_]*$/i`.
+`src/agent.ts` that streams one turn through the local Gateway.
 
 ## Next
 

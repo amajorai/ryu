@@ -56,8 +56,6 @@ export type MeetingEvent =
 
 export interface StartMeetingInput {
 	app?: string;
-	/** Base URL Shadow should POST captured chunks back to (defaults to local). */
-	ingest_base?: string;
 	source?: MeetingSource;
 	title?: string;
 }

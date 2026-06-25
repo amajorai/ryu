@@ -4,14 +4,16 @@ import { useSearchContext } from "fumadocs-ui/contexts/search";
 import {
   ArrowRight,
   BookOpen,
-  ChefHat,
-  Code,
+  Code2,
   Cpu,
   GraduationCap,
   type LucideIcon,
+  Monitor,
   Rocket,
   Search,
-  ShieldCheck,
+  Shield,
+  Smartphone,
+  Terminal,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -30,30 +32,48 @@ const REALMS: Realm[] = [
   {
     slug: "start-here",
     title: "Start Here",
-    description: "Orientation, install, and the big picture.",
+    description:
+      "Install Ryu, understand how the pieces fit together, and send your first message.",
     icon: Rocket,
     accent: "var(--start-here-color)",
   },
   {
-    slug: "using-ryu",
-    title: "Using Ryu",
-    description: "Run agents day to day: the app, engines, models, and skills.",
-    icon: BookOpen,
-    accent: "var(--using-ryu-color)",
+    slug: "desktop",
+    title: "Desktop",
+    description:
+      "The flagship app and its companions (Island, extension, Raycast): chat, agents, teams, engines, and more.",
+    icon: Monitor,
+    accent: "var(--desktop-color)",
+  },
+  {
+    slug: "cli",
+    title: "CLI",
+    description:
+      "The Rust terminal UI: chat, a fuzzy command palette, live list tabs, and GitOps from your shell.",
+    icon: Terminal,
+    accent: "var(--cli-color)",
+  },
+  {
+    slug: "mobile",
+    title: "Mobile",
+    description:
+      "The Expo app: chat and a drawer of screens over the same Core, through the active node.",
+    icon: Smartphone,
+    accent: "var(--mobile-color)",
   },
   {
     slug: "cookbook",
     title: "Cookbook",
     description:
-      "Real, end-to-end recipes: the app, the SDK, the CLI, and the gateway.",
-    icon: ChefHat,
+      "End-to-end recipes: agents, routing, deployments, multi-node, and channel bots.",
+    icon: BookOpen,
     accent: "var(--cookbook-color)",
   },
   {
     slug: "academy",
     title: "Academy",
     description:
-      "Learn Ryu the structured way, from first chat to certified builder.",
+      "Structured courses from first chat to certified builder, with knowledge checks.",
     icon: GraduationCap,
     accent: "var(--academy-color)",
   },
@@ -61,23 +81,24 @@ const REALMS: Realm[] = [
     slug: "gateway",
     title: "Gateway",
     description:
-      "The moat: routing, firewall, PII/DLP, budgets, evals, and audit.",
-    icon: ShieldCheck,
+      "The LLM control plane: routing, firewall, budgets, evals, and audit.",
+    icon: Shield,
     accent: "var(--gateway-color)",
   },
   {
     slug: "core",
-    title: "Core internals",
+    title: "Core",
     description:
-      "Orchestration: sessions, memory, RAG, workflows, sandboxes, and MCP.",
+      "Local backend internals: sessions, memory, RAG, workflows, sandboxes, and MCP.",
     icon: Cpu,
     accent: "var(--core-color)",
   },
   {
     slug: "develop",
     title: "Develop",
-    description: "Build on Ryu: extensions, the SDK, and the HTTP API.",
-    icon: Code,
+    description:
+      "Build on Ryu: TypeScript SDK, Rust SDK, plugin manifests, and the full API reference.",
+    icon: Code2,
     accent: "var(--develop-color)",
   },
 ];
@@ -106,11 +127,10 @@ type Stat = {
 };
 
 const STATS: Stat[] = [
-  { id: "guides", value: "128", label: "hand-written guides" },
+  { id: "guides", value: "285", label: "hand-written guides" },
   { id: "endpoints", value: "176", label: "API endpoints" },
-  { id: "realms", value: "7", label: "themed realms" },
-  { id: "diagrams", value: "34", label: "architecture diagrams" },
-  { id: "lessons", value: "21", label: "interactive lessons" },
+  { id: "sections", value: "9", label: "documentation sections" },
+  { id: "diagrams", value: "36", label: "architecture diagrams" },
 ];
 
 type Featured = {
@@ -136,15 +156,15 @@ const FEATURED: Featured[] = [
     id: "gateway",
     href: "/docs/gateway",
     eyebrow: "Gateway",
-    title: "The moat: govern every model call",
+    title: "The control plane: govern every model call",
     description:
-      "Routing, firewall, PII/DLP, budgets, evals, and audit: what is allowed, shared, and paid for.",
+      "Routing, firewall, budgets, evals, and audit: what is allowed, shared, and paid for.",
     accent: "var(--gateway-color)",
   },
   {
     id: "workflows",
     href: "/docs/core/workflows",
-    eyebrow: "Core internals",
+    eyebrow: "Core",
     title: "Workflows and the DAG engine",
     description:
       "Compose agents, tools, and sub-workflows into durable, resumable runs with retries and HITL gates.",
@@ -184,7 +204,7 @@ function SearchTrigger() {
         className="size-5 shrink-0 text-fd-muted-foreground transition-colors group-hover:text-fd-foreground"
       />
       <span className="flex-1 text-base text-fd-muted-foreground">
-        Search 128 guides and 176 endpoints…
+        Search 285 guides and 176 endpoints…
       </span>
       <kbd className="hidden shrink-0 items-center gap-1 rounded-md bg-fd-background px-2 py-1 font-medium font-mono text-fd-muted-foreground text-xs sm:inline-flex">
         {isMac ? "⌘" : "Ctrl"} K
@@ -303,13 +323,15 @@ export function Realms() {
         className="font-heading font-medium text-fd-foreground text-xl"
         id="realms-heading"
       >
-        Explore by realm
+        Explore the docs
       </h2>
       <p className="mt-1 text-fd-muted-foreground text-sm">
-        Seven themed sections, each with its own accent and depth.
+        Nine sections, one per surface and plane: get started, the desktop app,
+        CLI, mobile, the Gateway control plane, Core internals, the SDK, recipes,
+        and the Academy.
       </p>
       <nav
-        aria-label="Documentation realms"
+        aria-label="Documentation sections"
         className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
       >
         {REALMS.map((realm) => (

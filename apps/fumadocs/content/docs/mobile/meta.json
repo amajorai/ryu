@@ -1,0 +1,10 @@
+{
+  "root": true,
+  "title": "Mobile",
+  "description": "The Expo / React Native app: chat and roughly ten drawer screens over the same Core HTTP API, reached through the active node, sharing the `packages/core-client` layer with desktop.",
+  "icon": "smartphone",
+  "pages": [
+    "mobile/index.mdx",
+    "mobile/parity.mdx"
+  ]
+}

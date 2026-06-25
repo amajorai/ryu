@@ -23,7 +23,7 @@ Embeddings are a swappable default. Core can embed in two ways
 (`apps/core/src/server/retrieval.rs`):
 
 - **Local** - a deterministic, dependency-free embedder, or the local llama.cpp embedding sidecar
-  (`llamacpp-embed` on `:8081`, see [Engines](/docs/using-ryu/engines/chat-engines)) which serves the bundled
+  (`llamacpp-embed` on `:8081`, see [Engines](/docs/desktop/engines/chat-engines)) which serves the bundled
   nomic embedding model for real semantic vectors.
 - **Remote** - any OpenAI-compatible embeddings endpoint, configured through the registry
   (`RYU_EMBED_BASE_URL` and related fields).

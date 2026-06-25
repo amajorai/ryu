@@ -78,13 +78,16 @@ pub const SYSTEM_PLUGINS: &[SystemPlugin] = &[
 ///   dogfood (#448) declared as an `engine` runnable.
 /// - `ghost`/`shadow` are sidecar-managed (their own lifecycle), Core-tier so
 ///   the store groups them with the first-party set.
-/// - `firewall`/`routing`/`sandbox`/`headroom` are Core-tier but **opt-in**
-///   (they change gateway/sandbox behaviour), so they are NOT in
-///   [`CORE_DEFAULT_ON`].
+/// - `firewall`/`routing`/`sandbox` are Core-tier but **opt-in** (they change
+///   gateway/sandbox behaviour), so they are NOT in [`CORE_DEFAULT_ON`].
+/// - `headroom` (egress compression) is deliberately **Community-tier**: the
+///   compression *service* is the plugin and Core only hosts the gateway
+///   transform, so it is install-then-enable from the marketplace exactly like a
+///   third-party compression plugin would be. The bundled fixture is our
+///   reference; nothing about the service is hardcoded.
 pub const CORE_PLUGINS: &[&str] = &[
     "io.ryu.ghost",
     "io.ryu.shadow",
-    "io.ryu.headroom",
     "io.ryu.firewall",
     "io.ryu.routing",
     "io.ryu.sandbox",

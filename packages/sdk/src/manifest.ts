@@ -11,7 +11,7 @@
  * known provider literals.  A new provider must never require an SDK change.
  */
 
-import * as nativeAddon from "@ryu/sdk-native";
+import * as nativeAddon from "@ryuhq/sdk-native";
 import { z } from "zod";
 
 // ── RunnableKind ─────────────────────────────────────────────────────────────
@@ -63,6 +63,40 @@ export const CompanionSurfaceSchema = z.object({
 
 export type CompanionSurface = z.infer<typeof CompanionSurfaceSchema>;
 
+// ── Contributes (turn hooks + declarative UI) ────────────────────────────────
+
+/**
+ * A server-side chat turn hook. Mirrors `TurnHookContribution` in
+ * `apps/core/src/plugin_manifest/mod.rs`. `code` is a JS body run in the plugin
+ * sandbox with `ctx` + `host` in scope; it returns a directive. Authors usually
+ * build this via `defineTurnHook` rather than writing the string by hand.
+ */
+export const TurnHookContributionSchema = z.object({
+	/** Stable id for this hook (unique within the plugin). */
+	id: z.string().min(1),
+	/** Turn boundary this fires on. Today only `"post_assistant_turn"`. */
+	on: z.string().min(1).default("post_assistant_turn"),
+	/** The JS hook body executed in the sandbox (returns a directive). */
+	code: z.string().min(1),
+});
+
+export type TurnHookContribution = z.infer<typeof TurnHookContributionSchema>;
+
+/**
+ * The `contributes` block. Mirrors `Contributes` in
+ * `apps/core/src/plugin_manifest/mod.rs`. The declarative UI surfaces
+ * (`composer_controls` / `settings_tabs` / `slash_commands`) are passed verbatim
+ * to the desktop renderer, so they are typed loosely here (records).
+ */
+export const ContributesSchema = z.object({
+	turn_hooks: z.array(TurnHookContributionSchema).default([]),
+	composer_controls: z.array(z.record(z.string(), z.unknown())).default([]),
+	settings_tabs: z.array(z.record(z.string(), z.unknown())).default([]),
+	slash_commands: z.array(z.record(z.string(), z.unknown())).default([]),
+});
+
+export type Contributes = z.infer<typeof ContributesSchema>;
+
 // ── PluginManifest ───────────────────────────────────────────────────────────
 
 /**
@@ -108,11 +142,24 @@ export const PluginManifestSchema = z.object({
 	 * Absent when the plugin has no Companion surface.
 	 */
 	companion: CompanionSurfaceSchema.optional(),
+
+	/**
+	 * VS-Code-style activation events (`"*"`, `"onStartup"`, `"onChat"`,
+	 * `"onCommand:<id>"`). Empty = eager. Turn-hook plugins are driven by their
+	 * enabled flag, so `["*"]` is the usual value.
+	 */
+	activation_events: z.array(z.string()).default([]),
+
+	/**
+	 * Contribution points: server-side turn hooks + declarative UI widgets.
+	 * Absent for a plugin that contributes nothing here.
+	 */
+	contributes: ContributesSchema.optional(),
 });
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;
 
-// ── Rust-cored validation helpers (via @ryu/sdk-native) ───────────────────────
+// ── Rust-cored validation helpers (via @ryuhq/sdk-native) ───────────────────────
 //
 // These delegate to the `crates/ryu-sdk` Rust core through the native addon, so
 // they apply the *exact same* rules Core enforces on load. Note: Core's manifest

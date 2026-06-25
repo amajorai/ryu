@@ -1,142 +1,79 @@
 ---
-title: Build an Extension
-description: Three ways to extend Ryu - MCP servers, plugin.json plugin manifests, and the TypeScript SDK.
+title: Extensions Overview
+description: Three ways to extend Ryu - MCP servers, plugin.json manifests, and the TypeScript SDK.
 ---
 
 Ryu is built so that **nothing is hardcoded and everything is swappable**. Extending it means
 adding new capabilities - tools, agents, workflows, skills - that plug into the same Core and
-Gateway every built-in uses. There are three ways to do it today, in increasing order of
-structure.
+Gateway every built-in uses. There are three paths, in increasing order of structure.
 
 ## Three ways to extend Ryu
 
 1. **MCP server** - expose any tool over the Model Context Protocol. No manifest, no SDK, no
    restart required. Register it with Core and its tools become callable from chat immediately.
-   This is the fastest path and the one the [headroom](/docs/develop/extensions/mcp-server) worked
-   example uses.
-2. **`plugin.json` plugin manifest** - bundle one or more Runnables (tools, agents, workflows,
-   skills) plus the permission grants they need into a single installable plugin. Core validates
-   the manifest, writes it to disk, and hot-reloads it with no restart.
-3. **TypeScript SDK (`@ryu/sdk`)** - define agents, workflows, tools, and skills as typed
+   This is the fastest path and the one the [MCP server guide](/docs/develop/extensions/mcp-server)
+   worked example uses.
+
+2. **`plugin.json` manifest** - bundle one or more Runnables (tools, agents, workflows, skills)
+   plus the permission grants they need into a single installable plugin. Core validates the
+   manifest, writes it to disk, and hot-reloads it with no restart.
+
+3. **TypeScript SDK (`@ryuhq/sdk`)** - define agents, workflows, tools, and skills as typed
    Runnables in code, with the Gateway mandatory on every model call. Scaffold a project with
    `create-ryu-app`, author Runnables with `defineAgent` / `defineTool` / `defineSkill`, and
-   pack them into a `plugin.json` with `ryu pack`.
+   pack them into a `plugin.json` with `bunx ryu pack`.
 
 ## When to use each
 
-| You want to… | Use |
+| You want to... | Use |
 |---|---|
-| Expose a single tool or a small toolset fast | MCP server |
-| Wrap an existing process / language (Python, Go, anything that speaks stdio) | MCP server |
-| Ship a named, versioned, installable bundle of related Runnables | `plugin.json` manifest |
+| Expose a single tool or small toolset quickly | MCP server |
+| Wrap an existing process in any language (Python, Go, stdio) | MCP server |
+| Ship a named, versioned, installable bundle of Runnables | `plugin.json` manifest |
 | Declare permission grants the Gateway should enforce | `plugin.json` manifest |
 | Author agents/workflows in typed TypeScript with Gateway-routed model calls | TypeScript SDK |
-| Validate and package a plugin for distribution | TypeScript SDK (`ryu pack`) |
+| Validate and package a plugin for distribution | TypeScript SDK (`bunx ryu pack`) |
 
-An MCP server and a `plugin.json` manifest are not exclusive: headroom ships both. The MCP server
-is the executable that exposes the tools; the manifest is the install/lifecycle description of
-the same surface.
+An MCP server and a `plugin.json` manifest are not mutually exclusive. The MCP server is the
+executable that exposes the tools; the manifest is the install and lifecycle wrapper for the
+same surface.
 
-## Desktop extension host (UI plugins)
+## Quick start
 
-The three paths above all extend Core: tools, agents, workflows that run headless. A fourth,
-newer path lets a plugin contribute **desktop UI** - a route, a command, a settings section - and
-have it render inside the desktop app. This is the desktop extension host (`#446`), and it is the
-first concrete piece of the plugin runtime that earlier drafts of these docs marked design-only.
+```bash
+bunx create-ryu-app my-plugin
+cd my-plugin
+bun install
+bunx ryu pack   # produces plugin.json
+```
 
-### How a plugin's UI renders, safely
+The scaffolded project includes a starter Runnable, a gateway-pointed model config, and a
+`plugin.json` manifest ready to load into Core.
 
-`apps/desktop/src/contributions/host/ExtensionHost.tsx` renders a plugin's UI in a sandboxed,
-null-origin `<iframe>`. The frame uses `sandbox="allow-scripts"` **without** `allow-same-origin`,
-so it runs at a null origin: it cannot read the parent DOM, cannot touch app storage, and does
-**not** receive `window.__TAURI__` (Tauri injects IPC into the app's own webview, not a
-null-origin sandboxed frame). The plugin never holds a Core node token or a Tauri IPC handle.
-The only way out of the sandbox is the host RPC bridge, and every call across it is grant-gated.
+## Desktop UI contributions
 
-The bridge is established with a verified handshake:
-
-1. The host bakes a one-time `nonce` into the frame's document.
-2. The frame posts a `ryu-plugin-ready` message echoing that nonce.
-3. The host accepts the handshake only when the message both echoes the nonce **and** comes from
-   that exact frame (`event.source === iframe.contentWindow`). Because the frame is null-origin,
-   `event.origin` is the literal string `"null"` and is intentionally not used as the auth check.
-4. The host creates a `MessageChannel`, transfers `port2` into the frame, and runs all subsequent
-   RPC over `port1`.
-
-### Capability-gated RPC
-
-`apps/desktop/src/contributions/host/rpc.ts` is the pure dispatch half of the bridge. Given an RPC
-method, its args, the set of capabilities the host granted this plugin, and the privileged service
-callbacks the trusted webview owns, it either runs the call or rejects it. A method is rejected when
-it is unknown (never default-allow) or when its required capability is not in the granted set. The
-trusted host is the single place that holds the Core token and performs privileged work, so a
-plugin reaches a capability only indirectly, and only when it was granted.
+Plugins can also contribute **desktop UI** - a route, command, or settings section rendered
+inside the desktop app. The desktop extension host (`apps/desktop/src/contributions/host/`)
+renders a plugin's document in a sandboxed null-origin `<iframe>` with a capability-gated
+postMessage RPC bridge. The contract a plugin codes against ships in the SDK at
+`packages/sdk/src/plugin/ryu-plugin.ts`.
 
 <Callout type="warn">
-  This is an MVP, and built but not yet exercised live in the webview. Only the in-process
-  `MessageChannel` RPC round-trip is unit-tested; the in-webview handshake needs a display to
-  verify. The concrete host (`rpc.ts`) today implements a single method (`core.listAgents`, gated
-  by the `core.listAgents` capability) as a proof of the gate, and the granted-capability set is
-  host-provided config rather than read from the plugin's `plugin.json` grants yet. UI
-  contributions are declarative (a route path or panel id plus a sandboxed-webview entry), not
-  in-process React components.
+  The desktop UI host is an early MVP. The bridge and RPC gate are built and unit-tested, but
+  the in-webview handshake is not yet exercised end-to-end, and the granted-capability set is
+  host config rather than read from `plugin.json` grants. See
+  [Desktop companion](/docs/develop/extensions/desktop-companion) for the current state.
 </Callout>
 
-### The open contract: `RyuPlugin`
+## Explore further
 
-The host implementation is part of the closed desktop app, but the **contract** a plugin codes
-against ships in the OSS SDK at `packages/sdk/src/plugin/ryu-plugin.ts`. This is the open-core
-invariant: the host is closed, the contract is open, so a plugin stays buildable against a stable
-surface. The file is types and a factory only - it imports nothing (not even React) and has no
-runtime side effects.
-
-A plugin module is authored with `definePlugin`, which receives a `PluginContext` on `activate`.
-The `RyuPlugin` instance offers VS-Code-style registration methods, each returning a `Disposable`
-the plugin collects in `context.subscriptions` so `deactivate` tears everything down leak-free:
-
-| Method | Contributes |
-|---|---|
-| `registerRoute` | A tab/route loaded as a sandboxed webview body (exact path or RegExp source). |
-| `registerCommand` | A command-palette entry that maps 1:1 onto the desktop's `CommandAction`. |
-| `registerPanel` | A panel in a named region (`sidebar-section`, `settings-tab`, `chat-side-panel`, `companion-overlay`). |
-| `registerSettingsSection` | A section in the settings surface. |
-| `registerStoreSection` | A section in the unified Store/marketplace surface. |
-| `registerTheme` | A theme (CSS custom-property overrides keyed by token). |
-
-The plugin calls back into the host through grant-gated services on `plugin.host` -
-`commands.execute`, `gateway.chat` (Gateway-governed model access), `spaces.ingestDocument`, and
-`openTab`. For a sandboxed plugin each of these is an RPC over the postMessage bridge.
-
-<Callout type="info">
-  The `RyuHostServices` contract declares the full service surface above; the concrete desktop
-  host implements it method-by-method behind the same capability gate. Treat the contract as the
-  stable target and check `rpc.ts` for which methods the host actually dispatches today.
-</Callout>
-
-## Current gaps
-
-<Callout type="warn">
-  The extension story is shipping in phases. As of today:
-
-  - **Only 3 of 8 Runnable kinds activate.** A plugin can ship `agent`, `workflow`, and `tool`
-    Runnables and have them go live on enable. `companion`, `channel`, `engine`, `policy`, and
-    `skill` validate but have no Core activation handler yet - see
-    [Plugin manifests](/docs/develop/extensions/plugin-json-manifest).
-  - **The plugin UI *runtime* is an MVP, not finished.** The desktop extension host above
-    (`apps/desktop/src/contributions/host/`) is the first built slice: a plugin can render UI in
-    a sandboxed webview and call grant-gated host services over an RPC bridge. But it is not yet
-    end-to-end - the host dispatches a single proof-of-concept method, the granted-capability set
-    is host config rather than read from `plugin.json` grants, and the in-webview handshake is
-    untested without a display. The broader `contributes`-style runtime for third-party surfaces
-    remains an RFC (`docs/rfc-plugin-runtime.md`). The desktop `Companion` overlay that exists is
-    hardcoded first-party, not plugin-authored.
-  - **The plugin store catalog browser is built; authoring UI is not.** The desktop install/enable/
-    disable browser (`AppsPage.tsx` + `AppsCatalogSection.tsx`, including install-from-URL) consumes
-    `GET /api/plugins/catalog`. What is missing is an in-app manifest editor / permission picker -
-    authoring is hand-written `plugin.json` or the SDK today.
-  - **npm publish is in progress.** `@ryu/sdk` lives in the monorepo and resolves as
-    `workspace:*` today; the public npm release is not out yet.
-
-  Treat any capability here as built only where this documentation cites a file. A closed issue
-  is a claim, not proof.
-</Callout>
+<Cards>
+  <Card title="MCP server" href="/docs/develop/extensions/mcp-server" />
+  <Card title="TypeScript SDK" href="/docs/develop/extensions/typescript-sdk" />
+  <Card title="plugin.json manifest" href="/docs/develop/extensions/plugin-json-manifest" />
+  <Card title="Agent skills" href="/docs/develop/extensions/agent-skills" />
+  <Card title="Desktop companion" href="/docs/develop/extensions/desktop-companion" />
+  <Card title="Channel bot" href="/docs/develop/extensions/channel-bot" />
+  <Card title="Author workflows" href="/docs/develop/extensions/author-workflows" />
+  <Card title="Marketplace" href="/docs/develop/extensions/marketplace" />
+</Cards>

@@ -40,6 +40,11 @@ const TAG_ERROR: &str = "@@RYU_ERROR@@";
 
 /// A running execution parked mid-flight, kept alive on its blocked stdin.
 struct ParkedExec {
+    /// The temp file the script was delivered in (deleted on drop). The script is
+    /// delivered via a file — NOT stdin `-` — so stdin stays free for the runtime
+    /// tool-reply protocol; `deno run -` would otherwise wait for stdin EOF (which
+    /// never comes while we hold it open for replies) and hang until the deadline.
+    script_path: std::path::PathBuf,
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
@@ -53,6 +58,15 @@ struct ParkedExec {
     /// The resume reply must echo this id so the in-sandbox reply-router (which
     /// dispatches replies by id) resolves the correct pending promise.
     suspended_call_id: Value,
+}
+
+impl Drop for ParkedExec {
+    fn drop(&mut self) {
+        // Remove the delivered-script temp file. Deno reads + closes it at
+        // startup, so this succeeds even while the child is still alive (Windows
+        // would block deletion of an open file; the handle is already closed).
+        let _ = std::fs::remove_file(&self.script_path);
+    }
 }
 
 /// Process-global store of parked executions (bounded; cap [`MAX_PARKED`], TTL
@@ -102,26 +116,49 @@ impl DenoExecutor {
                 "deno is not installed (the tool_exec sandbox backend requires the deno binary on PATH)",
             );
         }
-        let mut child = match spawn_deno() {
+
+        // Deliver the program via a temp file (NOT stdin `-`): the host keeps
+        // stdin open for the tool-reply protocol, and `deno run -` would wait for
+        // stdin EOF before running and hang. The file is removed when the run's
+        // `ParkedExec` drops.
+        //
+        // The program embeds the turn context (transcript text), so the file is
+        // created **owner-readable only** (`0o600` on unix) with `create_new` so a
+        // pre-planted symlink at the (uuid-random) path can't redirect the write
+        // (TOCTOU) and no other local user can read the script.
+        let program = build_program(code);
+        let script_path =
+            std::env::temp_dir().join(format!("ryu-exec-{}.js", uuid::Uuid::new_v4()));
+        let write_result = (|| -> std::io::Result<()> {
+            use std::io::Write as _;
+            let mut opts = std::fs::OpenOptions::new();
+            opts.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt as _;
+                opts.mode(0o600);
+            }
+            let mut file = opts.open(&script_path)?;
+            file.write_all(program.as_bytes())?;
+            file.flush()
+        })();
+        if let Err(e) = write_result {
+            return ExecOutcome::error(format!("failed to write sandbox program: {e}"));
+        }
+
+        let mut child = match spawn_deno(&script_path) {
             Ok(c) => c,
-            Err(e) => return ExecOutcome::error(format!("failed to spawn deno: {e}")),
+            Err(e) => {
+                let _ = std::fs::remove_file(&script_path);
+                return ExecOutcome::error(format!("failed to spawn deno: {e}"));
+            }
         };
 
-        // Hand the program to the sandbox over stdin (the bootstrap + user code),
-        // then keep the stdin open for tool-result replies.
-        let mut stdin = child.stdin.take().expect("piped stdin");
-        let program = build_program(code);
-        if let Err(e) = stdin.write_all(program.as_bytes()).await {
-            let _ = child.kill().await;
-            return ExecOutcome::error(format!("failed to write program to sandbox: {e}"));
-        }
-        if let Err(e) = stdin.flush().await {
-            let _ = child.kill().await;
-            return ExecOutcome::error(format!("failed to flush program: {e}"));
-        }
-
+        // stdin is reply-only now (the program came from the file); keep it open.
+        let stdin = child.stdin.take().expect("piped stdin");
         let stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
         let state = ParkedExec {
+            script_path,
             child,
             stdin,
             stdout,
@@ -436,10 +473,12 @@ const tools = new Proxy({{}}, {{ get: (_t, server) => __mkServer(String(server))
     )
 }
 
-/// Spawn `deno run` with deny-by-default permissions reading the program from
-/// stdin (`-`). Zero `--allow-*` → no net/FS/env; `--no-prompt` → fail not
-/// prompt; `--v8-flags` caps the heap.
-fn spawn_deno() -> std::io::Result<Child> {
+/// Spawn `deno run` with deny-by-default permissions, running the program from
+/// `script_path` (a temp file). Zero `--allow-*` → no net/FS/env; `--no-prompt`
+/// → fail not prompt; `--v8-flags` caps the heap. stdin stays piped but carries
+/// only the tool-reply protocol (the script comes from the file, so deno doesn't
+/// wait for stdin EOF before running).
+fn spawn_deno(script_path: &std::path::Path) -> std::io::Result<Child> {
     let mem = std::env::var("RYU_TOOL_EXEC_MEMORY_MB")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
@@ -449,7 +488,7 @@ fn spawn_deno() -> std::io::Result<Child> {
         .arg("--no-prompt")
         .arg("--quiet")
         .arg(format!("--v8-flags=--max-old-space-size={mem}"))
-        .arg("-") // read the program from stdin
+        .arg(script_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

@@ -53,7 +53,7 @@ mod justbash_backend;
 // `detect_elicitation`/`tool_path_to_id` are re-exported as part of the public
 // Contract 4 surface (P3 imports them); not used inside Core yet.
 #[allow(unused_imports)]
-pub use invoker::{detect_elicitation, tool_path_to_id, SandboxToolInvoker};
+pub use invoker::{detect_elicitation, tool_path_to_id, SandboxBridge, SandboxToolInvoker};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -373,6 +373,37 @@ pub async fn execute_code(
     .await;
 
     outcome
+}
+
+/// Run a JS `program` in the sandbox with a caller-supplied `invoker`, **without**
+/// the PTC gateway exec-budget/audit framing. Used by the plugin turn-hook
+/// runtime ([`crate::plugin_host`]): a hook is orchestration, and any side-model
+/// call it makes is itself gateway-governed inside `call_side_model`, so the hook
+/// run must not be double-budgeted or mislabeled as `tool_exec`.
+///
+/// Returns [`ExecOutcome::Completed`] (final value + logs) or
+/// [`ExecOutcome::Paused`] (unused by hooks today; treated as a no-op by the
+/// caller). When no backend is built / Deno is absent, returns an error outcome
+/// so the caller can degrade gracefully (chat is never blocked).
+pub async fn run_sandboxed(
+    program: String,
+    invoker: Arc<SandboxToolInvoker>,
+    agent_id: &str,
+) -> ExecOutcome {
+    let executor = CodeExecutor::default_backend();
+    match executor {
+        #[cfg(feature = "tool-exec-deno")]
+        CodeExecutor::Deno(exec) => exec.execute(&program, invoker, agent_id).await,
+        #[cfg(feature = "tool-exec-quickjs")]
+        CodeExecutor::Quickjs(exec) => exec.execute(&program, invoker, agent_id).await,
+        #[cfg(feature = "tool-exec-securexec")]
+        CodeExecutor::SecureExec(exec) => exec.execute(&program, invoker, agent_id).await,
+        #[cfg(feature = "tool-exec-justbash")]
+        CodeExecutor::JustBash(exec) => exec.execute(&program, invoker, agent_id).await,
+        CodeExecutor::Unavailable => {
+            ExecOutcome::error("no code-execution backend is built (enable feature tool-exec-deno)")
+        }
+    }
 }
 
 /// Continue a paused execution after the user completed the auth/consent step

@@ -39,10 +39,36 @@ pub fn sd_base_url() -> String {
     format!("http://{SD_ADDR}")
 }
 
-fn resolved_model_path() -> std::path::PathBuf {
-    std::env::var("RYU_SD_MODEL")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| default_model_path())
+/// Resolve the diffusion model path in priority order:
+/// 1. `RYU_SD_MODEL` environment variable (testing / manual override).
+/// 2. User-selected active diffusion model from preferences
+///    (`local-diffusion-model` pref key → stem → `~/.ryu/models/<stem>.gguf`).
+/// 3. The bundled default from the downloader.
+async fn resolved_model_path() -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("RYU_SD_MODEL") {
+        return std::path::PathBuf::from(p);
+    }
+    if let Some(path) = active_diffusion_model_path().await {
+        return path;
+    }
+    default_model_path()
+}
+
+/// Read the user's active diffusion model preference and resolve it to an
+/// on-disk path. Returns `None` when no preference is set, the file is absent,
+/// or the preferences store cannot be opened.
+async fn active_diffusion_model_path() -> Option<std::path::PathBuf> {
+    let prefs = crate::server::preferences::PreferencesStore::open_default().ok()?;
+    let raw = prefs
+        .get(crate::model_catalog::installed::ACTIVE_DIFFUSION_MODEL_PREF)
+        .await
+        .ok()??;
+    let stem = raw.trim();
+    if stem.is_empty() {
+        return None;
+    }
+    let path = crate::model_catalog::installed::model_file_path(stem);
+    path.exists().then_some(path)
 }
 
 /// Lifecycle manager for the stable-diffusion.cpp media sidecar.
@@ -133,7 +159,7 @@ impl Sidecar for StableDiffusionManager {
                 );
             }
 
-            let model = resolved_model_path();
+            let model = resolved_model_path().await;
             if !model.exists() {
                 anyhow::bail!(
                     "stable diffusion model not found at {}. Install the media engine from \

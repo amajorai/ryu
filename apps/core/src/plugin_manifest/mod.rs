@@ -253,6 +253,48 @@ pub struct Contributes {
     /// Gateway policies the plugin contributes (referenced by runnable id).
     #[serde(default)]
     pub policies: Vec<ContributionId>,
+
+    /// Chat turn hooks the plugin contributes — server-side logic that runs at a
+    /// turn boundary (e.g. `post_assistant_turn`) and returns a directive. These
+    /// are **self-contained** (they carry their own inline `code`), so they are
+    /// NOT cross-validated against `runnables` like the id-reference surfaces
+    /// above; the [`crate::plugin_host`] runtime executes them in the sandbox.
+    #[serde(default)]
+    pub turn_hooks: Vec<TurnHookContribution>,
+
+    /// Declarative **native** UI widgets the plugin contributes to the desktop
+    /// composer (e.g. a `toggle` that sets a `plugin_flags` entry, or a `chip`).
+    /// Core stores these verbatim and serves them via `GET /api/plugins/contributions`;
+    /// the desktop renders the known widget types. Opaque to Core (the renderer
+    /// owns interpretation) so new widget types need no Core change.
+    #[serde(default)]
+    pub composer_controls: Vec<serde_json::Value>,
+
+    /// Declarative settings tabs the plugin contributes (model pickers, text
+    /// fields bound to preference keys). Served + rendered the same way.
+    #[serde(default)]
+    pub settings_tabs: Vec<serde_json::Value>,
+
+    /// Slash commands the plugin contributes (e.g. `/goal`). The desktop maps the
+    /// command to a `plugin_flags`/message action; the plugin's turn hook reads
+    /// the resulting message. Served + rendered the same way.
+    #[serde(default)]
+    pub slash_commands: Vec<serde_json::Value>,
+}
+
+/// A server-side chat turn hook contributed by a plugin. The `code` is a JS body
+/// run in the plugin sandbox with `ctx` (the turn context) and `host` (the
+/// capability bridge: `host.sideModel`, `host.storage`, `host.log`) in scope; it
+/// returns a directive (`{kind:"none"}` | `{kind:"note",text}` |
+/// `{kind:"continue",text}`). See [`crate::plugin_host`].
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TurnHookContribution {
+    /// Stable id for this hook (for logging/audit), unique within the plugin.
+    pub id: String,
+    /// The turn boundary this hook fires on. Today only `"post_assistant_turn"`.
+    pub on: String,
+    /// The JS hook body executed in the sandbox (returns a directive).
+    pub code: String,
 }
 
 impl Contributes {
@@ -362,6 +404,13 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("fixtures/sandbox.plugin.json"),
     include_str!("fixtures/engines.plugin.json"),
     include_str!("fixtures/durable.plugin.json"),
+    // Turn-hook plugins (the migrated, formerly-hardcoded features). These ship
+    // as built-in fixtures but are built exactly like a third-party plugin would
+    // be: a manifest + an inline JS hook reaching Core only through the
+    // capability-gated plugin host. Community-tier (install-then-enable).
+    include_str!("fixtures/double-check.plugin.json"),
+    include_str!("fixtures/goal.plugin.json"),
+    include_str!("fixtures/advisor.plugin.json"),
 ];
 
 /// Loader that merges built-in manifests with user-installed ones from

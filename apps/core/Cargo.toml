@@ -49,6 +49,26 @@ urlencoding = "2"
 base64 = { version = "0.22", features = ["alloc"] }
 rand = "0.8"
 chacha20poly1305 = "0.10"
+# Ryu Hardware Protocol (RHP v1) audio bridging: the device link speaks Opus
+# while the rest of Core speaks WAV/PCM (whisper STT, OuteTTS). The `opus` crate
+# wraps libopus through `audiopus-sys`/`opus-sys`, whose build script BUILDS
+# libopus FROM VENDORED SOURCE via CMake when pkg-config can't find a system copy
+# (the default on Windows + any box without libopus-dev) — so `cargo check` is
+# self-contained. Its API is plain slices (`encode(&[i16], &mut [u8])` /
+# `decode(&[u8], &mut [i16], fec)`), unlike audiopus's wrapper types.
+# `hound` reads/writes the RIFF/WAV the transcribe + synth seams use.
+opus = "0.3"
+hound = "3"
+# Server-side dashboard rasterization for the hardware display surface
+# (TRMNL-style: the node renders a device's dashboard to an image, the device just
+# polls + blits it — apps/hardware/DASHBOARD.md). We build an SVG layout from the
+# live widget data and rasterize it WITHOUT a headless browser: `resvg` renders the
+# SVG onto a `tiny-skia` pixmap (pure-Rust, no system deps, no Chromium), and the
+# `png` crate encodes the LCD color path. The e-ink path dithers the pixmap to
+# 1-bit and packs it ourselves (src/dashboard/render.rs). `resvg` re-exports
+# `usvg`/`tiny-skia`, so we depend on it alone to keep ONE version of each.
+resvg = "0.44"
+png = "0.17"
 # `unstable_session_model` exposes `SessionModelState`/`SetSessionModelRequest`
 # so the desktop can read+switch an ACP agent's models (Zed-style, but Zed does
 # not ship this for external agents). Stable session modes + config options

@@ -53,7 +53,7 @@ is absent.
 | `spider` | Web crawling / scraping | Shells out to the `spider` binary. Degrades gracefully when not installed |
 | `exa` | Neural web search | HTTP, BYOK via `RYU_EXA_API_KEY`. Degrades gracefully when the key is absent |
 | `web_fetch` | Authenticated web fetch over HTTPS | Built-in. Injects the user's [Identity Vault](/docs/core/identity-vault) session for the URL's host server-side (acts as the user; the credential never reaches the model) |
-| `search_conversations` | Semantic search over the user's past chat messages | Built-in. Backed by the message index; see [Search and recall](/docs/using-ryu/user-guide/search-and-recall) |
+| `search_conversations` | Semantic search over the user's past chat messages | Built-in. Backed by the message index; see [Search and recall](/docs/desktop/user-guide/search-and-recall) |
 | `threads` | Coordinator threads: spin up and manage worker threads (8 tools) | Built-in. See [Coordinator threads](/docs/core/coordinator-threads) |
 | `sandbox` | Run WASM/WASI modules with default-deny capabilities | Built-in wasmtime. Toggleable; available only when compiled with the `sandbox-wasmtime` feature. See [Sandbox](/docs/core/sandbox) |
 | `notify` | Show a native desktop notification | Built-in, in-process |

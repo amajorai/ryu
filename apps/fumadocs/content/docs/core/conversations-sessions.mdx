@@ -62,7 +62,7 @@ The list shape returned by `GET /api/conversations` (`ConversationSummary`,
 
 `participants`, `pinned`, and `archived` are `#[serde(default)]`, so older clients and older stored
 rows deserialize unchanged. The git fields (`folder_path`, `branch`, `worktree_path`) are documented
-on [Git workspace](/docs/using-ryu/user-guide/git-workspace).
+on [Git workspace](/docs/desktop/user-guide/git-workspace).
 
 ### StoredMessage
 
@@ -71,7 +71,7 @@ Each message has an `id`, a `role` (`user` / `assistant`), the `content`, an opt
 milliseconds. `ConversationStore::append_message` writes one message and, when the
 `llamacpp-embed` sidecar is reachable, indexes its plaintext for semantic search on a spawned task
 before the body is sealed. The index write is best-effort and fail-open: a down embedder never
-blocks or slows the chat write. See [Search and recall](/docs/using-ryu/user-guide/search-and-recall)
+blocks or slows the chat write. See [Search and recall](/docs/desktop/user-guide/search-and-recall)
 for the index itself.
 
 ## Conversations
@@ -169,7 +169,7 @@ worker conversations.
 
 <Cards>
   <DocCard href="/docs/core/coordinator-threads" />
-  <DocCard href="/docs/using-ryu/user-guide/search-and-recall" />
+  <DocCard href="/docs/desktop/user-guide/search-and-recall" />
   <DocCard href="/docs/core/observability" />
-  <DocCard href="/docs/using-ryu/user-guide/git-workspace" />
+  <DocCard href="/docs/desktop/user-guide/git-workspace" />
 </Cards>

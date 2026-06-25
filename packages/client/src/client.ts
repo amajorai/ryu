@@ -1,10 +1,10 @@
 // packages/client/src/client.ts
 //
-// RyuClient: the top-level entry point for the @ryu/client SDK. Instantiates
+// RyuClient: the top-level entry point for the @ryuhq/client SDK. Instantiates
 // each domain API class and exposes them as typed namespaces on the client.
 //
 // Usage:
-//   import { createRyuClient } from "@ryu/client";
+//   import { createRyuClient } from "@ryuhq/client";
 //   const client = createRyuClient({ baseUrl: "http://localhost:7980" });
 //   for await (const chunk of client.agents.stream("pi", messages)) { ... }
 

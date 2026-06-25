@@ -1,7 +1,7 @@
 /**
  * Gateway-mandatory model client for the Ryu SDK.
  *
- * Rust-cored: this is a thin TypeScript wrapper over the `@ryu/sdk-native`
+ * Rust-cored: this is a thin TypeScript wrapper over the `@ryuhq/sdk-native`
  * addon's `ModelClient`, which is the `crates/ryu-sdk` Rust core. Every model
  * call is routed by the Rust core to the Ryu gateway's OpenAI-compatible
  * `/v1/chat/completions` endpoint; direct-provider base URLs are rejected at
@@ -16,7 +16,7 @@
  *   }
  */
 
-import * as native from "@ryu/sdk-native";
+import * as native from "@ryuhq/sdk-native";
 
 // ── Wire types (OpenAI-compat subset) ─────────────────────────────────────────
 

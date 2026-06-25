@@ -1,36 +1,36 @@
 ---
-title: Client SDK (@ryu/client)
-description: The TypeScript client SDK for embedding a Ryu Core agent in any app - list/run agents, stream chat, sessions, and Spaces search.
+title: Client SDK
+description: TypeScript client SDK for calling a Ryu Core node from any app - list agents, stream chat, query sessions, and search Spaces.
 ---
 
-`@ryu/client` (`packages/client/`) is the TypeScript **client** SDK: it embeds a running Ryu
-**Core** agent in any app. Where [`@ryu/sdk`](/docs/develop/sdk) is for *authoring* Runnables and
-packing them into a plugin, `@ryu/client` is for *calling* a Core node over its HTTP API with
-Mastra-style ergonomics - create a client, pick an agent, stream.
+`@ryuhq/client` (`packages/client/`) is the TypeScript client SDK for calling a running Ryu **Core**
+node over its HTTP API. Where [`@ryuhq/sdk`](/docs/develop/sdk) is for authoring Runnables and
+packing them into a plugin, `@ryuhq/client` is for calling a Core node - create a client, pick an
+agent, stream.
 
-It has **zero runtime dependencies** (native `fetch` only), so it runs in Node 18+, Bun, Deno, and
+It has zero runtime dependencies (native `fetch` only), so it works in Node 18+, Bun, Deno, and
 modern browsers.
 
 <Callout type="warn">
-  The package version today is `0.1.0` and the public npm release is in progress. Inside the Ryu
-  monorepo it resolves as `workspace:*`.
+  `@ryuhq/client` is currently `0.0.1` and not yet published to npm. Inside the Ryu monorepo it
+  resolves as `workspace:*`.
 </Callout>
 
 ## Install
 
 ```bash
-npm install @ryu/client
+npm install @ryuhq/client
 # or
-bun add @ryu/client
+bun add @ryuhq/client
 ```
 
 ## Create a client
 
-`createRyuClient(options)` returns a `RyuClient` with three typed namespaces (`agents`, `sessions`,
-`spaces`). The only required option is `baseUrl`; pass a `token` for authenticated or remote nodes.
+`createRyuClient(options)` returns a `RyuClient` with three typed namespaces - `agents`, `sessions`,
+and `spaces`. The only required option is `baseUrl`; pass a `token` for authenticated or remote nodes.
 
 ```typescript
-import { createRyuClient } from "@ryu/client";
+import { createRyuClient } from "@ryuhq/client";
 
 const client = createRyuClient({ baseUrl: "http://localhost:7980" });
 
@@ -43,19 +43,14 @@ const remote = createRyuClient({
 
 ```typescript
 interface RyuClientOptions {
-  baseUrl: string;   // Base URL of the Core server, e.g. http://localhost:7980
-  token?: string;    // Optional bearer token for authenticated nodes
+  baseUrl: string; // Base URL of the Core server, e.g. "http://localhost:7980"
+  token?: string;  // Optional bearer token for authenticated nodes
 }
 ```
 
-The base URL points at a running Core instance (default port `7980`). Every request normalizes the
-base URL (trailing slashes stripped) and attaches `Authorization: Bearer <token>` when a token is
-set (`packages/client/src/request.ts`).
-
 ## `client.agents`
 
-The primary surface. It wraps Core's `GET /api/agents` / `GET /api/agents/:id` and the streaming
-`POST /api/chat/stream` endpoint (`packages/client/src/agents.ts`).
+Agent CRUD and chat streaming over Core's `/api/agents` and `/api/chat/stream` endpoints.
 
 | Method | Returns | Calls |
 |---|---|---|
@@ -94,15 +89,9 @@ for await (const chunk of client.agents.stream("pi", messages)) {
 }
 ```
 
-Core emits the **AI SDK v6 UI Message Stream** protocol: each SSE frame is a `data:` line carrying a
-JSON object with a `type` discriminator. The client surfaces `text-delta` parts as `text` chunks,
-maps `error` parts to `{ type: "error" }`, and treats `[DONE]` as the terminator. An OpenAI-style
-`choices[].delta.content` shape is also handled as a fallback, so the same `stream()` works against a
-non-Core OpenAI-compatible endpoint.
-
 ### Buffer the whole reply
 
-When you do not need streaming, `run()` consumes the stream and returns the full text:
+`run()` consumes the stream and returns the full text:
 
 ```typescript
 const reply = await client.agents.run("pi", messages);
@@ -111,9 +100,7 @@ console.log(reply);
 
 ## `client.sessions`
 
-Conversation (session) listing and retrieval over Core's `/api/conversations` endpoints
-(`packages/client/src/sessions.ts`). A conversation is a persisted session with message history and
-an optional agent binding.
+Conversation listing and retrieval over Core's `/api/conversations` endpoints.
 
 | Method | Returns | Calls |
 |---|---|---|
@@ -127,9 +114,8 @@ const detail = await client.sessions.get(conversations[0].id);
 
 ## `client.spaces`
 
-Spaces / RAG search over Core's `/api/spaces` endpoints (`packages/client/src/spaces.ts`). A Space
-is a named document collection backed by a sqlite-vec vector store; documents are chunked, embedded,
-and searched via KNN.
+Spaces / RAG search over Core's `/api/spaces` endpoints. A Space is a named document collection
+backed by a sqlite-vec vector store.
 
 | Method | Returns | Calls |
 |---|---|---|
@@ -144,15 +130,12 @@ for (const match of matches) {
 }
 ```
 
-Each `SpaceMatch` carries the chunk text plus a `distance` (squared L2 distance from the query
-vector - smaller is closer). This is how the client SDK exposes Core's embedding-backed retrieval:
-embeddings are computed server-side by Core's RAG pipeline, and the client searches over them. The
-client SDK does **not** expose a raw "embed this text" call; that lives in Core (the embedder serves
-the onboarding-downloaded GGUF) and the Gateway (`model.embed` scope).
+Each `SpaceMatch` carries the chunk text plus a `distance` (squared L2 distance - smaller is closer).
+Embeddings are computed server-side by Core's RAG pipeline.
 
 ## Types
 
-Every type is exported from the package root:
+All types are exported from the package root:
 
 ```typescript
 import type {
@@ -164,11 +147,8 @@ import type {
   Space,
   SpaceMatch,
   Conversation,
-} from "@ryu/client";
+} from "@ryuhq/client";
 ```
-
-The wire shapes from Core are snake_case; the SDK maps them to camelCase for TypeScript consumers
-(e.g. `system_prompt` -> `systemPrompt`, `document_count` -> `documentCount`).
 
 ```typescript
 interface Message     { role: "user" | "assistant" | "system"; content: string }
@@ -178,14 +158,13 @@ interface SpaceMatch {
   chunkId: string;
   documentId: string;
   content: string;
-  distance: number;   // squared L2 distance; smaller is closer
+  distance: number; // squared L2 distance; smaller is closer
 }
 ```
 
 ## Errors
 
-Every request throws an `Error` with the status code and response body on a non-2xx response, so you
-can wrap calls in `try`/`catch`:
+Non-2xx responses throw an `Error` with the status code and response body:
 
 ```typescript
 try {
@@ -197,9 +176,5 @@ try {
 
 ## Other languages
 
-There is no published client SDK for Go, C#, or Python yet. Until those land, call Core's HTTP API
-directly - it is plain JSON + SSE, documented in the
-[Core API reference](/docs/develop/api-reference/core). The shared Rust kernel
-([`crates/ryu-sdk`](/docs/develop/sdk/rust)) covers the *authoring* + gateway-mandatory model
-transport for Rust today; broader-language client bindings are deferred until the UniFFI bindings
-land (see the [Rust SDK](/docs/develop/sdk/rust) page).
+There is no published client SDK for Go, C#, or Python yet. Call Core's HTTP API directly - it is
+plain JSON + SSE, documented in the [Core API reference](/docs/develop/api-reference/core).

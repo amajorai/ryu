@@ -1,5 +1,5 @@
 {
-  "name": "@ryu/sdk-native",
+  "name": "@ryuhq/sdk-native",
   "version": "0.1.0",
   "description": "Native (napi-rs) Node addon backed by the ryu-sdk Rust core.",
   "main": "index.js",

@@ -1,11 +1,11 @@
 {
-  "name": "@ryu/protocol",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@ryuhq/protocol",
+  "version": "0.0.1",
   "type": "module",
   "exports": {
     "./agent-rules": "./src/agent-rules.ts",
-    "./deep-link": "./src/deep-link.ts"
+    "./deep-link": "./src/deep-link.ts",
+    "./hardware": "./src/hardware.ts"
   },
   "devDependencies": {
     "@ryu/config": "workspace:*",

@@ -59,7 +59,6 @@ console.log(response.choices[0].message.content);
 
 ```typescript
 import { Mastra } from "@mastra/core";
-import { openai } from "@ai-sdk/openai";
 import { createOpenAI } from "@ai-sdk/openai";
 
 // Override the OpenAI provider to point at the gateway
@@ -114,8 +113,9 @@ The gateway adds diagnostic headers to every response:
 | Header | Content |
 |---|---|
 | `x-provider` | Which upstream provider handled the call (`openai`, `anthropic`, `local`, …) |
-| `x-ryu-cached` | `true` when the response was served from the exact or semantic cache |
-| `x-ryu-request-id` | Unique request ID for the audit log |
+| `x-request-id` | Unique request ID for the audit log |
+| `x-routed-model` | The actual model selected after routing (may differ from the requested model) |
+| `x-cache` | `HIT` or `MISS` — present on non-streaming responses only |
 
 ## Smoke test
 
@@ -200,13 +200,13 @@ subscription credential is what reaches upstream), pointed at `/passthrough/open
 default to off, because enabling them changes how the subscription credential flows.
 
 <Callout type="warn">
-  Built and compiling, but the full live round-trip is not yet exercised against a real subscription
-  agent. The proxy is **loopback-only**: it refuses a request from a non-loopback peer
-  (`apps/gateway/src/passthrough/mod.rs`), so a remote gateway never carries a user's subscription
-  bearer. It is opt-in (off by default). Response-side redaction is per-delta, so a secret split
-  across two separate text-delta events is caught only by the end-of-stream audit, not rewritten
-  inline (a cross-delta hold-back buffer is a deliberate follow-on). The Gemini CLI is **not
-  wirable** through either mechanism, because it exposes no base-URL hook.
+  The passthrough is built and compiling but a full live round-trip against a real subscription
+  agent has not yet been exercised. The proxy is **loopback-only**: it refuses requests from
+  non-loopback peers (`apps/gateway/src/passthrough/mod.rs`), so a remote gateway never carries a
+  user's subscription bearer. It is opt-in (off by default). Response-side redaction is per-delta,
+  so a secret split across two separate text-delta events is caught only by the end-of-stream audit,
+  not rewritten inline (a cross-delta hold-back buffer is a deliberate follow-on). The Gemini CLI is
+  **not wirable** through either mechanism, because it exposes no base-URL hook.
 </Callout>
 
 ## Generic gateway routing for a BYO agent

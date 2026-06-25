@@ -19,7 +19,7 @@ For the manifest *format* and the full Runnable kind table, see
 surface only.
 
 <Callout type="warn">
-  The crate version is `0.1.0`. It is not yet published to crates.io; depend on it by path inside the
+  The crate version is `0.0.1`. It is not yet published to crates.io; depend on it by path inside the
   monorepo.
 </Callout>
 
@@ -254,7 +254,7 @@ in Python. Bindings are emitted on demand by the `uniffi-bindgen` driver
 </Callout>
 
 For TypeScript, prefer the published packages over the napi addon directly:
-[`@ryu/sdk`](/docs/develop/sdk) for authoring and [`@ryu/client`](/docs/develop/sdk/client) for
+[`@ryuhq/sdk`](/docs/develop/sdk) for authoring and [`@ryuhq/client`](/docs/develop/sdk/client) for
 calling a Core node. For any language without a binding, validate manifests against the exported JSON
 Schema and call Core's [HTTP API](/docs/develop/api-reference) and the Gateway's
 `/v1/chat/completions` directly.

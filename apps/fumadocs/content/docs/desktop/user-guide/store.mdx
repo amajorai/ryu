@@ -1,0 +1,158 @@
+---
+title: "Store: Models, Skills & Plugins"
+description: "Browse and install models (with a device-fit check), skills, and plugins, and track downloads"
+---
+
+The Store is how you extend Ryu without leaving the app: browse and install **models**, **skills**,
+**MCP servers**, and **plugins**, then watch every download in one place. All the catalog logic
+lives in Ryu Core, so the desktop is a thin browser over it.
+
+<TryInRyu page="store" />
+
+This page covers free browse and install. To **buy, sell, or manage licenses** for paid items, see
+[Marketplace](/docs/desktop/user-guide/marketplace). For the full depth on browsing and running
+models, see [Models](/docs/desktop/models).
+
+## How the catalog works
+
+Every catalog kind routes through one `CatalogSource` seam (`apps/core/src/catalog_source/`).
+`CatalogKind` is one of `model`, `skill`, `mcp`, or `plugin`, and each kind has a per-kind registry
+of built-in plus user-added sources with a persisted active selector:
+
+| Kind | Built-in sources |
+|---|---|
+| `model` | Hugging Face, ModelScope, model-index / custom URL |
+| `skill` | skills.sh, Claude `marketplace.json`, direct install-from-source |
+| `mcp` | official MCP registry, Smithery, Ryu-hosted |
+| `plugin` | Ryu-hosted marketplace |
+
+Sources return **descriptors only**; Core keeps the privileged install step. List and switch the
+active source per kind through `GET /api/catalog/sources?kind=<kind>` and
+`POST /api/catalog/sources/select` (custom sources persist to `~/.ryu/catalog-sources.json`, the
+active selection to the prefs KV `catalog.active_source.{kind}`).
+
+<Callout type="info">
+  Every untrusted catalog fetch goes through the SSRF-guarded `guarded_get` / `guarded_get_bytes`
+  (https-only, IP-pinned, redirects off, 32 MB cap). The Ryu-hosted marketplace is trusted
+  first-party, so it is not SSRF-guarded.
+</Callout>
+
+## Install a model
+
+The **Models** page searches the active model source (Hugging Face by default) for models you can
+run locally.
+
+1. Search for a model.
+2. Open a result to see its details: the README plus every quantization, with real file sizes and
+   SHA-256 checksums.
+3. Check the **device-fit verdict**. Ryu detects your RAM and GPU VRAM and grades each file as
+   *great*, *ok*, *partial offload*, *cpu*, or *too big*, so you know what will actually run.
+4. Click **Install**. Core downloads the chosen file with checksum verification and records its
+   provenance.
+
+Device-fit is computed locally with zero extra setup. If you set an Artificial Analysis API key,
+model detail views are enriched with extra benchmark stats, but no key is required. The full
+model-browsing flow lives on [Models](/docs/desktop/models).
+
+## Install a skill
+
+The **Skills** page browses the active skill source ([skills.sh](https://skills.sh) by default), a
+directory of Agent Skills.
+
+1. Search the directory, or browse the featured default list.
+2. Open a skill to read its `SKILL.md` documentation and file list.
+3. Click **Install**. Core writes the skill into your local skills directory, hot-reloads the
+   registry, and records it in your installed view, so the skill is available immediately.
+
+Skills can also be installed directly from a source URL or repo (six forms, via
+`POST /api/skills/install-from-source`). See the [Skills](/docs/desktop/skills) reference for the
+activation model and the per-agent allowlist.
+
+## Install an MCP server
+
+The **MCP** source lists servers from the official MCP registry, Smithery, or the Ryu-hosted
+catalog. Installing an MCP server plans a **disabled** entry in `~/.ryu/mcp.json` (remote servers
+are wired as `npx -y mcp-remote`), so you review it before it runs. Enable it from the
+[Tools and connections](/docs/desktop/user-guide/tools-and-connections) surface.
+
+## Install a plugin
+
+A **plugin** is a `plugin.json` manifest that bundles Runnables (agents, workflows, tools, skills)
+together with the permission grants they need.
+
+- The **Plugins** page lists the plugins Ryu Core has loaded, each showing its status (Installed or
+  Enabled) and its **permission grants**. You can also **install from a URL** that points at a
+  `plugin.json`; Core fetches, validates, and hot-reloads it with no restart.
+- **Install** a plugin to validate it and its grants, then **Enable** it to activate its Runnables.
+- Built-in plugins such as **Ghost** (desktop automation) and **Shadow** (capture and search) are
+  always available without installation.
+
+To add your own, drop a `plugin.json` into `~/.ryu/plugins/<your-plugin>/` (restart Core, or use
+**install from URL** to hot-reload without one). Ryu validates the manifest per Runnable kind on
+load. The manifest format is documented in
+[Plugin manifests](/docs/develop/extensions/plugin-json-manifest).
+
+<Callout type="warn">
+  Review a plugin's permission grants before enabling it. Grants determine what the plugin's
+  Runnables are allowed to reach, and they are enforced through the Gateway.
+</Callout>
+
+<Callout type="info">
+  Plugins that declare `post_assistant_turn` hooks (such as the built-in **double-check** and
+  **goal** plugins) run their hook code in the same deny-by-default Deno sandbox as tool execution.
+  This turn-hook runtime is live and backs installable plugins today. It requires **Deno on PATH**
+  for code-exec hooks; when Deno is absent the runtime gracefully no-ops so chat is never blocked.
+</Callout>
+
+## The Download Center
+
+Every long-running download Core fetches, including engine binaries, GGUF models, TTS models,
+skills, and other artifacts, is tracked in one place. The desktop surfaces it as a compact icon in
+the sidebar footer with a badge for active or failed downloads; click it to open a panel listing
+each download (`apps/desktop/src/components/downloads/DownloadCenter.tsx`). Core owns the lifecycle,
+so the panel is a thin view over its endpoints.
+
+Each row shows a progress bar, transfer size, speed, and an estimated time left, with per-item
+controls that depend on the download's state:
+
+| State | Available controls |
+|---|---|
+| `active` | Pause, Cancel |
+| `paused` or `queued` | Resume, Cancel |
+| `verifying` | Cancel |
+| `failed` (retryable) | Retry, Dismiss |
+| `completed` or `cancelled` | Dismiss |
+
+A **Clear finished** action removes all completed and cancelled entries at once.
+
+The controls map directly onto Core's endpoints (`apps/core/src/server/mod.rs`):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/downloads` | Snapshot of all tracked downloads |
+| `GET /api/downloads/stream` | SSE: a full snapshot on connect, then live deltas |
+| `POST /api/downloads/:id/pause` | Pause a download |
+| `POST /api/downloads/:id/resume` | Resume a download |
+| `POST /api/downloads/:id/retry` | Retry a failed download |
+| `POST /api/downloads/:id/cancel` | Cancel a download |
+| `DELETE /api/downloads/:id` | Clear (dismiss) a terminal entry |
+
+The stream always sends a full snapshot as its first event, so a late or reconnecting client
+self-heals without a separate fetch (`apps/core/src/server/mod.rs`, `downloads_stream`). The typed
+client lives in `apps/desktop/src/lib/api/downloads.ts`.
+
+<Callout type="info">
+  Some installs cannot report a total size up front, for example a model or TTS model fetched from
+  Hugging Face, where the source streams no byte total. Those downloads show an indeterminate
+  progress bar (a running byte count without a percentage) rather than a filling bar, then complete
+  normally.
+</Callout>
+
+## Next steps
+
+<Cards>
+  <DocCard href="/docs/desktop/models" />
+  <DocCard href="/docs/desktop/skills" />
+  <DocCard href="/docs/desktop/user-guide/marketplace" />
+  <DocCard href="/docs/desktop/user-guide/tools-and-connections" />
+</Cards>

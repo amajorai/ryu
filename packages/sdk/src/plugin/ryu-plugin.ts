@@ -2,7 +2,7 @@
 //
 // This is the SINGLE canonical home for the host API surface. The desktop
 // extension host (proprietary, closed source) IMPLEMENTS this contract; the
-// types ship here in the OSS `@ryu/sdk` so plugins stay buildable against a
+// types ship here in the OSS `@ryuhq/sdk` so plugins stay buildable against a
 // stable, open contract (the open-core invariant: the host is closed, the
 // contract is open). See `docs/desktop-extension-host-spec.md`.
 //
@@ -12,7 +12,7 @@
 //   disable/uninstall is leak-free — no dangling routes/commands/panels.
 // - This file is TYPES + factory shape ONLY. It imports NOTHING (not even React)
 //   and has no runtime side effects, so it is safe in the OSS SDK, when installed
-//   standalone (`@ryu/sdk` is published), and in any bundler. The desktop host
+//   standalone (`@ryuhq/sdk` is published), and in any bundler. The desktop host
 //   provides the concrete `RyuPlugin` instance.
 // - UI contributions are declared DECLARATIVELY here (a route path/title + a
 //   sandboxed-webview `entry`). The OSS contract stays framework-agnostic: it does
@@ -127,7 +127,7 @@ export interface ThemeContribution {
 export interface RyuHostServices {
 	/** Run a registered command by id (built-in or contributed). */
 	commands: { execute(id: string, ...args: unknown[]): Promise<unknown> };
-	/** Gateway-governed model access (chat/embed). Mirrors `@ryu/sdk` model
+	/** Gateway-governed model access (chat/embed). Mirrors `@ryuhq/sdk` model
 	 *  client semantics; every call still routes through the Gateway. */
 	gateway: {
 		chat(model: string, messages: { role: string; content: string }[]): Promise<string>;

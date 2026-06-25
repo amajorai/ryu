@@ -11,7 +11,8 @@ identity events) in a local audit log you can query. Both run on the request pat
 
 The eval runner (`apps/gateway/src/evals/mod.rs`, `EvalsRunner`) does two jobs: it passively scores
 sampled live responses and folds those scores into a rolling per-provider average, and it replays a
-dataset on demand for explicit eval runs. Passive scoring is off until `EvalsConfig.enabled` is set.
+dataset on demand for explicit eval runs. Passive scoring is **on by default** (`EvalsConfig.enabled`
+defaults to `true` and `sample_rate` defaults to `1.0`).
 
 ### Dimensions
 
@@ -30,7 +31,7 @@ carries its `overall` value back in the `x-eval-score` response header.
 
 Sampling is deterministic, with no RNG. `EvalsRunner::should_sample` increments a counter and keeps a
 request every `1/sample_rate` boundary, so a `sample_rate` of `0.25` scores exactly one request in
-four. A rate of `1.0` scores every request, `0.0` scores none. This keeps scoring overhead
+four. A rate of `1.0` scores every request (the default), `0.0` scores none. This keeps scoring overhead
 predictable and even rather than bursty.
 
 ### Rolling scores
@@ -50,7 +51,7 @@ returns the live config plus the current rolling score per provider:
 ```json
 {
   "enabled": true,
-  "sample_rate": 0.1,
+  "sample_rate": 1.0,
   "max_latency_ms": 10000,
   "providers": { "openai": 0.84, "anthropic": 0.79 }
 }
@@ -58,6 +59,18 @@ returns the live config plus the current rolling score per provider:
 
 When evals are disabled the endpoint still returns `200` with `enabled: false` and an empty
 `providers` map. It never panics and never returns a non-200 for a healthy gateway.
+
+### Configuration
+
+`EvalsConfig` lives under `[evals]` in `gateway.toml`. All fields have defaults so no configuration
+is required out of the box.
+
+| Field | Default | Description |
+|---|---|---|
+| `enabled` | `true` | Master switch. Set to `false` to disable all passive scoring |
+| `sample_rate` | `1.0` | Fraction of completed requests to score, in `[0.0, 1.0]` |
+| `max_latency_ms` | `10000` | Latency (ms) at which `latency_score` drops to 0 |
+| `stream_usage` | `true` | Inject `stream_options.include_usage=true` into streamed requests so the provider emits a terminal usage frame. Only OpenAI-compatible providers honour this flag; non-conforming providers fall back to `estimate_prompt_tokens` |
 
 ### Dataset runs
 
@@ -89,8 +102,7 @@ From Core, `POST /api/gateway/evals/run` proxies the dataset run.
 <Callout type="warn">
   Dataset runs are sequential and synchronous. A multi-model run with `llm_judge` fans out
   `models * cases * (1 + judge_calls)` provider calls, all under Core's 120s proxy timeout, so a large
-  matrix can time out at the proxy even though no field is dropped. Keep matrices small. LLM-judge and
-  custom dataset scorers are v1 only; richer scoring strategies are deferred.
+  matrix can time out at the proxy even though no field is dropped. Keep matrices small.
 </Callout>
 
 ## Audit
@@ -100,6 +112,15 @@ store, alongside sandbox exec events and identity-vault credential reads. Writes
 thread over a bounded channel, so the async request path never blocks on disk I/O; reads use a
 separate query-only connection under WAL mode. The store is off when `AuditConfig.enabled` is false,
 in which case writes are dropped and queries return empty.
+
+### DB path
+
+The default path is resolved by `dirs::data_local_dir()`:
+
+- Linux/macOS - `~/.local/share/ryu/audit.db` (respects `$XDG_DATA_HOME`)
+- Windows - `%LOCALAPPDATA%\ryu\audit.db`
+
+Override with `db_path` under `[audit]` in `gateway.toml`.
 
 ### Record schema
 
@@ -146,9 +167,8 @@ withdrawn when [mesh](/docs/core/node-and-presence) is enabled (a tailnet peer c
 `reachable: false` rather than erroring when the Gateway is down.
 
 <Callout type="warn">
-  Observability today is read-only snapshots. The audit log records and the eval runner scores, but
-  there is no built-in retention, rotation, or alerting on this data yet. The desktop audit viewer and
-  org dashboards (M4) extend this surface but do not change what the Gateway persists.
+  The audit log records and the eval runner scores, but there is no built-in retention, rotation, or
+  alerting on this data yet.
 </Callout>
 
 <Callout type="info">

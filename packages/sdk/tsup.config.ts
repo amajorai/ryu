@@ -5,6 +5,6 @@ export default defineConfig({
 	format: ["esm", "cjs"],
 	dts: true,
 	clean: true,
-	external: ["zod", "@ryu/sdk-native"],
+	external: ["zod", "@ryuhq/sdk-native"],
 	shims: true,
 });

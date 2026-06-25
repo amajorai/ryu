@@ -8,11 +8,11 @@ The model catalog is the Core subsystem that searches the Hugging Face Hub, comp
 verification, and switches which installed model the local engine serves. All logic lives in Core
 (`apps/core/src/model_catalog/`) so every client - desktop, mobile, extension - gets the same
 verdict from one place. Catalog entries are models only; the separate engine runtimes that serve
-them are documented under [Engines](/docs/using-ryu/engines).
+them are documented under [Engines](/docs/desktop/engines).
 
 <Callout type="info">
   Looking for the click-through how-to (browse, install, pick the active model)? See
-  [Models](/docs/using-ryu/models). This page is the Core internals and route reference.
+  [Models](/docs/desktop/models). This page is the Core internals and route reference.
 </Callout>
 
 ## What it does
@@ -125,7 +125,7 @@ The plumbing:
 - `model_catalog::active_model_ref_for_engine(engine)` is the runtime-switch source feeding each
   provider's `start()`, sitting below an explicit `with_model` override.
 
-The same switch is reachable from a [deep link](/docs/using-ryu/deep-links)
+The same switch is reachable from a [deep link](/docs/desktop/deep-links)
 (`ryu://models/<source>/<id>`) and from the desktop "Use this model" button (`ActiveModelControl`).
 
 ## Behavior and guarantees
@@ -146,8 +146,8 @@ The same switch is reachable from a [deep link](/docs/using-ryu/deep-links)
 ## Related
 
 <Cards>
-  <DocCard href="/docs/using-ryu/models" />
-  <DocCard href="/docs/using-ryu/engines" />
+  <DocCard href="/docs/desktop/models" />
+  <DocCard href="/docs/desktop/engines" />
   <DocCard href="/docs/core/skills-catalog" />
-  <DocCard href="/docs/using-ryu/deep-links" />
+  <DocCard href="/docs/desktop/deep-links" />
 </Cards>

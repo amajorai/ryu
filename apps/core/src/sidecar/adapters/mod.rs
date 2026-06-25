@@ -1,4 +1,5 @@
 pub mod acp;
+pub mod context_window;
 pub mod mcp_bridge;
 pub mod openai_compat;
 pub mod sdk;
@@ -311,6 +312,13 @@ pub struct ChatStreamRequest {
     /// `x-ryu-*` headers).
     #[serde(default)]
     pub background: bool,
+    /// Per-request plugin flags set by the client (e.g. a composer toggle):
+    /// `{ "io.ryu.double-check": true }`. The plugin turn-hook runtime
+    /// ([`crate::plugin_host`]) passes these to each `post_assistant_turn` hook so
+    /// a plugin reads its own flag to decide whether to act this turn. Empty by
+    /// default (no hook acts on a flag it cannot see).
+    #[serde(default)]
+    pub plugin_flags: std::collections::HashMap<String, bool>,
 }
 
 /// Default for [`ChatStreamRequest::persist`] — normal turns persist.
@@ -365,6 +373,18 @@ impl UiContent {
 
 /// Terminal SSE frame the AI SDK expects to close a UI message stream.
 const DONE_SSE_LINE: &str = "data: [DONE]\n\n";
+
+/// The terminal `[DONE]` SSE frame bytes. Exposed so the plugin turn-hook wrapper
+/// (`server::run_chat_with_hooks`) can withhold each inner turn's `[DONE]` and
+/// emit a single terminal one for the whole (possibly multi-turn) response.
+pub(crate) fn done_sse_frame() -> Vec<u8> {
+    DONE_SSE_LINE.as_bytes().to_vec()
+}
+
+/// Whether a forwarded SSE chunk is exactly the terminal `[DONE]` frame.
+pub(crate) fn is_done_frame(bytes: &[u8]) -> bool {
+    bytes == DONE_SSE_LINE.as_bytes()
+}
 
 /// Encode one UI message stream chunk as an SSE `data:` frame.
 fn ui_chunk(value: &Value) -> Vec<u8> {
@@ -1057,6 +1077,13 @@ fn persona_tone_prefix(persona: Option<&PersonaSlot>) -> Option<String> {
 /// When `tone_prefix` is `Some`, it is prepended to `existing` (separated by
 /// a blank line when `existing` is non-empty). When `tone_prefix` is `None`,
 /// `existing` is returned unchanged.
+/// Resolve just the model id bound to an agent (the second field of
+/// [`resolve_binding`]). Used by the context-window resolver to size an `auto`
+/// budget to the loaded model's launch `ctx_size`.
+pub(crate) async fn resolve_agent_model(agent_id: &str, store: &AgentStore) -> Option<String> {
+    resolve_binding(agent_id, store).await.1
+}
+
 fn merge_system_prompt(existing: Option<String>, tone_prefix: Option<String>) -> Option<String> {
     match (existing, tone_prefix) {
         (Some(e), Some(p)) if !e.is_empty() => Some(format!("{p}\n\n{e}")),
@@ -1677,6 +1704,7 @@ pub(crate) async fn run_text_turn_in(
         // Programmatic fan-out (delegate / threads / worker / scheduled / team
         // member) — yield to a directly-typing user on the shared local engine.
         background: true,
+        plugin_flags: std::collections::HashMap::new(),
     };
 
     // Route through the full streaming path (identical to the HTTP handler).
@@ -1694,6 +1722,10 @@ pub(crate) async fn run_text_turn_in(
         mcp,
         skills,
         traces,
+        None,
+        // Programmatic fan-out (channels/threads) inherits the engine's own
+        // overflow handling; app-level trimming is wired on the interactive
+        // chat path (route_single_turn) only.
         None,
     )
     .await;
@@ -1818,6 +1850,7 @@ async fn run_member_text(
         // Programmatic fan-out (delegate / threads / worker / scheduled / team
         // member) — yield to a directly-typing user on the shared local engine.
         background: true,
+        plugin_flags: std::collections::HashMap::new(),
     };
     // Team members run with auto-recall OFF: a single user message is fanned out
     // to N members, so per-member recall would be N× redundant retrieval on the
@@ -1833,6 +1866,8 @@ async fn run_member_text(
         Arc::clone(&deps.mcp),
         deps.skills.clone(),
         deps.traces.clone(),
+        None,
+        // Team member turns inherit engine overflow handling (see above).
         None,
     )
     .await;
@@ -2113,7 +2148,7 @@ pub async fn route_team_chat_stream(
 /// and the user's turn is recorded for future sessions once the stream completes.
 #[allow(clippy::too_many_arguments)]
 pub async fn route_chat_stream(
-    req: ChatStreamRequest,
+    mut req: ChatStreamRequest,
     registry: Arc<AcpAgentRegistry>,
     conversations: ConversationStore,
     agent_store: AgentStore,
@@ -2124,6 +2159,12 @@ pub async fn route_chat_stream(
     skills: SkillRegistry,
     traces: TraceStore,
     recall: Option<AutoRecallConfig>,
+    // App-level context-window management (opt-in / off by default). `None`
+    // means full history is sent and the engine handles overflow. When set, the
+    // OpenAI-compat path trims `req.messages` to the token budget and the ACP
+    // path replaces its fixed last-10 replay with a budgeted window — both
+    // always keeping the system block, optionally summarizing dropped turns.
+    ctx_window: Option<context_window::ContextWindowConfig>,
 ) -> Response {
     tracing::info!(
         agent_id = ?req.agent_id,
@@ -2267,7 +2308,8 @@ pub async fn route_chat_stream(
     // and is INDEPENDENT of `enable_long_term`. Fully fail-open — any error inside
     // `run_auto_recall` logs and yields `None`, never blocking the turn. Appended
     // AFTER persona+memory so persona instructions stay leading.
-    let long_term_system = if let Some(ref cfg) = recall {
+    // Mutable: a context-window compaction summary (if enabled) is merged in below.
+    let mut long_term_system = if let Some(ref cfg) = recall {
         // Hard wall-clock bound so recall NEVER slows a turn fatally. Both halves
         // do a lazy backfill (the chat-search path embeds any not-yet-indexed
         // message inline; the memory path embeds any not-yet-indexed long-term
@@ -2361,12 +2403,44 @@ pub async fn route_chat_stream(
     // the full message list from the client, so it needs no short-term injection.
     let short_term = if matches!(route, AgentRoute::Acp { .. }) {
         match req.conversation_id.as_deref() {
-            Some(id) => assemble_short_term_context(&conversations, id).await,
+            // When a context budget is set, replay a token-budgeted window of
+            // recent turns (optionally summarizing the dropped tail) instead of
+            // the fixed last-10 cap. The system block is counted against the
+            // budget so the replay leaves room for it + the reply.
+            Some(id) => match &ctx_window {
+                Some(cfg) => {
+                    let system_tokens = long_term_system
+                        .as_deref()
+                        .map(context_window::estimate_tokens)
+                        .unwrap_or(0);
+                    context_window::budgeted_short_term(&conversations, id, system_tokens, cfg).await
+                }
+                None => assemble_short_term_context(&conversations, id).await,
+            },
             None => None,
         }
     } else {
         None
     };
+
+    // OpenAI-compat / local path: trim the outbound history to the token budget
+    // (off by default). ACP is handled above via its short-term replay, so this
+    // only runs for the OpenAI-compat plane. Keeps every system message and the
+    // last turn; when auto-compact is on, dropped turns are summarized and the
+    // summary is merged into the system prompt (labelled, not a memory fact).
+    if let Some(cfg) = &ctx_window {
+        if !matches!(route, AgentRoute::Acp { .. }) {
+            let system_tokens = long_term_system
+                .as_deref()
+                .map(context_window::estimate_tokens)
+                .unwrap_or(0);
+            if let Some(summary) =
+                context_window::apply_openai(&mut req.messages, system_tokens, cfg).await
+            {
+                long_term_system = merge_system_prompt(long_term_system, Some(summary));
+            }
+        }
+    }
 
     // Resolve the effective working directory for ACP. If the request carries a
     // `cwd` and worktree isolation is requested, allocate a per-run git worktree

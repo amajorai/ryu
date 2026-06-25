@@ -131,6 +131,37 @@ impl MeetingStore {
         Ok(out)
     }
 
+    /// Rename a meeting (manual). Marks the title user-chosen so the background
+    /// auto-namer leaves it alone. Returns the updated meeting, or `None` when no
+    /// such meeting exists.
+    pub async fn set_title(&self, id: &str, title: &str) -> Result<Option<Meeting>> {
+        let Some(mut meeting) = self.get_meeting(id).await? else {
+            return Ok(None);
+        };
+        meeting.title = title.to_string();
+        meeting.title_custom = true;
+        meeting.updated_at = chrono::Utc::now().to_rfc3339();
+        self.upsert_meeting(&meeting).await?;
+        Ok(Some(meeting))
+    }
+
+    /// Apply an auto-generated title from the transcript, but only when the user
+    /// hasn't chosen one (`title_custom == false`). Does not set `title_custom`,
+    /// so an auto title stays replaceable and a later manual rename still locks
+    /// it. Returns the updated meeting when it wrote, else `None`.
+    pub async fn auto_set_title(&self, id: &str, title: &str) -> Result<Option<Meeting>> {
+        let Some(mut meeting) = self.get_meeting(id).await? else {
+            return Ok(None);
+        };
+        if meeting.title_custom {
+            return Ok(None);
+        }
+        meeting.title = title.to_string();
+        meeting.updated_at = chrono::Utc::now().to_rfc3339();
+        self.upsert_meeting(&meeting).await?;
+        Ok(Some(meeting))
+    }
+
     /// Delete a meeting and its transcript segments. Returns true when removed.
     pub async fn delete_meeting(&self, id: &str) -> Result<bool> {
         let conn = self.conn.lock().await;

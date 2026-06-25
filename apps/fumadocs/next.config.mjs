@@ -29,7 +29,9 @@ const config = {
         permanent: false,
       },
       // The recipes gallery became its own "Cookbook" root. Keep the old
-      // /docs/using-ryu/recipes URLs (and every recipe under it) alive.
+      // /docs/using-ryu/recipes URLs (and every recipe under it) alive. These
+      // must precede the /docs/using-ryu catch-all below so recipes still land
+      // on Cookbook, not desktop/recipes.
       {
         source: "/docs/using-ryu/recipes",
         destination: "/docs/cookbook",
@@ -38,6 +40,18 @@ const config = {
       {
         source: "/docs/using-ryu/recipes/:path*",
         destination: "/docs/cookbook/:path*",
+        permanent: true,
+      },
+      // "Using Ryu" was re-cut into per-surface realms; its content now lives
+      // under the "Desktop" root. Preserve every old /docs/using-ryu URL.
+      {
+        source: "/docs/using-ryu",
+        destination: "/docs/desktop",
+        permanent: true,
+      },
+      {
+        source: "/docs/using-ryu/:path*",
+        destination: "/docs/desktop/:path*",
         permanent: true,
       },
     ];

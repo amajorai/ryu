@@ -241,6 +241,12 @@ impl CatalogSort {
     }
 }
 
+/// True for HuggingFace pipeline tags that identify a generative image/video
+/// diffusion model (stable-diffusion.cpp compatible).
+fn is_diffusion_pipeline_tag(tag: &str) -> bool {
+    matches!(tag, "text-to-image" | "image-to-image" | "text-to-video")
+}
+
 /// A single model as shown in the left-hand selector list.
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelCard {
@@ -285,6 +291,10 @@ pub struct ModelCard {
     /// Human label of the engine the user would need for an incompatible card
     /// (e.g. `"vLLM"`, `"MLX"`); `None` when compatible.
     pub needs_engine: Option<String>,
+    /// True when this is a generative image/video diffusion model (FLUX, SDXL,
+    /// SD3, …). Detected from the Hub `pipeline_tag` at browse time, or from
+    /// the GGUF `general.architecture` for local-only installs.
+    pub diffusion: bool,
 }
 
 /// One downloadable GGUF file (a specific quantization of a model).
@@ -696,6 +706,17 @@ pub async fn search_models(
             let (author, name) = split_id(&it.id);
             let installed = installed.contains(&it.id);
             let (context_length, architecture, params) = gguf_fields(&it.gguf);
+            // Detect diffusion from pipeline_tag first (reliable); fall back to
+            // architecture for repos where the tag is absent but the gguf block is.
+            let diffusion = it
+                .pipeline_tag
+                .as_deref()
+                .map(is_diffusion_pipeline_tag)
+                .unwrap_or_else(|| {
+                    architecture
+                        .as_deref()
+                        .is_some_and(gguf::is_diffusion_architecture)
+                });
             ModelCard {
                 installed,
                 author,
@@ -714,6 +735,7 @@ pub async fn search_models(
                 format,
                 compatible,
                 needs_engine: needs_engine.clone(),
+                diffusion,
             }
         })
         .collect();
@@ -793,6 +815,9 @@ fn installed_cards() -> Vec<ModelCard> {
                 stem.clone(),
             ),
         };
+        // Detect diffusion from the on-disk GGUF metadata (secondary probe; the
+        // enriched path below overwrites this with the Hub pipeline_tag when online).
+        let diffusion = capabilities::detect_local_is_diffusion(&stem);
         seen.entry(key).or_insert(ModelCard {
             id,
             author,
@@ -811,6 +836,7 @@ fn installed_cards() -> Vec<ModelCard> {
             format: ModelFormat::Gguf,
             compatible: gguf_compatible,
             needs_engine: gguf_needs.clone(),
+            diffusion,
         });
     }
 
@@ -846,6 +872,7 @@ fn installed_cards() -> Vec<ModelCard> {
             format: m.format,
             compatible,
             needs_engine,
+            diffusion: false,
         });
     }
     seen.into_values().collect()
@@ -871,14 +898,26 @@ async fn installed_cards_enriched(
             card.downloads = meta.downloads;
             card.likes = meta.likes;
             card.tags = meta.tags;
-            card.pipeline_tag = meta.pipeline_tag;
             card.gated = gated_to_bool(&meta.gated);
             card.last_modified = meta.last_modified;
             card.created_at = meta.created_at;
             let (context_length, architecture, params) = gguf_fields(&meta.gguf);
             card.context_length = context_length;
-            card.architecture = architecture;
             card.params = params;
+            // Refresh diffusion from the Hub pipeline_tag (more reliable than
+            // GGUF architecture for models whose metadata omits the arch key).
+            let tag = meta.pipeline_tag;
+            card.diffusion = tag
+                .as_deref()
+                .map(is_diffusion_pipeline_tag)
+                .unwrap_or_else(|| {
+                    architecture
+                        .as_deref()
+                        .is_some_and(gguf::is_diffusion_architecture)
+                })
+                || card.diffusion; // keep local detection if Hub provides nothing
+            card.architecture = architecture;
+            card.pipeline_tag = tag;
         }
     }
     cards
@@ -1150,6 +1189,15 @@ pub async fn model_detail(
 
     let (compatible, needs_engine) = format_compat(format);
     let (context_length, architecture, params) = gguf_fields(&info.gguf);
+    let diffusion = info
+        .pipeline_tag
+        .as_deref()
+        .map(is_diffusion_pipeline_tag)
+        .unwrap_or_else(|| {
+            architecture
+                .as_deref()
+                .is_some_and(gguf::is_diffusion_architecture)
+        });
     let card = ModelCard {
         installed: installed_set.contains(&info.id) || files.iter().any(|f| f.installed),
         author,
@@ -1168,6 +1216,7 @@ pub async fn model_detail(
         format,
         compatible,
         needs_engine,
+        diffusion,
     };
 
     Ok(ModelDetail {

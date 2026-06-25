@@ -40,6 +40,11 @@ pub struct DetectedCaps {
     pub tools: bool,
     pub reasoning: bool,
     pub vision: bool,
+    /// True when the model is a generative image/video diffusion model (not a
+    /// chat model). Detected from the GGUF `general.architecture` key.
+    /// Unlike the other flags, this is a model *kind* — it changes the entire
+    /// interaction surface — and is not user-overridable via [`CapabilityOverrides`].
+    pub diffusion: bool,
 }
 
 /// User overrides for an agent's capabilities. Each field is tri-state: `None`
@@ -62,11 +67,13 @@ impl CapabilityOverrides {
     }
 
     /// Apply the overrides on top of detected defaults to get effective flags.
+    /// `diffusion` is not user-overridable and passes through unchanged.
     pub fn apply(&self, d: DetectedCaps) -> DetectedCaps {
         DetectedCaps {
             tools: self.tools.unwrap_or(d.tools),
             reasoning: self.reasoning.unwrap_or(d.reasoning),
             vision: self.vision.unwrap_or(d.vision),
+            diffusion: d.diffusion,
         }
     }
 }
@@ -82,6 +89,9 @@ pub struct CapabilityReport {
     pub reasoning: bool,
     /// Effective vision (image input) support.
     pub vision: bool,
+    /// True when this model is a generative diffusion model (text-to-image /
+    /// text-to-video). Not user-overridable — taken directly from detection.
+    pub diffusion: bool,
     /// Auto-detected flags before overrides.
     pub detected: DetectedCaps,
     /// The user's tri-state overrides.
@@ -102,6 +112,7 @@ impl CapabilityReport {
             tools: eff.tools,
             reasoning: eff.reasoning,
             vision: eff.vision,
+            diffusion: detected.diffusion,
             detected,
             overrides,
             source,
@@ -141,6 +152,7 @@ pub fn detect_local(model_ref: &str) -> Option<DetectedCaps> {
     let stem = installed::resolve_to_stem(model_ref)?;
     let path = installed::model_file_path(&stem);
     let meta = gguf::read_metadata(&path).ok()?;
+    let diffusion = meta.is_diffusion();
     let (tools, reasoning) = meta
         .chat_template()
         .map(detect_from_chat_template)
@@ -153,7 +165,21 @@ pub fn detect_local(model_ref: &str) -> Option<DetectedCaps> {
         tools,
         reasoning,
         vision,
+        diffusion,
     })
+}
+
+/// Detect whether a local GGUF identified by its stem is a diffusion model.
+/// Cheaper than [`detect_local`] when only the diffusion flag is needed — reads
+/// the GGUF metadata once without needing to resolve via the provenance index.
+/// Returns `false` on any read or parse failure.
+pub fn detect_local_is_diffusion(stem: &str) -> bool {
+    let path = installed::model_file_path(stem);
+    gguf::read_metadata(&path)
+        .ok()
+        .as_ref()
+        .map(|m| m.is_diffusion())
+        .unwrap_or(false)
 }
 
 /// Detect whether an ACP agent advertises a reasoning / thought-level control in
@@ -265,6 +291,7 @@ mod tests {
             tools: false,
             reasoning: true,
             vision: false,
+            diffusion: false,
         };
         let ov = CapabilityOverrides {
             tools: Some(true),
@@ -275,6 +302,19 @@ mod tests {
         assert!(eff.tools, "override forces tools on");
         assert!(!eff.reasoning, "override forces reasoning off");
         assert!(!eff.vision, "no override → detected value");
+        assert!(!eff.diffusion, "diffusion passes through from detection");
+    }
+
+    #[test]
+    fn diffusion_not_overridable() {
+        let detected = DetectedCaps {
+            diffusion: true,
+            ..Default::default()
+        };
+        // No matter what the override says, diffusion stays from detection.
+        let ov = CapabilityOverrides::default();
+        let eff = ov.apply(detected);
+        assert!(eff.diffusion, "diffusion passes through unchanged");
     }
 
     #[test]
@@ -285,6 +325,7 @@ mod tests {
             tools: true,
             reasoning: false,
             vision: true,
+            diffusion: false,
         };
         assert_eq!(ov.apply(detected), detected);
     }
@@ -315,6 +356,7 @@ mod tests {
             tools: true,
             reasoning: false,
             vision: false,
+            diffusion: false,
         };
         let ov = CapabilityOverrides {
             reasoning: Some(true),
@@ -323,7 +365,18 @@ mod tests {
         let report = CapabilityReport::build(detected, ov, "gguf");
         assert!(report.tools);
         assert!(report.reasoning);
+        assert!(!report.diffusion);
         assert!(!report.detected.reasoning, "detected snapshot is pre-override");
         assert_eq!(report.source, "gguf");
+    }
+
+    #[test]
+    fn diffusion_report_is_not_overridable() {
+        let detected = DetectedCaps {
+            diffusion: true,
+            ..Default::default()
+        };
+        let report = CapabilityReport::build(detected, CapabilityOverrides::default(), "gguf");
+        assert!(report.diffusion, "diffusion surfaces directly in the report");
     }
 }

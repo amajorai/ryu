@@ -13,14 +13,18 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
+pub mod auto_title;
 pub mod conversations;
 pub mod data_admin;
 pub mod git;
+pub mod hardware_api;
+pub mod hardware_ws;
 pub mod identity_api;
 pub mod media;
 pub mod meetings_api;
 pub mod memory;
 pub mod approvals_api;
+pub mod dashboard_api;
 pub mod message_index;
 pub mod monitors_api;
 pub mod predict_api;
@@ -153,6 +157,11 @@ pub struct ServerState {
     /// quest on its interval via a `JobTarget::Quest` job. The judge call routes
     /// through the Gateway; nothing about the model is hardcoded.
     pub quests: crate::quests::QuestEngine,
+    /// Home dashboards engine: holds the dashboards/widgets store and the live SSE
+    /// stream. The background refresh loop resolves each widget's source on its
+    /// interval and broadcasts fresh values. Decides *what data is pulled and how
+    /// often* ⇒ Core; the model/tool calls a source makes route through the Gateway.
+    pub dashboards: crate::dashboard::DashboardEngine,
     /// Human-in-the-loop approval inbox: holds the approvals store + decision
     /// engine. Agents/workflows/automations explicitly configured for approval
     /// raise pending requests here (scheduler `require_approval` jobs, workflow
@@ -170,6 +179,12 @@ pub struct ServerState {
     /// self-declared attribution behind the shared token, NOT verified identity
     /// (see `crate::connections`).
     pub connections: crate::connections::ConnectionRegistry,
+    /// Ryu hardware device registry (RHP v1, PROTOCOL.md §6): paired watch /
+    /// necklace / desk devices, their revocable per-device Bearer tokens, and
+    /// presence (last-seen + battery). Backed by `~/.ryu/hardware.db`. Read by the
+    /// `/api/hardware/*` REST surface and the `/api/hardware/ws` realtime handler;
+    /// the WS handler authenticates the device token against it on each connect.
+    pub hardware: crate::hardware::store::DeviceStore,
 }
 
 /// Whether a bind address string (`host:port`, `host`, `[v6]:port`) resolves to a
@@ -487,6 +502,27 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/auth/login", post(auth_login))
         .route("/api/auth/status", get(auth_status))
         .route("/api/auth/logout", post(auth_logout))
+        // ── Ryu Hardware Protocol (RHP v1) public surface ────────────────────
+        // The realtime device link: a device presents a PER-DEVICE Bearer token,
+        // which `require_auth` (which only knows the global RYU_TOKEN) would
+        // reject — so the WS handler authenticates the device token against the
+        // registry itself. Pairing is nonce-gated (the proof-of-possession is the
+        // device's QR/BLE nonce), so it is public too. Device management
+        // (list/patch/delete) is protected — see the protected router below.
+        .route("/api/hardware/ws", get(hardware_ws::hardware_ws))
+        .route("/api/hardware/pair", post(hardware_api::pair_device))
+        // TRMNL display surface: the device polls these with its OWN per-device
+        // Bearer token (which `require_auth`/global-RYU_TOKEN can't gate), so the
+        // handlers authenticate the device token against the registry themselves —
+        // the same model as the WS upgrade. Hence: public router.
+        .route(
+            "/api/hardware/display/:device_id",
+            get(hardware_api::display_manifest),
+        )
+        .route(
+            "/api/hardware/display/:device_id/image",
+            get(hardware_api::display_image),
+        )
         // Inbound Composio webhook: public (external delivery can't send the bearer
         // token) but HMAC-authenticated fail-closed inside the handler.
         .route("/api/composio/webhook", post(composio_webhook));
@@ -555,6 +591,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // Static 3-segment routes registered before the parameterized
         // `/api/plugins/:id/*` routes so matchit never confuses them.
         .route("/api/plugins", get(list_apps))
+        .route("/api/plugins/contributions", get(plugin_contributions))
         .route("/api/plugins/catalog", get(list_apps_catalog))
         .route("/api/plugins/install", post(install_app_from_url))
         .route("/api/plugins/reload", post(reload_app_manifests))
@@ -703,23 +740,15 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/conversations/:id/archived",
             post(set_conversation_archived_handler),
         )
-        // ── Goal (`/goal`): persistent completion condition + judge ──────────
+        // Manual rename (ChatGPT/Claude-style). Marks the title user-chosen so the
+        // background auto-namer leaves it alone.
         .route(
-            "/api/conversations/:id/goal",
-            get(get_goal_handler)
-                .put(set_goal_handler)
-                .delete(clear_goal_handler),
+            "/api/conversations/:id/title",
+            post(set_conversation_title_handler),
         )
-        .route(
-            "/api/conversations/:id/goal/judge",
-            post(judge_goal_handler),
-        )
-        .route("/api/conversations/:id/goal/run", post(run_goal_handler))
-        // ── Double-check: a side model reviews the latest answer (stateless) ──
-        .route(
-            "/api/conversations/:id/double-check",
-            post(double_check_handler),
-        )
+        // Goal + double-check are now plugins (io.ryu.goal / io.ryu.double-check)
+        // driven by the plugin turn-hook runtime; their old Core endpoints are
+        // removed. See docs/plugin-runtime.md.
         // ── Side questions (`/btw`): ephemeral answer over the conversation ──
         .route("/api/btw", post(btw_handler))
         // ── Predictive typing: system-wide inline autocomplete brain ──────────
@@ -882,6 +911,9 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/events/notifications/stream",
             get(notifications_stream),
         )
+        // Unified multiplex of every feature event bus over ONE connection so the
+        // desktop stays within the browser's 6-per-host HTTP/1.1 budget.
+        .route("/api/events/all", get(all_events_stream))
         .route("/api/monitors/alerts", get(monitors_api::list_all_alerts))
         .route(
             "/api/monitors/alerts/:id/ack",
@@ -956,6 +988,37 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/quests/:id/suggestion/dismiss",
             post(quests_api::dismiss_suggestion),
         )
+        // ── Home dashboards (customizable live widget grid) ─────────────────
+        // Static segments (`events`, `catalog`) before `:id` so they match first.
+        .route("/api/dashboards/events", get(dashboard_api::dashboard_events))
+        .route("/api/dashboards/catalog", get(dashboard_api::catalog))
+        .route(
+            "/api/dashboards",
+            get(dashboard_api::list_dashboards).post(dashboard_api::create_dashboard),
+        )
+        .route(
+            "/api/dashboards/:id",
+            get(dashboard_api::get_dashboard)
+                .put(dashboard_api::update_dashboard)
+                .delete(dashboard_api::delete_dashboard),
+        )
+        .route(
+            "/api/dashboards/:id/widgets",
+            get(dashboard_api::list_widgets).post(dashboard_api::create_widget),
+        )
+        .route(
+            "/api/dashboards/:id/widgets/:wid",
+            axum::routing::put(dashboard_api::update_widget)
+                .delete(dashboard_api::delete_widget),
+        )
+        .route(
+            "/api/dashboards/:id/widgets/:wid/layout",
+            axum::routing::put(dashboard_api::update_widget_layout),
+        )
+        .route(
+            "/api/dashboards/:id/widgets/:wid/refresh",
+            post(dashboard_api::refresh_widget),
+        )
         // ── Meeting notes (record → live transcript → AI notes) ─────────────
         // Static segments are registered before `:id` so `stream` / `detect` /
         // `detection-config` match first.
@@ -973,6 +1036,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/meetings/:id",
             get(meetings_api::get_meeting).delete(meetings_api::delete_meeting),
         )
+        .route("/api/meetings/:id/title", post(meetings_api::rename_meeting))
         .route("/api/meetings/:id/chunk", post(meetings_api::ingest_chunk))
         .route(
             "/api/meetings/:id/finalize",
@@ -981,6 +1045,23 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route(
             "/api/meetings/:id/transcript",
             get(meetings_api::get_transcript),
+        )
+        // ── Hardware device registry (management; protected) ────────────────
+        // The realtime `/api/hardware/ws` + nonce-gated `/api/hardware/pair` are
+        // public (registered on the public router above). These management routes
+        // require the node token.
+        .route("/api/hardware/devices", get(hardware_api::list_devices))
+        .route(
+            "/api/hardware/devices/:id",
+            axum::routing::patch(hardware_api::update_device)
+                .delete(hardware_api::delete_device),
+        )
+        // Per-device dashboard config (layout/widgets/refresh_rate). Management
+        // routes (the desktop + the `dashboard_builder` chat target these), so they
+        // sit behind `require_auth` with the rest of the protected surface.
+        .route(
+            "/api/hardware/devices/:id/dashboard",
+            get(hardware_api::get_device_dashboard).put(hardware_api::set_device_dashboard),
         )
         // ── Sub-agent delegation (clean context, presets, caps) ─────────────
         .route("/api/delegate/stream", post(delegate_stream))
@@ -1330,6 +1411,99 @@ async fn notifications_stream() -> axum::response::sse::Sse<
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+/// `GET /api/events/all` — unified SSE that multiplexes EVERY feature event bus
+/// (notifications, quests, monitors, approvals, meetings, dashboards, downloads)
+/// into ONE connection, each event tagged with its channel via the SSE `event:`
+/// field. The desktop subscribes here ONCE instead of opening 6+ always-on
+/// streams; otherwise those feeds hold every slot of the browser's
+/// 6-connection-per-host HTTP/1.1 budget and starve all other fetches (the
+/// "every page loads forever" bug). The per-feature endpoints stay for
+/// non-desktop clients (mobile, CLI).
+async fn all_events_stream(
+    State(state): State<ServerState>,
+) -> axum::response::sse::Sse<
+    impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    use futures_util::stream::{self, Stream, StreamExt};
+    use std::convert::Infallible;
+    use std::pin::Pin;
+    use tokio::sync::broadcast::error::RecvError;
+
+    type TaggedStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
+
+    // Wrap one broadcast receiver as a channel-tagged SSE event stream.
+    fn tagged<T>(channel: &'static str, rx: tokio::sync::broadcast::Receiver<T>) -> TaggedStream
+    where
+        T: serde::Serialize + Clone + Send + 'static,
+    {
+        Box::pin(stream::unfold(rx, move |mut rx| async move {
+            loop {
+                match rx.recv().await {
+                    Ok(ev) => {
+                        let data = serde_json::to_string(&ev).unwrap_or_default();
+                        return Some((Ok(Event::default().event(channel).data(data)), rx));
+                    }
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => return None,
+                }
+            }
+        }))
+    }
+
+    // Downloads is snapshot-first (a late client self-heals from the snapshot).
+    // Subscribe BEFORE taking the snapshot so no delta is missed in between, then
+    // prepend the snapshot ahead of the delta stream.
+    let downloads_rx = state.downloads.subscribe();
+    let downloads_snapshot = crate::downloads::DownloadEvent::Snapshot {
+        tasks: state.downloads.snapshot().await,
+    };
+    let downloads_snap_data = serde_json::to_string(&downloads_snapshot).unwrap_or_default();
+    let downloads: TaggedStream = Box::pin(
+        stream::once(
+            async move { Ok(Event::default().event("downloads").data(downloads_snap_data)) },
+        )
+        .chain(tagged("downloads", downloads_rx)),
+    );
+
+    // The dashboards channel additionally registers a live UI VIEWER for the life of
+    // this stream (the refresh loop's cost guard keys off viewer_count, not the raw
+    // broadcast receiver count — so internal listeners like the hardware nudge loop
+    // don't fake a viewer). The guard rides in the unfold state and drops on close.
+    let dashboards_rx = state.dashboards.store.subscribe();
+    let dashboards_guard = state.dashboards.store.viewer_guard();
+    let dashboards: TaggedStream = Box::pin(stream::unfold(
+        (dashboards_rx, dashboards_guard),
+        |(mut rx, guard)| async move {
+            loop {
+                match rx.recv().await {
+                    Ok(ev) => {
+                        let data = serde_json::to_string(&ev).unwrap_or_default();
+                        return Some((
+                            Ok(Event::default().event("dashboards").data(data)),
+                            (rx, guard),
+                        ));
+                    }
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => return None,
+                }
+            }
+        },
+    ));
+
+    let streams: Vec<TaggedStream> = vec![
+        tagged("notifications", crate::events::subscribe()),
+        tagged("quests", state.quests.store.subscribe()),
+        tagged("monitors", state.monitors.store.subscribe()),
+        tagged("approvals", state.approvals.store.subscribe()),
+        tagged("meetings", state.meetings.store.subscribe()),
+        dashboards,
+        downloads,
+    ];
+
+    Sse::new(stream::select_all(streams)).keep_alive(KeepAlive::default())
+}
+
 // ── Download center handlers (#456) ─────────────────────────────────────────
 
 /// `GET /api/downloads` — current snapshot of all tracked downloads.
@@ -1533,7 +1707,6 @@ async fn auth_status(State(state): State<ServerState>) -> Json<serde_json::Value
     Json(json!({
         "authenticated": authenticated,
         "pending": pending,
-        "token": s.token,
         "userCode": s.user_code,
         "verificationUri": s.verification_uri,
     }))
@@ -1598,20 +1771,37 @@ async fn chat_stream(
         )
         .await;
     }
+    // Wrap the turn with the plugin turn-hook runtime (M5): after the assistant
+    // turn streams + persists, enabled `post_assistant_turn` hooks run and may
+    // surface a note or drive a server-side continue loop. Zero-overhead when no
+    // hook plugins are enabled (the wrapper returns the inner stream unwrapped).
+    run_chat_with_hooks(state, req).await
+}
+
+/// Run one chat turn: resolve the per-turn skills-disclosure + auto-recall config,
+/// then hand off to the single-agent route. Extracted so the plugin turn-hook
+/// wrapper can re-run a turn during a `continue` loop.
+async fn route_single_turn(
+    state: &ServerState,
+    req: crate::sidecar::adapters::ChatStreamRequest,
+) -> axum::response::Response {
     // Apply the global skills disclosure mode (progressive vs full) from the pref
     // so the ACP chat path injects the L1 index + loads on demand (default) or the
     // full skill bodies. Cheap pref read; mirrors the per-request recall resolution.
-    apply_skills_disclosure(&state).await;
+    apply_skills_disclosure(state).await;
     // Resolve auto-recall (U17) config from prefs/env. Default ON; encoded as
     // `Some`/`None` so a disabled feature does zero work inside route_chat_stream.
-    let recall = if resolve_auto_recall_enabled(&state).await {
+    let recall = if resolve_auto_recall_enabled(state).await {
         Some(crate::sidecar::adapters::AutoRecallConfig {
             retrieval: state.retrieval.clone(),
-            top_k: resolve_auto_recall_top_k(&state).await,
+            top_k: resolve_auto_recall_top_k(state).await,
         })
     } else {
         None
     };
+    // App-level context-window config (off by default). Resolved here, on the
+    // interactive chat path, mirroring the recall resolution above.
+    let ctx_window = resolve_context_window(state, &req).await;
     route_chat_stream(
         req,
         Arc::clone(&state.agents),
@@ -1624,8 +1814,167 @@ async fn chat_stream(
         state.skills.clone(),
         state.traces.clone(),
         recall,
+        ctx_window,
     )
     .await
+}
+
+/// Build the post-assistant-turn hook context from the persisted transcript
+/// (most-recent 20 messages) + the request's plugin flags.
+async fn build_hook_context(
+    state: &ServerState,
+    conversation_id: &str,
+    agent_id: Option<&str>,
+    flags: &std::collections::HashMap<String, bool>,
+) -> crate::plugin_host::HookContext {
+    const MAX_TRANSCRIPT: usize = 20;
+    let transcript = match state.conversations.get_messages(conversation_id).await {
+        Ok(msgs) => {
+            let skip = msgs.len().saturating_sub(MAX_TRANSCRIPT);
+            msgs.into_iter()
+                .skip(skip)
+                .map(|m| crate::plugin_host::HookMessage {
+                    role: m.role,
+                    content: m.content,
+                })
+                .collect()
+        }
+        Err(e) => {
+            tracing::warn!("plugin_host: could not load transcript for hooks: {e}");
+            Vec::new()
+        }
+    };
+    crate::plugin_host::HookContext {
+        conversation_id: Some(conversation_id.to_string()),
+        agent_id: agent_id.map(str::to_string),
+        transcript,
+        flags: flags.clone(),
+    }
+}
+
+/// Build the next-turn request for a `continue` directive: reload the full
+/// transcript and append the injected user turn (`text`). `route_chat_stream`
+/// persists that final user turn + the next assistant reply, so the server-side
+/// loop is recorded exactly like a normal turn.
+async fn continue_turn_request(
+    state: &ServerState,
+    prev: &crate::sidecar::adapters::ChatStreamRequest,
+    conversation_id: &str,
+    text: String,
+) -> crate::sidecar::adapters::ChatStreamRequest {
+    use crate::sidecar::adapters::{UiContent, UiMessage};
+    let mut messages: Vec<UiMessage> = match state.conversations.get_messages(conversation_id).await
+    {
+        Ok(msgs) => msgs
+            .into_iter()
+            .map(|m| UiMessage {
+                role: m.role,
+                content: UiContent::Text(m.content),
+                parts: Vec::new(),
+            })
+            .collect(),
+        Err(_) => prev.messages.clone(),
+    };
+    messages.push(UiMessage {
+        role: "user".to_string(),
+        content: UiContent::Text(text),
+        parts: Vec::new(),
+    });
+    let mut next = prev.clone();
+    next.messages = messages;
+    next.persist = true;
+    next
+}
+
+/// One `data-plugin_note` AI-SDK custom data part frame carrying a hook's note
+/// (e.g. double-check's review). The client renders it out-of-band; it never
+/// enters chat history.
+fn plugin_note_frame(text: &str) -> Vec<u8> {
+    let value = serde_json::json!({ "type": "data-plugin_note", "data": { "text": text } });
+    format!("data: {value}\n\n").into_bytes()
+}
+
+/// Wrap a chat turn with the plugin turn-hook runtime (M5). After the assistant
+/// turn streams + persists, enabled `post_assistant_turn` hooks run: a `note`
+/// directive is surfaced as a `data-plugin_note` UI part (e.g. double-check's
+/// review), and a `continue` directive injects a follow-up user turn and streams
+/// another turn into the SAME response (the server-side goal loop), capped at
+/// [`crate::plugin_host::MAX_CONTINUE_TURNS`]. When no hook plugins are enabled
+/// (or the sandbox backend is absent, or this is a background / non-persisted /
+/// no-conversation turn) the inner stream is returned unwrapped — zero overhead
+/// on the hot path.
+async fn run_chat_with_hooks(
+    state: ServerState,
+    req: crate::sidecar::adapters::ChatStreamRequest,
+) -> axum::response::Response {
+    use axum::body::Body;
+    use futures_util::StreamExt;
+
+    let eligible = req.conversation_id.is_some() && req.persist && !req.background;
+    // Cheap gate: collect enabled hooks once. Empty (the common case) → no wrap.
+    let hooks = if eligible && crate::tool_exec::is_available() {
+        crate::plugin_host::collect_enabled_hooks(&state).await
+    } else {
+        Vec::new()
+    };
+    if hooks.is_empty() {
+        return route_single_turn(&state, req).await;
+    }
+
+    let conversation_id = req.conversation_id.clone().unwrap_or_default();
+    let agent_id = req.agent_id.clone();
+    let flags = req.plugin_flags.clone();
+
+    let stream = async_stream::stream! {
+        let mut current = req;
+        let mut turn: u32 = 0;
+        loop {
+            // Stream one turn, forwarding every UI part except its terminal [DONE].
+            let inner = route_single_turn(&state, current.clone()).await;
+            let mut body = inner.into_body().into_data_stream();
+            while let Some(item) = body.next().await {
+                match item {
+                    Ok(bytes) => {
+                        if crate::sidecar::adapters::is_done_frame(&bytes) {
+                            continue;
+                        }
+                        yield Ok::<_, std::convert::Infallible>(bytes.to_vec());
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            // Post-turn hooks: build context from the persisted transcript.
+            let ctx = build_hook_context(&state, &conversation_id, agent_id.as_deref(), &flags).await;
+            let directives = crate::plugin_host::run_hooks(&state, &ctx, &hooks).await;
+            let mut next_text: Option<String> = None;
+            for directive in directives {
+                match directive {
+                    crate::plugin_host::HookDirective::Note { text } => {
+                        yield Ok(plugin_note_frame(&text));
+                    }
+                    crate::plugin_host::HookDirective::Continue { text } => {
+                        if next_text.is_none() {
+                            next_text = Some(text);
+                        }
+                    }
+                    crate::plugin_host::HookDirective::None => {}
+                }
+            }
+
+            turn += 1;
+            match next_text {
+                Some(text) if turn < crate::plugin_host::MAX_CONTINUE_TURNS => {
+                    current = continue_turn_request(&state, &current, &conversation_id, text).await;
+                }
+                _ => break,
+            }
+        }
+        // One terminal DONE for the whole (possibly multi-turn) response.
+        yield Ok(crate::sidecar::adapters::done_sse_frame());
+    };
+
+    crate::sidecar::adapters::sse_response(Body::from_stream(stream))
 }
 
 /// `GET /api/agents/:id/acp-config` — the agent's advertised ACP session config.
@@ -1700,6 +2049,7 @@ async fn agent_capabilities(
                         tools: true,
                         reasoning: caps::acp_probe_reasoning(&v),
                         vision: false,
+                        diffusion: false,
                     },
                     "acp_probe",
                 ),
@@ -1710,6 +2060,7 @@ async fn agent_capabilities(
                         tools: true,
                         reasoning: false,
                         vision: false,
+                        diffusion: false,
                     },
                     "default",
                 ),
@@ -1747,6 +2098,7 @@ async fn agent_capabilities(
                 tools: true,
                 reasoning: false,
                 vision: false,
+                diffusion: false,
             },
             "default",
         ),
@@ -3135,6 +3487,73 @@ pub async fn fire_activation_event(state: &ServerState, event: &str) {
 
 /// Collect the `policy_type` of every `Policy` runnable in a manifest.
 fn manifest_policy_types(manifest: &crate::plugin_manifest::PluginManifest) -> Vec<String> {
+    manifest_policies(manifest)
+        .into_iter()
+        .map(|c| c.policy_type)
+        .collect()
+}
+
+/// `GET /api/plugins/contributions` — the declarative UI contributions (composer
+/// controls, settings tabs, slash commands) of every **enabled** plugin, each
+/// tagged with its owning `plugin` id. The desktop renders the known widget types
+/// from this; new widget types need no Core change (Core passes them verbatim).
+/// This is what lets a plugin like double-check/goal contribute its composer
+/// toggle / slash command without editing the closed desktop source.
+async fn plugin_contributions(State(state): State<ServerState>) -> axum::response::Response {
+    let enabled_ids: std::collections::HashSet<String> = match state.app_store.list().await {
+        Ok(records) => records
+            .into_iter()
+            .filter(|r| r.enabled)
+            .map(|r| r.id)
+            .collect(),
+        Err(e) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+        }
+    };
+    let mut composer_controls = Vec::new();
+    let mut settings_tabs = Vec::new();
+    let mut slash_commands = Vec::new();
+    let mut turn_hooks = Vec::new();
+
+    let manifests = state.app_manifests.read().await;
+    for manifest in manifests.iter() {
+        if !enabled_ids.contains(&manifest.id) {
+            continue;
+        }
+        let Some(c) = &manifest.contributes else {
+            continue;
+        };
+        // Tag each contribution with its owning plugin id so the desktop knows
+        // which `plugin_flags` entry a toggle sets / which plugin a tab belongs to.
+        let tag = |mut v: serde_json::Value| {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("plugin".to_string(), serde_json::json!(manifest.id));
+            }
+            v
+        };
+        composer_controls.extend(c.composer_controls.iter().cloned().map(tag));
+        settings_tabs.extend(c.settings_tabs.iter().cloned().map(tag));
+        slash_commands.extend(c.slash_commands.iter().cloned().map(tag));
+        turn_hooks.extend(c.turn_hooks.iter().map(|h| {
+            serde_json::json!({ "plugin": manifest.id, "id": h.id, "on": h.on })
+        }));
+    }
+    Json(json!({
+        "composer_controls": composer_controls,
+        "settings_tabs": settings_tabs,
+        "slash_commands": slash_commands,
+        "turn_hooks": turn_hooks,
+    }))
+    .into_response()
+}
+
+/// Collect the full [`PolicyConfig`] (type + definition) of every `Policy`
+/// runnable in a manifest, so [`apply_policy`] can data-drive a policy from its
+/// declared `definition` (e.g. the compression service URL) rather than a
+/// hardcoded value.
+fn manifest_policies(
+    manifest: &crate::plugin_manifest::PluginManifest,
+) -> Vec<crate::plugin_manifest::schema::PolicyConfig> {
     manifest
         .runnables
         .iter()
@@ -3143,7 +3562,6 @@ fn manifest_policy_types(manifest: &crate::plugin_manifest::PluginManifest) -> V
             r.config.as_ref().and_then(|v| {
                 serde_json::from_value::<crate::plugin_manifest::schema::PolicyConfig>(v.clone())
                     .ok()
-                    .map(|c| c.policy_type)
             })
         })
         .collect()
@@ -3172,25 +3590,45 @@ async fn apply_policy(
     manifest: &crate::plugin_manifest::PluginManifest,
     enabled: bool,
 ) {
-    let policy_types = manifest_policy_types(manifest);
-    if policy_types.is_empty() {
+    let policies = manifest_policies(manifest);
+    if policies.is_empty() {
         return;
     }
 
     let mut gateway_dirty = false;
 
-    for policy_type in &policy_types {
-        match policy_type.as_str() {
+    for policy in &policies {
+        match policy.policy_type.as_str() {
             "compression" => {
-                crate::sidecar::headroom::set_enabled(enabled);
+                // Data-drive the compression service from the policy `definition`
+                // (url/token/timeout_ms/min_messages/service) rather than a
+                // hardcoded URL, so any compression plugin — not just the bundled
+                // `io.ryu.headroom` — works by pointing at its own `/v1/compress`
+                // service. The gateway transform (`compression.rs`) is the generic
+                // protocol host; the *service* is the plugin (MCP-style split).
                 if enabled {
-                    if let Err(e) = state.headroom.start().await {
-                        tracing::warn!(
-                            "headroom: start on plugin-enable failed (compression may pass through): {e}"
-                        );
+                    crate::sidecar::headroom::set_compression_policy(
+                        crate::sidecar::headroom::CompressionPolicy::from_definition(
+                            &policy.definition,
+                        ),
+                    );
+                } else {
+                    crate::sidecar::headroom::set_compression_policy(Default::default());
+                }
+                crate::sidecar::headroom::set_enabled(enabled);
+                // Manage the bundled local proxy only when the active service IS
+                // the bundled headroom one; a third-party service URL is the
+                // plugin's own process and Core only configures the gateway.
+                if crate::sidecar::headroom::manages_bundled_service() {
+                    if enabled {
+                        if let Err(e) = state.headroom.start().await {
+                            tracing::warn!(
+                                "headroom: start on plugin-enable failed (compression may pass through): {e}"
+                            );
+                        }
+                    } else if let Err(e) = state.headroom.stop().await {
+                        tracing::warn!("headroom: stop on plugin-disable failed: {e}");
                     }
-                } else if let Err(e) = state.headroom.stop().await {
-                    tracing::warn!("headroom: stop on plugin-disable failed: {e}");
                 }
                 gateway_dirty = true;
             }
@@ -4413,6 +4851,43 @@ async fn set_conversation_archived_handler(
     }
 }
 
+/// `POST /api/conversations/:id/title` request body.
+#[derive(serde::Deserialize)]
+struct SetTitleBody {
+    title: String,
+}
+
+/// `POST /api/conversations/:id/title` — manually rename a conversation. Body:
+/// `{ "title": "..." }`. This marks the title user-chosen (`title_custom = 1`)
+/// so the background auto-namer never overwrites it. Server-backed, so the new
+/// title surfaces to every client (and to the coordinator `threads` view).
+#[utoipa::path(
+    post,
+    path = "/api/conversations/{id}/title",
+    tag = "Conversations",
+    summary = "Rename a conversation",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn set_conversation_title_handler(
+    State(state): State<ServerState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<SetTitleBody>,
+) -> axum::response::Response {
+    let title = body.title.trim();
+    if title.is_empty() {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "title must not be empty".to_string(),
+        );
+    }
+    match state.conversations.set_title(&id, title).await {
+        Ok(()) => Json(json!({ "ok": true, "title": title })).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
 // ── Goal handlers (`/goal`) ───────────────────────────────────────────────────
 //
 // A goal is a persistent completion condition attached to a conversation. The
@@ -4422,34 +4897,10 @@ async fn set_conversation_archived_handler(
 // client for now; Core owns the reusable headless primitives: persist the goal and
 // evaluate progress on demand.
 
-/// Preference key holding the user-selected judge model id (empty / unset → the
-/// system default chat model is used). Settable from desktop Settings.
-const GOAL_JUDGE_MODEL_PREF: &str = "goal-judge-model";
-
-/// Preference key for the goal judge's reasoning effort / thinking level
-/// (e.g. `low`/`medium`/`high`; empty → provider default). Forwarded as
-/// `reasoning_effort` on the gateway call (see [`call_side_model`]).
-const GOAL_JUDGE_EFFORT_PREF: &str = "goal-judge-effort";
-
-/// Preference keys for the double-check feature's side model + effort. The
-/// desktop also stores a `double-check-provider` pref purely for UI state (to
-/// restore the provider dropdown); Core ignores it — the gateway routes by the
-/// model id alone, so the stored model is a free gateway-routable id.
-const DOUBLE_CHECK_MODEL_PREF: &str = "double-check-model";
-const DOUBLE_CHECK_EFFORT_PREF: &str = "double-check-effort";
-
-/// Recent-message window the double-check reviewer sees: the latest assistant
-/// answer plus the user turn that prompted it (and a little prior context).
-const DOUBLE_CHECK_TRANSCRIPT_LIMIT: usize = 6;
-
-/// Hard cap on how many recent messages are sent to the judge. Bounds the judge
-/// prompt size for small local models.
-const GOAL_JUDGE_TRANSCRIPT_LIMIT: usize = 30;
-
-/// Hard cap on continuation turns for the server-driven goal loop
-/// (`POST /goal/run`). Mirrors the desktop client loop's `MAX_GOAL_TURNS` so a
-/// runaway goal never spins forever; the caller may request a lower cap.
-const GOAL_RUN_MAX_TURNS: i64 = 25;
+// Goal + double-check preference keys moved to their plugins (io.ryu.goal /
+// io.ryu.double-check); the model/effort prefs (`goal-judge-model`,
+// `double-check-model`, …) are still read by the plugin host's side-model
+// capability, just not by hardcoded Core handlers.
 
 /// Preference keys for the `/btw` side-question feature's model + effort. Like
 /// double-check, the desktop may store a `btw-provider` pref purely for UI state;
@@ -4531,110 +4982,138 @@ async fn resolve_auto_recall_top_k(state: &ServerState) -> usize {
     AUTO_RECALL_DEFAULT_TOP_K
 }
 
+// ── Context-window management (opt-in / off by default) ───────────────────────
+//
+// Local models run with small context windows. When a budget is set, Core trims
+// the outbound history to fit (always keeping the system block) and optionally
+// summarizes the dropped turns, instead of relying solely on the engine's blunt
+// context-shift (which can evict the system prompt since Ryu never sets n_keep).
+// All keys are off/unset by default so behavior is unchanged until configured.
+
+/// `context.max-tokens`: `""`/`0`/`off` = disabled (default); `auto` = size to
+/// the loaded model's launch `ctx_size`; a positive integer = explicit total
+/// token budget (input + output). Env fallback `RYU_CONTEXT_MAX_TOKENS`.
+const CONTEXT_MAX_TOKENS_PREF: &str = "context.max-tokens";
+/// `context.auto-compact`: summarize dropped turns via a side model instead of
+/// dropping them. DEFAULT off. Adds one summarization round-trip per over-budget
+/// turn (cached by the dropped-message set).
+const CONTEXT_AUTO_COMPACT_PREF: &str = "context.auto-compact";
+/// `context.max-output-tokens`: tokens reserved for the reply. DEFAULT 1024.
+const CONTEXT_MAX_OUTPUT_PREF: &str = "context.max-output-tokens";
+/// `context.compact-model`: model id used to summarize dropped turns. DEFAULT =
+/// the turn's own chat model.
+const CONTEXT_COMPACT_MODEL_PREF: &str = "context.compact-model";
+/// `context.compact-effort`: reasoning effort for the summarizer. DEFAULT empty.
+const CONTEXT_COMPACT_EFFORT_PREF: &str = "context.compact-effort";
+/// Reply reserve used when `context.max-output-tokens` is unset.
+const CONTEXT_DEFAULT_OUTPUT_RESERVE: usize = 1024;
+
+/// Parse the `context.max-tokens` value into a concrete token budget. PURE so
+/// the off/auto/numeric contract is unit-testable without a store. Returns
+/// `None` (feature off) for `""`/`0`/`off` and for unparseable values, for
+/// `auto` when `ctx_size` is unknown/0, else the resolved positive budget.
+fn parse_context_budget(raw: &str, ctx_size: Option<u32>) -> Option<usize> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw == "0" || raw.eq_ignore_ascii_case("off") {
+        return None;
+    }
+    if raw.eq_ignore_ascii_case("auto") {
+        return match ctx_size {
+            Some(n) if n > 0 => Some(n as usize),
+            _ => None,
+        };
+    }
+    match raw.parse::<usize>() {
+        Ok(n) if n > 0 => Some(n),
+        _ => None,
+    }
+}
+
+/// Resolve app-level context-window config from prefs/env. Returns `None` (the
+/// feature is off, full history is sent) unless `context.max-tokens` is `auto`
+/// or a positive integer. `auto` sizes the budget to the loaded model's launch
+/// `ctx_size` and is the recommended no-guess value; it yields `None` when the
+/// model's `ctx_size` is unknown/0. Mirrors the `resolve_auto_recall_*` shape so
+/// the per-turn cost is a few cheap pref reads.
+async fn resolve_context_window(
+    state: &ServerState,
+    req: &crate::sidecar::adapters::ChatStreamRequest,
+) -> Option<crate::sidecar::adapters::context_window::ContextWindowConfig> {
+    let raw = match state.preferences.get(CONTEXT_MAX_TOKENS_PREF).await {
+        Ok(Some(v)) => v.trim().to_string(),
+        _ => std::env::var("RYU_CONTEXT_MAX_TOKENS")
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+    };
+    if raw.is_empty() || raw == "0" || raw.eq_ignore_ascii_case("off") {
+        return None;
+    }
+
+    // The chat model for this turn (mirrors route_chat_stream's effective-agent
+    // resolution): used to size an `auto` budget and as the default summarizer.
+    let effective_agent = req
+        .target_agent_id
+        .clone()
+        .or_else(|| req.agent_id.clone());
+    let model = match effective_agent {
+        Some(id) => crate::sidecar::adapters::resolve_agent_model(&id, &state.agent_store).await,
+        None => None,
+    };
+
+    // For `auto`, the budget is the loaded model's launch `ctx_size`; for a
+    // numeric value, `ctx_size` is ignored. Fetched only on the `auto` path.
+    let ctx_size = if raw.eq_ignore_ascii_case("auto") {
+        match model.as_deref() {
+            Some(m) => state.preferences.get_launch_config(m).await.ctx_size,
+            None => None,
+        }
+    } else {
+        None
+    };
+    let max_tokens = parse_context_budget(&raw, ctx_size)?;
+
+    let reserve_output = match state.preferences.get(CONTEXT_MAX_OUTPUT_PREF).await {
+        Ok(Some(v)) => v.trim().parse::<usize>().ok(),
+        _ => None,
+    }
+    .unwrap_or(CONTEXT_DEFAULT_OUTPUT_RESERVE);
+
+    let auto_compact = matches!(
+        state
+            .preferences
+            .get(CONTEXT_AUTO_COMPACT_PREF)
+            .await
+            .ok()
+            .flatten()
+            .as_deref()
+            .map(|s| s.trim().to_ascii_lowercase()),
+        Some(ref v) if matches!(v.as_str(), "true" | "1" | "on" | "yes")
+    );
+
+    let compact_model = match state.preferences.get(CONTEXT_COMPACT_MODEL_PREF).await {
+        Ok(Some(v)) if !v.trim().is_empty() => v.trim().to_string(),
+        _ => model.unwrap_or_else(|| crate::registry::DEFAULT_LLM_MODEL.to_string()),
+    };
+    let compact_effort = match state.preferences.get(CONTEXT_COMPACT_EFFORT_PREF).await {
+        Ok(Some(v)) => v.trim().to_string(),
+        _ => String::new(),
+    };
+
+    Some(crate::sidecar::adapters::context_window::ContextWindowConfig {
+        max_tokens,
+        reserve_output,
+        auto_compact,
+        compact_model,
+        compact_effort,
+    })
+}
+
 /// Recent-message window a `/btw` side question sees when it loads the transcript
 /// from a stored conversation (clients that pass their own `messages` aren't
 /// bounded here). Matches the goal judge's window.
 const BTW_TRANSCRIPT_LIMIT: usize = 30;
 
-#[derive(serde::Deserialize)]
-struct SetGoalBody {
-    goal: String,
-}
-
-/// `GET /api/conversations/:id/goal` — current goal state for a conversation.
-#[utoipa::path(
-    get,
-    path = "/api/conversations/{id}/goal",
-    tag = "Conversations",
-    summary = "Get the conversation goal state",
-    params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn get_goal_handler(
-    State(state): State<ServerState>,
-    Path(id): Path<String>,
-) -> axum::response::Response {
-    match state.conversations.get_goal(&id).await {
-        Ok(goal) => Json(goal).into_response(),
-        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    }
-}
-
-/// `PUT /api/conversations/:id/goal` — set or replace the goal. Body: `{ goal }`.
-#[utoipa::path(
-    put,
-    path = "/api/conversations/{id}/goal",
-    tag = "Conversations",
-    summary = "Set the conversation goal",
-    params(("id" = String, Path)),
-    request_body = serde_json::Value,
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn set_goal_handler(
-    State(state): State<ServerState>,
-    Path(id): Path<String>,
-    Json(body): Json<SetGoalBody>,
-) -> axum::response::Response {
-    let goal = body.goal.trim();
-    if goal.is_empty() {
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            "goal must not be empty".to_string(),
-        );
-    }
-    if goal.len() > 4000 {
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            "goal must be 4000 characters or fewer".to_string(),
-        );
-    }
-    match state.conversations.set_goal(&id, goal).await {
-        Ok(goal) => Json(goal).into_response(),
-        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    }
-}
-
-/// `DELETE /api/conversations/:id/goal` — clear an active goal.
-#[utoipa::path(
-    delete,
-    path = "/api/conversations/{id}/goal",
-    tag = "Conversations",
-    summary = "Clear the conversation goal",
-    params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn clear_goal_handler(
-    State(state): State<ServerState>,
-    Path(id): Path<String>,
-) -> axum::response::Response {
-    match state.conversations.clear_goal(&id).await {
-        Ok(()) => Json(json!({ "success": true })).into_response(),
-        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    }
-}
-
-/// Resolve the judge model id, swappable and never hardcoded to a remote
-/// provider: preference `goal-judge-model` → env `RYU_GOAL_JUDGE_MODEL` →
-/// env `RYU_DEFAULT_LLM_MODEL` → literal. The literal default is the
-/// auto-installed local chat model (Gemma 4 E2B), so goals judge on the cheap
-/// local engine with zero setup (no API key, prefix-routed to llama.cpp by the
-/// gateway) — matching the bundled chat default rather than a remote provider.
-async fn resolve_goal_judge_model(state: &ServerState) -> String {
-    if let Ok(Some(pref)) = state.preferences.get(GOAL_JUDGE_MODEL_PREF).await {
-        let trimmed = pref.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_string();
-        }
-    }
-    for var in ["RYU_GOAL_JUDGE_MODEL", "RYU_DEFAULT_LLM_MODEL"] {
-        if let Ok(val) = std::env::var(var) {
-            if !val.is_empty() {
-                return val;
-            }
-        }
-    }
-    crate::registry::DEFAULT_LOCAL_CHAT_MODEL_ID.to_string()
-}
 
 /// Resolve a "side model" effort/thinking level from a preference key, falling
 /// back to an env var then empty (= provider default). Shared by the goal judge
@@ -4658,7 +5137,7 @@ async fn resolve_side_effort(state: &ServerState, pref_key: &str, env_var: &str)
 /// OpenAI/local/OpenRouter providers clone the request body verbatim, so it
 /// reaches them as-is; the Anthropic-direct transform (`to_anthropic_body`)
 /// rebuilds the request and currently drops it (caveat, not a hard failure).
-async fn call_side_model(
+pub(crate) async fn call_side_model(
     state: &ServerState,
     model: &str,
     effort: &str,
@@ -4709,515 +5188,6 @@ async fn call_side_model(
     Ok(text.to_string())
 }
 
-/// Parse the judge's reply into a (met, reason) pair. The judge is instructed to
-/// answer with a single line `MET: yes — <reason>` / `MET: no — <reason>`. We
-/// parse defensively: only an explicit "yes" verdict counts as met; anything we
-/// cannot read as a clear verdict is treated as not-met-and-stop (fail-safe — we
-/// never keep looping on garbage). Returns `(met, reason, parse_ok)`.
-fn parse_goal_verdict(text: &str) -> (bool, String, bool) {
-    let trimmed = text.trim();
-    // Find the verdict line (the one containing "MET:"), else use the whole text.
-    let verdict_line = trimmed
-        .lines()
-        .find(|l| l.to_lowercase().contains("met:"))
-        .unwrap_or(trimmed);
-    let lower = verdict_line.to_lowercase();
-    // Reason: prefer everything after the em-dash (the instructed separator); else
-    // fall back to the text after the verdict word. Avoids truncating reasons that
-    // contain internal hyphens or colons.
-    let reason_after_dash = verdict_line
-        .split_once('—')
-        .map(|(_, r)| r.trim())
-        .filter(|s| !s.is_empty());
-    if let Some(rest) = lower.split("met:").nth(1) {
-        let rest = rest.trim_start();
-        let after_word = |word: &str| {
-            verdict_line
-                .to_lowercase()
-                .find("met:")
-                .and_then(|i| verdict_line.get(i + 4..))
-                .map(|s| s.trim_start().get(word.len()..).unwrap_or("").trim())
-                .map(|s| s.trim_start_matches(['—', '-', ':', ' ']).trim())
-                .filter(|s| !s.is_empty())
-        };
-        if rest.starts_with("yes") || rest.starts_with("true") || rest.starts_with("met") {
-            let reason = reason_after_dash
-                .map(str::to_string)
-                .or_else(|| after_word("yes").map(str::to_string))
-                .unwrap_or_else(|| "Goal met".to_string());
-            return (true, reason, true);
-        }
-        if rest.starts_with("no") || rest.starts_with("false") || rest.starts_with("not") {
-            let reason = reason_after_dash
-                .map(str::to_string)
-                .or_else(|| after_word("no").map(str::to_string))
-                .unwrap_or_else(|| "Not yet met".to_string());
-            return (false, reason, true);
-        }
-    }
-    // No clear verdict token: fail-safe.
-    (
-        false,
-        "Could not read a clear verdict from the judge".to_string(),
-        false,
-    )
-}
-
-/// `POST /api/conversations/:id/goal/judge` — run one judge evaluation against
-/// the conversation transcript so far. Returns `{ met, reason, turns, stop }`.
-/// `stop` is true when the loop should halt regardless of `met` (judge
-/// unreachable or unparseable verdict — fail-safe direction is always stop).
-#[utoipa::path(
-    post,
-    path = "/api/conversations/{id}/goal/judge",
-    tag = "Conversations",
-    summary = "Judge whether the goal is met",
-    params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn judge_goal_handler(
-    State(state): State<ServerState>,
-    Path(id): Path<String>,
-) -> axum::response::Response {
-    // Preserve the explicit no-goal 400 / get_goal-failure 500 for API parity.
-    let goal_state = match state.conversations.get_goal(&id).await {
-        Ok(g) => g,
-        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    };
-    if goal_state
-        .goal
-        .as_deref()
-        .filter(|g| !g.is_empty())
-        .is_none()
-    {
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            "no goal set on this conversation".to_string(),
-        );
-    }
-    let o = judge_goal_once(&state, &id).await;
-    Json(json!({ "met": o.met, "reason": o.reason, "turns": o.turns, "stop": o.stop }))
-        .into_response()
-}
-
-/// One judge evaluation, shared by the single-shot `goal/judge` endpoint and the
-/// server-driven `goal/run` loop. Runs the judge model against the recent
-/// transcript, records the eval, and returns the verdict. Fail-safe: any
-/// transport/parse failure (or a missing goal) yields `stop = true` so a loop
-/// never spins on garbage.
-struct GoalJudgeOutcome {
-    met: bool,
-    reason: String,
-    turns: i64,
-    stop: bool,
-}
-
-async fn judge_goal_once(state: &ServerState, id: &str) -> GoalJudgeOutcome {
-    let goal_state = match state.conversations.get_goal(id).await {
-        Ok(g) => g,
-        Err(e) => {
-            return GoalJudgeOutcome {
-                met: false,
-                reason: format!("goal unavailable ({e})"),
-                turns: 0,
-                stop: true,
-            }
-        }
-    };
-    let Some(goal) = goal_state
-        .goal
-        .as_deref()
-        .filter(|g| !g.is_empty())
-        .map(str::to_string)
-    else {
-        return GoalJudgeOutcome {
-            met: false,
-            reason: "no goal set".to_string(),
-            turns: goal_state.turns,
-            stop: true,
-        };
-    };
-
-    let messages = state
-        .conversations
-        .get_recent_messages(id, GOAL_JUDGE_TRANSCRIPT_LIMIT)
-        .await
-        .unwrap_or_default();
-    let transcript = messages
-        .iter()
-        .map(|m| format!("[{}] {}", m.role, m.content))
-        .collect::<Vec<_>>()
-        .join("\n\n");
-
-    let model = resolve_goal_judge_model(state).await;
-    let system = "You are a strict evaluator deciding whether a goal has been met. \
-        Judge ONLY from the conversation transcript provided; you cannot run commands or read files. \
-        Reply with exactly ONE line in this format and nothing else:\n\
-        MET: yes — <short reason>\n\
-        or\n\
-        MET: no — <short reason for what still remains>";
-    let user = format!(
-        "GOAL (completion condition):\n{goal}\n\n\
-         CONVERSATION TRANSCRIPT (most recent {} messages):\n{transcript}\n\n\
-         Has the goal been met? Answer with the single MET: line.",
-        messages.len()
-    );
-    let effort = resolve_side_effort(state, GOAL_JUDGE_EFFORT_PREF, "RYU_GOAL_JUDGE_EFFORT").await;
-
-    let text = match call_side_model(state, &model, &effort, system, &user).await {
-        Ok(t) => t,
-        Err(e) => {
-            let reason = format!("Judge unavailable ({e})");
-            let turns = state
-                .conversations
-                .record_goal_eval(id, false, &reason)
-                .await
-                .map(|g| g.turns)
-                .unwrap_or(goal_state.turns);
-            return GoalJudgeOutcome {
-                met: false,
-                reason,
-                turns,
-                stop: true,
-            };
-        }
-    };
-
-    let (met, reason, parse_ok) = parse_goal_verdict(&text);
-    let turns = state
-        .conversations
-        .record_goal_eval(id, met, &reason)
-        .await
-        .map(|g| g.turns)
-        .unwrap_or(goal_state.turns + 1);
-    // met → achieved (loop ends); !met && parse_ok → keep looping; !parse_ok → stop.
-    GoalJudgeOutcome {
-        met,
-        reason,
-        turns,
-        stop: met || !parse_ok,
-    }
-}
-
-/// The next action for the server-driven goal loop, given a judge outcome and the
-/// iteration count. Pure so the control flow is unit-testable without a model.
-#[derive(Debug, PartialEq, Eq)]
-enum GoalLoopStep {
-    /// Goal achieved — stop, success.
-    Met,
-    /// Judge said stop (unreachable/unparseable) — stop, fail-safe.
-    StopJudge,
-    /// Hit the continuation cap — stop without achieving.
-    MaxTurns,
-    /// Not met and under the cap — run one more continuation turn.
-    Continue,
-}
-
-fn goal_loop_step(met: bool, stop: bool, iterations: i64, max_turns: i64) -> GoalLoopStep {
-    if met {
-        GoalLoopStep::Met
-    } else if stop {
-        GoalLoopStep::StopJudge
-    } else if iterations >= max_turns {
-        GoalLoopStep::MaxTurns
-    } else {
-        GoalLoopStep::Continue
-    }
-}
-
-#[cfg(test)]
-mod goal_loop_tests {
-    use super::{goal_loop_step, GoalLoopStep};
-
-    #[test]
-    fn met_wins_over_everything() {
-        assert_eq!(goal_loop_step(true, true, 99, 1), GoalLoopStep::Met);
-    }
-
-    #[test]
-    fn stop_halts_when_not_met() {
-        assert_eq!(goal_loop_step(false, true, 0, 25), GoalLoopStep::StopJudge);
-    }
-
-    #[test]
-    fn cap_halts_when_iterations_reach_max() {
-        assert_eq!(goal_loop_step(false, false, 25, 25), GoalLoopStep::MaxTurns);
-    }
-
-    #[test]
-    fn continues_when_unmet_and_under_cap() {
-        assert_eq!(goal_loop_step(false, false, 3, 25), GoalLoopStep::Continue);
-    }
-}
-
-/// Optional body for `goal/run`: cap the continuation turns and/or pin the agent.
-#[derive(serde::Deserialize, Default, utoipa::ToSchema)]
-struct GoalRunBody {
-    #[serde(default)]
-    max_turns: Option<i64>,
-    #[serde(default)]
-    agent_id: Option<String>,
-}
-
-/// `POST /api/conversations/:id/goal/run` — the server-driven goal pursuit loop.
-///
-/// Core owns the loop so it works for CLI and channel bots, not just the desktop
-/// (whose client-side loop drives its live-streaming UX). Call it AFTER the
-/// initial user turn has produced an assistant reply: it judges the transcript,
-/// and while the goal is unmet (and under the cap) runs a persisted continuation
-/// turn via [`run_reply_text`], re-judging each round. Stops on met, a fail-safe
-/// judge stop, or the turn cap. Returns the final verdict + how it stopped.
-#[utoipa::path(
-    post,
-    path = "/api/conversations/{id}/goal/run",
-    tag = "Conversations",
-    summary = "Run the goal pursuit loop to completion",
-    params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn run_goal_handler(
-    State(state): State<ServerState>,
-    Path(id): Path<String>,
-    body: Option<Json<GoalRunBody>>,
-) -> axum::response::Response {
-    let body = body.map(|b| b.0).unwrap_or_default();
-    let goal_state = match state.conversations.get_goal(&id).await {
-        Ok(g) => g,
-        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    };
-    if goal_state
-        .goal
-        .as_deref()
-        .filter(|g| !g.is_empty())
-        .is_none()
-    {
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            "no goal set on this conversation".to_string(),
-        );
-    }
-    let max_turns = body
-        .max_turns
-        .unwrap_or(GOAL_RUN_MAX_TURNS)
-        .clamp(1, GOAL_RUN_MAX_TURNS);
-
-    let mut iterations = 0i64;
-    loop {
-        let outcome = judge_goal_once(&state, &id).await;
-        let stopped = match goal_loop_step(outcome.met, outcome.stop, iterations, max_turns) {
-            GoalLoopStep::Met => Some("met"),
-            GoalLoopStep::StopJudge => Some("judge"),
-            GoalLoopStep::MaxTurns => Some("max_turns"),
-            GoalLoopStep::Continue => None,
-        };
-        if let Some(reason_kind) = stopped {
-            return Json(json!({
-                "met": outcome.met,
-                "reason": outcome.reason,
-                "turns": outcome.turns,
-                "iterations": iterations,
-                "stopped": reason_kind,
-            }))
-            .into_response();
-        }
-
-        iterations += 1;
-        let prompt = format!(
-            "Keep working toward the goal. Remaining: {}",
-            outcome.reason
-        );
-        if let Err(e) = run_reply_text(
-            id.clone(),
-            body.agent_id.clone(),
-            prompt,
-            Arc::clone(&state.agents),
-            state.conversations.clone(),
-            state.agent_store.clone(),
-            Arc::clone(&state.manager),
-            state.memory.clone(),
-            Arc::clone(&state.worktree_diffs),
-            Arc::clone(&state.mcp),
-            state.skills.clone(),
-            state.traces.clone(),
-        )
-        .await
-        {
-            return Json(json!({
-                "met": false,
-                "reason": format!("continuation turn failed: {e}"),
-                "turns": outcome.turns,
-                "iterations": iterations,
-                "stopped": "error",
-            }))
-            .into_response();
-        }
-    }
-}
-
-// ── Double-check: a side model reviews the latest answer ─────────────────────
-//
-// Stateless sibling of the goal judge: when the chat composer's "Double-check"
-// toggle is on, the client calls this once after each assistant turn completes.
-// A separately-configured model reviews the latest answer (in the context of the
-// user turn that prompted it) and returns a verdict + critique, which the client
-// attaches to that message. No conversation state is persisted in v1.
-
-/// Resolve the double-check reviewer model id, swappable and never hardcoded:
-/// preference `double-check-model` → env `RYU_DOUBLE_CHECK_MODEL` →
-/// env `RYU_DEFAULT_LLM_MODEL` → literal default.
-async fn resolve_double_check_model(state: &ServerState) -> String {
-    if let Ok(Some(pref)) = state.preferences.get(DOUBLE_CHECK_MODEL_PREF).await {
-        let trimmed = pref.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_string();
-        }
-    }
-    for var in ["RYU_DOUBLE_CHECK_MODEL", "RYU_DEFAULT_LLM_MODEL"] {
-        if let Ok(val) = std::env::var(var) {
-            if !val.is_empty() {
-                return val;
-            }
-        }
-    }
-    crate::registry::DEFAULT_LLM_MODEL.to_string()
-}
-
-/// Parse the reviewer's reply into `(ok, critique)`. The reviewer is instructed
-/// to answer with a first line `VERDICT: ok` or `VERDICT: issues`, optionally
-/// followed by detail. Defensive: only an explicit "ok" verdict counts as clean;
-/// anything unreadable is treated as "issues" so problems surface rather than
-/// being silently swallowed (fail-loud, the opposite of the goal judge's
-/// fail-safe-stop, because here flagging a false positive is cheaper than hiding
-/// a real one).
-fn parse_double_check_verdict(text: &str) -> (bool, String) {
-    let trimmed = text.trim();
-    let verdict_line = trimmed
-        .lines()
-        .find(|l| l.to_lowercase().contains("verdict:"))
-        .unwrap_or(trimmed);
-    let after = verdict_line
-        .to_lowercase()
-        .split_once("verdict:")
-        .map(|(_, r)| r.trim().to_string());
-    // Detail: everything after the verdict line, else the dash-separated tail.
-    let detail = trimmed
-        .split_once('\n')
-        .map(|(_, r)| r.trim())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            verdict_line
-                .split_once('—')
-                .map(|(_, r)| r.trim())
-                .filter(|s| !s.is_empty())
-        })
-        .unwrap_or("")
-        .to_string();
-    match after.as_deref() {
-        Some(rest)
-            if rest.starts_with("ok")
-                || rest.starts_with("pass")
-                || rest.starts_with("correct") =>
-        {
-            let critique = if detail.is_empty() {
-                "No issues found.".to_string()
-            } else {
-                detail
-            };
-            (true, critique)
-        }
-        Some(rest)
-            if rest.starts_with("issue")
-                || rest.starts_with("fail")
-                || rest.starts_with("wrong")
-                || rest.starts_with("no") =>
-        {
-            let critique = if detail.is_empty() {
-                "Issues found (no detail given).".to_string()
-            } else {
-                detail
-            };
-            (false, critique)
-        }
-        // Unreadable verdict → surface the whole reply as the critique, flagged.
-        _ => (
-            false,
-            if trimmed.is_empty() {
-                "The reviewer returned no response.".to_string()
-            } else {
-                trimmed.to_string()
-            },
-        ),
-    }
-}
-
-/// `POST /api/conversations/:id/double-check` — review the latest assistant
-/// answer with the configured side model. Returns `{ ok, critique, model }`.
-/// Stateless: reads the latest assistant message + the preceding user turn from
-/// the conversation transcript; persists nothing.
-#[utoipa::path(
-    post,
-    path = "/api/conversations/{id}/double-check",
-    tag = "Conversations",
-    summary = "Double-check the latest answer with a side model",
-    params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn double_check_handler(
-    State(state): State<ServerState>,
-    Path(id): Path<String>,
-) -> axum::response::Response {
-    let messages = state
-        .conversations
-        .get_recent_messages(&id, DOUBLE_CHECK_TRANSCRIPT_LIMIT)
-        .await
-        .unwrap_or_default();
-
-    // The latest assistant answer is what we review; the most recent user turn
-    // before it is the question that gives the reviewer something to judge against.
-    let last_assistant = messages.iter().rposition(|m| m.role == "assistant");
-    let Some(ai_idx) = last_assistant else {
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            "no assistant message to double-check yet".to_string(),
-        );
-    };
-    let answer = messages[ai_idx].content.clone();
-    let question = messages[..ai_idx]
-        .iter()
-        .rposition(|m| m.role == "user")
-        .map(|i| messages[i].content.clone())
-        .unwrap_or_default();
-
-    let model = resolve_double_check_model(&state).await;
-    let effort =
-        resolve_side_effort(&state, DOUBLE_CHECK_EFFORT_PREF, "RYU_DOUBLE_CHECK_EFFORT").await;
-
-    let system = "You are a meticulous reviewer double-checking another AI's answer for \
-        correctness, accuracy, and obvious mistakes or unsupported claims. You judge ONLY \
-        from the text given; you cannot run code or browse. Reply with a first line in this \
-        exact format and nothing before it:\n\
-        VERDICT: ok\n\
-        or\n\
-        VERDICT: issues\n\
-        Then, on following lines, give a brief, specific critique: what (if anything) is wrong, \
-        misleading, or missing, and how to fix it. Be concise.";
-    let user = format!(
-        "USER ASKED:\n{question}\n\n\
-         ASSISTANT ANSWERED:\n{answer}\n\n\
-         Double-check the assistant's answer. Start with the VERDICT line."
-    );
-
-    match call_side_model(&state, &model, &effort, system, &user).await {
-        Ok(text) => {
-            let (ok, critique) = parse_double_check_verdict(&text);
-            Json(json!({ "ok": ok, "critique": critique, "model": model })).into_response()
-        }
-        Err(e) => json_error(
-            StatusCode::BAD_GATEWAY,
-            format!("double-check reviewer unavailable: {e}"),
-        ),
-    }
-}
 
 // ── Side questions (`/btw`) ───────────────────────────────────────────────────
 //
@@ -9562,6 +9532,41 @@ async fn set_active_model(
         );
     };
 
+    // 1b. Diffusion GGUFs are not chat models — route them to sd-server instead
+    //     of the LOCAL_ENGINES chat-engine swap.
+    if selection.format == crate::model_format::ModelFormat::Gguf
+        && crate::model_catalog::capabilities::detect_local_is_diffusion(&selection.r#ref)
+    {
+        if let Err(e) = state
+            .preferences
+            .set(
+                installed::ACTIVE_DIFFUSION_MODEL_PREF,
+                &selection.r#ref,
+            )
+            .await
+        {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    json!({ "success": false, "error": format!("could not persist diffusion model: {e}") }),
+                ),
+            );
+        }
+        // Best-effort restart so sd-server reloads with the new model weights.
+        if let Err(e) = state.manager.restart_sidecar("sdcpp").await {
+            tracing::warn!("could not restart sdcpp after diffusion model switch: {e}");
+        }
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "engine": "sdcpp",
+                "ref": selection.r#ref,
+                "diffusion": true,
+            })),
+        );
+    }
+
     // 2. Derive the engine: an explicit override wins; otherwise pick the best
     //    node-supported engine for the model's format (preferring the resident
     //    one). No supported engine ⇒ 400 (annotate-only on this node).
@@ -11298,60 +11303,43 @@ async fn install_dependencies() -> Json<serde_json::Value> {
     }
 }
 
-// ── Double-check verdict parser tests ────────────────────────────────────────
-
-#[cfg(test)]
-mod double_check_tests {
-    use super::parse_double_check_verdict;
-
-    #[test]
-    fn ok_verdict_with_detail() {
-        let (ok, critique) =
-            parse_double_check_verdict("VERDICT: ok\nThe answer is accurate and complete.");
-        assert!(ok);
-        assert_eq!(critique, "The answer is accurate and complete.");
-    }
-
-    #[test]
-    fn ok_verdict_no_detail_gets_default() {
-        let (ok, critique) = parse_double_check_verdict("VERDICT: ok");
-        assert!(ok);
-        assert_eq!(critique, "No issues found.");
-    }
-
-    #[test]
-    fn issues_verdict_surfaces_detail() {
-        let (ok, critique) = parse_double_check_verdict(
-            "VERDICT: issues\nThe second claim is unsupported; cite a source.",
-        );
-        assert!(!ok);
-        assert_eq!(critique, "The second claim is unsupported; cite a source.");
-    }
-
-    #[test]
-    fn issues_inline_dash_detail() {
-        let (ok, critique) = parse_double_check_verdict("VERDICT: issues — math error in step 2");
-        assert!(!ok);
-        assert_eq!(critique, "math error in step 2");
-    }
-
-    #[test]
-    fn unreadable_reply_flags_as_issue() {
-        // Fail-loud: no clear verdict → not ok, surface the raw text.
-        let (ok, critique) = parse_double_check_verdict("I think it looks fine maybe?");
-        assert!(!ok);
-        assert_eq!(critique, "I think it looks fine maybe?");
-    }
-
-    #[test]
-    fn empty_reply_flags_as_issue() {
-        let (ok, critique) = parse_double_check_verdict("   ");
-        assert!(!ok);
-        assert_eq!(critique, "The reviewer returned no response.");
-    }
-}
+// NOTE: the former `double_check_tests` module was removed — it tested
+// `parse_double_check_verdict`, which was deleted when the goal/double-check path
+// moved to the plugin runtime (commit 10ca382c). The stale test broke the core
+// test binary; it is gone with the function it covered.
 
 // ── Connection-identity header parsing tests ─────────────────────────────────
+
+#[cfg(test)]
+mod context_budget_tests {
+    use super::parse_context_budget;
+
+    #[test]
+    fn off_values_disable() {
+        assert_eq!(parse_context_budget("", Some(8192)), None);
+        assert_eq!(parse_context_budget("0", Some(8192)), None);
+        assert_eq!(parse_context_budget("off", Some(8192)), None);
+        assert_eq!(parse_context_budget("  OFF ", Some(8192)), None);
+    }
+
+    #[test]
+    fn auto_sizes_to_ctx_size_else_off() {
+        assert_eq!(parse_context_budget("auto", Some(8192)), Some(8192));
+        assert_eq!(parse_context_budget("AUTO", Some(4096)), Some(4096));
+        // Unknown / zero ctx_size → feature stays off (no guessable budget).
+        assert_eq!(parse_context_budget("auto", None), None);
+        assert_eq!(parse_context_budget("auto", Some(0)), None);
+    }
+
+    #[test]
+    fn numeric_is_explicit_budget_and_ignores_ctx_size() {
+        assert_eq!(parse_context_budget("3500", None), Some(3500));
+        assert_eq!(parse_context_budget(" 12000 ", Some(8192)), Some(12000));
+        // Garbage / non-positive → off.
+        assert_eq!(parse_context_budget("abc", Some(8192)), None);
+        assert_eq!(parse_context_budget("-5", Some(8192)), None);
+    }
+}
 
 #[cfg(test)]
 mod connection_identity_tests {

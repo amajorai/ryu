@@ -59,11 +59,29 @@ pub fn detect_elicitation(value: &Value) -> Option<Elicitation> {
     })
 }
 
+/// A generic host-callback bridge so the same sandbox substrate can be reused
+/// for **non-tool** host capabilities (the plugin turn-hook runtime calls
+/// `host.sideModel` / `host.storage_*` instead of `tools.*`). This is a cold
+/// path (per-turn, not per-token), so a `dyn` + boxed future is acceptable here
+/// — it keeps all plugin-specific logic out of `tool_exec` and in
+/// [`crate::plugin_host`], which implements this trait.
+pub trait SandboxBridge: Send + Sync {
+    /// Handle one `<server>.<method>(args)` call the sandbox made.
+    fn handle(
+        &self,
+        path: String,
+        args: Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = InvokeOutcome> + Send + '_>>;
+}
+
 /// The invokers a running program can be wired to. Closed enum, match-dispatched.
 pub enum SandboxToolInvoker {
     /// Production: route through the MCP registry with the agent's resolved
     /// allowlist (fail-closed: `agent_id` must be `Some` and known).
     Registry(RegistryToolInvoker),
+    /// A caller-supplied host bridge (plugin host capabilities), not the MCP
+    /// registry. Used by the plugin turn-hook runtime.
+    Bridge(Arc<dyn SandboxBridge>),
     /// Test-only: a canned responder. Built via [`SandboxToolInvoker::mock`].
     #[cfg(test)]
     Mock(MockInvoker),
@@ -110,9 +128,15 @@ impl SandboxToolInvoker {
     pub async fn invoke(&self, call: ToolInvocation) -> InvokeOutcome {
         match self {
             SandboxToolInvoker::Registry(inner) => inner.invoke(call).await,
+            SandboxToolInvoker::Bridge(inner) => inner.handle(call.path, call.args).await,
             #[cfg(test)]
             SandboxToolInvoker::Mock(inner) => inner.invoke(call),
         }
+    }
+
+    /// Construct a host-bridge invoker (plugin host capabilities).
+    pub fn bridge(bridge: Arc<dyn SandboxBridge>) -> Self {
+        SandboxToolInvoker::Bridge(bridge)
     }
 
     #[cfg(test)]

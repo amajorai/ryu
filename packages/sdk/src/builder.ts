@@ -126,7 +126,7 @@ export const skill = () => new SkillBuilder();
  *
  * @example
  * ```ts
- * import { PluginBuilder, agent, tool } from "@ryu/sdk/builder"
+ * import { PluginBuilder, agent, tool } from "@ryuhq/sdk/builder"
  *
  * const manifest = new PluginBuilder()
  *   .id("com.example.my-plugin")

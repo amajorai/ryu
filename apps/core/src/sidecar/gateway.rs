@@ -90,15 +90,33 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
     // This auto-wraps every gateway-routed agent. The gateway fails open if the
     // proxy is unreachable, so this is safe even before headroom is healthy.
     if crate::sidecar::headroom::is_enabled() {
+        let policy = crate::sidecar::headroom::compression_policy();
+        let url = crate::sidecar::headroom::headroom_url();
         tracing::info!(
-            url = %crate::sidecar::headroom::headroom_url(),
-            "gateway: enabling egress compression via headroom"
+            %url,
+            service = policy.service.as_deref().unwrap_or("headroom"),
+            "gateway: enabling egress compression"
         );
         env.push(("GATEWAY_COMPRESSION_ENABLED".to_owned(), "1".to_owned()));
-        env.push((
-            "GATEWAY_COMPRESSION_URL".to_owned(),
-            crate::sidecar::headroom::headroom_url(),
-        ));
+        env.push(("GATEWAY_COMPRESSION_URL".to_owned(), url));
+        // Forward the rest of the plugin-defined service config so the whole
+        // compression setup is data-driven (any compression plugin, not just the
+        // bundled headroom one).
+        if let Some(token) = policy.token {
+            env.push(("GATEWAY_COMPRESSION_TOKEN".to_owned(), token));
+        }
+        if let Some(timeout_ms) = policy.timeout_ms {
+            env.push((
+                "GATEWAY_COMPRESSION_TIMEOUT_MS".to_owned(),
+                timeout_ms.to_string(),
+            ));
+        }
+        if let Some(min_messages) = policy.min_messages {
+            env.push((
+                "GATEWAY_COMPRESSION_MIN_MESSAGES".to_owned(),
+                min_messages.to_string(),
+            ));
+        }
     }
     // Gateway policy plugins (M2 / #447): the firewall and smart-routing policies
     // are boolean-shaped on/off switches that force their gateway feature on when

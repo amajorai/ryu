@@ -8,7 +8,7 @@
  * Emits a directory `<name>/` containing:
  *   plugin.json        — Plugin manifest (validated against PluginManifestSchema)
  *   src/agent.ts       — Starter Runnable using the gateway-mandatory model client
- *   package.json       — Project config with a `dev` script and @ryu/sdk dep
+ *   package.json       — Project config with a `dev` script and @ryuhq/sdk dep
  *
  * The generated plugin.json validates against the PluginManifest schema so the
  * Ryu desktop plugin store can install it immediately.
@@ -22,7 +22,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { PluginManifestSchema } from "@ryu/sdk/manifest";
+import { PluginManifestSchema } from "@ryuhq/sdk/manifest";
 
 // Top-level regex constants — avoids lint/performance/useTopLevelRegex.
 const RE_WORD_SEPARATOR = /[-_\s]+/;
@@ -133,7 +133,7 @@ export function scaffold(name: string, outDir: string): string {
 			pack: "bunx ryu pack .",
 		},
 		dependencies: {
-			"@ryu/sdk": "0.0.1",
+			"@ryuhq/sdk": "0.0.1",
 		},
 	};
 	writeFileSync(

@@ -2,6 +2,9 @@
 name = "ghost-core"
 version = "0.0.1"
 edition = "2021"
+description = "Core automation primitives (recipes, store) for the Ghost desktop-automation MCP server."
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ghost"
 
 [lib]
 name = "ghost_core"

@@ -1,0 +1,46 @@
+{
+  "id": "com.ryuhq.advisor",
+  "name": "Advisor",
+  "version": "1.0.0",
+  "runnables": [],
+  "permission_grants": ["hook:side-model"],
+  "activation_events": ["*"],
+  "contributes": {
+    "composer_controls": [
+      {
+        "id": "advisor.toggle",
+        "type": "toggle",
+        "flag": "com.ryuhq.advisor",
+        "label": "Advisor",
+        "description": "Consult a stronger reviewer model on the full conversation after each answer."
+      }
+    ],
+    "settings_tabs": [
+      {
+        "id": "advisor.settings",
+        "title": "Advisor",
+        "fields": [
+          {
+            "type": "model_picker",
+            "pref_key": "advisor-model",
+            "label": "Advisor model"
+          }
+        ]
+      }
+    ],
+    "slash_commands": [
+      {
+        "id": "advisor.consult",
+        "command": "/advisor",
+        "description": "Ask a stronger advisor model to review the whole conversation and advise. Add a focus, e.g. '/advisor is this the right approach?'."
+      }
+    ],
+    "turn_hooks": [
+      {
+        "id": "advisor.review",
+        "on": "post_assistant_turn",
+        "code": "const rev = ctx.transcript.slice().reverse(); const lastUser = rev.find(m => m.role === 'user'); const cmd = lastUser ? (lastUser.content || '').trim() : ''; const onDemand = cmd === '/advisor' || cmd.indexOf('/advisor ') === 0; const toggled = !!(ctx.flags && ctx.flags['com.ryuhq.advisor']); if (!onDemand && !toggled) { return { kind: 'none' }; } if (!ctx.transcript || ctx.transcript.length === 0) { return { kind: 'none' }; } const transcript = ctx.transcript.map(m => m.role + ': ' + m.content).join('\\n\\n'); const focus = onDemand && cmd.length > 8 ? cmd.slice(9).trim() : ''; const system = 'You are a stronger reviewer advising a capable assistant. You can see the entire conversation. Before the assistant commits to an approach or declares the task done, give concrete, actionable advice: flag wrong assumptions, missing steps, better approaches, and risks. Be specific and brief. If the direction is already sound, say so in one line and add the single highest-value improvement. Advise; do not rewrite the answer for it.'; let prompt = 'Full conversation so far:\\n\\n' + transcript; if (focus) { prompt += '\\n\\nThe assistant specifically wants advice on: ' + focus; } prompt += '\\n\\nGive your advice now.'; const advice = await host.sideModel({ system: system, prompt: prompt, model_pref_key: 'advisor-model', effort: 'high' }); if (!advice || !advice.trim()) { return { kind: 'none' }; } if (onDemand) { return { kind: 'continue', text: 'An expert advisor reviewed the whole conversation and gave this advice. Give it serious weight and act on it in your next response:\\n\\n' + advice.trim() }; } return { kind: 'note', text: 'Advisor: ' + advice.trim() };"
+      }
+    ]
+  }
+}

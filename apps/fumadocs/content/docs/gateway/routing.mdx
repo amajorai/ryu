@@ -12,11 +12,15 @@ By default the router matches the model name against built-in prefix rules:
 
 | Model prefix | Provider |
 |---|---|
-| `gpt-`, `o1`, `o3`, `o4` | OpenAI |
+| `gpt-`, `o1`, `o3`, `o4`, `text-davinci` | OpenAI |
 | `claude-` | Anthropic |
+| `gemini-` | GenAi (native Gemini protocol) |
 | `openrouter/` | OpenRouter (its own routing runs after the Gateway's guardrails) |
+| `modal/` | Modal (serverless GPU compute) |
 | `llama`, `mistral`, `mixtral`, `gemma`, `phi`, `qwen`, `deepseek` | Local engine |
 | `zeroclaw`, `openclaw` | Core agents |
+
+Resolution order: exact match in `model_map` wins, then longest prefix match in `model_map`, then built-in prefix rules, then `default_provider`.
 
 ## The strategies
 
@@ -66,7 +70,7 @@ rule. Two env vars set the basics for a standalone Gateway: `GATEWAY_SMART_ROUTI
 `GATEWAY_SMART_ROUTING_MODEL`. The rules themselves are config-file-only. Like all routing config,
 changes are a startup snapshot and take effect on the next Gateway refresh/restart.
 
-On the desktop, edit smart routing under Gateway → Routing → Smart routing
+On the desktop, edit smart routing under Gateway - Routing - Smart routing
 (`SmartRoutingCard` in `apps/desktop/src/components/gateway/GatewayDialog.tsx`), which reads and
 writes the routing config through the same config endpoint the rest of the dialog uses.
 
@@ -84,26 +88,41 @@ writes the routing config through the same config endpoint the rest of the dialo
 - **Observability.** The model that actually handled the request is returned in the
   `x-routed-model` response header (`apps/gateway/src/api/chat.rs`).
 
-<Callout type="info">
-  Smart routing is off by default because the classifier adds a round-trip to every request. There
-  is no Google provider, so to route to Gemini use an `openrouter/google/…` slug as the rule's
-  target model.
-</Callout>
-
 ## The model list
 
 ```
 GET /v1/models
 ```
 
-returns the routable models. The built-in list includes OpenAI models (`gpt-4o`, `gpt-4o-mini`,
-`gpt-4-turbo`, `o1`, `o3-mini`), Anthropic models (`claude-opus-4-5`, `claude-sonnet-4-5`,
-`claude-haiku-4-5`, and the dated 3.5 models), Core agents (`zeroclaw`, `openclaw`),
-`openrouter/auto`, and local models. Add your own with `routing.model_map`.
+returns the routable models. The built-in list (`builtin_model_list` in `apps/gateway/src/router/mod.rs`) includes:
+
+- OpenAI: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `o1`, `o3-mini`
+- Anthropic: `claude-opus-4-5`, `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`
+- Core agents: `zeroclaw`, `openclaw`
+- OpenRouter: `openrouter/auto`
+- Local: `llama3.2:latest`, `mistral:latest`, `phi4:latest`, `deepseek-r1:latest`
+
+Add your own with `routing.model_map`.
 
 ## Providers and credentials
 
-Provider credentials come from environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`OPENROUTER_API_KEY`) or the config. The local provider's URL comes from `LOCAL_LLM_URL`, which Core
-sets to the active local engine when it spawns the Gateway. Set or clear provider keys at runtime
-through Core's `PUT /api/gateway/providers`.
+Provider credentials come from environment variables or the config file.
+
+| Provider | Env vars | Notes |
+|---|---|---|
+| OpenAI | `OPENAI_API_KEY` | `base_url` defaults to `https://api.openai.com/v1` |
+| Anthropic | `ANTHROPIC_API_KEY` | `base_url` defaults to `https://api.anthropic.com` |
+| OpenRouter | `OPENROUTER_API_KEY` | |
+| Local | `LOCAL_LLM_URL` | Core sets this to the active local engine on startup |
+| Modal | `MODAL_API_KEY` + `MODAL_BASE_URL` | Both required — no default URL exists; each Modal deployment has its own `*.modal.run` endpoint |
+| GenAi | Per-provider keys in `providers.genai.keys` map | Keyed by adapter name, e.g. `"gemini"`. Falls back to each adapter's own env var if not set |
+
+Set or clear provider keys at runtime through Core's `PUT /api/gateway/providers`.
+
+### Modal
+
+`modal/` routes to a Ryu Cloud GPU node's Modal inference app (serverless GPU). Use any `modal/<model-name>` form to offload heavy inference to Modal's GPUs (pay-per-second, scale-to-zero) while the always-on orchestration node stays on cheap CPU. The provider is OpenAI wire-compatible — it is activated only when both `MODAL_BASE_URL` and `MODAL_API_KEY` are configured.
+
+### GenAi
+
+`gemini-` routes to the `genai` backend, which handles native-format providers (primarily Gemini) that the Gateway does not implement by hand. This is the correct way to route to Gemini models — use a `gemini-` prefixed model id directly (e.g. `gemini-2.5-pro`) rather than an `openrouter/google/…` slug. Other providers supported by the `genai` adapter (e.g. `groq`, `xai`, `cohere`) can be reached via `routing.model_map` entries that pin `provider = "genai"`.

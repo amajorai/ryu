@@ -146,7 +146,7 @@ export function unwrapContent(raw: unknown): unknown {
  *
  * @example
  * ```ts
- * import { McpServer } from "@ryu/sdk/mcp/server"
+ * import { McpServer } from "@ryuhq/sdk/mcp/server"
  *
  * const server = new McpServer()
  *   .register({ name: "greet", run: (a) => Promise.resolve(`Hello!`) })

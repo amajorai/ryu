@@ -1,6 +1,6 @@
 // packages/client/src/types.ts
 //
-// Shared type definitions for the @ryu/client SDK. Wire shapes from Core use
+// Shared type definitions for the @ryuhq/client SDK. Wire shapes from Core use
 // snake_case; the SDK surfaces camelCase for TypeScript consumers.
 
 /** Options passed to createRyuClient(). */

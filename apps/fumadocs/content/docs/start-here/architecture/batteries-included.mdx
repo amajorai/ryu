@@ -39,7 +39,7 @@ download pipeline and marked installed so the matching sidecar becomes eligible 
   parakeet *inference* is gated behind the off-by-default `voice-parakeet` build feature. The
   model download in step 5 is independent, so the bits are present, but transcription returns a
   "feature not built" error unless Core was compiled with that feature. whisper.cpp is the STT
-  engine that works out of the box. See [Voice engines](/docs/using-ryu/engines/voice-engines).
+  engine that works out of the box. See [Voice engines](/docs/desktop/engines/voice-engines).
 </Callout>
 
 The vision adapter in step 2 is bound to the chat model's stem by the `<stem>.mmproj.gguf`
@@ -55,11 +55,11 @@ install with no setup.
 
 | Default | What it is | Where to swap |
 |---|---|---|
-| Default agent "Ryu" | Pi with the Gateway on top, the only agent installed by default; `DEFAULT_AGENT_ID` is `"ryu"` | [Agents](/docs/using-ryu/user-guide/agents) |
+| Default agent "Ryu" | Pi with the Gateway on top, the only agent installed by default; `DEFAULT_AGENT_ID` is `"ryu"` | [Agents](/docs/desktop/user-guide/agents) |
 | Reranker | BAAI `bge-reranker`, the default RAG reranker | [Spaces and RAG](/docs/core/spaces-rag) |
 | RAG strategy | Vector retrieval over sqlite-vec, with GraphRAG planned | [Spaces and RAG](/docs/core/spaces-rag) |
-| `agentbrowser` | Web browsing tool app | [Tools and connections](/docs/using-ryu/user-guide/tools-and-connections) |
-| `spider` | Web scraping tool app | [Tools and connections](/docs/using-ryu/user-guide/tools-and-connections) |
+| `agentbrowser` | Web browsing tool app | [Tools and connections](/docs/desktop/user-guide/tools-and-connections) |
+| `spider` | Web scraping tool app | [Tools and connections](/docs/desktop/user-guide/tools-and-connections) |
 
 The default agent "Ryu" manages its own Pi binary, so it is self-sufficient. Every other built-in
 agent (Claude Code, Codex, Gemini CLI, bare Pi, OpenClaw) is opt-in via the agents catalog.
@@ -85,8 +85,8 @@ already read installed skills and call MCP tools through the unified registry.
 ## Where to go next
 
 <Cards>
-  <DocCard href="/docs/using-ryu/engines" />
-  <DocCard href="/docs/using-ryu/models" />
-  <DocCard href="/docs/using-ryu/skills" />
+  <DocCard href="/docs/desktop/engines" />
+  <DocCard href="/docs/desktop/models" />
+  <DocCard href="/docs/desktop/skills" />
   <DocCard href="/docs/start-here/getting-started/install-sidecar" />
 </Cards>

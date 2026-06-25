@@ -148,6 +148,14 @@ pub fn record(model: InstalledModel) -> anyhow::Result<()> {
 /// swappable).
 pub const ACTIVE_MODEL_PREF: &str = "local-chat-model";
 
+/// Preferences-KV key holding the user-selected active diffusion model. The
+/// value is the plain local stem of a GGUF diffusion file installed at
+/// `~/.ryu/models/<stem>.gguf`. When set, `sd-server` is started with this
+/// model instead of the default bundled one. Mirrors [`ACTIVE_MODEL_PREF`] for
+/// the chat-engine swap but is independent of it — a diffusion model does not
+/// enter the `LOCAL_ENGINES` swap pool (sd-server runs alongside a chat engine).
+pub const ACTIVE_DIFFUSION_MODEL_PREF: &str = "local-diffusion-model";
+
 /// Absolute path of an installed GGUF given its local stem
 /// (`~/.ryu/models/<stem>.gguf`). Mirrors the layout the shared
 /// `GgufDownloader` writes to.

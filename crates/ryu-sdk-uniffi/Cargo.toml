@@ -17,7 +17,7 @@ crate-type = ["cdylib", "staticlib", "lib"]
 # The single shared kernel. Every binding (napi, ffi, this) wraps THIS crate and
 # duplicates no logic, so the manifest rules + gateway egress blocklist + model
 # transport can never drift across languages.
-ryu-sdk = { path = "../ryu-sdk" }
+ryu-sdk = { path = "../ryu-sdk", version = "0.0.1" }
 serde_json = "1"
 # The `RyuError` enum derives `thiserror::Error` for the foreign-surfaced
 # message, matching how `ryu_sdk::ModelError` is built. Must be declared (the

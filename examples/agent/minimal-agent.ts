@@ -10,8 +10,8 @@
  * Env:  RYU_GATEWAY_URL (default http://127.0.0.1:7981), RYU_GATEWAY_TOKEN, RYU_MODEL
  */
 
-import { defineModel } from "@ryu/sdk/model";
-import { defineAgent } from "@ryu/sdk";
+import { defineModel } from "@ryuhq/sdk/model";
+import { defineAgent } from "@ryuhq/sdk";
 
 const model = defineModel(process.env.RYU_MODEL ?? "gpt-4o-mini");
 

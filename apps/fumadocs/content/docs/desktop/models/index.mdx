@@ -1,0 +1,173 @@
+---
+title: Models
+description: Browse, device-fit check, and install GGUF, safetensors, and MLX models from Hugging Face - all logic in Core.
+---
+
+The model catalog lets you browse the Hugging Face Hub for models, see which will actually run
+on your machine, and install one with a checksum-verified download. All the logic lives in Core
+(`apps/core/src/model_catalog/`), so every client (desktop, mobile, CLI, extension) reuses the same
+search, ranking, device-fit, and install behavior.
+
+The catalog is format-aware. A model has a weight format, and the engine to serve it is derived from
+that format, so the catalog browses across GGUF, safetensors, and MLX rather than GGUF only. See
+[Model formats and engine compatibility](#model-formats-and-engine-compatibility) below.
+
+## Browse
+
+```
+GET /api/models/catalog
+```
+
+Search the Hub with a `query`, a `sort` (trending, downloads, likes, or recent), a `limit`, and an
+optional `task` filter. A `format` facet (`gguf`, `safetensors`, or `mlx`, defaulting to GGUF)
+selects which weight format the query browses. The desktop fans out across all three formats
+(`MODEL_FORMATS` in `apps/desktop/src/lib/api/models.ts`) and keeps one clean Hub cursor per format.
+Pagination uses an opaque `cursor` forwarded from the Hub. Pass `installed_only=true` to list what is
+already on disk instead of hitting the network.
+
+An optional Hugging Face token (from preferences or environment) raises rate limits and unlocks gated
+repos, but no token is required for public models.
+
+## Detail
+
+```
+GET /api/models/catalog/detail?id=author%2Fname
+```
+
+The detail view fetches three things from the Hub and merges them: the model card metadata, the file
+tree (every GGUF quantization with its real size and SHA-256), and the README (front-matter
+stripped). Each quantization is labelled (for example Q4_K_M) and sorted smallest-first.
+
+Repo ids and filenames are validated to prevent path traversal and URL injection before any request
+or download.
+
+## Device fit
+
+For every quantization, Core computes a **device-fit verdict** so you know what will run before you
+download (`apps/core/src/model_catalog/device.rs`). It detects your hardware with zero extra setup:
+
+- RAM via the OS (PowerShell on Windows, `/proc/meminfo` on Linux, `sysctl` on macOS).
+- GPU VRAM via `nvidia-smi` for discrete NVIDIA cards, or unified memory on Apple Silicon.
+
+The verdict is one of:
+
+| Verdict | Meaning |
+|---|---|
+| `Great` | Fits in VRAM with comfortable headroom |
+| `Ok` | Fits in VRAM |
+| `Partial` | Spills from VRAM into system RAM (slower) |
+| `Cpu` | Fits in system RAM only, no GPU acceleration |
+| `TooBig` | Exceeds available memory |
+| `Unknown` | Memory could not be detected |
+
+The estimate budgets roughly 1.2x the file size for the model plus context, and adds overhead for the
+system. Query your detected hardware directly:
+
+```
+GET /api/models/device
+```
+
+## Model formats and engine compatibility
+
+A model carries a weight format, and the engine that serves it is derived from that format rather
+than picked per agent or by an inline branch (`apps/core/src/model_format/mod.rs`). Three formats are
+cataloged:
+
+| Format | Wire value | Install shape | Serving engines |
+|---|---|---|---|
+| GGUF | `gguf` | Single file (`~/.ryu/models/<stem>.gguf`) | llama.cpp, Ollama |
+| Safetensors | `safetensors` | Repo snapshot directory | vLLM, SGLang |
+| MLX | `mlx` | Repo snapshot directory | MLX, MLX-VLM |
+
+Each Hub query supplies its own filter, so the old hardcoded `filter=gguf` is gone: GGUF and
+safetensors map to the Hub's `filter=` values, and MLX (which has no Hub filter) is scoped to the
+`mlx-community` org when the caller has not already chosen an author
+(`apps/core/src/model_catalog/mod.rs`).
+
+Because GGUF is a single quantized file, only GGUF gets per-file quantization listing and per-quant
+device fit. Safetensors and MLX install as a multi-file repo snapshot and get a coarser repo-level
+verdict.
+
+Compatibility is computed per node. A catalog card is marked compatible when at least one engine that
+can serve its format is runnable on this node, otherwise it carries a `needs_engine` label (for
+example `vLLM` or `MLX`) so an incompatible model still surfaces and is annotated rather than hidden.
+The desktop renders this as a format facet plus compatibility badges. Read which formats and engines a
+node can run with:
+
+```
+GET /api/models/engines
+```
+
+<Callout type="info">
+  MLX engines are Apple Silicon only, so on other nodes an MLX model surfaces with a `needs_engine`
+  label instead of an Install action. Nothing here is hardcoded: adding an engine is one row in the
+  capability table in `apps/core/src/model_format/mod.rs`.
+</Callout>
+
+## Optional benchmark stats
+
+If you set an Artificial Analysis API key (`ARTIFICIAL_ANALYSIS_API_KEY`, or the fallback
+`RYU_AA_API_KEY`), detail views are enriched with benchmark stats: an intelligence index, output
+tokens per second, time to first token, and a blended price. The key is free-tier; there is no
+anonymous endpoint, so without a key the catalog simply omits these stats.
+
+## Install
+
+```
+POST /api/models/catalog/install
+```
+
+Install a chosen quantization by passing the repo `id` and the `file`. Core fetches the SHA-256 from
+the file tree, downloads with the shared checksum-verified downloader (atomic, retrying), records
+provenance in `~/.ryu/installed-models.json`, and stores the weight under `~/.ryu/models/`.
+
+<Callout type="info">
+  Repeat browse and detail calls are served from a short in-process cache (a 60-second list cache and
+  a 5-minute detail cache), so the catalog stays fast for every client.
+</Callout>
+
+## Vision models (mmproj)
+
+A GGUF vision model ships its multimodal projector as a separate companion file, named with an
+`mmproj` token (`mmproj-F16.gguf`, `mmproj-model-f16.gguf`, and so on). Core detects this and keeps
+the vision path zero-setup.
+
+In the detail view (`apps/core/src/model_catalog/mod.rs`), a repo is flagged `vision: true` when any
+of its GGUF siblings is a projector file (`is_mmproj_filename`). The projector is filtered out of the
+listed quantizations because it is an adapter, not a user-selectable weight, so the quant picker shows
+only the model weights while the UI can still badge the repo as vision-capable.
+
+When you install a quant, Core auto-installs the matching projector alongside it
+(`install_companion_mmproj`). It picks the projector by precision, preferring `f16` and falling back
+to the smallest available, then downloads it through the same checksum-verified downloader and stores
+it bound to the model's stem at `~/.ryu/models/<stem>.mmproj.gguf`. The same path runs during
+onboarding for the default model (`apps/core/src/sidecar/onboarding.rs`). Projector download is
+best-effort: if it fails, the model still chats as text-only.
+
+The projector quant is overridable so nothing is hardcoded:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `RYU_MMPROJ_QUANT` | `f16` | Preferred projector precision; falls back to the smallest projector if absent |
+
+At launch, the local engine (`apps/core/src/sidecar/providers/llamacpp/mod.rs`) resolves the adapter
+by the on-disk `<stem>.mmproj.gguf` convention. If the file is present it starts llama.cpp with
+`--mmproj` so the served model accepts images, otherwise it does a plain text launch. This runs both
+for the registry default and for a runtime active-model switch.
+
+On the chat path, a user message that carries image `file` parts becomes an OpenAI content array
+(text plus each image as an `image_url` data-URL) through `route_openai_stream`
+(`apps/core/src/sidecar/adapters/mod.rs`), so a locally-served vision model with its projector loaded,
+or any multimodal provider, actually receives the image. Text-only messages keep the plain-string
+content shape, so non-vision chat is unaffected.
+
+<Callout type="warn">
+  The projector must live in the same repo as the model weights (same-repo `mmproj` only). Vision
+  needs the local engine running with a vision GGUF installed, and live vision inference has not been
+  exercised here.
+</Callout>
+
+## In the desktop
+
+The Models page is a thin master-detail browser over these endpoints, reachable from the command
+palette or the sidebar. See [The App Store](/docs/desktop/user-guide/store).

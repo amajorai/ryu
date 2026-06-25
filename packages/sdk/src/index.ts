@@ -1,9 +1,9 @@
 /**
- * @ryu/sdk — Ryu developer SDK.
+ * @ryuhq/sdk — Ryu developer SDK.
  *
  * Re-exports the manifest types, builder utilities, gateway-mandatory model
  * client, and Runnable authoring API as a single entry point for consumers
- * who import from "@ryu/sdk".
+ * who import from "@ryuhq/sdk".
  *
  * CLI users run `bunx ryu pack <dir>` via the bin entry in package.json.
  */
@@ -21,9 +21,11 @@ export {
 } from "./builder";
 export type {
 	CompanionSurface,
+	Contributes,
 	PluginManifest,
 	RunnableKind,
 	RunnableMeta,
+	TurnHookContribution,
 } from "./manifest";
 export {
 	coreManifestJsonSchema,
@@ -56,6 +58,16 @@ export type {
 } from "./runnable/runnable-types";
 export type { SkillOptions } from "./runnable/skill";
 export { defineSkill } from "./runnable/skill";
+export type {
+	DefinePluginOptions,
+	DefineTurnHookOptions,
+	HookContext,
+	HookDirective,
+	HookRun,
+	HostApi,
+	SideModelArgs,
+} from "./runnable/turn-hook";
+export { definePlugin, defineTurnHook } from "./runnable/turn-hook";
 export type {
 	JsonSchemaProperty,
 	ToolOptions,

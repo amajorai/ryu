@@ -209,11 +209,8 @@ async fn poll_device_token(
 
 pub fn save_token(token: &str) -> Result<()> {
     let path = token_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let data = serde_json::json!({ "token": token });
-    std::fs::write(&path, serde_json::to_string(&data)?)?;
+    write_secret_file(&path, &serde_json::to_string(&data)?)?;
     Ok(())
 }
 
@@ -236,4 +233,38 @@ pub fn clear_token() -> Result<()> {
 
 fn token_path() -> std::path::PathBuf {
     crate::paths::ryu_dir().join("auth.json")
+}
+
+fn write_secret_file(path: &std::path::Path, body: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(body.as_bytes())?;
+        file.sync_all()?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, body)?;
+    }
+
+    Ok(())
 }

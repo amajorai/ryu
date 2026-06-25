@@ -1,5 +1,5 @@
 {
-  "name": "@ryu/client",
+  "name": "@ryuhq/client",
   "version": "0.0.1",
   "type": "module",
   "description": "TypeScript client SDK for embedding a Ryu Core agent in any app",

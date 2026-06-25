@@ -1,5 +1,5 @@
 {
-  "name": "@ryu/sdk",
+  "name": "@ryuhq/sdk",
   "version": "0.0.1",
   "type": "module",
   "description": "Ryu developer SDK: typed builders and CLI for authoring plugin.json Plugin bundles",
@@ -38,7 +38,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@ryu/sdk-native": "workspace:*",
+    "@ryuhq/sdk-native": "workspace:*",
     "zod": "^4.1.13"
   },
   "devDependencies": {

@@ -1,0 +1,124 @@
+---
+title: "Desktop parity"
+description: "How close the ryu CLI is to the desktop app, what is built, what is planned, and what is deliberately N/A in a terminal"
+---
+
+This page summarizes `docs/cli-desktop-parity.md`, which tracks `apps/cli` (the Rust ratatui TUI,
+binary `ryu`) against `apps/desktop` (Tauri plus React).
+
+## The principle
+
+The CLI reaches the **same Core** (`:7980`) the desktop uses, so parity is overwhelmingly a matter
+of surfacing existing Core endpoints, not new backend work. The goal is **capability parity, not
+modality parity**: a terminal cannot render a React Flow canvas or a screen-capture timeline, so some
+desktop surfaces are deliberately out of scope rather than missing. Those are marked N/A in the TUI.
+
+Two design notes shape the layout. First, extend, do not rewrite: the CLI is one ratatui event loop
+with a single `App` struct, per-tab keys in `main.rs`, rendering in `ui.rs`, and Core fetchers in
+`api.rs`, so each new surface follows the same seam. Second, the command palette (`Ctrl+P`) is the
+information architecture: a narrow sidebar cannot hold every tab, so a fuzzy palette is the primary
+jump surface (the Cmd+K analog) and the sidebar stays a short grouped list.
+
+<Callout type="info">
+Verification ceiling: without a live Core plus a TTY, `cargo build -p ryu-cli` is the gate. Each
+slice is compile-verified; live round-trips (judge verdicts, installs, transcripts) are
+runtime-unverified.
+</Callout>
+
+## Matrix
+
+Legend: ✅ built, 🟡 in progress, ⬜ planned, 🚫 N/A in TUI (with reason).
+
+### Chat
+
+| Feature | Status | Notes |
+|---|---|---|
+| Multi-turn streaming chat | ✅ | `POST /api/chat/stream`, `conversation_id` minted per chat |
+| Agent picker (`Ctrl+A`) | ✅ | `GET /api/agents` |
+| Tool-call loop surfacing | ✅ | tool-input/output frames rendered inline |
+| `/btw` side question | ✅ | `POST /api/btw`, ephemeral overlay |
+| `/goal` set/clear plus judge loop | ✅ | judge endpoint plus client continuation loop (capped at 25), goal status bar |
+| Double-check (armed with `/check`) | ✅ | `POST /api/conversations/:id/double-check`, result overlay |
+| Model override (`/model <id>`) | ✅ | sent as `acp_model`, status-bar indicator |
+| Council team (`/team <id>`) | ✅ | `team_id` body field |
+| Sessions (`/sessions`) | ✅ | `GET /api/conversations/:id/sessions` overlay |
+| Permission mode / reasoning effort | ⬜ | needs `GET /api/agents/:id/acp-config` probe |
+| Conversation fork/branch | ⬜ | `POST /api/conversations/:id/fork` |
+| Message queue | ⬜ | client-side scheduler |
+| Voice input | 🚫 | needs mic capture and Web Audio, no TTY equivalent |
+| File attach / Plate editor | 🚫 | rich editor, `ryu open` hands media to desktop |
+| Diff review pane | ⬜ | `GET /api/worktree/:id/diff` (read-only summary feasible) |
+
+### Catalogs and local stack
+
+| Feature | Status | Notes |
+|---|---|---|
+| Services / sidecar lifecycle | ✅ | start/stop/restart/install/uninstall |
+| Engines catalog plus active swap | ✅ | `GET /api/engines`, `POST /api/engine/active` |
+| Apps / plugins catalog | ✅ | `GET /api/catalog`, install/uninstall |
+| Models tab (browse / install / use) | ✅ | `GET /api/models/catalog` |
+| Skills tab (browse / install / activate) | ✅ | `GET /api/skills/catalog` |
+| Tools tab (MCP search) | ✅ | `GET /api/tools/search` |
+| Marketplace browse | ⬜ | control-plane (`:3000`), not Core; needs auth plus separate base |
+| Marketplace buy / licenses / sell | 🚫 | Stripe checkout needs a browser, `ryu open marketplace` |
+
+### Orchestration
+
+| Feature | Status | Notes |
+|---|---|---|
+| Workflows list / run / poll | ✅ | `GET /workflows`, `POST /workflows/:id/run` |
+| Workflow DAG canvas editing | 🚫 | React Flow graph editor, `ryu open workflows` to edit |
+| Schedules / automations | ✅ | `GET /heartbeat/jobs` |
+| Recipes tab (list / replay) | ✅ | `GET /api/recipes`, Enter replays |
+| Recipe recording (record then replay) | 🚫 | needs a desktop input tap, `ryu open` |
+| Teams tab (browse) | ✅ | `GET /api/teams` (list and inspect, create via desktop) |
+
+### Knowledge and monitoring
+
+| Feature | Status | Notes |
+|---|---|---|
+| Spaces / RAG (list plus docs) | ✅ | `GET /api/spaces`, `.../documents` |
+| Spaces search | ⬜ | `POST /api/spaces/:id/search` |
+| Long-term memory (list/add) | ⬜ | no Core list endpoint yet (internal-injection only) |
+| Monitors tab (list / check now) | ✅ | `GET /api/monitors`, Enter runs a check |
+| Meetings tab (browse) | ✅ | `GET /api/meetings`, transcript via `.../:id/transcript` |
+| Shadow timeline | 🚫 | screen-capture keyframes, no TTY rendering |
+
+### Platform and IA
+
+| Feature | Status | Notes |
+|---|---|---|
+| Command palette (`Ctrl+P`) | ✅ | fuzzy jump to any tab plus chat/global actions (Cmd+K analog) |
+| Multi-node selection / picker | ✅ | `node` subcommands plus in-TUI picker (`Ctrl+N`) |
+| Mesh status | ✅ (read) | `GET /api/mesh/status`, surfaced in the node picker |
+| Gateway observability | ✅ | `GET /api/gateway/status` |
+| Gateway config (GitOps) | ✅ | `apply` / `diff` / `config` subcommands |
+| Gateway firewall/DLP/budget UI | ⬜ | no desktop UI either, config-as-code covers it |
+| Preferences / settings | ⬜ | only per-key `GET/PUT`, no list endpoint to browse |
+| Auth (login/whoami/sessions/plan) | ✅ | full subcommand set plus Account tab |
+| Channels (bot CRUD) | ⬜ | `:3000` server, not Core |
+| Downloads center | ⬜ | `GET /api/downloads` plus SSE |
+| Update check/apply | ✅ | `version`, `update` |
+| Deep links (`ryu open …`) | ✅ | hands `ryu://` to the desktop app |
+| Split view / tabs / island | 🚫 | desktop window features |
+
+## The deferred set
+
+The pieces consciously not yet in the TUI, in roughly priority order:
+
+- Permission-mode and reasoning-effort pickers (need an `acp-config` probe).
+- Conversation fork (`/fork`) and a client-side message queue.
+- Memory and settings tabs (blocked on Core list endpoints that do not exist yet).
+- Marketplace browse (lives on the control-plane `:3000`, behind auth, not Core).
+
+Modality-bound surfaces (voice input, the workflow canvas, recipe recording, marketplace buy, the
+Shadow timeline, split view and the island) stay N/A in the TUI by design: a terminal hands those off
+to the desktop with `ryu open` rather than reimplementing them.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/cli/index" />
+  <DocCard href="/docs/cli/getting-started" />
+  <DocCard href="/docs/core/conversations-sessions" />
+</Cards>

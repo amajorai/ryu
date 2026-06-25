@@ -15,7 +15,7 @@ driving each run.
   coordinator uses to create, run, and read worker threads.
 - [Conversations and sessions](/docs/core/conversations-sessions): each worker thread is a real
   conversation, so it is durable, searchable, and resumable.
-- [Git workspace](/docs/using-ryu/user-guide/git-workspace): per-conversation worktrees keep
+- [Git workspace](/docs/desktop/user-guide/git-workspace): per-conversation worktrees keep
   parallel workers from colliding on the same files.
 - [Delegation](/docs/core/delegation): the ephemeral alternative, contrasted at the end.
 
@@ -83,7 +83,7 @@ files, because each has its own checkout. The worktree is created lazily on the 
 `send_message_to_thread` and reused across that thread's later turns, keyed on its conversation id,
 so a worker keeps the same checkout as you give it follow-up instructions.
 
-See [Git workspace](/docs/using-ryu/user-guide/git-workspace) for how the per-conversation worktrees
+See [Git workspace](/docs/desktop/user-guide/git-workspace) for how the per-conversation worktrees
 are created and how their diffs surface.
 
 </Step>
@@ -131,6 +131,6 @@ can open later, use coordinator threads.
 <Cards>
   <DocCard href="/docs/core/coordinator-threads" />
   <DocCard href="/docs/core/delegation" />
-  <DocCard href="/docs/using-ryu/user-guide/git-workspace" />
+  <DocCard href="/docs/desktop/user-guide/git-workspace" />
   <DocCard href="/docs/core/conversations-sessions" />
 </Cards>

@@ -9,8 +9,8 @@
  * Run:  bun run examples/workflow/summarize-and-rate.ts
  */
 
-import { defineModel } from "@ryu/sdk/model";
-import { defineTool, defineWorkflow } from "@ryu/sdk";
+import { defineModel } from "@ryuhq/sdk/model";
+import { defineTool, defineWorkflow } from "@ryuhq/sdk";
 
 const model = defineModel(process.env.RYU_MODEL ?? "gpt-4o-mini");
 

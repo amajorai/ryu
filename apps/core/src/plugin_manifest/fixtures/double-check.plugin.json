@@ -1,0 +1,39 @@
+{
+  "id": "io.ryu.double-check",
+  "name": "Double Check",
+  "version": "1.0.0",
+  "runnables": [],
+  "permission_grants": ["hook:side-model"],
+  "activation_events": ["*"],
+  "contributes": {
+    "composer_controls": [
+      {
+        "id": "double-check.toggle",
+        "type": "toggle",
+        "flag": "io.ryu.double-check",
+        "label": "Double-check",
+        "description": "Have a second model review each answer."
+      }
+    ],
+    "settings_tabs": [
+      {
+        "id": "double-check.settings",
+        "title": "Double-check",
+        "fields": [
+          {
+            "type": "model_picker",
+            "pref_key": "double-check-model",
+            "label": "Reviewer model"
+          }
+        ]
+      }
+    ],
+    "turn_hooks": [
+      {
+        "id": "double-check.review",
+        "on": "post_assistant_turn",
+        "code": "if (!(ctx.flags && ctx.flags['io.ryu.double-check'])) { return { kind: 'none' }; } const rev = ctx.transcript.slice().reverse(); const lastAssistant = rev.find(m => m.role === 'assistant'); if (!lastAssistant) { return { kind: 'none' }; } const lastUser = rev.find(m => m.role === 'user'); const review = await host.sideModel({ system: 'You are a meticulous reviewer. Check the assistant\\'s last answer for factual errors, unsupported claims, or missing steps. If it is correct and complete, reply with exactly: Looks correct. Otherwise give a brief, specific correction.', prompt: 'User asked:\\n' + (lastUser ? lastUser.content : '(unknown)') + '\\n\\nAssistant answered:\\n' + lastAssistant.content, model_pref_key: 'double-check-model' }); if (!review || !review.trim()) { return { kind: 'none' }; } return { kind: 'note', text: review.trim() };"
+      }
+    ]
+  }
+}

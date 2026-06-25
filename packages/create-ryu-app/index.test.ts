@@ -11,7 +11,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { PluginManifestSchema } from "@ryu/sdk/manifest";
+import { PluginManifestSchema } from "@ryuhq/sdk/manifest";
 import { scaffold } from "./index";
 
 const EXPECTED_FILES = ["plugin.json", "src/agent.ts", "package.json"];
@@ -68,7 +68,7 @@ describe("create-ryu-app scaffold", () => {
 		};
 		expect(pkg.name).toBe("my-test-app");
 		expect(pkg.scripts.dev).toBe("bun run src/agent.ts");
-		expect(pkg.dependencies["@ryu/sdk"]).toBeDefined();
+		expect(pkg.dependencies["@ryuhq/sdk"]).toBeDefined();
 	});
 
 	it("plugin.json has at least one agent runnable", () => {

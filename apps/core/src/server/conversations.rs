@@ -99,30 +99,6 @@ pub struct ConversationDetail {
     pub participants: Vec<String>,
 }
 
-/// The persistent goal (`/goal`) attached to a conversation. A goal is a
-/// completion condition the user wants satisfied; a separate judge model
-/// evaluates progress after each turn. `status` is `"active"` while the loop is
-/// running and `"achieved"` once the condition has been met. A conversation with
-/// no goal returns `goal == None` and `status == None`.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GoalState {
-    /// The completion condition. `None` when no goal is set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal: Option<String>,
-    /// `"active"` | `"achieved"` | `None`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    /// Unix milliseconds when the goal was set (drives the elapsed timer).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub started_at: Option<i64>,
-    /// The judge's most recent reason for its yes/no verdict.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_reason: Option<String>,
-    /// Number of turns evaluated by the judge so far.
-    #[serde(default)]
-    pub turns: i64,
-}
-
 /// The run status of a [`Session`]. Tracks the lifecycle of a single agent/workflow run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -201,6 +177,13 @@ pub struct ConversationStore {
     /// (tests, CLI, headless). Indexing on append and lazy backfill on search are
     /// both best-effort: a failure here never affects message CRUD.
     message_index: Option<super::message_index::MessageIndex>,
+    /// Optional sink for conversation ids that just received their *first* user
+    /// message and so are candidates for a background auto-rename. `None` in
+    /// contexts without a server loop to consume them (tests, CLI). The server
+    /// wires a consumer that asks the default local model for a concise title and
+    /// calls [`auto_set_title`]. Best-effort: a closed/absent channel just means
+    /// the conversation keeps its first-message-derived title.
+    auto_title_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 fn now_millis() -> i64 {
@@ -231,6 +214,7 @@ impl ConversationStore {
             conn: Arc::new(Mutex::new(conn)),
             cipher: crate::crypto::global_cipher()?,
             message_index: None,
+            auto_title_tx: None,
         })
     }
 
@@ -239,6 +223,17 @@ impl ConversationStore {
     /// construction to enable indexing-on-append + searchable history.
     pub fn with_message_index(mut self, index: super::message_index::MessageIndex) -> Self {
         self.message_index = Some(index);
+        self
+    }
+
+    /// Wire the auto-rename sink: each conversation that gets its first user
+    /// message is sent on `tx` so a server-side consumer can generate a concise
+    /// title with the default local model. Must be called after construction.
+    pub fn with_auto_title(
+        mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Self {
+        self.auto_title_tx = Some(tx);
         self
     }
 
@@ -252,6 +247,7 @@ impl ConversationStore {
             conn: Arc::new(Mutex::new(conn)),
             cipher: crate::crypto::FieldCipher::new(&[0x11; 32]),
             message_index: None,
+            auto_title_tx: None,
         })
     }
 
@@ -322,30 +318,6 @@ impl ConversationStore {
                 "participants",
                 "ALTER TABLE conversations ADD COLUMN participants  TEXT NOT NULL DEFAULT '[]'",
             ),
-            // Goal (`/goal`): a persistent completion condition for the conversation
-            // judged each turn by a separate model. `goal_status` is one of
-            // "active" | "achieved" | null (no goal). The remaining columns hold the
-            // judge bookkeeping surfaced in the desktop goal bar.
-            (
-                "goal",
-                "ALTER TABLE conversations ADD COLUMN goal             TEXT",
-            ),
-            (
-                "goal_status",
-                "ALTER TABLE conversations ADD COLUMN goal_status      TEXT",
-            ),
-            (
-                "goal_started_at",
-                "ALTER TABLE conversations ADD COLUMN goal_started_at  INTEGER",
-            ),
-            (
-                "goal_last_reason",
-                "ALTER TABLE conversations ADD COLUMN goal_last_reason TEXT",
-            ),
-            (
-                "goal_turns",
-                "ALTER TABLE conversations ADD COLUMN goal_turns       INTEGER NOT NULL DEFAULT 0",
-            ),
             // Coordinator threads (Codex-style cross-thread orchestration): a
             // coordinator agent can pin a thread to keep it surfaced and archive
             // a finished one to hide it. Both default off so existing
@@ -357,6 +329,17 @@ impl ConversationStore {
             (
                 "archived",
                 "ALTER TABLE conversations ADD COLUMN archived      INTEGER NOT NULL DEFAULT 0",
+            ),
+            // Auto-rename (ChatGPT/Claude-style): a conversation's title is first
+            // derived from the first user message, then a background task asks the
+            // default local model for a concise title and overwrites it. A manual
+            // rename (REST/coordinator) sets `title_custom = 1` so the auto-namer
+            // never clobbers a user-chosen title. Defaults off → existing
+            // conversations are eligible for a one-time auto-name on their next
+            // first-user-message (none, since they already have messages).
+            (
+                "title_custom",
+                "ALTER TABLE conversations ADD COLUMN title_custom  INTEGER NOT NULL DEFAULT 0",
             ),
         ] {
             if !existing_conv_columns.contains(col) {
@@ -439,17 +422,59 @@ impl ConversationStore {
 
     /// Set (or replace) the title of a conversation. The title is sealed at rest
     /// like every other title write. Used by the coordinator `set_thread_title`
-    /// tool so an orchestrator can label its worker threads.
+    /// tool so an orchestrator can label its worker threads, and by the desktop
+    /// manual-rename endpoint.
+    ///
+    /// This is an explicit, human-driven rename, so it marks the title
+    /// `title_custom = 1` — the background auto-namer ([`auto_set_title`]) checks
+    /// that flag and never overwrites a title a user (or coordinator) chose.
     pub async fn set_title(&self, conversation_id: &str, title: &str) -> Result<()> {
         let now = now_millis();
         let sealed = self.seal_opt(Some(title))?;
         let conn = self.conn.lock().await;
         conn.execute(
-            "UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3",
+            "UPDATE conversations SET title = ?1, title_custom = 1, updated_at = ?2 WHERE id = ?3",
             params![sealed, now, conversation_id],
         )
         .context("setting conversation title")?;
         Ok(())
+    }
+
+    /// Apply an auto-generated title (from the background auto-namer) to a
+    /// conversation, but **only** when the user hasn't chosen one themselves
+    /// (`title_custom = 0`). The guard makes the write a no-op if a manual rename
+    /// raced ahead, so an LLM title can never clobber a deliberate one.
+    ///
+    /// Unlike [`set_title`] this does NOT set `title_custom` — an auto title stays
+    /// replaceable, and a later manual rename still locks it. Returns whether a
+    /// row was actually updated.
+    pub async fn auto_set_title(&self, conversation_id: &str, title: &str) -> Result<bool> {
+        let now = now_millis();
+        let sealed = self.seal_opt(Some(title))?;
+        let conn = self.conn.lock().await;
+        let changed = conn
+            .execute(
+                "UPDATE conversations SET title = ?1, updated_at = ?2
+                 WHERE id = ?3 AND title_custom = 0",
+                params![sealed, now, conversation_id],
+            )
+            .context("auto-setting conversation title")?;
+        Ok(changed > 0)
+    }
+
+    /// Whether a conversation's title is user-chosen (locked against auto-rename).
+    /// Used by the auto-namer to skip conversations the user already renamed.
+    pub async fn title_is_custom(&self, conversation_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let custom: Option<i64> = conn
+            .query_row(
+                "SELECT title_custom FROM conversations WHERE id = ?1",
+                params![conversation_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("reading title_custom")?;
+        Ok(custom.unwrap_or(0) != 0)
     }
 
     /// Pin or unpin a conversation (coordinator `set_thread_pinned`).
@@ -474,98 +499,6 @@ impl ConversationStore {
         )
         .context("setting archived flag")?;
         Ok(())
-    }
-
-    /// Read the goal state for a conversation. Returns a default (empty) goal
-    /// when the conversation has none or does not exist.
-    pub async fn get_goal(&self, conversation_id: &str) -> Result<GoalState> {
-        let conn = self.conn.lock().await;
-        let goal = conn
-            .query_row(
-                "SELECT goal, goal_status, goal_started_at, goal_last_reason, goal_turns
-                 FROM conversations WHERE id = ?1",
-                params![conversation_id],
-                |row| {
-                    Ok(GoalState {
-                        goal: row.get(0)?,
-                        status: row.get(1)?,
-                        started_at: row.get(2)?,
-                        last_reason: row.get(3)?,
-                        turns: row.get::<_, Option<i64>>(4)?.unwrap_or(0),
-                    })
-                },
-            )
-            .optional()
-            .context("reading goal")?
-            .unwrap_or_default();
-        Ok(goal)
-    }
-
-    /// Set (or replace) the goal for a conversation. Resets the judge bookkeeping
-    /// (status → "active", turns → 0, last_reason cleared) and stamps
-    /// `goal_started_at`. Creates the conversation row if it does not exist.
-    pub async fn set_goal(&self, conversation_id: &str, goal: &str) -> Result<GoalState> {
-        let now = now_millis();
-        {
-            let conn = self.conn.lock().await;
-            conn.execute(
-                "INSERT INTO conversations (id, created_at, updated_at, goal, goal_status, goal_started_at, goal_last_reason, goal_turns)
-                 VALUES (?1, ?2, ?2, ?3, 'active', ?2, NULL, 0)
-                 ON CONFLICT(id) DO UPDATE SET
-                     goal             = excluded.goal,
-                     goal_status      = 'active',
-                     goal_started_at  = ?2,
-                     goal_last_reason = NULL,
-                     goal_turns       = 0,
-                     updated_at       = ?2",
-                params![conversation_id, now, goal],
-            )
-            .context("setting goal")?;
-        }
-        self.get_goal(conversation_id).await
-    }
-
-    /// Clear the goal on a conversation (user ran `/goal clear` or the goal was
-    /// achieved and dismissed). Leaves the conversation row intact.
-    pub async fn clear_goal(&self, conversation_id: &str) -> Result<()> {
-        let now = now_millis();
-        let conn = self.conn.lock().await;
-        conn.execute(
-            "UPDATE conversations
-             SET goal = NULL, goal_status = NULL, goal_started_at = NULL,
-                 goal_last_reason = NULL, goal_turns = 0, updated_at = ?2
-             WHERE id = ?1",
-            params![conversation_id, now],
-        )
-        .context("clearing goal")?;
-        Ok(())
-    }
-
-    /// Record one judge evaluation: increment the turn count, store the reason,
-    /// and flip `goal_status` to "achieved" when `met` is true. Returns the
-    /// updated goal state.
-    pub async fn record_goal_eval(
-        &self,
-        conversation_id: &str,
-        met: bool,
-        reason: &str,
-    ) -> Result<GoalState> {
-        let now = now_millis();
-        {
-            let conn = self.conn.lock().await;
-            let status = if met { "achieved" } else { "active" };
-            conn.execute(
-                "UPDATE conversations
-                 SET goal_turns       = COALESCE(goal_turns, 0) + 1,
-                     goal_last_reason = ?2,
-                     goal_status      = ?3,
-                     updated_at       = ?4
-                 WHERE id = ?1",
-                params![conversation_id, reason, status, now],
-            )
-            .context("recording goal eval")?;
-        }
-        self.get_goal(conversation_id).await
     }
 
     /// Append a message and bump the conversation's `updated_at`. Returns the new
@@ -642,6 +575,36 @@ impl ConversationStore {
             params![message_id, conversation_id, role, sealed, agent_id, now],
         )
         .context("inserting message")?;
+
+        // Auto-rename trigger: when this is the conversation's *first* user
+        // message and the title hasn't been user-locked, hand the id to the
+        // server-side auto-namer (ChatGPT/Claude-style). We fire exactly once per
+        // conversation (guarded on user-message count == 1) so the model is asked
+        // for a title only at the start; the consumer re-checks `title_custom`
+        // before writing, so a manual rename that races still wins.
+        if role == "user" {
+            if let Some(tx) = &self.auto_title_tx {
+                let user_count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM messages
+                         WHERE conversation_id = ?1 AND role = 'user'",
+                        params![conversation_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                let already_custom: i64 = conn
+                    .query_row(
+                        "SELECT title_custom FROM conversations WHERE id = ?1",
+                        params![conversation_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                if user_count == 1 && already_custom == 0 {
+                    // Best-effort: a full/closed channel just skips auto-naming.
+                    let _ = tx.send(conversation_id.to_owned());
+                }
+            }
+        }
         Ok(message_id)
     }
 
@@ -780,6 +743,25 @@ impl ConversationStore {
         Ok(out)
     }
 
+    /// The decrypted text of a conversation's earliest user message, if any.
+    /// Used by the auto-namer to seed a concise title from what the user first
+    /// asked. Returns `None` for conversations with no user turn yet.
+    pub async fn get_first_user_message(&self, conversation_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let sealed: Option<String> = conn
+            .query_row(
+                "SELECT content FROM messages
+                 WHERE conversation_id = ?1 AND role = 'user'
+                 ORDER BY created_at ASC, rowid ASC
+                 LIMIT 1",
+                params![conversation_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("reading first user message")?;
+        Ok(sealed.map(|s| self.open_content(s)))
+    }
+
     /// Semantic search over past conversation messages (the `search_conversations`
     /// builtin tool). Returns `None` when no message index is wired.
     ///
@@ -833,23 +815,38 @@ impl ConversationStore {
             pending
         };
         if !unindexed.is_empty() {
-            let embedder = index.embedder();
-            let model = embedder.model_id().to_string();
-            for (id, conv, role, content, created) in unindexed {
-                match embedder.embed(&content).await {
-                    Ok(vec) => {
-                        if let Err(e) = index
-                            .index_message(&id, &conv, &role, &vec, &model, created)
-                            .await
-                        {
-                            tracing::warn!("backfill index write failed for {id}: {e:#}");
+            let bg_index = index.clone();
+            tokio::spawn(async move {
+                let embedder = bg_index.embedder();
+                let model = embedder.model_id().to_string();
+                let mut consecutive_failures: u32 = 0;
+                for (id, conv, role, content, created) in unindexed {
+                    if consecutive_failures >= 3 {
+                        tracing::warn!(
+                            "backfill embed: aborting after {consecutive_failures} consecutive \
+                             failures — sidecar likely down, will retry on next search"
+                        );
+                        break;
+                    }
+                    match embedder.embed(&content).await {
+                        Ok(vec) => {
+                            consecutive_failures = 0;
+                            if let Err(e) = bg_index
+                                .index_message(&id, &conv, &role, &vec, &model, created)
+                                .await
+                            {
+                                tracing::warn!("backfill index write failed for {id}: {e:#}");
+                            }
+                        }
+                        Err(e) => {
+                            consecutive_failures += 1;
+                            tracing::warn!(
+                                "backfill embed failed for {id} (sidecar down?): {e:#}"
+                            );
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!("backfill embed failed for {id} (sidecar down?): {e:#}");
-                    }
                 }
-            }
+            });
         }
 
         // ── KNN + snippet re-read ────────────────────────────────────────────
@@ -1606,6 +1603,61 @@ mod tests {
         );
         let detail = store.get_conversation_detail("c1").await.unwrap().unwrap();
         assert_eq!(detail.title.as_deref(), Some("Plan the secret acquisition"));
+    }
+
+    #[tokio::test]
+    async fn auto_set_title_overwrites_derived_but_not_custom() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .append_message("c1", "user", "how do I center a div", None)
+            .await
+            .unwrap();
+        // Provisional title is the derived first message; not yet user-locked.
+        assert!(!store.title_is_custom("c1").await.unwrap());
+
+        // The auto-namer may overwrite the derived title.
+        assert!(store.auto_set_title("c1", "Centering a div").await.unwrap());
+        let list = store.list_conversations().await.unwrap();
+        assert_eq!(list[0].title.as_deref(), Some("Centering a div"));
+
+        // A manual rename locks the title.
+        store.set_title("c1", "CSS layout help").await.unwrap();
+        assert!(store.title_is_custom("c1").await.unwrap());
+
+        // A later auto-name is a no-op once the user has chosen a title.
+        assert!(!store.auto_set_title("c1", "Robot title").await.unwrap());
+        let list = store.list_conversations().await.unwrap();
+        assert_eq!(list[0].title.as_deref(), Some("CSS layout help"));
+    }
+
+    #[tokio::test]
+    async fn first_user_message_fires_auto_title_once() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let store = ConversationStore::open_in_memory().unwrap().with_auto_title(tx);
+
+        // First user message fires the auto-rename signal.
+        store
+            .append_message("c1", "user", "first question", None)
+            .await
+            .unwrap();
+        assert_eq!(rx.try_recv().ok(), Some("c1".to_owned()));
+
+        // Assistant reply + a second user turn must NOT fire again.
+        store
+            .append_message("c1", "assistant", "an answer", None)
+            .await
+            .unwrap();
+        store
+            .append_message("c1", "user", "follow-up", None)
+            .await
+            .unwrap();
+        assert!(rx.try_recv().is_err(), "auto-title should fire only once");
+
+        // `get_first_user_message` returns the earliest user turn.
+        assert_eq!(
+            store.get_first_user_message("c1").await.unwrap().as_deref(),
+            Some("first question")
+        );
     }
 
     #[tokio::test]

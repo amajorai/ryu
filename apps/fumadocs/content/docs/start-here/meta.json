@@ -1,7 +1,21 @@
 {
   "root": true,
   "title": "Start Here",
-  "description": "Orientation, install, and the big picture.",
-  "icon": "Rocket",
-  "pages": ["index", "---Set up---", "getting-started", "---Understand---", "architecture"]
+  "description": "Install Ryu, understand how the pieces fit together, and send your first message. Covers architecture, the Core/Gateway split, and the runnable model.",
+  "icon": "rocket",
+  "pages": [
+    "start-here/index.mdx",
+    "start-here/getting-started/index.mdx",
+    "start-here/getting-started/install-sidecar.mdx",
+    "start-here/getting-started/first-chat.mdx",
+    "start-here/architecture/index.mdx",
+    "start-here/architecture/why-ryu.mdx",
+    "start-here/architecture/core-vs-gateway.mdx",
+    "start-here/architecture/batteries-included.mdx",
+    "start-here/architecture/runnable-model.mdx",
+    "academy/essentials/what-is-ryu.mdx (rehomed as start-here/essentials/what-is-ryu.mdx)",
+    "academy/essentials/install-and-setup.mdx (rehomed as start-here/essentials/install-and-setup.mdx)",
+    "academy/essentials/your-first-chat.mdx (rehomed as start-here/essentials/your-first-chat.mdx)",
+    "academy/essentials/your-first-agent.mdx (rehomed as start-here/essentials/your-first-agent.mdx)"
+  ]
 }

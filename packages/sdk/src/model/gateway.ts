@@ -1,13 +1,13 @@
 /**
  * Gateway configuration + egress enforcement for the Ryu SDK model client.
  *
- * Rust-cored: every function here delegates to the `@ryu/sdk-native` addon, so
+ * Rust-cored: every function here delegates to the `@ryuhq/sdk-native` addon, so
  * the gateway URL/token resolution and the direct-provider egress blocklist are
  * the exact same implementation (`crates/ryu-sdk/src/gateway.rs`) used by the
  * Go/Python bindings and Core itself — one source of truth, no drift.
  */
 
-import * as native from "@ryu/sdk-native";
+import * as native from "@ryuhq/sdk-native";
 
 /** Default base URL for the local Ryu gateway — matches Core's DEFAULT_GATEWAY_URL. */
 export const DEFAULT_GATEWAY_URL = "http://127.0.0.1:7981";

@@ -13,7 +13,7 @@
  * No provider key belongs in this file; credentials live in the gateway config.
  */
 
-import { defineModel } from "@ryu/sdk/model";
+import { defineModel } from "@ryuhq/sdk/model";
 
 const MODEL_ID = process.env.RYU_MODEL ?? "gpt-4o-mini";
 const model = defineModel(MODEL_ID);

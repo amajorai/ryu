@@ -1,9 +1,9 @@
 ---
 title: "Reliability & Budgets"
-description: "Caching, rate limits, circuit breaking with fallback, and budget caps across user, agent, and session."
+description: "Caching, rate limits, concurrency admission control, circuit breaking with fallback, and budget caps across user, agent, and session."
 ---
 
-The Gateway keeps model calls fast, bounded, and resilient. Four mechanisms sit on the request path: two caches in front of the provider, a per-key rate limiter, a per-provider circuit breaker that drives the routing fallback chain, and budget enforcement across user, agent, and session scopes.
+The Gateway keeps model calls fast, bounded, and resilient. Five mechanisms sit on the request path: two caches in front of the provider, a per-key rate limiter, a concurrency admission gate for the local engine, a per-provider circuit breaker that drives the routing fallback chain, and budget enforcement across user, agent, and session scopes.
 
 ## Caching
 
@@ -25,6 +25,30 @@ The exact cache evicts expired entries with a background task. The semantic cach
 ## Rate limiting
 
 The rate limiter (`apps/gateway/src/rate_limit/`) applies token-bucket limits per key across three dimensions: requests per minute, tokens per minute, and a per-second burst cap for bot detection. Per-key overrides in the auth config let one key have a higher ceiling than the global default. Idle buckets are evicted to bound memory.
+
+## Concurrency admission control
+
+The concurrency gate (`apps/gateway/src/concurrency/mod.rs`) protects the resident local engine from overload. A local llama.cpp or Ollama server has a fixed number of batch slots (`--parallel N`). Without a gate, a burst of background fan-out work submitted before an interactive turn makes the user wait behind the batch jobs in the engine's internal FIFO.
+
+The admission gate fixes this with a priority-aware async semaphore keyed to the `local` provider:
+
+- At most `local_max_in_flight` requests run concurrently. Size this to match the engine's `--parallel` slot count so every engine slot stays busy and the engine's own queue stays empty.
+- When all slots are occupied, new requests queue — up to `local_max_queued`. Interactive requests jump ahead of background ones in the queue regardless of arrival order.
+- When the queue is also full, new requests are rejected immediately with `503 engine_overloaded` rather than piling up unbounded.
+
+Priority is read from the `x-ryu-priority` request header Core stamps. Any value of `background`, `low`, or `batch` is treated as Background; anything else (including no header) is treated as Interactive, so unlabelled requests from old clients or direct callers are never penalised.
+
+Remote providers (OpenAI, Anthropic, OpenRouter, etc.) are never gated — they scale elastically upstream.
+
+`ConcurrencyLimiter` is a snapshot of `config.concurrency` at startup; changes take effect on the next restart. `GateSnapshot` observability data (in-flight count, queue depth per priority) is exposed on the status surface.
+
+| Setting | `gateway.toml` | Default |
+|---|---|---|
+| Enabled | `[concurrency] enabled` | `true` |
+| In-flight slots | `[concurrency] local_max_in_flight` | `4` |
+| Queue depth | `[concurrency] local_max_queued` | `64` |
+
+Set `local_max_in_flight = 0` to disable gating entirely (treated as unlimited).
 
 ## Circuit breaker and fallback
 
@@ -67,14 +91,9 @@ The session scope reuses the same machinery as the user and agent scopes. `evalu
 | Setting | `gateway.toml` | Env var | Default |
 |---|---|---|---|
 | Token cap | `[budgets.session] limit` | `GATEWAY_SESSION_BUDGET_LIMIT` | `0` (off) |
-| Action | `[budgets.session] action` | `GATEWAY_SESSION_BUDGET_ACTION` | `stop` |
+| Action | `[budgets.session] action` | `GATEWAY_SESSION_BUDGET_ACTION` | `notify` |
 
 A `limit` of `0` turns the session scope off. Session ids are ephemeral, so the counter map (`session_usage`) is soft-capped at `MAX_SESSION_ENTRIES` and cleared wholesale on overflow (`record_session`, `budget/mod.rs`).
-
-<Callout type="warn">
-  The per-session cap (#510) is compile-verified and unit-tested but has not yet been exercised
-  against a running Core. It is off by default.
-</Callout>
 
 ### Per-key lifetime budget
 

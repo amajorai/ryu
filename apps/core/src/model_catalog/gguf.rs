@@ -36,6 +36,30 @@ pub struct GgufMetadata {
     pub strings: HashMap<String, String>,
 }
 
+/// GGUF `general.architecture` values that identify a diffusion image/video
+/// model served by stable-diffusion.cpp. Sourced from the sd.cpp ggml model
+/// registry and community GGUF converter repos (city96 FLUX, SDXL, SD3).
+/// Conservative by design — unknown architectures default to `false` so a
+/// chat model is never mis-classified as diffusion.
+const DIFFUSION_ARCHITECTURES: &[&str] = &[
+    "flux",   // FLUX.1 dev / schnell / pro (city96 et al.)
+    "sd",     // Stable Diffusion 1.x generic
+    "sd1",    // SD 1.x explicit variant
+    "sd2",    // SD 2.x explicit variant
+    "sdxl",   // Stable Diffusion XL
+    "sd3",    // Stable Diffusion 3.x / 3.5
+    "mmdit",  // Multimodal Diffusion Transformer (SD3 alternate)
+    "auraflow",
+];
+
+/// True when `arch` (a `general.architecture` value) identifies a diffusion
+/// model. Public so callers that only have the raw architecture string (e.g.
+/// from the Hub's `gguf.architecture` field) can check without constructing a
+/// full [`GgufMetadata`].
+pub fn is_diffusion_architecture(arch: &str) -> bool {
+    DIFFUSION_ARCHITECTURES.contains(&arch)
+}
+
 impl GgufMetadata {
     /// The model's chat template, if present.
     pub fn chat_template(&self) -> Option<&str> {
@@ -47,6 +71,13 @@ impl GgufMetadata {
     /// The model architecture (`general.architecture`), if present.
     pub fn architecture(&self) -> Option<&str> {
         self.strings.get("general.architecture").map(String::as_str)
+    }
+
+    /// True when the GGUF's `general.architecture` identifies it as a
+    /// generative diffusion model (image/video synthesis, not chat).
+    pub fn is_diffusion(&self) -> bool {
+        self.architecture()
+            .is_some_and(|a| DIFFUSION_ARCHITECTURES.contains(&a))
     }
 }
 
@@ -253,6 +284,24 @@ mod tests {
             }
         }
         GgufMetadata { strings }
+    }
+
+    #[test]
+    fn is_diffusion_matches_known_architectures() {
+        for arch in ["flux", "sdxl", "sd3", "sd", "sd1", "sd2", "mmdit", "auraflow"] {
+            let bytes = synth_gguf(&[("general.architecture", arch)]);
+            let meta = parse(&bytes);
+            assert!(meta.is_diffusion(), "{arch} should be classified as diffusion");
+        }
+        for arch in ["llama", "gemma3", "mistral", "qwen2", "phi3"] {
+            let bytes = synth_gguf(&[("general.architecture", arch)]);
+            let meta = parse(&bytes);
+            assert!(!meta.is_diffusion(), "{arch} must not be classified as diffusion");
+        }
+        // No architecture key → not diffusion (e.g. city96 GGUF with no arch).
+        let bytes = synth_gguf(&[("tokenizer.chat_template", "hi")]);
+        let meta = parse(&bytes);
+        assert!(!meta.is_diffusion());
     }
 
     #[test]

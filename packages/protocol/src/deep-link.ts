@@ -1,4 +1,4 @@
-// @ryu/protocol — the canonical, surface-agnostic parser/builder for `ryu://`
+// @ryuhq/protocol — the canonical, surface-agnostic parser/builder for `ryu://`
 // deep links: the scheme that lets a link on any website (or another Ryu surface)
 // open the app and jump straight to a destination or action. This is the SINGLE
 // source of truth shared by desktop, web, and mobile — previously each surface

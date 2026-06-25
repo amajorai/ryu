@@ -22,6 +22,7 @@
 //! (M3 / issue #171).
 
 pub mod agent_builder;
+pub mod dashboard_builder;
 pub mod self_build;
 pub mod workflow_builder;
 

@@ -1,12 +1,14 @@
 {
-  "name": "@ryu/core-client",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@ryuhq/core-client",
+  "version": "0.0.1",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
     "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@ryuhq/protocol": "workspace:*"
   },
   "devDependencies": {
     "@ryu/config": "workspace:*",

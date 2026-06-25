@@ -54,6 +54,7 @@ const BUILTIN_SERVERS: &[&str] = &[
     super::threads::SERVER_NAME,
     super::delegate::SERVER_NAME,
     super::skills_tool::SERVER_NAME,
+    super::advisor::SERVER_NAME,
 ];
 
 /// Classify a fully-qualified tool id (`<server>__<tool>`) into a [`ToolKind`].

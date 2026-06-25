@@ -12,9 +12,11 @@ mod composio_triggers;
 mod connections;
 mod crash;
 mod crypto;
+mod dashboard;
 mod data_path;
 mod downloads;
 mod events;
+mod hardware;
 mod hf_auth;
 mod identity;
 mod inference;
@@ -28,7 +30,9 @@ mod openrouter_auth;
 mod paths;
 mod pi_config;
 mod approvals;
+mod plugin_host;
 mod plugin_manifest;
+mod plugin_storage;
 mod plugins;
 mod predict;
 mod privacy;
@@ -470,6 +474,34 @@ async fn main() {
         .await
     {
         crate::sidecar::headroom::set_enabled(rec.enabled);
+        // Also seed the data-driven compression policy (service URL/token/timeout/
+        // min) from the plugin manifest, so a restart preserves the configured
+        // service — not just the on/off flag. Find the compression Policy runnable
+        // in the headroom manifest and parse its `definition`.
+        if rec.enabled {
+            if let Some(def) = crate::plugin_manifest::PluginManifestLoader::load()
+                .iter()
+                .find(|m| m.id == crate::sidecar::headroom::HEADROOM_PLUGIN_ID)
+                .and_then(|m| {
+                    m.runnables
+                        .iter()
+                        .filter(|r| r.kind == crate::runnable::RunnableKind::Policy)
+                        .filter_map(|r| r.config.as_ref())
+                        .filter_map(|c| {
+                            serde_json::from_value::<crate::plugin_manifest::schema::PolicyConfig>(
+                                c.clone(),
+                            )
+                            .ok()
+                        })
+                        .find(|c| c.policy_type == "compression")
+                        .map(|c| c.definition)
+                })
+            {
+                crate::sidecar::headroom::set_compression_policy(
+                    crate::sidecar::headroom::CompressionPolicy::from_definition(&def),
+                );
+            }
+        }
     }
     // Seed the gateway-policy plugin flags (#447) from their persisted enabled
     // state, exactly like headroom above: if the firewall/routing plugin is
@@ -542,7 +574,10 @@ async fn main() {
             .with_conversations(conversations.clone())
             // Wire the skill registry so the `skills` built-in tools can discover +
             // load Agent Skills on demand (progressive disclosure).
-            .with_skills(skill_registry.clone()),
+            .with_skills(skill_registry.clone())
+            // Wire the preferences store so the built-in `advisor` tool resolves
+            // the configured `advisor-model` (the stronger reviewer model).
+            .with_preferences(preferences.clone()),
     );
 
     // Website-monitoring engine (#456 monitoring feature). Opens its own SQLite
@@ -572,6 +607,15 @@ async fn main() {
     let meeting_engine = crate::meetings::MeetingEngine::new(meeting_store, reqwest::Client::new());
     crate::meetings::set_global_engine(meeting_engine.clone());
 
+    // Hardware device registry (RHP v1, PROTOCOL.md §6): paired watch/necklace/
+    // desk devices + their revocable per-device tokens + presence. Opens its own
+    // SQLite store (`~/.ryu/hardware.db`). Read by the `/api/hardware/*` REST
+    // surface and the `/api/hardware/ws` realtime handler.
+    let hardware_store = match crate::hardware::store::DeviceStore::open_default() {
+        Ok(store) => store,
+        Err(e) => panic!("failed to open hardware device registry: {e:#}"),
+    };
+
     // Quests engine (auto-detecting todo list). Opens its own SQLite store and
     // reuses the MCP registry (for Shadow context), a shared HTTP client (for the
     // gateway judge call), and the preferences store (for the detection mode +
@@ -588,6 +632,26 @@ async fn main() {
         preferences.clone(),
     );
     crate::quests::set_global_engine(quest_engine.clone());
+
+    // Home dashboards engine (customizable live widget grid). Opens its own SQLite
+    // store and reuses a shared HTTP client for loopback Core self-calls (curated
+    // endpoint widgets), the Gateway (Composio widgets), and external GETs (HTTP
+    // widgets). Published as a process-global and driven by a dashboard-owned
+    // refresh loop that re-resolves each due widget and broadcasts fresh values
+    // over SSE — skipping expensive sources when no client is watching.
+    let dashboard_store = match crate::dashboard::store::DashboardStore::open_default() {
+        Ok(store) => store,
+        Err(e) => panic!("failed to open dashboards store: {e:#}"),
+    };
+    let dashboard_engine =
+        crate::dashboard::DashboardEngine::new(dashboard_store, reqwest::Client::new());
+    crate::dashboard::set_global_engine(dashboard_engine.clone());
+    crate::dashboard::refresh::spawn(dashboard_engine.clone());
+    // Live display nudge for hardware: when a device-bound dashboard's data changes,
+    // push the RHP `display` re-poll signal to that device's live WS so the desk
+    // e-ink reflects edits promptly (TRMNL push-to-refresh; review gap #4). Cost-
+    // guarded — only connected devices are nudged, and per-device debounced.
+    crate::hardware::nudge::spawn(dashboard_engine.clone(), hardware_store.clone());
 
     // Approval inbox (human-in-the-loop). Opens its own SQLite store and reuses a
     // shared HTTP client (mobile Expo push) + the monitors store's registered
@@ -643,6 +707,14 @@ async fn main() {
     // Publish the MCP registry globally so the workflow `Tool` node can invoke
     // tools (the executor is a free function with no ServerState handle).
     crate::sidecar::mcp::set_global_registry(Arc::clone(&mcp_registry));
+    // Plugin-owned KV storage (the plugin turn-hook runtime's `storage:kv`
+    // capability). Published as a process-global so the sandbox bridge reaches it
+    // without threading through ServerState. Best-effort: a plugin's `host.storage`
+    // call surfaces a clean error if the store could not open.
+    match crate::plugin_storage::PluginStorage::open_default() {
+        Ok(store) => crate::plugin_storage::set_global(store),
+        Err(e) => tracing::warn!("plugin storage unavailable: {e:#}"),
+    }
     // Composio event-trigger store: registers trigger instances with Composio and
     // fires the bound agent when the webhook arrives. Published as a process-global
     // so the webhook + CRUD handlers reach it without threading through ServerState.
@@ -681,6 +753,12 @@ async fn main() {
     let sync_conversations = conversations.clone();
     let sync_preferences = preferences.clone();
 
+    // Auto-rename (ChatGPT/Claude-style): the store sends each conversation that
+    // gets its first user message on this channel; the consumer (spawned below,
+    // once `ServerState` exists) asks the default local model for a concise title.
+    let (auto_title_tx, auto_title_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let conversations = conversations.with_auto_title(auto_title_tx);
+
     let server_state = server::ServerState {
         setup: Arc::clone(&setup),
         manager: Arc::clone(&sidecars),
@@ -712,9 +790,11 @@ async fn main() {
         monitors: monitor_engine,
         meetings: meeting_engine,
         quests: quest_engine,
+        dashboards: dashboard_engine,
         approvals: approval_engine,
         mesh: crate::mesh::MeshHandle::new(),
         connections: crate::connections::ConnectionRegistry::new(),
+        hardware: hardware_store,
     };
     let auth_token = std::env::var("RYU_TOKEN").ok();
 
@@ -729,6 +809,15 @@ async fn main() {
         let startup_state = server_state.clone();
         tokio::spawn(async move {
             crate::server::fire_activation_event(&startup_state, "onStartup").await;
+        });
+    }
+
+    // Background auto-rename consumer: drains conversation ids whose first user
+    // message just landed and titles each with the default local model.
+    {
+        let title_state = server_state.clone();
+        tokio::spawn(async move {
+            crate::server::auto_title::run_auto_title_loop(title_state, auto_title_rx).await;
         });
     }
 

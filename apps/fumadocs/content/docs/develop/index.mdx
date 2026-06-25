@@ -1,37 +1,24 @@
 ---
-title: "Build on Ryu"
-description: "Extend Ryu with Runnables, call a Core node from the client SDK, and publish to the marketplace"
+title: Develop
+description: Build on Ryu - TypeScript SDK, Rust SDK, plugin manifests, extensions, the client library, agent inboxes, and the full API reference.
 ---
 
-This realm is for developers building on top of Ryu: packaging extensions, authoring Runnables
-with the SDK, calling a Core node over HTTP, and shipping to the marketplace.
-
-Everything you add is a **Runnable** - the one contract that unifies agents, workflows, tools,
-skills, and MCP servers (`packages/sdk/src/`). The SDK factories `defineAgent`, `defineWorkflow`,
-`defineTool`, and `defineSkill` (`apps/core/src/runnable/mod.rs`) author them, a `plugin.json`
-manifest bundles them, and every model call routes through the Gateway.
-
-```mermaid
-flowchart LR
-  SDK["defineAgent / Workflow / Tool / Skill"] --> M["plugin.json manifest"]
-  M --> I["install / enable on a Core node"]
-  I --> P["publish to the marketplace"]
-```
-
-## Start here
-
-New to building on Ryu? Scaffold a project with `create-ryu-app` in the
-[Quickstart](/docs/develop/quickstart), then pick a path below.
-
-<Cards>
-  <DocCard href="/docs/develop/quickstart" />
-  <DocCard href="/docs/develop/extensions" />
-  <DocCard href="/docs/develop/sdk" />
-  <DocCard href="/docs/develop/agent-inboxes" />
-  <DocCard href="/docs/develop/api-reference" />
-</Cards>
+The Develop section covers everything needed to build on top of Ryu. Core runs locally on port 7980
+and exposes a JSON + SSE HTTP API. The Gateway on port 7981 is the LLM control plane you route
+model calls through. The TypeScript SDK (`@ryuhq/sdk`) lets you author agents, workflows, tools,
+and skills as typed Runnables and pack them into installable plugins. The client library
+(`@ryu/client`) lets any Node, Bun, or browser app call a running Core node directly.
 
 <Callout type="info">
-The SDK and the `plugin.json` lifecycle are built (M8). The third-party plugin code-execution
-runtime is still design-first - see the extensions realm for what is live today versus deferred.
+  Both `@ryuhq/sdk` and `@ryu/client` are in the Ryu monorepo at `workspace:*` today. Public npm
+  releases are in progress.
 </Callout>
+
+<Cards>
+  <DocCard href="/docs/develop/quickstart" title="Quickstart" description="Scaffold a plugin with create-ryu-app, define a tool, and install it into Core in under five minutes." />
+  <DocCard href="/docs/develop/extensions" title="Extensions" description="MCP servers, plugin.json manifests, agent skills, channel bots, desktop companions, and the marketplace submission flow." />
+  <DocCard href="/docs/develop/sdk" title="SDK" description="TypeScript SDK (defineAgent / Workflow / Tool / Skill), the client library for calling Core, and the Rust SDK crate." />
+  <DocCard href="/docs/develop/agent-inboxes" title="Agent Inboxes" description="Hosted email inboxes for agents - receive and send mail over an API via Ryu Cloud's AWS SES integration." />
+  <DocCard href="/docs/develop/api-reference" title="API Reference" description="Interactive OpenAPI reference for both the Core API (port 7980) and the Gateway API (port 7981)." />
+  <DocCard href="/docs/develop/guides/sdk-quickstart" title="Guides" description="Hands-on walkthroughs: SDK quickstart, Runnables deep-dive, plugins and apps, and publishing to the marketplace." />
+</Cards>

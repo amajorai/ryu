@@ -102,10 +102,6 @@ pub struct StartBody {
     pub app: Option<String>,
     #[serde(default)]
     pub source: Option<String>,
-    /// Optional base URL Shadow should POST captured chunks back to (e.g. Core's
-    /// own reachable address). When omitted, Shadow uses its configured default.
-    #[serde(default)]
-    pub ingest_base: Option<String>,
 }
 
 /// `POST /api/meetings` — start a meeting (and best-effort begin Shadow capture).
@@ -117,11 +113,7 @@ pub async fn create_meeting(
         Some("auto") => MeetingSource::Auto,
         _ => MeetingSource::Manual,
     };
-    match state
-        .meetings
-        .start(body.title, body.app, source, body.ingest_base)
-        .await
-    {
+    match state.meetings.start(body.title, body.app, source).await {
         Ok(meeting) => (StatusCode::OK, Json(json!({ "meeting": meeting }))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -141,6 +133,36 @@ pub async fn get_meeting(
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e })),
+        ),
+    }
+}
+
+/// Request body for renaming a meeting.
+#[derive(Debug, Deserialize)]
+pub struct RenameBody {
+    pub title: String,
+}
+
+/// `POST /api/meetings/:id/title` — manually rename a meeting. Marks the title
+/// user-chosen so the transcript auto-namer leaves it alone.
+pub async fn rename_meeting(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+    Json(body): Json<RenameBody>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let title = body.title.trim();
+    if title.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "title must not be empty" })),
+        );
+    }
+    match state.meetings.store.set_title(&id, title).await {
+        Ok(Some(m)) => (StatusCode::OK, Json(json!({ "meeting": m }))),
+        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
         ),
     }
 }
@@ -251,10 +273,23 @@ pub async fn finalize_meeting(
     let model = resolve_notes_model(&state).await;
     let effort = resolve_notes_effort(&state).await;
     let prompt = resolve_notes_prompt(&state).await;
-    let meeting = match state.meetings.finalize(&id, &model, &effort, &prompt).await {
+    let mut meeting = match state.meetings.finalize(&id, &model, &effort, &prompt).await {
         Ok(m) => m,
         Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "error": e }))),
     };
+
+    // Auto-name the meeting from its summary with the default local model, unless
+    // the user already chose a title. Best-effort; on success update the local
+    // copy so the Space document below uses the new title.
+    if !meeting.title_custom {
+        if let Some(summary) = meeting.notes.as_ref().map(|n| n.summary.clone()) {
+            if let Some(new_title) =
+                super::auto_title::auto_title_meeting(&state, &id, &summary).await
+            {
+                meeting.title = new_title;
+            }
+        }
+    }
 
     let final_meeting = match save_notes_to_space(&state, &meeting).await {
         Some((space_id, doc_id)) => state

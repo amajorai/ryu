@@ -2,7 +2,7 @@ import { ArrowUpRight } from "lucide-react";
 
 /**
  * The canonical `ryu://open/<page>` navigation keys, mirrored from
- * `@ryu/protocol` DEEP_LINK_PAGES. Kept as a local copy because the docs site
+ * `@ryuhq/protocol` DEEP_LINK_PAGES. Kept as a local copy because the docs site
  * does not depend on the desktop protocol package, and a key that drifts simply
  * renders a link the app ignores rather than breaking the build.
  */

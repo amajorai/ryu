@@ -9,7 +9,7 @@
  * Run:  bun run examples/tool/calculator.ts
  */
 
-import { defineTool } from "@ryu/sdk";
+import { defineTool } from "@ryuhq/sdk";
 
 export const calculator = defineTool<{ a: number; op: string; b: number }, number>({
   id: "tool-calculator",

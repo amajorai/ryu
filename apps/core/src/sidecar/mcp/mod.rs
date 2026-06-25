@@ -12,6 +12,7 @@
 //! org/team is Gateway/control-plane — out of scope (U30). The one allowlist we
 //! honor here is the per-agent `tools` list, which is part of "what runs."
 
+pub mod advisor;
 pub mod catalog;
 pub mod channel_tool;
 pub mod client;
@@ -196,6 +197,11 @@ pub struct McpRegistry {
     /// disclosure). Cheap to clone (`Arc` inside). `None` in test/CLI contexts
     /// that don't wire it (the tools then report skills unavailable).
     pub skills: Option<crate::skills::SkillRegistry>,
+    /// Preferences store, wired so the built-in `advisor` tool can resolve the
+    /// configured `advisor-model` (the stronger reviewer model). Cheap to clone
+    /// (`Arc` inside). `None` in test/CLI contexts; the tool then falls back to
+    /// env / the bundled default.
+    pub preferences: Option<crate::server::preferences::PreferencesStore>,
 }
 
 impl McpRegistry {
@@ -211,6 +217,7 @@ impl McpRegistry {
             agent_store: None,
             conversations: None,
             skills: None,
+            preferences: None,
         }
     }
 
@@ -226,6 +233,7 @@ impl McpRegistry {
             agent_store: None,
             conversations: None,
             skills: None,
+            preferences: None,
         }
     }
 
@@ -264,6 +272,17 @@ impl McpRegistry {
     /// `skills__load`, progressive disclosure of Agent Skills).
     pub fn with_skills(mut self, skills: crate::skills::SkillRegistry) -> Self {
         self.skills = Some(skills);
+        self
+    }
+
+    /// Wire the preferences store into the registry. Must be called after
+    /// construction to let the built-in `advisor` tool resolve the configured
+    /// `advisor-model` (the stronger reviewer model).
+    pub fn with_preferences(
+        mut self,
+        preferences: crate::server::preferences::PreferencesStore,
+    ) -> Self {
+        self.preferences = Some(preferences);
         self
     }
 
@@ -324,6 +343,7 @@ impl McpRegistry {
             agent_store: None,
             conversations: None,
             skills: None,
+            preferences: None,
         }
     }
 
@@ -398,6 +418,7 @@ impl McpRegistry {
             || name == threads::SERVER_NAME
             || name == delegate::SERVER_NAME
             || name == skills_tool::SERVER_NAME
+            || name == advisor::SERVER_NAME
         {
             return true;
         }
@@ -544,6 +565,19 @@ impl McpRegistry {
                 enabled: true,
                 available: Some(true),
             },
+            ServerSummary {
+                name: advisor::SERVER_NAME.to_owned(),
+                command: "(built-in)".to_owned(),
+                args: vec![],
+                description: Some(
+                    "Built-in advisor: consult a stronger model for a second opinion on the \
+                     current task (advisor__consult) — before committing to an approach, when \
+                     stuck, or before declaring done."
+                        .to_owned(),
+                ),
+                enabled: true,
+                available: Some(true),
+            },
         ];
         let servers = self.servers.read().expect("mcp servers RwLock poisoned");
         summaries.extend(servers.iter().map(|(name, cfg)| ServerSummary {
@@ -651,6 +685,10 @@ impl McpRegistry {
         // Skills on demand). Always listed; dispatch reports unavailable when the
         // skill registry is not wired (test / CLI contexts).
         all.extend(skills_tool::tools());
+        // Built-in advisor tool — consult a stronger reviewer model for a second
+        // opinion. Always listed; dispatch reports a structured error if the
+        // Gateway call fails so the agent's turn continues.
+        all.extend(advisor::tools());
         // Include self-build tools (U57) — always listed, dispatch fails gracefully
         // if the self_build context was not wired (test / CLI contexts).
         all.extend(crate::runnable::self_build::tools());
@@ -660,6 +698,10 @@ impl McpRegistry {
         // Workflow-builder tools — chat authors/edits a workflow definition.
         // Backed by the global file-backed workflow store (no handle to wire).
         all.extend(crate::runnable::workflow_builder::tools());
+        // Dashboard-builder tools — chat authors/arranges a Home dashboard's
+        // widget grid. Backed by the process-global dashboard engine (no handle
+        // to wire); dispatch reports unavailable in test/CLI contexts.
+        all.extend(crate::runnable::dashboard_builder::tools());
         for name in &names {
             match self.tools_for_server(name).await {
                 Ok(tools) => all.extend(tools),
@@ -1046,6 +1088,25 @@ impl McpRegistry {
             return skills_tool::dispatch(tool, arguments, skills).await;
         }
 
+        // Built-in advisor tool — consult a stronger reviewer model. Always
+        // available (the Gateway call needs only the registry's http client); the
+        // preferences store, when wired, supplies the configured `advisor-model`.
+        if server == advisor::SERVER_NAME {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool {
+                    id: tool_id.to_owned(),
+                    server: server.to_owned(),
+                    name: tool.to_owned(),
+                    description: None,
+                    input_schema: None,
+                };
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            return advisor::dispatch(tool, arguments, &self.http, self.preferences.as_ref()).await;
+        }
+
         // Built-in authenticated web-fetch provider (Identity Vault consumer):
         // fetches a page over HTTPS, injecting the user's sealed session for the
         // URL's domain (resolved by the consult above) server-side. The credential
@@ -1138,6 +1199,26 @@ impl McpRegistry {
                 }
             }
             return crate::runnable::workflow_builder::dispatch(tool, arguments).await;
+        }
+
+        // Built-in dashboard-builder provider: get_dashboard, create_dashboard,
+        // configure_dashboard. Lets the builder meta-agent author a Home
+        // dashboard's widget grid in chat. Backed by the process-global dashboard
+        // engine, so no handle needs wiring (like workflow_builder).
+        if server == crate::runnable::dashboard_builder::SERVER_NAME {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool {
+                    id: tool_id.to_owned(),
+                    server: server.to_owned(),
+                    name: tool.to_owned(),
+                    description: None,
+                    input_schema: None,
+                };
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            return crate::runnable::dashboard_builder::dispatch(tool, arguments).await;
         }
 
         // Extract owned values under the read lock; drop the guard before .await.

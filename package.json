@@ -6,6 +6,7 @@
       "apps/*",
       "packages/*",
       "crates/ryu-sdk-napi",
+      "!apps/raycast",
       "!apps/tts-sidecar",
       "!apps/unsloth-sidecar"
     ],
@@ -29,8 +30,12 @@
   "type": "module",
   "scripts": {
     "predev": "node scripts/free-ports.mjs",
-    "mirror:public": "bash tools/mirror-push.sh",
+    "mirror:ryu": "bash tools/mirror-push.sh",
+    "mirror:satellites": "bash tools/mirror-satellites.sh",
+    "mirror:public": "bash tools/mirror-push.sh && bash tools/mirror-satellites.sh",
     "release:local": "bash scripts/release/release-local.sh",
+    "publish:npm": "bash tools/publish-npm.sh",
+    "publish:crates": "bash tools/publish-crates.sh",
     "dev": "turbo dev --concurrency=20",
     "kill-ports": "node scripts/free-ports.mjs",
     "build": "turbo build",

@@ -1,13 +1,13 @@
 ---
 title: "Scheduler"
-description: "Cron and interval jobs for workflows, agents, and monitors that survive Core restarts"
+description: "Cron and interval jobs for workflows, agents, monitors, quests, and identity health that survive Core restarts"
 ---
 
 The scheduler is Core's always-on tick loop. It fires persisted jobs on a cron expression or a
-fixed interval and runs a workflow, an agent prompt, a website-monitor check, or an Identity Vault
-health sweep. Per the Core-vs-Gateway rule it is Core - it decides *what runs and when*, and
-enforces no policy; each fired job hands its model calls to the normal chat and workflow routing
-path where the Gateway sits (`apps/core/src/scheduler/mod.rs`).
+fixed interval and runs a workflow, an agent prompt, a website-monitor check, a quest detection
+pass, or an Identity Vault health sweep. Per the Core-vs-Gateway rule it is Core - it decides
+*what runs and when*, and enforces no policy; each fired job hands its model calls to the normal
+chat and workflow routing path where the Gateway sits (`apps/core/src/scheduler/mod.rs`).
 
 Jobs are file-backed, so schedules survive a Core restart. On boot the scheduler reloads every job
 from disk and resumes ticking (`apps/core/src/scheduler/store.rs`).
@@ -15,7 +15,8 @@ from disk and resumes ticking (`apps/core/src/scheduler/store.rs`).
 ## The job model
 
 A `ScheduledJob` (`scheduler/store.rs`) is one persisted unit of work. It carries an id, a display
-name, a schedule, a target, an `enabled` flag, and a bounded execution history.
+name, a schedule, a target, an `enabled` flag, a `require_approval` flag, and a bounded execution
+history.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -24,13 +25,14 @@ name, a schedule, a target, an `enabled` flag, and a bounded execution history.
 | `schedule` | `Schedule` | Cron expression or fixed interval (see below). |
 | `target` | `JobTarget` | What the job runs (see below). |
 | `enabled` | bool | When false the tick loop skips the job without deleting it. Defaults to true. |
+| `require_approval` | bool | When true a due firing raises a human-in-the-loop approval request instead of running directly. Defaults to false. |
 | `created_at` / `updated_at` | string | RFC 3339 timestamps. |
 | `last_run_at` | string? | When the job last fired (success or failure). |
 | `last_outcome` | `success` \| `failure` | Outcome of the most recent run. |
 | `history` | `ExecRecord[]` | Bounded execution log, oldest first. |
 
 Each job is stored at `~/.ryu/scheduled-jobs/<id>.json`. The data folder root is configurable; see
-[Data and storage](/docs/using-ryu/user-guide/data-and-storage).
+[Data and storage](/docs/desktop/user-guide/data-and-storage).
 
 ## Schedules
 
@@ -54,13 +56,14 @@ persisted state; firing once on start is the pragmatic always-on behavior (`is_d
 
 ## Job targets
 
-`JobTarget` (`scheduler/store.rs`) is tagged on `type` and has four variants.
+`JobTarget` (`scheduler/store.rs`) is tagged on `type` and has five variants.
 
 | Variant | Fields | What it runs |
 |---|---|---|
 | `workflow` | `workflow_id`, `input` map | Loads the persisted workflow and runs it (`workflow::executor::run_workflow`). Records the workflow run id on success. |
 | `agent` | `agent_id`, `prompt` | One chat turn against the configured agent via the global agent runner (its engine binding, gateway routing, tools, and persona). |
 | `monitor` | `monitor_id` | One website-monitor check (fetch then compare then alert) via the monitor engine. |
+| `quest` | `quest_id` | One quest detection pass (gather Shadow context, judge, suggest or auto-complete) via the quest engine. |
 | `identity_health` | none | Re-validates every `AUTHENTICATED` Identity Vault connection and flips stale ones to `NEEDS_AUTH`. |
 
 The `agent` target routes through `global_agent_runner()` so the *configured* agent handles the
@@ -74,18 +77,21 @@ appear in chat history. This is a known caveat carried from the workflow engine.
 
 ### Most jobs are created for you
 
-Two of the four targets are never created by hand. They are reconciled automatically so they ride
+Four of the five targets are never created by hand. They are reconciled automatically so they ride
 the same tick loop as everything else, using deterministic ids.
 
 | Source | Deterministic id | Reconciled by |
 |---|---|---|
 | A workflow schedule trigger | `wf-sched-<workflow_id>-<idx>` | `apps/core/src/workflow/triggers.rs` |
 | A website monitor | `monitor-<id>` | `apps/core/src/server/monitors_api.rs` |
+| An open quest | `quest-<id>` | `apps/core/src/server/quests_api.rs` |
+| Identity Vault health | `identity-health` | Ensured once at startup |
 
 The ids are stable across re-saves so reconciliation is idempotent: editing a workflow's triggers
 converges the `wf-sched-*` jobs to the declared set and deletes stale ones, and deleting the
-workflow or monitor tears down its backing job. The `identity_health` job is a single fixed-id job
-ensured at startup. See [Workflows](/docs/core/workflows) for trigger reconciliation and
+workflow, monitor, or quest tears down its backing job. Quest jobs are enabled only while the
+quest is open; completing or dismissing a quest disables (and then removes) its backing job. See
+[Workflows](/docs/core/workflows) for trigger reconciliation and
 [Website monitoring](/docs/core/website-monitoring) for the monitor lifecycle.
 
 ## The tick loop
@@ -112,7 +118,9 @@ workflow run never stalls other due jobs in the same tick. Spawned runs share a 
   Enabled -- no --> Skip["Skip"]
   Enabled -- yes --> Due{"due now?"}
   Due -- no --> Skip
-  Due -- yes --> Mark["Mark last_fired"]
+  Due -- yes --> Approval{"require_approval?"}
+  Approval -- yes --> Gate["Raise approval request"]
+  Approval -- no --> Mark["Mark last_fired"]
   Mark --> Permit["Acquire permit (max 8)"]
   Permit --> Run["Run target"]
   Run --> Record["Record outcome + persist"]
@@ -152,12 +160,12 @@ The scheduler is served under the `heartbeat` prefix (`apps/core/src/server/mod.
 
 Creating a job validates the cron expression or interval before persisting, so a malformed schedule
 is rejected up front rather than failing silently at run time. There is no update route; to change a
-job, recreate it under the same id (workflow and monitor jobs are reconciled for you).
+job, recreate it under the same id (workflow, monitor, and quest jobs are reconciled for you).
 
 <Callout type="info">
 Most users never call these routes directly. You create scheduled work by adding a schedule trigger
-to a [workflow](/docs/core/workflows) or a [website monitor](/docs/core/website-monitoring), and the
-scheduler job is reconciled automatically.
+to a [workflow](/docs/core/workflows), a [website monitor](/docs/core/website-monitoring), or a
+[quest](/docs/core/quests), and the scheduler job is reconciled automatically.
 </Callout>
 
 ## Related
@@ -165,6 +173,7 @@ scheduler job is reconciled automatically.
 <Cards>
   <DocCard href="/docs/core/workflows" />
   <DocCard href="/docs/core/website-monitoring" />
+  <DocCard href="/docs/core/quests" />
   <DocCard href="/docs/core/identity-vault" />
-  <DocCard href="/docs/using-ryu/user-guide/data-and-storage" />
+  <DocCard href="/docs/desktop/user-guide/data-and-storage" />
 </Cards>

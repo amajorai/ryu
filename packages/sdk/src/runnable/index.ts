@@ -9,11 +9,11 @@
  *   - The four kinds are peers, not a hierarchy.
  *
  * This module re-exports all factory functions and types so consumers can
- * import from `@ryu/sdk/runnable` as a single entry point.
+ * import from `@ryuhq/sdk/runnable` as a single entry point.
  */
 
 export type { AgentOptions } from "./agent";
-// biome-ignore lint/performance/noBarrelFile: intentional package entry point for @ryu/sdk/runnable
+// biome-ignore lint/performance/noBarrelFile: intentional package entry point for @ryuhq/sdk/runnable
 export { defineAgent } from "./agent";
 export type {
 	GatewayClient,

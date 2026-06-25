@@ -69,13 +69,15 @@
  * Per-root accent colors (Fumadocs-style theming).
  *
  * The ui/headless/framework/brand values are taken straight from the official
- * Fumadocs docs site; using-ryu (green) and core (cyan) are in-style additions
- * for the two extra roots Ryu has. `data-docs-root` is set by DocsLayoutClient
+ * Fumadocs docs site; the per-surface roots (desktop, cli, mobile, core, ...)
+ * are in-style additions. `data-docs-root` is set by DocsLayoutClient
  * and switches the primary/ring tokens for the whole layout per active root.
  */
 :root {
   --start-here-color: hsl(217 100% 58%);
-  --using-ryu-color: hsl(150 65% 40%);
+  --desktop-color: hsl(150 65% 40%);
+  --cli-color: hsl(290 70% 52%);
+  --mobile-color: hsl(90 60% 38%);
   --cookbook-color: hsl(343 80% 52%);
   --academy-color: hsl(250 80% 54%);
   --gateway-color: hsl(41 100% 40%);
@@ -85,7 +87,9 @@
 
 .dark {
   --start-here-color: hsl(214 100% 84%);
-  --using-ryu-color: hsl(150 60% 64%);
+  --desktop-color: hsl(150 60% 64%);
+  --cli-color: hsl(290 90% 78%);
+  --mobile-color: hsl(95 65% 62%);
   --cookbook-color: hsl(343 90% 72%);
   --academy-color: hsl(250 100% 80%);
   --gateway-color: hsl(53 100% 76%);
@@ -97,9 +101,17 @@
   --color-fd-primary: var(--start-here-color);
   --color-fd-ring: var(--start-here-color);
 }
-[data-docs-root="using-ryu"] {
-  --color-fd-primary: var(--using-ryu-color);
-  --color-fd-ring: var(--using-ryu-color);
+[data-docs-root="desktop"] {
+  --color-fd-primary: var(--desktop-color);
+  --color-fd-ring: var(--desktop-color);
+}
+[data-docs-root="cli"] {
+  --color-fd-primary: var(--cli-color);
+  --color-fd-ring: var(--cli-color);
+}
+[data-docs-root="mobile"] {
+  --color-fd-primary: var(--mobile-color);
+  --color-fd-ring: var(--mobile-color);
 }
 [data-docs-root="cookbook"] {
   --color-fd-primary: var(--cookbook-color);

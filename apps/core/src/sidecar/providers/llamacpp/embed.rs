@@ -153,11 +153,16 @@ impl Sidecar for LlamaCppEmbedManager {
                 model_path: Some(model_path),
                 // The embedding model is text-only — no vision adapter.
                 mmproj_path: None,
-                ctx_size: 0,
+                // nomic-embed-text supports 8192-token inputs; set ctx + both
+                // batch knobs to match so long messages don't get HTTP 500
+                // "input too large" from the default 512-token physical batch.
+                ctx_size: 8192,
                 embeddings: true,
-                // The embeddings sidecar serves a fixed model with no user-facing
-                // tuning, so it never carries an advanced launch config.
-                launch: crate::inference::LaunchConfig::default(),
+                launch: crate::inference::LaunchConfig {
+                    batch_size: Some(8192),
+                    ubatch_size: Some(8192),
+                    ..Default::default()
+                },
             };
             proc.start_with(opts)
                 .await

@@ -1,4 +1,14 @@
 {
   "title": "Docs",
-  "pages": ["start-here", "using-ryu", "cookbook", "academy", "gateway", "core", "develop"]
+  "pages": [
+    "start-here",
+    "desktop",
+    "cli",
+    "mobile",
+    "gateway",
+    "core",
+    "develop",
+    "cookbook",
+    "academy"
+  ]
 }

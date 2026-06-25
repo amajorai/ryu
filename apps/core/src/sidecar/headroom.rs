@@ -79,12 +79,111 @@ pub fn set_enabled(active: bool) {
     flag().store(active, Ordering::Relaxed);
 }
 
-/// Base URL of the headroom proxy. Always non-empty.
+/// The active compression-policy definition, set from the compression plugin's
+/// manifest `definition` on enable (and cleared on disable). This is what makes
+/// compression **data-driven**: the service URL/token/timeout/min and the service
+/// name come from the plugin manifest, not a hardcoded constant — so any
+/// compression plugin works, not just the bundled headroom one.
+#[derive(Debug, Clone, Default)]
+pub struct CompressionPolicy {
+    /// The compression service base URL (no trailing `/v1`).
+    pub url: Option<String>,
+    /// Optional bearer token for the service.
+    pub token: Option<String>,
+    /// Per-request compression timeout (ms).
+    pub timeout_ms: Option<u64>,
+    /// Minimum message count before compression kicks in.
+    pub min_messages: Option<usize>,
+    /// The plugin-declared service name. `"headroom"` (or unset + a local URL)
+    /// means Core manages the bundled proxy; any other value means the service is
+    /// the plugin's own external process and Core only configures the gateway.
+    pub service: Option<String>,
+}
+
+impl CompressionPolicy {
+    /// Parse a manifest policy `definition` JSON into a [`CompressionPolicy`].
+    pub fn from_definition(def: &serde_json::Value) -> Self {
+        Self {
+            url: def
+                .get("url")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned),
+            token: def
+                .get("token")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned),
+            timeout_ms: def.get("timeout_ms").and_then(serde_json::Value::as_u64),
+            min_messages: def
+                .get("min_messages")
+                .and_then(serde_json::Value::as_u64)
+                .map(|n| n as usize),
+            service: def
+                .get("service")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned),
+        }
+    }
+}
+
+static COMPRESSION_POLICY: OnceLock<std::sync::RwLock<CompressionPolicy>> = OnceLock::new();
+
+fn policy_cell() -> &'static std::sync::RwLock<CompressionPolicy> {
+    COMPRESSION_POLICY.get_or_init(|| std::sync::RwLock::new(CompressionPolicy::default()))
+}
+
+/// Set the active compression-policy definition (from the plugin manifest).
+pub fn set_compression_policy(policy: CompressionPolicy) {
+    if let Ok(mut guard) = policy_cell().write() {
+        *guard = policy;
+    }
+}
+
+/// The active compression-policy definition.
+pub fn compression_policy() -> CompressionPolicy {
+    policy_cell()
+        .read()
+        .map(|g| g.clone())
+        .unwrap_or_default()
+}
+
+/// Whether the active compression service is the **bundled** headroom proxy Core
+/// manages itself (vs a third-party HTTP service the plugin points at). A
+/// `service: "headroom"` definition, or no service name with a local URL, counts
+/// as the bundled proxy.
+pub fn manages_bundled_service() -> bool {
+    policy_manages_bundled(&compression_policy())
+}
+
+/// Pure decision: does this policy describe the bundled headroom proxy (Core
+/// manages it) or a third-party service (Core only configures the gateway)?
+fn policy_manages_bundled(policy: &CompressionPolicy) -> bool {
+    match policy.service.as_deref() {
+        Some(s) => s.eq_ignore_ascii_case("headroom"),
+        None => policy
+            .url
+            .as_deref()
+            .map(|u| u.contains("127.0.0.1") || u.contains("localhost"))
+            // No service name and no URL → assume the bundled default.
+            .unwrap_or(true),
+    }
+}
+
+/// Base URL of the compression service. Resolution: explicit `RYU_HEADROOM_URL`
+/// operator override → the active policy definition's `url` → the bundled default.
+/// Always non-empty.
 pub fn headroom_url() -> String {
-    std::env::var(ENV_HEADROOM_URL)
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| DEFAULT_HEADROOM_URL.to_owned())
+    if let Ok(url) = std::env::var(ENV_HEADROOM_URL) {
+        if !url.is_empty() {
+            return url;
+        }
+    }
+    if let Some(url) = compression_policy().url.filter(|s| !s.is_empty()) {
+        return url;
+    }
+    DEFAULT_HEADROOM_URL.to_owned()
 }
 
 /// Whether Core should spawn and manage the headroom process itself. Defaults
@@ -242,5 +341,52 @@ mod tests {
         assert!(is_enabled(), "set_enabled(true) → is_enabled() true");
         set_enabled(false);
         assert!(!is_enabled(), "set_enabled(false) → is_enabled() false");
+    }
+
+    #[test]
+    fn from_definition_parses_full_service_config() {
+        let def = serde_json::json!({
+            "service": "headroom",
+            "url": "http://127.0.0.1:8787",
+            "token": "secret",
+            "timeout_ms": 4000,
+            "min_messages": 4
+        });
+        let p = CompressionPolicy::from_definition(&def);
+        assert_eq!(p.service.as_deref(), Some("headroom"));
+        assert_eq!(p.url.as_deref(), Some("http://127.0.0.1:8787"));
+        assert_eq!(p.token.as_deref(), Some("secret"));
+        assert_eq!(p.timeout_ms, Some(4000));
+        assert_eq!(p.min_messages, Some(4));
+    }
+
+    #[test]
+    fn from_definition_tolerates_missing_fields() {
+        let p = CompressionPolicy::from_definition(&serde_json::json!({}));
+        assert!(p.url.is_none() && p.token.is_none() && p.timeout_ms.is_none());
+    }
+
+    #[test]
+    fn bundled_vs_external_service_decision() {
+        // The bundled reference proxy → Core manages it.
+        let bundled = CompressionPolicy {
+            service: Some("headroom".into()),
+            url: Some("http://127.0.0.1:8787".into()),
+            ..Default::default()
+        };
+        assert!(policy_manages_bundled(&bundled));
+        // A third-party compression service → Core only configures the gateway.
+        let external = CompressionPolicy {
+            service: Some("acme-squeeze".into()),
+            url: Some("https://compress.acme.com".into()),
+            ..Default::default()
+        };
+        assert!(!policy_manages_bundled(&external));
+        // No service name + a local URL → treated as bundled.
+        let local_only = CompressionPolicy {
+            url: Some("http://localhost:9000".into()),
+            ..Default::default()
+        };
+        assert!(policy_manages_bundled(&local_only));
     }
 }
