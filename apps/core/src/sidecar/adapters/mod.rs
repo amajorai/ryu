@@ -546,6 +546,93 @@ fn ui_data(name: &str, data: &Value) -> Vec<u8> {
     ui_chunk(&serde_json::json!({ "type": format!("data-{name}"), "data": data }))
 }
 
+/// Build the `data-ryu-stats` part carrying per-message inference statistics
+/// (tokens/sec, token counts, time-to-first-token), or `None` when there is
+/// nothing meaningful to show.
+///
+/// Mirrors Jan AI's calculation: the token speed is llama.cpp's
+/// `timings.predicted_per_second` when present, falling back to
+/// `completion_tokens / generation_seconds`. Token counts prefer the engine's
+/// reported numbers (`timings.predicted_n`/`usage.completion_tokens`) over a
+/// streamed-delta count, which is only a last resort (a delta is not a token).
+/// `ttft_ms` is the wall-clock from stream open to the first content delta;
+/// `duration_ms` is first delta → completion (the generation window), so the
+/// fallback speed excludes prompt-processing time exactly as Jan does.
+fn build_stats_part(
+    stream_open: std::time::Instant,
+    first_token_at: Option<std::time::Instant>,
+    delta_count: u64,
+    last_timings: &Option<Value>,
+    last_usage: &Option<Value>,
+) -> Option<Vec<u8>> {
+    let now = std::time::Instant::now();
+    let timings_f = |key: &str| {
+        last_timings
+            .as_ref()
+            .and_then(|t| t.get(key))
+            .and_then(Value::as_f64)
+    };
+    let usage_u = |key: &str| {
+        last_usage
+            .as_ref()
+            .and_then(|u| u.get(key))
+            .and_then(Value::as_u64)
+    };
+
+    let prompt_tokens = timings_f("prompt_n")
+        .map(|n| n as u64)
+        .or_else(|| usage_u("prompt_tokens"));
+    let completion_tokens = timings_f("predicted_n")
+        .map(|n| n as u64)
+        .or_else(|| usage_u("completion_tokens"))
+        .unwrap_or(delta_count);
+    let total_tokens = usage_u("total_tokens")
+        .or_else(|| Some(prompt_tokens.unwrap_or(0) + completion_tokens));
+
+    // Generation window: first content token → now. TTFT: stream open → first token.
+    let duration_ms = first_token_at.map(|t| now.duration_since(t).as_millis() as u64);
+    let ttft_ms = first_token_at.map(|t| t.duration_since(stream_open).as_millis() as u64);
+
+    let round2 = |v: f64| (v * 100.0).round() / 100.0;
+    let duration_sec = duration_ms.unwrap_or(0) as f64 / 1000.0;
+    let tokens_per_second = match timings_f("predicted_per_second") {
+        Some(tps) if tps > 0.0 => round2(tps),
+        _ if duration_sec > 0.0 && completion_tokens > 0 => {
+            round2(completion_tokens as f64 / duration_sec)
+        }
+        _ => 0.0,
+    };
+    let prompt_per_second = timings_f("prompt_per_second")
+        .filter(|v| *v > 0.0)
+        .map(round2);
+
+    // Nothing worth showing (e.g. an empty/aborted turn): omit the part entirely,
+    // mirroring Jan's `if speed === 0 && count === 0 return null`.
+    if tokens_per_second == 0.0 && completion_tokens == 0 {
+        return None;
+    }
+
+    let mut stats = serde_json::Map::new();
+    stats.insert("tokensPerSecond".into(), serde_json::json!(tokens_per_second));
+    if let Some(pps) = prompt_per_second {
+        stats.insert("promptPerSecond".into(), serde_json::json!(pps));
+    }
+    stats.insert("completionTokens".into(), serde_json::json!(completion_tokens));
+    if let Some(pt) = prompt_tokens {
+        stats.insert("promptTokens".into(), serde_json::json!(pt));
+    }
+    if let Some(tt) = total_tokens {
+        stats.insert("totalTokens".into(), serde_json::json!(tt));
+    }
+    if let Some(d) = duration_ms {
+        stats.insert("durationMs".into(), serde_json::json!(d));
+    }
+    if let Some(ttft) = ttft_ms {
+        stats.insert("ttftMs".into(), serde_json::json!(ttft));
+    }
+    Some(ui_data("ryu-stats", &Value::Object(stats)))
+}
+
 pub(crate) fn sse_response(body: Body) -> Response {
     let mut response = Response::builder()
         .status(StatusCode::OK)
@@ -1218,6 +1305,11 @@ const MEMORY_BACKFILL_LIMIT: usize = 500;
 pub struct AutoRecallConfig {
     pub retrieval: RetrievalStore,
     pub top_k: usize,
+    /// Whether the FTS (full-text, lexical) session-search source contributes this
+    /// turn. DEFAULT-OFF sub-source of auto-recall: when `true`, `run_auto_recall`
+    /// also runs a keyword FTS pass over past messages and merges its hits into the
+    /// past-chat set (deduped by message id). When `false`, no FTS work is done.
+    pub fts_enabled: bool,
 }
 
 /// Truncate a snippet to `AUTO_RECALL_SNIPPET_CHARS` on a char boundary, adding
@@ -1399,7 +1491,7 @@ async fn run_auto_recall(
 
     // Past-chat half (current conversation excluded). `search_messages` returns
     // `Ok(None)` when no message index is wired — treat as no hits.
-    let chat_hits = match conversations.search_messages(query, cfg.top_k, None).await {
+    let mut chat_hits = match conversations.search_messages(query, cfg.top_k, None).await {
         Ok(Some(hits)) => hits
             .into_iter()
             .filter(|h| Some(h.conversation_id.as_str()) != current_conversation_id)
@@ -1410,6 +1502,36 @@ async fn run_auto_recall(
             Vec::new()
         }
     };
+
+    // FTS (lexical) session-search source — default-OFF sub-source. When enabled,
+    // run a keyword FTS pass over past messages and merge its hits into the
+    // past-chat set, deduped BY MESSAGE ID (the semantic and lexical passes can
+    // both surface the same message). The current conversation is excluded, same as
+    // the semantic half. Fully fail-open. `assemble_recall_block` still caps the
+    // TOTAL injected lines at `top_k`.
+    if cfg.fts_enabled {
+        match conversations
+            .fts_search_messages(query, cfg.top_k, None)
+            .await
+        {
+            Ok(Some(hits)) => {
+                let mut seen: std::collections::HashSet<String> =
+                    chat_hits.iter().map(|h| h.message_id.clone()).collect();
+                for hit in hits {
+                    if Some(hit.conversation_id.as_str()) == current_conversation_id {
+                        continue;
+                    }
+                    if seen.insert(hit.message_id.clone()) {
+                        chat_hits.push(hit);
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!("auto-recall: fts session search failed (skipping): {e:#}");
+            }
+        }
+    }
 
     assemble_recall_block(&memory_chunks, &chat_hits, cfg.top_k)
 }
@@ -3020,6 +3142,15 @@ async fn connect_openai(
     let mut payload_map = serde_json::Map::new();
     payload_map.insert("model".to_owned(), Value::String(model.to_owned()));
     payload_map.insert("stream".to_owned(), Value::Bool(true));
+    // Ask any OpenAI-compatible endpoint to emit a final `usage` chunk
+    // (prompt/completion/total tokens). llama.cpp additionally streams a
+    // non-standard `timings` object with `predicted_per_second` — both feed the
+    // per-message inference stats surfaced by `build_stats_part` (mirrors Jan's
+    // `includeUsage: true`). Harmless to providers that ignore the option.
+    payload_map.insert(
+        "stream_options".to_owned(),
+        serde_json::json!({ "include_usage": true }),
+    );
     payload_map.insert("messages".to_owned(), Value::Array(messages.to_vec()));
     // Merge advanced sampling (temperature/top_p/top_k/penalties/…). No-op when the
     // agent set nothing, so the body stays identical to the pre-feature shape.
@@ -3371,6 +3502,17 @@ where
         let mut persist = Some(persist);
         let mut text_open = false;
 
+        // Per-message inference stats (see `build_stats_part`). `stream_open`
+        // anchors TTFT; `first_token_at` marks the start of the generation
+        // window; `delta_count` is the last-resort token count; the engine's
+        // own `timings`/`usage` (kept as the LAST seen, since they arrive on a
+        // trailing `choices: []` chunk) are preferred when present.
+        let stream_open = std::time::Instant::now();
+        let mut first_token_at: Option<std::time::Instant> = None;
+        let mut delta_count: u64 = 0;
+        let mut last_timings: Option<Value> = None;
+        let mut last_usage: Option<Value> = None;
+
         yield Ok::<_, std::convert::Infallible>(ui_start());
 
         tokio::pin!(byte_stream);
@@ -3410,12 +3552,31 @@ where
                     if text_open {
                         yield Ok::<_, std::convert::Infallible>(ui_text_end(TEXT_ID));
                     }
+                    if let Some(stats) = build_stats_part(
+                        stream_open,
+                        first_token_at,
+                        delta_count,
+                        &last_timings,
+                        &last_usage,
+                    ) {
+                        yield Ok::<_, std::convert::Infallible>(stats);
+                    }
                     yield Ok::<_, std::convert::Infallible>(ui_finish());
                     yield Ok::<_, std::convert::Infallible>(DONE_SSE_LINE.as_bytes().to_vec());
                     return;
                 }
 
                 if let Ok(json) = serde_json::from_str::<Value>(&data) {
+                    // Stats siblings: the engine reports `timings` (llama.cpp)
+                    // and `usage` on a trailing chunk that carries no
+                    // `delta.content`, so capture them independently of the
+                    // text branch and keep the last one seen.
+                    if json.get("timings").is_some_and(Value::is_object) {
+                        last_timings = json.get("timings").cloned();
+                    }
+                    if json.get("usage").is_some_and(Value::is_object) {
+                        last_usage = json.get("usage").cloned();
+                    }
                     if let Some(delta_text) = json
                         .get("choices")
                         .and_then(|c| c.get(0))
@@ -3424,6 +3585,10 @@ where
                         .and_then(|t| t.as_str())
                     {
                         if !delta_text.is_empty() {
+                            if first_token_at.is_none() {
+                                first_token_at = Some(std::time::Instant::now());
+                            }
+                            delta_count += 1;
                             reply.push_str(delta_text);
                             if !text_open {
                                 text_open = true;
@@ -3444,6 +3609,15 @@ where
         }
         if text_open {
             yield Ok::<_, std::convert::Infallible>(ui_text_end(TEXT_ID));
+        }
+        if let Some(stats) = build_stats_part(
+            stream_open,
+            first_token_at,
+            delta_count,
+            &last_timings,
+            &last_usage,
+        ) {
+            yield Ok::<_, std::convert::Infallible>(stats);
         }
         yield Ok::<_, std::convert::Infallible>(ui_finish());
         yield Ok::<_, std::convert::Infallible>(DONE_SSE_LINE.as_bytes().to_vec());
@@ -4129,6 +4303,78 @@ mod tests {
         );
     }
 
+    /// FTS session-search sub-source: with `fts_enabled = false` the FTS pass does
+    /// no work (a matching past message is NOT surfaced); with `fts_enabled = true`
+    /// an FTS-only match surfaces in the assembled recall block. Network-free.
+    #[tokio::test]
+    async fn run_auto_recall_fts_source_gated_by_flag() {
+        let memory = MemoryStore::open_in_memory().unwrap();
+        let retrieval = RetrievalStore::open_in_memory().unwrap();
+        let fts = crate::server::message_fts::MessageFtsIndex::open_in_memory().unwrap();
+        // Conversation store WITHOUT a semantic message index (so the only past-chat
+        // contribution can come from the FTS source), WITH the FTS index wired.
+        let conversations = ConversationStore::open_in_memory()
+            .unwrap()
+            .with_message_fts_index(fts);
+        // A distinctive past message in a DIFFERENT conversation than the current.
+        conversations
+            .append_message(
+                "c-past",
+                "user",
+                "the quarterly kubernetes migration retro",
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let recency = std::collections::HashSet::new();
+
+        // Gate OFF: FTS contributes nothing → no block (memory + semantic are empty).
+        let cfg_off = AutoRecallConfig {
+            retrieval: retrieval.clone(),
+            top_k: 5,
+            fts_enabled: false,
+        };
+        let block_off = run_auto_recall(
+            &cfg_off,
+            &conversations,
+            &memory,
+            "default",
+            &recency,
+            "kubernetes migration",
+            Some("c-current"),
+        )
+        .await;
+        assert!(
+            block_off.is_none(),
+            "fts disabled must contribute no recall, got: {block_off:?}"
+        );
+
+        // Gate ON: the FTS-only match surfaces in the block.
+        let cfg_on = AutoRecallConfig {
+            retrieval,
+            top_k: 5,
+            fts_enabled: true,
+        };
+        let block_on = run_auto_recall(
+            &cfg_on,
+            &conversations,
+            &memory,
+            "default",
+            &recency,
+            "kubernetes migration",
+            Some("c-current"),
+        )
+        .await
+        .expect("fts match should produce a recall block");
+        assert!(
+            block_on.contains("kubernetes migration retro"),
+            "fts-surfaced past chat must appear, got: {block_on}"
+        );
+    }
+
     // ── ACP skill injection seam (per-agent allowlist on the ACP plane) ─────────
     // The `AgentRoute::Acp` arm folds the resolved skill block into the prompt
     // preamble via `merge_system_prompt` → `build_acp_prompt`. These lock that
@@ -4805,6 +5051,72 @@ mod tests {
             !err.contains("fallback"),
             "no fallback should be mentioned when chain is empty: {err}"
         );
+    }
+
+    // ── per-message inference stats (build_stats_part) ────────────────────────
+
+    /// Decode the JSON `data` object out of a `data: {…}\n\n` UI-stream frame.
+    fn decode_stats(bytes: &[u8]) -> Value {
+        let s = String::from_utf8(bytes.to_vec()).unwrap();
+        let json: Value = serde_json::from_str(s.trim_start_matches("data:").trim()).unwrap();
+        assert_eq!(json["type"], "data-ryu-stats");
+        json["data"].clone()
+    }
+
+    #[test]
+    fn stats_prefer_llamacpp_timings() {
+        // When the engine reports `timings`, its `predicted_per_second` wins over
+        // any wall-clock estimate, and token counts come from `predicted_n` /
+        // `prompt_n` (not the streamed-delta count).
+        let timings = serde_json::json!({
+            "prompt_n": 1024,
+            "predicted_n": 200,
+            "predicted_per_second": 42.5,
+            "prompt_per_second": 350.0
+        });
+        let open = std::time::Instant::now();
+        let first = Some(open + std::time::Duration::from_millis(120));
+        let part = build_stats_part(open, first, 7, &Some(timings), &None)
+            .expect("timings produce a stats part");
+        let data = decode_stats(&part);
+        assert_eq!(data["tokensPerSecond"], 42.5);
+        assert_eq!(data["promptPerSecond"], 350.0);
+        assert_eq!(data["completionTokens"], 200);
+        assert_eq!(data["promptTokens"], 1024);
+        assert_eq!(data["totalTokens"], 1224);
+    }
+
+    #[test]
+    fn stats_fall_back_to_usage_and_wallclock() {
+        // No timings: token counts come from `usage`, speed is
+        // completion_tokens / generation_seconds. delta_count is ignored when
+        // usage reports a real completion count.
+        let usage = serde_json::json!({
+            "prompt_tokens": 50,
+            "completion_tokens": 100,
+            "total_tokens": 150
+        });
+        let open = std::time::Instant::now();
+        // Generation window must be a real elapsed span; sleep 2s would be slow,
+        // so we synthesize `first_token_at` 2s in the past relative to "now".
+        let first = Some(std::time::Instant::now() - std::time::Duration::from_secs(2));
+        let part = build_stats_part(open, first, 3, &None, &Some(usage))
+            .expect("usage produces a stats part");
+        let data = decode_stats(&part);
+        // ~100 tokens / ~2s ≈ 50 tok/s (allow slack for scheduling jitter).
+        let tps = data["tokensPerSecond"].as_f64().unwrap();
+        assert!((30.0..=60.0).contains(&tps), "tps {tps} not in expected band");
+        assert_eq!(data["completionTokens"], 100);
+        assert_eq!(data["totalTokens"], 150);
+        assert!(data.get("promptPerSecond").is_none());
+    }
+
+    #[test]
+    fn stats_omitted_when_nothing_generated() {
+        // An empty/aborted turn (no tokens, no engine numbers) yields no part,
+        // mirroring Jan's "hide when speed and count are both zero".
+        let open = std::time::Instant::now();
+        assert!(build_stats_part(open, None, 0, &None, &None).is_none());
     }
 
     // ── run_reply_text / channel session seam (M11 / #226) ────────────────────

@@ -1,0 +1,44 @@
+---
+title: "Hardening checklist"
+description: "An actionable checklist for deploying Ryu beyond a single local machine."
+---
+
+Ryu is safe by default on loopback for single-user local use. The moment you expose it - a shared box, a server, a tunnel - walk this checklist. Each item links to the page that explains it.
+
+## Network and access
+
+- [ ] Set `RYU_TOKEN` before any non-loopback bind. Never expose `0.0.0.0` or a LAN address without it. See [Network binding and auth](/docs/security/network-binding-auth).
+- [ ] Keep the Gateway admin surface unreachable from outside the host, and do not let a reverse proxy satisfy the loopback admin check on its behalf. See [Network binding and auth](/docs/security/network-binding-auth).
+- [ ] Verify any proxy or tunnel forwards the `Authorization` header intact.
+
+## Execution governance
+
+- [ ] Keep `RYU_EXEC_APPROVAL_MODE=manual` in any shared or server deployment. See [Command approval](/docs/security/command-approval).
+- [ ] Do NOT set `RYU_ALLOW_GATEWAY_FALLBACK=1` in production - it disables the fail-closed default when the scanner is unreachable. See [Command approval](/docs/security/command-approval).
+- [ ] Confirm the hardline blocklist behavior with a dry run before trusting agents with a shell.
+
+## Data protection
+
+- [ ] Enable the firewall's outbound redaction so secrets never leave in response bodies, errors, or logs. See [Outbound DLP](/docs/security/outbound-dlp).
+- [ ] Restrict each MCP server's config `env` block to the exact keys it needs - everything else is scrubbed, but a wide `env` block re-introduces secrets. See [Credential and environment scrubbing](/docs/security/credential-scrubbing).
+- [ ] Keep `~/.ryu/` data-folder permissions tight so the SQLite store and its encrypted fields are not world-readable. See [Encryption at rest](/docs/core/encryption-at-rest).
+
+## Routing and surface
+
+- [ ] Scope channel and agent routing allowlists to the minimum each channel needs. See [Channel allowlists](/docs/security/channel-allowlists).
+- [ ] Review which sandbox backend is actually executing - the default backend's isolation is process-level. See [Sandboxing and isolation](/docs/security/sandboxing-isolation).
+
+## Operations
+
+- [ ] Keep Ryu current - security fixes ship in updates. See [Updates](/docs/core/updates).
+- [ ] Re-read the [Trust model](/docs/security/trust-model) so you know what the boundary does and does not cover, especially that Ryu is single-tenant.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/security/trust-model" />
+  <DocCard href="/docs/security/command-approval" />
+  <DocCard href="/docs/security/network-binding-auth" />
+  <DocCard href="/docs/security/outbound-dlp" />
+  <DocCard href="/docs/core/updates" />
+</Cards>

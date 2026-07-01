@@ -1,0 +1,23 @@
+{
+  "name": "mcp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "ryu-mcp": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
+    "check": "bun run --silent src/index.ts < /dev/null || true"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@ryuhq/core-client": "workspace:*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@ryu/config": "workspace:*",
+    "typescript": "^5"
+  }
+}

@@ -1,6 +1,15 @@
+<p align="center">
+  <a href="https://ryuhq.com">
+    <img src=".github/banner.png" alt="Ryu — End-to-end infrastructure for AI agents" width="100%" />
+  </a>
+</p>
+
 # <img src=".github/logo.png" width="50" align="center" alt="" />&nbsp; Ryu
 
 **Agents are powerful. Using them shouldn't be.**
+
+> [!WARNING]
+> **Early access — under active development.** Ryu is pre-1.0 and moving fast. APIs, schemas, config, on-disk formats, and CLI flags can change without notice, and releases may include breaking changes between versions. Pin a version, expect rough edges, and read the release notes before upgrading. Not yet recommended for production-critical workloads.
 
 [![Docs](https://shieldcn.dev/badge/Docs-ryuhq.com-73DC8C.svg?logo=readthedocs&logoColor=white)](https://ryuhq.com/help)
 [![Discord](https://shieldcn.dev/discord/1439211418724597800.svg?logo=discord&logoColor=white&color=4B78E6)](https://ryuhq.com/discord)
@@ -33,6 +42,26 @@ Most people want the **[desktop app](https://github.com/amajorai/ryu/releases/la
 Every release ships on a [single page](https://github.com/amajorai/ryu/releases/latest) with desktop installers for macOS, Windows, and Linux, the headless binaries, and the Island companion.
 
 For the wider ecosystem, see **[Awesome Ryu](https://github.com/amajorai/awesome-ryu)**.
+
+## Backed by
+
+Ryu is built with the support of leading startup programs.
+
+<p align="center">
+  <a href="https://aws.amazon.com/startups/" target="_blank" rel="noopener"><img alt="AWS Activate" height="34" src=".github/backers/aws.svg" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://block71.co" target="_blank" rel="noopener"><img alt="BLOCK71" height="34" src=".github/backers/block71.png" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.anthropic.com/startups" target="_blank" rel="noopener"><img alt="Claude for Startups" height="34" src=".github/backers/claude.svg" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://openai.com/startups" target="_blank" rel="noopener"><img alt="OpenAI for Startups" height="34" src=".github/backers/openai.svg" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.cloudflare.com/forstartups/" target="_blank" rel="noopener"><img alt="Cloudflare for Startups" height="34" src=".github/backers/cloudflare.svg" /></a>
+</p>
+
+<p align="center">
+  <sub>AWS Activate&nbsp; · &nbsp;BLOCK71&nbsp; · &nbsp;Claude for Startups&nbsp; · &nbsp;OpenAI for Startups&nbsp; · &nbsp;Cloudflare for Startups</sub>
+</p>
 
 ## How it fits together
 
@@ -100,6 +129,33 @@ The TypeScript units (SDK, docs) use [Bun](https://bun.sh):
 ```bash
 bun install && bun run build
 ```
+
+### One-click deploy
+
+Stand up a hosted node (Core + Gateway) on a container host. Each builds the
+[`Dockerfile`](./Dockerfile): Core runs the stack and manages the Gateway on
+loopback, so only Core's port is published.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/amajorai/ryu)
+&nbsp;
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new)
+&nbsp;
+[![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/amajorai/ryu/tree/main)
+
+Or run it yourself:
+
+- **Docker Compose** — `docker compose up --build` ([`docker-compose.yml`](./docker-compose.yml)): Core on `:7980`, Gateway on `:7981`, model state in a named volume.
+- **Fly.io** — `fly launch --copy-config` then `fly deploy` ([`fly.toml`](./fly.toml)).
+
+> **Sizing.** Core downloads a fully-local model stack on first boot, so pick a
+> plan with **≥ 2 GB RAM** (4 GB is comfortable), or set a provider key such as
+> `OPENAI_API_KEY` to skip the local download and run small.
+>
+> **License.** The Gateway is **AGPL-3.0**: host a *modified* Gateway and §13
+> obliges you to offer those changes to its users. Core is Apache-2.0.
+
+The documentation site (`apps/fumadocs`) is a Next.js app and deploys to Vercel
+in one click — [![Deploy docs to Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/amajorai/ryu&root-directory=apps/fumadocs&project-name=ryu-docs). Vercel is serverless and cannot host the long-running Core/Gateway; use a container host above for the backend.
 
 ## Dual-use & consent
 

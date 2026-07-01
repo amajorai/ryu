@@ -263,6 +263,35 @@ pub(crate) async fn run_target(target: &JobTarget) -> Result<Option<String>, Str
             engine.run_sweep().await?;
             Ok(None)
         }
+        JobTarget::LearningCycle => {
+            let state = crate::learning::global_state()
+                .ok_or_else(|| "learning state not initialized".to_string())?;
+            // No-op quietly unless the user opted in; if a sleep window is set,
+            // only fire within it (Core has no keyboard-idle signal — this is the
+            // pragmatic "idle window" gate, MetaClaw-style). The job is ticked
+            // hourly so it reliably catches the window; a persisted min-gap keeps
+            // it to at most one retrain per ~day and prevents fire-on-every-restart.
+            if !crate::learning::resolve_enabled(&state).await {
+                return Ok(None);
+            }
+            if !crate::learning::resolve_in_sleep_window(&state).await {
+                return Ok(None);
+            }
+            if !crate::learning::scheduled_cycle_due(&state).await {
+                return Ok(None);
+            }
+            // Stamp before running so a crash/restart mid-cycle can't re-fire.
+            crate::learning::mark_cycle_ran(&state).await;
+            let plan = crate::learning::run_cycle(&state, true)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+            // A dispatch failure is folded into plan.error (run_cycle still returns
+            // Ok); surface it as a job failure so it's not recorded green.
+            if let Some(err) = plan.error {
+                return Err(err);
+            }
+            Ok(plan.job_id)
+        }
         JobTarget::Agent { agent_id, prompt } => {
             // Route directly through the global agent runner so the *configured*
             // agent handles the prompt via the real chat path (its engine binding,

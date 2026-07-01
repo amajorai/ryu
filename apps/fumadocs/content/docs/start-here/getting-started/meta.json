@@ -1,4 +1,4 @@
 {
   "title": "Getting Started",
-  "pages": ["index", "first-chat", "install-sidecar"]
+  "pages": ["index", "first-chat", "install-sidecar", "self-host"]
 }

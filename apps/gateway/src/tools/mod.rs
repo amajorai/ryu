@@ -30,6 +30,12 @@ pub use catalog_client::{CoreCatalog, ToolSearchClient};
 /// (Contract 3: search ≠ grant).
 pub const TOOL_SEARCH_NAME: &str = "tool_search";
 
+/// FQ-id prefix of Composio tools (Core mints them as `composio__<slug>`). These
+/// are the only tool executions the managed plan bills for — Composio charges per
+/// action execution, whereas builtin/MCP/app tools are free. The tool loop counts
+/// dispatched calls with this prefix so the pipeline can debit them at cost.
+pub const COMPOSIO_TOOL_PREFIX: &str = "composio__";
+
 /// Whether the mesh is enabled (B-9). When userspace networking is on, mesh
 /// peers appear as `127.0.0.1`, so loopback-trust gates fail open; the exec gate
 /// must neutralize loopback trust. Read locally so P2 compiles without P5.
@@ -77,15 +83,21 @@ pub struct ToolLoopContext {
 
 impl ToolLoopContext {
     /// Whether a tool id is permitted to execute. `tool_search` is always
-    /// allowed (Contract 3); every other tool must appear in the allowlist by
-    /// its exact fully-qualified id (`e == tool.id` only). Bare-name and
-    /// bare-server matches are deliberately rejected — they would let an
+    /// allowed (Contract 3); the single wildcard entry `"*"` (produced only by an
+    /// `unrestricted` / "full" tool-policy profile that the request explicitly
+    /// selected) permits any catalog tool; every other tool must appear in the
+    /// allowlist by its exact fully-qualified id (`e == tool.id` only). Bare-name
+    /// and bare-server matches are deliberately rejected — they would let an
     /// allowlist entry like `search` authorize `exa__search`/`composio__search`
     /// across planes (spec §3 security fix #1; lines 218/961/966). Server-scoped
     /// grants, when desired, are expressed as the explicit `<server>__*` id form
-    /// upstream, never as a bare-server equality here.
+    /// upstream, never as a bare-server equality here. Absent `"*"`, the exact
+    /// deny-by-default gate is unchanged.
     pub fn is_allowed(&self, tool_id: &str) -> bool {
         if tool_id == TOOL_SEARCH_NAME {
+            return true;
+        }
+        if self.allowed.iter().any(|a| a == "*") {
             return true;
         }
         self.allowed.iter().any(|a| a == tool_id)
@@ -144,6 +156,12 @@ pub fn inject_search_tool(body: &mut Value, always_on: &[Value]) {
 ///      - any other id → allowlist gate; denial returns an error *result* (not
 ///        an execution); allowed ids execute via Core `call_tool`.
 ///   4. Loop until no tool calls or `max_rounds` is reached.
+///
+/// Returns the final assistant turn plus the number of billable (Composio) tool
+/// executions dispatched across all rounds, so the caller can debit them (#496
+/// managed-plan tool-call cost). Only `composio__*` ids that pass the allowlist
+/// gate and reach Core are counted; `tool_search`, denied calls, and free
+/// builtin/MCP/app tools never increment it.
 pub async fn run_tool_loop(
     body: &mut Value,
     provider: &dyn Provider,
@@ -152,7 +170,7 @@ pub async fn run_tool_loop(
     ctx: &ToolLoopContext,
     max_rounds: u8,
     describe_top_n: usize,
-) -> Result<Value, GatewayError> {
+) -> Result<(Value, u64), GatewayError> {
     // The buffered loop must never request a stream from the provider. Also
     // strip `stream_options` (e.g. `{include_usage:true}`, injected on the
     // streaming path before the tools branch): OpenAI / OpenAI-compat providers
@@ -165,6 +183,7 @@ pub async fn run_tool_loop(
     }
 
     let mut response = provider.complete(model, body).await?;
+    let mut billable_tool_calls: u64 = 0;
 
     for round in 0..max_rounds {
         let tool_calls = match response["choices"][0]["message"]["tool_calls"].as_array() {
@@ -185,14 +204,29 @@ pub async fn run_tool_loop(
             let tool_call_id = tc["id"].as_str().unwrap_or("");
             let input: Value = serde_json::from_str(args_str).unwrap_or_else(|_| json!({}));
 
+            // Only a successful external `call_tool` RESULT is untrusted content
+            // (poisoned web/tool output). `tool_search` is a Ryu-generated
+            // discovery envelope the next round parses, and the denial/execution
+            // error envelopes below are gateway-generated — none of those get
+            // boundary-wrapped.
+            let mut is_external_result = false;
             let result: Value = if name == TOOL_SEARCH_NAME {
                 handle_search(body, catalog, ctx, input, describe_top_n).await
             } else if ctx.is_allowed(name) {
+                // Bill Composio executions at dispatch (Composio charges per
+                // action). Counted whether the call succeeds or errors, since
+                // both reach Core; free builtin/MCP/app tools are not counted.
+                if name.starts_with(COMPOSIO_TOOL_PREFIX) {
+                    billable_tool_calls = billable_tool_calls.saturating_add(1);
+                }
                 match catalog
                     .call_tool(name, input, ctx.agent_id.as_deref(), ctx.user_id.as_deref())
                     .await
                 {
-                    Ok(out) => out,
+                    Ok(out) => {
+                        is_external_result = true;
+                        out
+                    }
                     Err(e) => {
                         warn!(tool = name, error = %e, "tool execution failed; returning error result");
                         json!({ "error": e })
@@ -203,11 +237,21 @@ pub async fn run_tool_loop(
                 json!({ "error": format!("tool '{name}' is not allowed for this request") })
             };
 
+            // Injection defense: wrap the untrusted external result in
+            // untrusted-content boundary markers + strip chat-template control
+            // tokens before it re-enters the model. Default-ON, gated by
+            // `firewall.wrap_untrusted_tool_results`.
+            let content = if is_external_result && crate::untrusted::is_enabled() {
+                crate::untrusted::neutralize(&result.to_string())
+            } else {
+                result.to_string()
+            };
+
             if let Some(msgs) = body["messages"].as_array_mut() {
                 msgs.push(json!({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
-                    "content": result.to_string(),
+                    "content": content,
                 }));
             }
         }
@@ -227,7 +271,7 @@ pub async fn run_tool_loop(
         }
     }
 
-    Ok(response)
+    Ok((response, billable_tool_calls))
 }
 
 /// Handle a `tool_search` call: query Core's catalog, describe the top hits and
@@ -553,10 +597,12 @@ mod tests {
         let mut body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
         inject_search_tool(&mut body, &[]);
 
-        let out = run_tool_loop(&mut body, &provider, "m", &catalog, &ctx, 6, 5)
+        let (out, billable) = run_tool_loop(&mut body, &provider, "m", &catalog, &ctx, 6, 5)
             .await
             .unwrap();
         assert_eq!(out["choices"][0]["message"]["content"], "done");
+        // exa__search is not a Composio tool ⇒ not billable.
+        assert_eq!(billable, 0);
 
         // The body's tools must now include the described exa__search def.
         let names: Vec<&str> = body["tools"]
@@ -572,6 +618,59 @@ mod tests {
             catalog.executed.lock().unwrap().as_slice(),
             &["exa__search"]
         );
+    }
+
+    #[tokio::test]
+    async fn counts_only_billable_composio_executions() {
+        // #496: the loop bills only executed `composio__*` calls. Three rounds
+        // each execute one allowed tool — two Composio actions and one free
+        // builtin — so the billable count is 2, not 3.
+        let catalog = MockCatalog::default();
+        let provider = ScriptedProvider::new(vec![
+            tool_call("c1", "composio__SLACK_SEND_MESSAGE", "{}"),
+            tool_call("c2", "composio__GITHUB_CREATE_ISSUE", "{}"),
+            tool_call("c3", "exa__search", r#"{"query":"x"}"#),
+            final_text("done"),
+        ]);
+        let ctx = ToolLoopContext {
+            agent_id: None,
+            user_id: None,
+            allowed: vec![
+                "composio__SLACK_SEND_MESSAGE".into(),
+                "composio__GITHUB_CREATE_ISSUE".into(),
+                "exa__search".into(),
+            ],
+        };
+        let mut body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+        let (out, billable) = run_tool_loop(&mut body, &provider, "m", &catalog, &ctx, 6, 5)
+            .await
+            .unwrap();
+        assert_eq!(out["choices"][0]["message"]["content"], "done");
+        // All three executed; only the two Composio calls are billable.
+        assert_eq!(catalog.executed.lock().unwrap().len(), 3);
+        assert_eq!(billable, 2);
+    }
+
+    #[tokio::test]
+    async fn denied_composio_call_is_not_billed() {
+        // A `composio__*` call that fails the allowlist gate never reaches Core,
+        // so it is not counted (no execution = no Composio charge).
+        let catalog = MockCatalog::default();
+        let provider = ScriptedProvider::new(vec![
+            tool_call("c1", "composio__SLACK_SEND_MESSAGE", "{}"),
+            final_text("ok"),
+        ]);
+        let ctx = ToolLoopContext {
+            agent_id: None,
+            user_id: None,
+            allowed: vec![], // nothing allowed
+        };
+        let mut body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+        let (_, billable) = run_tool_loop(&mut body, &provider, "m", &catalog, &ctx, 6, 5)
+            .await
+            .unwrap();
+        assert!(catalog.executed.lock().unwrap().is_empty());
+        assert_eq!(billable, 0);
     }
 
     #[tokio::test]
@@ -601,6 +700,98 @@ mod tests {
             .expect("a tool result message");
         let content = tool_msg["content"].as_str().unwrap();
         assert!(content.contains("not allowed"), "got: {content}");
+    }
+
+    #[tokio::test]
+    async fn external_result_wrapped_tool_search_not() {
+        // Injection defense: the external `exa__search` RESULT re-entering the
+        // model is wrapped in untrusted-content boundary markers, while the
+        // `tool_search` discovery envelope is returned verbatim (excluded).
+        let _guard = crate::untrusted::FLAG_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        crate::untrusted::set_enabled(true);
+        let catalog = {
+            let mut c = MockCatalog::default();
+            c.search_results = vec![descriptor("exa__search", "search")];
+            c.described
+                .insert("exa__search".into(), described("exa__search", "search"));
+            c
+        };
+        let provider = ScriptedProvider::new(vec![
+            tool_call("c1", TOOL_SEARCH_NAME, r#"{"query":"web search"}"#),
+            tool_call("c2", "exa__search", r#"{"query":"rust"}"#),
+            final_text("done"),
+        ]);
+        let ctx = ToolLoopContext {
+            agent_id: Some("agent1".into()),
+            user_id: None,
+            allowed: vec!["exa__search".into()],
+        };
+        let mut body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+        inject_search_tool(&mut body, &[]);
+        let _ = run_tool_loop(&mut body, &provider, "m", &catalog, &ctx, 6, 5)
+            .await
+            .unwrap();
+
+        let tool_msgs: Vec<&str> = body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "tool")
+            .filter_map(|m| m["content"].as_str())
+            .collect();
+        // Two tool results: the tool_search descriptor list and the exa__search
+        // execution result.
+        let search_content = tool_msgs
+            .iter()
+            .find(|c| c.contains("exa__search") && !c.contains("ran"))
+            .expect("tool_search descriptor result");
+        let exec_content = tool_msgs
+            .iter()
+            .find(|c| c.contains("ran"))
+            .expect("exa__search execution result");
+        // The external execution result is boundary-wrapped.
+        assert!(
+            exec_content.starts_with(crate::untrusted::UNTRUSTED_OPEN),
+            "external result must be wrapped: {exec_content}"
+        );
+        assert!(exec_content.ends_with(crate::untrusted::UNTRUSTED_CLOSE));
+        // The tool_search discovery envelope is NOT wrapped.
+        assert!(
+            !search_content.starts_with(crate::untrusted::UNTRUSTED_OPEN),
+            "tool_search result must not be wrapped: {search_content}"
+        );
+
+        // Opt-out: with the flag off, the external result is not wrapped.
+        crate::untrusted::set_enabled(false);
+        let catalog2 = MockCatalog::default();
+        let provider2 = ScriptedProvider::new(vec![
+            tool_call("d1", "exa__search", r#"{"query":"x"}"#),
+            final_text("done"),
+        ]);
+        let ctx2 = ToolLoopContext {
+            agent_id: None,
+            user_id: None,
+            allowed: vec!["exa__search".into()],
+        };
+        let mut body2 = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+        let _ = run_tool_loop(&mut body2, &provider2, "m", &catalog2, &ctx2, 6, 5)
+            .await
+            .unwrap();
+        let off_content = body2["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["role"] == "tool")
+            .and_then(|m| m["content"].as_str())
+            .unwrap();
+        assert!(
+            !off_content.contains(crate::untrusted::UNTRUSTED_OPEN),
+            "opt-out must not wrap: {off_content}"
+        );
+        // Restore the default-ON state for other tests.
+        crate::untrusted::set_enabled(true);
     }
 
     #[tokio::test]
@@ -730,5 +921,26 @@ mod tests {
         // tool_search is always allowed; an unrelated id is not.
         assert!(exact.is_allowed(TOOL_SEARCH_NAME));
         assert!(!exact.is_allowed("exa__search"));
+    }
+
+    #[test]
+    fn wildcard_allows_any_tool_for_unrestricted_profile() {
+        // The "full"/unrestricted tool-policy profile resolves to a single "*"
+        // allowlist entry, which must permit any catalog tool.
+        let full = ToolLoopContext {
+            agent_id: None,
+            user_id: None,
+            allowed: vec!["*".into()],
+        };
+        assert!(full.is_allowed("spider__crawl"));
+        assert!(full.is_allowed("exa__search"));
+        assert!(full.is_allowed(TOOL_SEARCH_NAME));
+        // Without "*", a non-listed id is still denied (deny-by-default intact).
+        let scoped = ToolLoopContext {
+            agent_id: None,
+            user_id: None,
+            allowed: vec!["spider__crawl".into()],
+        };
+        assert!(!scoped.is_allowed("exa__search"));
     }
 }

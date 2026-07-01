@@ -1479,6 +1479,16 @@ struct MarketplaceCard {
     version: Option<String>,
     #[serde(default, rename = "installSource")]
     install_source: Option<String>,
+    // App-store presentation (logo + free-text category) and the denormalized
+    // rating aggregate. Optional so an older server that omits them still parses.
+    #[serde(default, rename = "iconUrl")]
+    icon_url: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default, rename = "ratingAverage")]
+    rating_average: Option<f64>,
+    #[serde(default, rename = "ratingCount")]
+    rating_count: Option<u64>,
 }
 
 /// The marketplace `GET /catalog` envelope.
@@ -1728,6 +1738,10 @@ impl RyuMarketplaceSource {
                 "last_modified": Value::Null,
                 "created_at": Value::Null,
                 "installed": false,
+                "icon_url": card.icon_url,
+                "category": card.category,
+                "rating_average": card.rating_average.unwrap_or(0.0),
+                "rating_count": card.rating_count.unwrap_or(0),
             }),
             CatalogKind::Skill => serde_json::json!({
                 "id": card.id,
@@ -1737,6 +1751,10 @@ impl RyuMarketplaceSource {
                 "description": card.description,
                 "installs": 0,
                 "installed": false,
+                "icon_url": card.icon_url,
+                "category": card.category,
+                "rating_average": card.rating_average.unwrap_or(0.0),
+                "rating_count": card.rating_count.unwrap_or(0),
             }),
             CatalogKind::Mcp => serde_json::json!({
                 "id": card.id,
@@ -1747,6 +1765,10 @@ impl RyuMarketplaceSource {
                 "has_remotes": false,
                 "transports": [],
                 "installed": false,
+                "icon_url": card.icon_url,
+                "category": card.category,
+                "rating_average": card.rating_average.unwrap_or(0.0),
+                "rating_count": card.rating_count.unwrap_or(0),
             }),
             CatalogKind::Plugin => serde_json::json!({
                 "id": card.id,
@@ -1756,6 +1778,10 @@ impl RyuMarketplaceSource {
                 "version": card.version,
                 "install_source": card.install_source,
                 "installed": false,
+                "icon_url": card.icon_url,
+                "category": card.category,
+                "rating_average": card.rating_average.unwrap_or(0.0),
+                "rating_count": card.rating_count.unwrap_or(0),
             }),
             CatalogKind::Knowledge => serde_json::json!({
                 "id": card.id,
@@ -1765,6 +1791,10 @@ impl RyuMarketplaceSource {
                 "version": card.version,
                 "install_source": card.install_source,
                 "installed": false,
+                "icon_url": card.icon_url,
+                "category": card.category,
+                "rating_average": card.rating_average.unwrap_or(0.0),
+                "rating_count": card.rating_count.unwrap_or(0),
             }),
         }
     }

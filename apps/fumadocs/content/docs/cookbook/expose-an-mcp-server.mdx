@@ -14,6 +14,13 @@ it from chat. It is for developers who want one tool to serve every agent.
 - [Register an MCP server](/docs/develop/extensions/mcp-server): the canonical guide for the registration handshake and allowlisting.
 - [MCP registry](/docs/core/mcp-registry): how Core discovers and dispatches the tools.
 
+## Prerequisites
+
+- **Bun** on your PATH, to run the stdio server (`bun run src/server.ts`).
+- **A running Ryu Core** on `http://localhost:7980`, so `POST /api/mcp/servers` can register the
+  server and hot-reload the registry.
+- Your server `command` (here `bun`) must be on Core's PATH, or registered with an absolute path.
+
 ## Steps
 
 <Steps>
@@ -28,7 +35,7 @@ function, then call `serve()` to read JSON-RPC from stdin and write responses to
 
 ```ts
 // src/server.ts
-import { McpServer } from "@ryu/sdk/mcp/server";
+import { McpServer } from "@ryuhq/sdk/mcp/server";
 
 const server = new McpServer();
 
@@ -51,7 +58,7 @@ await server.serve(); // reads process.stdin, writes process.stdout
 <Callout type="warn">
 `McpServer` lives in SDK source but is not yet in the package's public `exports` map (only `.`,
 `./manifest`, and `./cli` are exported today). Inside the monorepo import it from the source path as
-above; the public `@ryu/sdk` MCP subpath export is pending. See the
+above; the public `@ryuhq/sdk` MCP subpath export is pending. See the
 [TypeScript SDK guide](/docs/develop/extensions/typescript-sdk#mcp-bridge).
 </Callout>
 
@@ -112,6 +119,15 @@ POST /api/mcp/tools/call
 </Step>
 
 </Steps>
+
+## Check your work
+
+- After registering, `GET /api/mcp/servers` lists `mytools`, confirming Core hot-reloaded the
+  registry with no restart.
+- Your tool appears namespaced as `mytools__word_count` (the `__` separator), so a `name` containing
+  `__` is rejected at registration.
+- `POST /api/mcp/tools/call` for `mytools__word_count` with `{ "text": "one two three" }` returns
+  `{ "words": 3 }`, the same result an agent gets when it emits the tool call in chat.
 
 ## Going further
 

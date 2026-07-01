@@ -10,10 +10,13 @@ import {
   GraduationCap,
   type LucideIcon,
   Monitor,
+  PlugZap,
   Rocket,
   Search,
   Shield,
+  ShieldCheck,
   Smartphone,
+  Sparkles,
   Terminal,
 } from "lucide-react";
 import Link from "next/link";
@@ -71,6 +74,22 @@ const REALMS: Realm[] = [
     accent: "var(--hardware-color)",
   },
   {
+    slug: "skills",
+    title: "Skills",
+    description:
+      "Agent skills: reusable SKILL.md instruction packs that load on demand. The setup-ryu flagship, the shipped catalog, authoring, and publishing.",
+    icon: Sparkles,
+    accent: "var(--skills-color)",
+  },
+  {
+    slug: "mcp",
+    title: "MCP Server",
+    description:
+      "Connect Claude Desktop or any MCP host to your node: quickstart config, the tool list, remote-node setup, and security.",
+    icon: PlugZap,
+    accent: "var(--mcp-color)",
+  },
+  {
     slug: "cookbook",
     title: "Cookbook",
     description:
@@ -101,6 +120,14 @@ const REALMS: Realm[] = [
       "Local backend internals: sessions, memory, RAG, workflows, sandboxes, and MCP.",
     icon: Cpu,
     accent: "var(--core-color)",
+  },
+  {
+    slug: "security",
+    title: "Security",
+    description:
+      "Ryu's security model: trust boundary, sandboxing, command approval and HITL, credential scrubbing, outbound DLP, SSRF protection, and deployment hardening.",
+    icon: ShieldCheck,
+    accent: "var(--security-color)",
   },
   {
     slug: "develop",

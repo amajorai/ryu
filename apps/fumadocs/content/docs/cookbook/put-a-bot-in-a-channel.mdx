@@ -13,6 +13,13 @@ It is for anyone who wants their agent reachable where people already chat.
 - [Channel bots](/docs/gateway/channels): how the gateway runs the platform listeners and routes turns to Core.
 - [Agent teams](/docs/core/agent-teams): the coordination strategies a team uses when a channel routes to one.
 
+## Prerequisites
+
+- Admin access on the platform to create a bot and copy its token (a Telegram BotFather token, a
+  Slack bot token, a WhatsApp Cloud API token, or a Discord bot token). You do this in step 1.
+- An agent (or a team) you want the channel to reach. Channels are configured in **Gateway
+  settings** and are account-global, not per Core node.
+
 ## Steps
 
 <Steps>
@@ -74,6 +81,15 @@ Core to Gateway, so routing, firewall, budgets, and audit stay on the path.
 </Step>
 
 </Steps>
+
+## Check your work
+
+- Send a message in the channel and the bound agent (or team) replies with the same memory and tools
+  it has in the desktop.
+- Each sender keeps a **persistent** conversation: the sender's id becomes the Core `conversation_id`,
+  so a follow-up message continues where the last left off.
+- Route to a **team** and the reply is one combined, attributed answer from the team's members, not a
+  single agent's.
 
 ## Going further
 

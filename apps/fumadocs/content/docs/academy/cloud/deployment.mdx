@@ -1,6 +1,7 @@
 ---
 title: Deploying Ryu
 description: What self-hosting ships, how managed Cloud is provisioned, and where the line between feature and service sits.
+level: 500
 ---
 
 When you deploy Ryu for a team, two open-source Rust services do the work: the Core and the Gateway. The Core orchestrates what runs (agents, sessions, tools, workflows). The Gateway governs every model call (routing, firewall, budgets, audit). The Core is Apache-2.0 and the Gateway is AGPL v3; both are open-source and self-hostable. The desktop, web, and backend stay closed, which is the open core plus managed cloud model in practice.
@@ -32,6 +33,26 @@ Be honest about the rest. Much of managed Ryu Cloud is a service offering, not a
 <Callout type="warn">
   Do not expect the full managed Cloud experience from a provisioning script alone. The script stands up infrastructure; the audit, build, and ongoing operation are the service layer on top.
 </Callout>
+
+## One-click deploy
+
+If you do not want to manage a VPS, a hosted node also deploys to a container
+platform in one click. Each button builds the repo's `Dockerfile`, which runs
+Core (Core spawns and manages the Gateway on loopback), so the node is governed
+the moment it serves traffic.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/amajorai/ryu)
+&nbsp;
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new)
+&nbsp;
+[![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/amajorai/ryu/tree/main)
+
+Core downloads a local model stack on first boot, so choose a plan with at least
+2 GB of RAM, or set a provider key (such as `OPENAI_API_KEY`) to skip the local
+download. The Gateway is AGPL v3, so hosting a modified Gateway carries the AGPL
+section 13 obligation to offer your changes to its users. See
+[Deploy & self-host](/docs/start-here/getting-started/self-host) for the full
+walkthrough (Docker, Fly, and the Vercel-for-docs caveat).
 
 ## Knowledge check
 

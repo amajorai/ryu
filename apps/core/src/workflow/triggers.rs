@@ -41,6 +41,9 @@ pub struct ScheduleUpsert {
     pub id: String,
     pub name: String,
     pub schedule: Schedule,
+    /// Mirror of the trigger's `require_approval`: gate each firing on a
+    /// human-in-the-loop approval instead of running autonomously.
+    pub require_approval: bool,
 }
 
 /// The pure schedule-reconcile diff. Given a workflow's id, its triggers, and
@@ -59,7 +62,12 @@ pub fn reconcile_schedule_jobs(
 ) -> (Vec<ScheduleUpsert>, Vec<String>) {
     let mut upserts: Vec<ScheduleUpsert> = Vec::new();
     for (idx, trigger) in triggers.iter().enumerate() {
-        if let WorkflowTrigger::Schedule { cron, every } = trigger {
+        if let WorkflowTrigger::Schedule {
+            cron,
+            every,
+            require_approval,
+        } = trigger
+        {
             let schedule = match (cron, every) {
                 (Some(expr), _) if !expr.trim().is_empty() => Schedule::Cron { expr: expr.clone() },
                 (_, Some(interval)) if !interval.trim().is_empty() => Schedule::Every {
@@ -72,6 +80,7 @@ pub fn reconcile_schedule_jobs(
                 id: schedule_job_id(workflow_id, idx),
                 name: format!("{workflow_name} (schedule)"),
                 schedule,
+                require_approval: *require_approval,
             });
         }
     }
@@ -121,6 +130,7 @@ pub fn apply_schedule_reconcile(
                 prior.name = upsert.name;
                 prior.schedule = upsert.schedule;
                 prior.enabled = true;
+                prior.require_approval = upsert.require_approval;
                 prior.updated_at = now.clone();
                 prior
             }
@@ -133,7 +143,7 @@ pub fn apply_schedule_reconcile(
                     input: std::collections::HashMap::new(),
                 },
                 enabled: true,
-                require_approval: false,
+                require_approval: upsert.require_approval,
                 created_at: now.clone(),
                 updated_at: now.clone(),
                 last_run_at: None,
@@ -179,10 +189,12 @@ mod tests {
             WorkflowTrigger::Schedule {
                 cron: Some("0 9 * * *".into()),
                 every: None,
+                require_approval: false,
             },
             WorkflowTrigger::Schedule {
                 cron: None,
                 every: Some("5m".into()),
+                require_approval: false,
             },
         ];
         let (upserts, deletes) = reconcile_schedule_jobs("wf_x", "My WF", &triggers, &[]);
@@ -210,6 +222,7 @@ mod tests {
         let triggers = vec![WorkflowTrigger::Schedule {
             cron: Some("* * * * *".into()),
             every: Some("5m".into()),
+            require_approval: false,
         }];
         let (upserts, _) = reconcile_schedule_jobs("wf_x", "n", &triggers, &[]);
         assert_eq!(upserts.len(), 1);
@@ -226,6 +239,7 @@ mod tests {
         let triggers = vec![WorkflowTrigger::Schedule {
             cron: Some("   ".into()),
             every: None,
+            require_approval: false,
         }];
         let (upserts, _) = reconcile_schedule_jobs("wf_x", "n", &triggers, &[]);
         assert_eq!(upserts.len(), 0);
@@ -238,6 +252,7 @@ mod tests {
         let triggers = vec![WorkflowTrigger::Schedule {
             cron: Some("0 0 * * *".into()),
             every: None,
+            require_approval: false,
         }];
         let (upserts, deletes) = reconcile_schedule_jobs("wf_x", "n", &triggers, &existing);
         // Trigger at index 0 → keep wf-sched-wf_x-0; index-1 job is now stale.

@@ -577,7 +577,9 @@ impl McpRegistry {
                 description: Some(
                     "Built-in skills: discover and load Agent Skills on demand \
                      (skills__search / skills__load) instead of injecting every skill body \
-                     up front — progressive disclosure for low-context models."
+                     up front — progressive disclosure for low-context models. \
+                     skills__author writes a new structured, reusable SKILL.md and \
+                     refines it on reuse."
                         .to_owned(),
                 ),
                 enabled: true,

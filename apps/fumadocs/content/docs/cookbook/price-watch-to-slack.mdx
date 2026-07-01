@@ -14,6 +14,12 @@ something actually changes.
 - [Website Monitoring](/docs/core/website-monitoring): the engine, check types, comparators, and notification fan-out.
 - [Scheduler](/docs/core/scheduler): the tick loop that runs your monitor on a regular interval.
 
+## Prerequisites
+
+- **The Ryu desktop app** (or a running Core to use `POST /api/monitors`).
+- Permission to create an **incoming webhook** in the Slack or Discord channel you want alerts in.
+  You add this webhook in step 3; without it, alerts still show in Ryu but not in your channel.
+
 ## Steps
 
 <Steps>
@@ -136,6 +142,16 @@ Monitors fetch with a swappable backend. The default is a plain HTTP GET, which 
 JavaScript. If the price only appears after the page renders, switch the backend to `spider`, which
 crawls via the Spider tool when it is available in the [MCP registry](/docs/core/mcp-registry).
 </Callout>
+
+## Check your work
+
+- `POST /api/monitors/:id/run` returns the check status. The first run establishes the baseline
+  snapshot, so no alert fires yet, that is expected.
+- On the run where the value actually crosses your rule, exactly **one** alert posts to your Slack or
+  Discord channel and appears on the Monitors page. It does not re-fire every tick while the price
+  stays low, only on the transition.
+- If the price never parses, confirm the page renders it server-side; a JS-rendered price needs the
+  `spider` backend (see the callout above).
 
 ## Going further
 

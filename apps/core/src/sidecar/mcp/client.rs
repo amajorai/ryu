@@ -58,6 +58,13 @@ impl McpConnection {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        // Env-scrub (security): an MCP stdio server has no business inheriting
+        // Core's full env (provider keys, gateway/credits tokens). `env_clear`
+        // first is load-bearing (a bare `Command` inherits the parent env);
+        // then pass ONLY a small benign allowlist (PATH/HOME/XDG_*/...) and
+        // finally layer the server config's own declared env on top.
+        command.env_clear();
+        command.envs(crate::sidecar::env_scrub::mcp_safe_env(std::env::vars()));
         for (k, v) in &cmd.env {
             command.env(k, v);
         }

@@ -915,7 +915,7 @@ fn render_services_content(f: &mut Frame, area: Rect, app: &mut App) {
 
             let category = match *name {
                 "llamacpp" | "ollama" | "vllm" => "provider",
-                "temporal" | "spider" | "screenpipe" | "llmfit" | "qmd" => "tool   ",
+                "spider" | "screenpipe" | "llmfit" => "tool   ",
                 _ => "agent  ",
             };
 

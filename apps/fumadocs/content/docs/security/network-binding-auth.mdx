@@ -1,0 +1,43 @@
+---
+title: "Network binding and auth"
+description: "Loopback-by-default binding, when to set RYU_TOKEN, and how clients authenticate when you expose Ryu off-box."
+---
+
+By default Core binds `127.0.0.1:7980` and the Gateway binds `127.0.0.1:7981` - loopback only. Nothing is reachable from another machine until you deliberately change the bind address. See [Ryu port scheme](/docs/core) for the full port layout.
+
+## Token auth for non-loopback exposure
+
+Loopback is the safe default - any process on your machine can already act as you, so unauthenticated loopback is acceptable. The moment you bind to a non-loopback address, set `RYU_TOKEN`. Core then requires a bearer token on requests that do not originate from loopback.
+
+| Setting | Default | Effect |
+|---|---|---|
+| Bind address | `127.0.0.1` | Reachable only from the same machine |
+| `RYU_TOKEN` | unset | When set, non-loopback requests must present `Authorization: Bearer <token>` |
+
+Clients pass the token as a standard bearer header:
+
+```
+Authorization: Bearer <RYU_TOKEN>
+```
+
+## Gateway admin enforcement
+
+The Gateway gates its admin surface on a loopback check derived from the connection's `ConnectInfo` rather than the bearer-auth middleware.
+
+<Callout type="warn">
+The admin loopback check uses `ConnectInfo`, which reflects the directly-connected peer. If you place Ryu behind a reverse proxy that terminates the connection locally, every forwarded request appears to originate from loopback and would satisfy the admin check - a fail-open risk. When you expose the Gateway off-box, do not let a proxy front the admin surface on loopback without its own auth, and prefer keeping admin endpoints unreachable from outside the host.
+</Callout>
+
+## When to set a token
+
+- Binding to `0.0.0.0` or a LAN address - always set `RYU_TOKEN` first.
+- Exposing through a tunnel or proxy - set the token and verify the proxy forwards the `Authorization` header.
+- Pure local single-user use on loopback - a token is optional.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/security/ssrf-protection" />
+  <DocCard href="/docs/security/channel-allowlists" />
+  <DocCard href="/docs/security/hardening-checklist" />
+</Cards>

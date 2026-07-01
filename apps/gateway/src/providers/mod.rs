@@ -56,12 +56,20 @@ impl ProviderRegistry {
             .map(|c| LocalProvider::new(client.clone(), c.base_url.clone()));
 
         let openrouter = config.openrouter.as_ref().map(|c| {
+            let options = openrouter::OpenRouterOptions {
+                data_collection: (!c.data_collection.is_empty()).then(|| c.data_collection.clone()),
+                zdr: c.zdr.then_some(true),
+                sort: (!c.sort.is_empty()).then(|| c.sort.clone()),
+                response_healing: c.response_healing,
+                usage_accounting: c.usage_accounting,
+            };
             OpenRouterProvider::new(
                 client.clone(),
                 c.api_key.clone(),
                 c.base_url.clone(),
                 c.site_url.clone(),
                 c.site_name.clone(),
+                options,
             )
         });
 

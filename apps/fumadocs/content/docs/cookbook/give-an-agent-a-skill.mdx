@@ -84,6 +84,17 @@ Skills you install through Ryu are usable by Claude Code too, since they share t
 `~/.claude/skills` directory, and any skill those tools install shows up as installed in Ryu.
 </Callout>
 
+## Check your work
+
+- On the Skills page the skill reads as **active** (not just installed) after you toggle it, or
+  automatically if you installed it through Ryu.
+- Ask the agent to do the thing the skill teaches. Its reply reflects the skill's instructions,
+  where a plain agent would improvise.
+- Set a non-empty allowlist on one agent and the skill reaches *that* agent only. Other agents,
+  asked the same thing, answer without it.
+- The skill file exists at `~/.claude/skills/<slug>/SKILL.md`, so Claude Code and the skills CLI see
+  the same skill.
+
 ## Going further
 
 - Author your own skill in code instead of installing one: [TypeScript SDK](/docs/develop/extensions/typescript-sdk) and the `defineSkill` factory.

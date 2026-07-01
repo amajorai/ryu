@@ -1,0 +1,66 @@
+---
+title: "Quickstart"
+description: "Install the Ryu Core MCP server and wire it into Claude Desktop with an mcpServers snippet that sets RYU_CORE_URL and RYU_CORE_TOKEN."
+---
+
+This page connects an MCP host to your node in three steps: have a Core running, point the bridge at it, and register it with the host.
+
+## 1. Have a node running
+
+The bridge talks to a Ryu Core over HTTP. Start the desktop app or run Core directly. By default Core listens on port 7980, so your node URL is `http://127.0.0.1:7980`. Note the access token your node uses; you will pass it to the bridge as `RYU_CORE_TOKEN`.
+
+## 2. Point the bridge at Core
+
+The server reads two environment variables:
+
+- `RYU_CORE_URL` - the base URL of the node, for example `http://127.0.0.1:7980`.
+- `RYU_CORE_TOKEN` - the access token the node expects.
+
+You can run it directly to confirm it starts and completes an MCP handshake over stdio:
+
+```bash
+RYU_CORE_URL="http://127.0.0.1:7980" \
+RYU_CORE_TOKEN="your-node-token" \
+bun run apps/mcp
+```
+
+## 3. Register it with Claude Desktop
+
+Add the server to your `claude_desktop_config.json` under `mcpServers`. On macOS this file is at `~/Library/Application Support/Claude/claude_desktop_config.json`.
+
+```json
+{
+  "mcpServers": {
+    "ryu": {
+      "command": "bun",
+      "args": ["run", "apps/mcp"],
+      "env": {
+        "RYU_CORE_URL": "http://127.0.0.1:7980",
+        "RYU_CORE_TOKEN": "your-node-token"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop. The Ryu tools appear in the host's tool list, and a prompt like "ask my Ryu node to summarize this" routes through the bridge to your Core.
+
+## 4. (Optional) Sign in
+
+To attach your Ryu user identity (for `ryu_whoami` and, later, multi-tenant nodes), sign in with the device-authorization flow. It shares `~/.ryu/auth.json` with the desktop and CLI, so if you have already signed in elsewhere you can skip this.
+
+```bash
+bun run apps/mcp login     # opens your browser, then stores the bearer
+bun run apps/mcp whoami    # confirms who you are signed in as
+```
+
+See [security](/docs/mcp/security) for how this user token differs from the node token.
+
+<Callout type="warn">
+  The token grants whatever your node grants. Keep it out of source control and out of chat. Use a per-host token where your node supports it so you can revoke one host without disturbing the others. See [security](/docs/mcp/security).
+</Callout>
+
+## Next
+
+- The [tool list](/docs/mcp/tools) for what the host can do.
+- [Configuration](/docs/mcp/configuration) for pointing at a remote node and the full set of environment variables.

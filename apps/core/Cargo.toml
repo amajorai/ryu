@@ -37,11 +37,6 @@ flate2 = "1"
 tar = "0.4"
 zip = "0.6"
 chrono = { version = "0.4", features = ["serde"] }
-temporalio-sdk = "0.1.0-alpha.1"
-temporalio-client = "0.1"
-temporalio-sdk-core = "0.1"
-temporalio-macros = "0.1"
-temporalio-common = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 sqlite-vec = "=0.1.6"
 humantime = "2"

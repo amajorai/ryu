@@ -1,0 +1,35 @@
+---
+title: "setup-ryu"
+description: "The flagship Ryu skill: it teaches any agent how Ryu is structured so it can install, configure, and operate a node without guessing at the architecture."
+---
+
+`setup-ryu` is the flagship skill in the `apps/skills` collection. It teaches an agent how Ryu fits together so the agent can install Ryu, bring up a node, and operate it correctly without inventing commands or misremembering the architecture. It is the skill you load when you want a model to act as a competent Ryu operator rather than a generic assistant.
+
+## What it does
+
+The skill body gives the model an accurate mental model of Ryu and the steps to get a working node:
+
+- The surface split. Desktop, CLI, mobile, and hardware are thin clients; every model call, transcription, and synthesis happens on a node.
+- The Core vs Gateway rule. Core decides what runs (sessions, memory, RAG, workflows, skills, MCP); the Gateway decides what is allowed, measured, and paid (routing, firewall, budgets, evals, audit).
+- The install path. How to get the desktop app or run Core directly, where the data folder lives, and the default ports (Core on 7980, Gateway on 7981).
+- First-run setup. Picking an engine, downloading or pointing at a model, and sending a first message to confirm the node answers.
+- Node selection. How a request is routed to the active node, and how a remote node over Tailscale is the same as a local one to every surface.
+
+Because the instructions match how Ryu actually behaves, an agent running with `setup-ryu` loaded gives setup answers that line up with the real ports, paths, and flows rather than plausible-sounding guesses.
+
+## When to load it
+
+Load `setup-ryu` at the start of any session where the agent will help a user install or operate Ryu, debug a node that will not come up, or explain how the pieces connect. It pairs naturally with the [MCP server](/docs/mcp), where an external host drives a node through tools and benefits from the agent understanding the same model.
+
+<Callout type="info">
+  `setup-ryu` is an instruction pack, not an installer. It makes the model accurate about Ryu; it does not perform privileged actions on its own. Anything that changes the node still goes through tools the Gateway governs.
+</Callout>
+
+## Installing it
+
+`setup-ryu` ships in the `apps/skills` collection and installs to the universal skills directory like any other skill. See [publishing](/docs/skills/publishing) for how agents discover, install, and activate it.
+
+```bash
+# the skill lives at the universal location Ryu and Claude Code both read
+~/.claude/skills/setup-ryu/SKILL.md
+```

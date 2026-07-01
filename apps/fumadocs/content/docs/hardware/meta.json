@@ -2,17 +2,17 @@
   "root": true,
   "title": "Hardware",
   "description": "Ryu's physical devices: the watch, necklace, and desk hub. ESP32-S3 thin clients that capture audio and camera, render chat, TTS, and dashboards, and run all inference on a node. Protocol, pairing, ambient capture, firmware, deployment, and security.",
-  "icon": "circuit-board",
+  "icon": "CircuitBoard",
   "pages": [
-    "hardware/index.mdx",
-    "hardware/architecture.mdx",
-    "hardware/devices.mdx",
-    "hardware/protocol.mdx",
-    "hardware/pairing.mdx",
-    "hardware/ambient-capture.mdx",
-    "hardware/dashboard.mdx",
-    "hardware/firmware.mdx",
-    "hardware/deployment.mdx",
-    "hardware/security.mdx"
+    "index",
+    "architecture",
+    "devices",
+    "protocol",
+    "pairing",
+    "ambient-capture",
+    "dashboard",
+    "firmware",
+    "deployment",
+    "security"
   ]
 }

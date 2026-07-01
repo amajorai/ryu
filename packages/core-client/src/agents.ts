@@ -32,6 +32,11 @@ export interface AgentSummary {
 	 * (e.g. "claude") and null for custom agents — use {@link fetchAgent} for the
 	 * canonical, engine-picker-matching id (e.g. "acp:claude"). */
 	engine: string | null;
+	/** True when this agent's provider calls cannot be redirected through the
+	 * local gateway (the engine ignores `OPENAI_BASE_URL`), so its egress bypasses
+	 * the gateway. Omitted by Core when false/absent, so `undefined` here means
+	 * "via gateway" (matches the Rust CLI's `None` default). */
+	gatewayBypass?: boolean;
 	id: string;
 	installed: boolean | null;
 	/** Hint shown to users on how to install/run this agent (e.g. "via npx"). */
@@ -150,6 +155,7 @@ interface AgentSummaryWire {
 	created_at?: string | null;
 	description?: string | null;
 	engine?: string | null;
+	gateway_bypass?: boolean | null;
 	id: string;
 	install_hint?: string | null;
 	installed?: boolean | null;
@@ -197,6 +203,9 @@ function toSummary(a: AgentSummaryWire): AgentSummary {
 		createdAt: a.created_at ?? null,
 		version: a.version ?? null,
 		locked: a.locked ?? false,
+		// Preserve Core's tri-state: absent/null → undefined ("via gateway"),
+		// matching the Rust CLI's `None` default rather than collapsing to false.
+		gatewayBypass: a.gateway_bypass ?? undefined,
 	};
 }
 

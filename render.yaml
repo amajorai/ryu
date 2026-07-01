@@ -1,0 +1,30 @@
+# Render Blueprint — one-click deploy of the Ryu open-core stack.
+# https://render.com/docs/blueprint-spec
+#
+# Deploy: https://render.com/deploy?repo=https://github.com/amajorai/ryu
+#
+# Runs ryu-core as a Docker web service (Core spawns + manages the Gateway on
+# loopback). Render injects $PORT; the image's entrypoint maps it onto RYU_BIND.
+#
+# Sizing: Core downloads a local model stack on first boot, so the `standard`
+# plan (2 GB) is the floor and a 4 GB plan is comfortable. To run small, set a
+# provider key below (e.g. OPENAI_API_KEY) so Core routes to a hosted model
+# instead of downloading the local one.
+services:
+  - type: web
+    name: ryu
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      - key: RYU_DIR
+        value: /data
+      # Uncomment to bring your own provider and skip the local-model download:
+      # - key: OPENAI_API_KEY
+      #   sync: false
+    disk:
+      name: ryu-data
+      mountPath: /data
+      sizeGB: 10

@@ -1,0 +1,33 @@
+---
+title: "MCP Server"
+description: "The Ryu Core MCP server lets any MCP host (Claude Desktop, an IDE, another agent) drive your node through tools, with the Gateway governing every call."
+---
+
+The Ryu Core MCP server is a small bridge that exposes your node to any Model Context Protocol host. It lets Claude Desktop, an MCP-capable IDE, or another agent talk to your Ryu Core as a set of tools, so the host can chat through your models, search your memory, run your agents, and trigger your workflows without speaking Core's HTTP API directly.
+
+It lives in `apps/mcp` and is the inverse of Core's own MCP client. Core can consume external MCP servers as tools; this server publishes Core itself as an MCP server that external hosts consume.
+
+## The picture
+
+An external host speaks MCP over stdio to the `apps/mcp` process. That process speaks HTTP to a Ryu Core, local or remote. Core does the real work and the Gateway governs every model call.
+
+<Mermaid chart={`flowchart LR
+  Host["MCP host Claude Desktop"] -->|"MCP stdio"| Bridge["apps/mcp Ryu MCP server"]
+  Bridge -->|"HTTP RYU_CORE_URL"| Core["Ryu Core node"]
+  Core --> Gateway["Gateway routing budget audit"]
+`} />
+
+The bridge holds no model and runs no inference. It translates MCP tool calls into Core HTTP requests and streams the results back. Point it at a different `RYU_CORE_URL` and the same host now drives a different node, including a remote node over Tailscale.
+
+<Callout type="info">
+  Core decides what runs; the Gateway decides what is allowed, measured, and paid. Driving Core through MCP changes nothing about that split. A tool call from Claude Desktop is governed exactly like a call from the desktop app.
+</Callout>
+
+## In this section
+
+<Cards>
+  <DocCard href="/docs/mcp/quickstart" />
+  <DocCard href="/docs/mcp/tools" />
+  <DocCard href="/docs/mcp/configuration" />
+  <DocCard href="/docs/mcp/security" />
+</Cards>

@@ -79,6 +79,16 @@ POST /api/workflows/:id/run
 
 </Steps>
 
+## Check your work
+
+- On save, a scheduler job appears with the deterministic id `wf-sched-<workflow_id>-<idx>`,
+  confirming the trigger reconciled into a real job.
+- `POST /api/workflows/:id/run` runs it immediately so you can verify the wiring without waiting for
+  the next tick.
+- Restart Core and the schedule survives: the file-backed job reloads on boot and resumes ticking.
+- If you flagged the job for approval, its firing raises a single deduped entry in the approval inbox
+  instead of running, and approving it runs the exact run the tick would have.
+
 ## Going further
 
 - Fire the workflow from an external event instead of a clock: the `webhook` and `composio` triggers in [Workflows](/docs/core/workflows#triggers-and-schedules).

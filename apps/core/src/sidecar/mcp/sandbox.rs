@@ -46,7 +46,7 @@ use serde_json::{json, Value};
 use super::RegistryTool;
 use crate::sidecar::sandbox::{
     build_command_backend, configured_backend, ExecSpec, Sandbox as _, SandboxBackend,
-    SandboxCapabilities,
+    SandboxCapabilities, SandboxScope, WorkspaceAccess,
 };
 
 /// Reserved registry server name for the built-in sandbox provider.
@@ -396,6 +396,23 @@ fn parse_capabilities(arguments: &Value) -> SandboxCapabilities {
     }
     for p in parse_str_array(arguments, "write_paths") {
         caps.fs_write_paths.insert(PathBuf::from(p));
+    }
+    // Optional agent-declared scope + workspace access. Unknown/absent values
+    // keep the deny-safe defaults (per-exec scope, honor-the-path-sets access),
+    // matching this module's "bad value falls through to default" idiom.
+    if let Some(Ok(scope)) = arguments
+        .get("scope")
+        .and_then(Value::as_str)
+        .map(SandboxScope::from_name)
+    {
+        caps.scope = scope;
+    }
+    if let Some(Ok(access)) = arguments
+        .get("workspace_access")
+        .and_then(Value::as_str)
+        .map(WorkspaceAccess::from_name)
+    {
+        caps.workspace_access = access;
     }
     caps
 }

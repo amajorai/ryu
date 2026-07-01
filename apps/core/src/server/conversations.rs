@@ -111,6 +111,23 @@ pub struct ConversationDetail {
     pub participants: Vec<String>,
 }
 
+/// A persisted `/btw` side question + its answer, keyed to the conversation it
+/// was asked about. These are lightweight asides (single Q&A, no tools) that the
+/// "Side chats" surfaces list under their parent conversation. `question` and
+/// `answer` are sealed at rest like message content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BtwEntry {
+    pub id: String,
+    pub conversation_id: String,
+    pub question: String,
+    pub answer: String,
+    /// The model that produced the answer (None if unknown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Unix milliseconds.
+    pub created_at: i64,
+}
+
 /// The run status of a [`Session`]. Tracks the lifecycle of a single agent/workflow run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -189,6 +206,14 @@ pub struct ConversationStore {
     /// (tests, CLI, headless). Indexing on append and lazy backfill on search are
     /// both best-effort: a failure here never affects message CRUD.
     message_index: Option<super::message_index::MessageIndex>,
+    /// Optional full-text (FTS5) index over message bodies — the lexical/keyword
+    /// complement to `message_index` (semantic KNN), backing the FTS session-search
+    /// recall layer. `None` in contexts that don't wire it (tests, CLI, headless).
+    /// Unlike the semantic index it needs NO embedder, so its lazy backfill on
+    /// search is network-free. Population is DEFAULT-OFF: it only ever runs when the
+    /// FTS recall pref is enabled (search is the sole writer, via lazy backfill), so
+    /// the on-disk term index materializes only for users who opt in.
+    message_fts: Option<super::message_fts::MessageFtsIndex>,
     /// Optional sink for conversation ids that just received their *first* user
     /// message and so are candidates for a background auto-rename. `None` in
     /// contexts without a server loop to consume them (tests, CLI). The server
@@ -234,6 +259,7 @@ impl ConversationStore {
             conn: Arc::new(Mutex::new(conn)),
             cipher: crate::crypto::global_cipher()?,
             message_index: None,
+            message_fts: None,
             auto_title_tx: None,
             realtime: None,
         })
@@ -244,6 +270,16 @@ impl ConversationStore {
     /// construction to enable indexing-on-append + searchable history.
     pub fn with_message_index(mut self, index: super::message_index::MessageIndex) -> Self {
         self.message_index = Some(index);
+        self
+    }
+
+    /// Wire the full-text (FTS5) message index (backing the FTS session-search
+    /// recall layer) into the store. Cheap to clone (`Arc` inside). Mirrors
+    /// [`with_message_index`]. Population is lazy-on-search and default-OFF, so
+    /// wiring the index alone materializes nothing until a search runs under the
+    /// enabled FTS recall pref.
+    pub fn with_message_fts_index(mut self, index: super::message_fts::MessageFtsIndex) -> Self {
+        self.message_fts = Some(index);
         self
     }
 
@@ -275,6 +311,7 @@ impl ConversationStore {
             conn: Arc::new(Mutex::new(conn)),
             cipher: crate::crypto::FieldCipher::new(&[0x11; 32]),
             message_index: None,
+            message_fts: None,
             auto_title_tx: None,
             realtime: None,
         })
@@ -309,7 +346,17 @@ impl ConversationStore {
                  updated_at      INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_sessions_conversation
-                 ON sessions(conversation_id);",
+                 ON sessions(conversation_id);
+             CREATE TABLE IF NOT EXISTS btw_entries (
+                 id              TEXT PRIMARY KEY,
+                 conversation_id TEXT NOT NULL,
+                 question        TEXT NOT NULL,
+                 answer          TEXT NOT NULL,
+                 model           TEXT,
+                 created_at      INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_btw_conversation
+                 ON btw_entries(conversation_id, created_at);",
         )
         .context("initializing conversation schema")?;
 
@@ -981,6 +1028,94 @@ impl ConversationStore {
         Ok(Some(out))
     }
 
+    /// Full-text (FTS5) search over past conversation messages — the lexical/keyword
+    /// complement to [`search_messages`] (semantic KNN). Returns `None` when no FTS
+    /// index is wired.
+    ///
+    /// Performs a **lazy backfill** first: any stored message not yet in the FTS
+    /// index is decrypted and indexed so the feature returns hits for chats already
+    /// on disk, not just future ones. Unlike the semantic backfill this is
+    /// network-free (no embedder), so it runs INLINE (awaited) rather than spawned —
+    /// a down embed sidecar can never affect it. Then runs the FTS MATCH and
+    /// re-reads + decrypts each hit's snippet from this db (the FTS index stores only
+    /// the tokenized inverted index + metadata, never message text). Hits whose
+    /// message id no longer resolves (e.g. a deleted conversation orphaned its FTS
+    /// row) are dropped.
+    pub async fn fts_search_messages(
+        &self,
+        query: &str,
+        limit: usize,
+        conversation_ids: Option<&[String]>,
+    ) -> Result<Option<Vec<MessageSearchHit>>> {
+        let Some(index) = self.message_fts.clone() else {
+            return Ok(None);
+        };
+
+        // ── Lazy backfill (inline, network-free) ─────────────────────────────
+        let already = index.indexed_ids().await.unwrap_or_default();
+        let unindexed = {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn
+                .prepare("SELECT id, conversation_id, role, content, created_at FROM messages")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            })?;
+            let mut pending: Vec<(String, String, String, String, i64)> = Vec::new();
+            for row in rows {
+                let (id, conv, role, sealed, created) = row?;
+                if already.contains(&id) {
+                    continue;
+                }
+                let plaintext = self.open_content(sealed);
+                if plaintext.trim().is_empty() {
+                    continue;
+                }
+                pending.push((id, conv, role, plaintext, created));
+            }
+            pending
+        };
+        for (id, conv, role, content, created) in unindexed {
+            if let Err(e) = index
+                .index_message(&id, &conv, &role, &content, created)
+                .await
+            {
+                tracing::warn!("fts backfill index write failed for {id}: {e:#}");
+            }
+        }
+
+        // ── FTS MATCH + snippet re-read ──────────────────────────────────────
+        let hits = index.search(query, limit, conversation_ids).await?;
+        let mut out = Vec::with_capacity(hits.len());
+        for hit in hits {
+            let sealed: Option<String> = {
+                let conn = self.conn.lock().await;
+                conn.query_row(
+                    "SELECT content FROM messages WHERE id = ?1",
+                    [&hit.message_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+            };
+            // Drop orphaned rows (message deleted out from under the index).
+            let Some(sealed) = sealed else { continue };
+            out.push(MessageSearchHit {
+                conversation_id: hit.conversation_id,
+                message_id: hit.message_id,
+                role: hit.role,
+                content: self.open_content(sealed),
+                created_at: hit.created_at,
+                score: hit.score,
+            });
+        }
+        Ok(Some(out))
+    }
+
     /// Fetch the most recent `limit` messages of a conversation, returned in
     /// chronological order (oldest first). Used by short-term memory (spec unit
     /// U11) to assemble recent session context for each request without
@@ -1373,10 +1508,84 @@ impl ConversationStore {
             "DELETE FROM messages WHERE conversation_id = ?1",
             params![conversation_id],
         )?;
+        // FK enforcement is off (deletes are manual), so drop side chats here too.
+        conn.execute(
+            "DELETE FROM btw_entries WHERE conversation_id = ?1",
+            params![conversation_id],
+        )?;
         let removed = conn.execute(
             "DELETE FROM conversations WHERE id = ?1",
             params![conversation_id],
         )?;
+        Ok(removed > 0)
+    }
+
+    // ── Side questions (`/btw`) ───────────────────────────────────────────────
+
+    /// Persist a `/btw` side question + answer against its parent conversation.
+    /// `question`/`answer` are sealed at rest. Returns the stored entry (with the
+    /// plaintext fields, for an immediate echo back to the client).
+    pub async fn append_btw(
+        &self,
+        conversation_id: &str,
+        question: &str,
+        answer: &str,
+        model: Option<&str>,
+    ) -> Result<BtwEntry> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_millis();
+        let sealed_q = self.cipher.seal(question)?;
+        let sealed_a = self.cipher.seal(answer)?;
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO btw_entries (id, conversation_id, question, answer, model, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, conversation_id, sealed_q, sealed_a, model, now],
+        )
+        .context("persisting btw entry")?;
+        Ok(BtwEntry {
+            id,
+            conversation_id: conversation_id.to_owned(),
+            question: question.to_owned(),
+            answer: answer.to_owned(),
+            model: model.map(str::to_owned),
+            created_at: now,
+        })
+    }
+
+    /// All side questions for a conversation, newest first.
+    pub async fn list_btw(&self, conversation_id: &str) -> Result<Vec<BtwEntry>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, question, answer, model, created_at
+             FROM btw_entries
+             WHERE conversation_id = ?1
+             ORDER BY created_at DESC, rowid DESC",
+        )?;
+        let rows = stmt.query_map([conversation_id], |row| {
+            Ok(BtwEntry {
+                id: row.get(0)?,
+                conversation_id: row.get(1)?,
+                question: row.get(2)?,
+                answer: row.get(3)?,
+                model: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let mut entry = row?;
+            entry.question = self.open_content(std::mem::take(&mut entry.question));
+            entry.answer = self.open_content(std::mem::take(&mut entry.answer));
+            out.push(entry);
+        }
+        Ok(out)
+    }
+
+    /// Delete a single side question by id. Returns true when a row was removed.
+    pub async fn delete_btw(&self, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let removed = conn.execute("DELETE FROM btw_entries WHERE id = ?1", params![id])?;
         Ok(removed > 0)
     }
 
@@ -1397,6 +1606,7 @@ impl ConversationStore {
         let conn = self.conn.lock().await;
         conn.execute("DELETE FROM messages", [])?;
         conn.execute("DELETE FROM sessions", [])?;
+        conn.execute("DELETE FROM btw_entries", [])?;
         let removed = conn.execute("DELETE FROM conversations", [])?;
         Ok(removed as u64)
     }
@@ -1710,6 +1920,86 @@ mod tests {
         );
         // The decrypted snippet is returned (proves snippet re-read + cipher.open).
         assert!(hits[0].content.contains("lifetimes"));
+    }
+
+    #[tokio::test]
+    async fn fts_search_none_without_index() {
+        // No FTS index wired (open_in_memory) → search returns None, never errors.
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .append_message("c1", "user", "hello world", None, None, None)
+            .await
+            .unwrap();
+        let res = store.fts_search_messages("hello", 5, None).await.unwrap();
+        assert!(res.is_none());
+    }
+
+    #[tokio::test]
+    async fn fts_search_backfills_existing_and_returns_decrypted_snippet() {
+        // Append messages to an FTS-wired store, then search. The inline lazy
+        // backfill on the first search indexes the stored (decrypted) messages and
+        // finds them — and the returned snippet is the decrypted plaintext, not the
+        // sealed blob. Network-free (no embedder).
+        let index = crate::server::message_fts::MessageFtsIndex::open_in_memory().unwrap();
+        let store = ConversationStore::open_in_memory()
+            .unwrap()
+            .with_message_fts_index(index);
+        store
+            .append_message(
+                "c1",
+                "user",
+                "rust ownership and lifetimes are tricky",
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        store
+            .append_message(
+                "c2",
+                "assistant",
+                "favourite pizza toppings pepperoni",
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let hits = store
+            .fts_search_messages("pizza", 5, None)
+            .await
+            .unwrap()
+            .expect("fts index wired");
+        assert!(!hits.is_empty(), "expected a hit after backfill");
+        assert_eq!(hits[0].conversation_id, "c2");
+        // Proves snippet re-read + cipher.open (decrypted, not the sealed blob).
+        assert!(hits[0].content.contains("pepperoni"));
+        assert!(!hits[0].content.starts_with("enc:v1:"));
+    }
+
+    #[tokio::test]
+    async fn fts_search_scopes_to_conversation_ids() {
+        let index = crate::server::message_fts::MessageFtsIndex::open_in_memory().unwrap();
+        let store = ConversationStore::open_in_memory()
+            .unwrap()
+            .with_message_fts_index(index);
+        store
+            .append_message("c1", "user", "alpha beta gamma", None, None, None)
+            .await
+            .unwrap();
+        store
+            .append_message("c2", "user", "alpha beta gamma", None, None, None)
+            .await
+            .unwrap();
+        let hits = store
+            .fts_search_messages("alpha beta", 5, Some(&["c2".to_owned()]))
+            .await
+            .unwrap()
+            .expect("fts index wired");
+        assert!(!hits.is_empty());
+        assert!(hits.iter().all(|h| h.conversation_id == "c2"));
     }
 
     #[tokio::test]

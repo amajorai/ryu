@@ -128,50 +128,6 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             deprecated: false,
             recommended: false,
         },
-        CatalogEntry {
-            name: "nanoclaw",
-            display_name: "NanoClaw",
-            description: "Docker sandbox isolation · macOS M1 / Win x86 only",
-            category: SidecarCategory::Agent,
-            source: SidecarSource::Docker {
-                image: "ryu-org/nanoclaw",
-            },
-            deprecated: false,
-            recommended: false,
-        },
-        CatalogEntry {
-            name: "picoclaw",
-            display_name: "PicoClaw",
-            description: "Lightweight native binary · minimal footprint · embeddable",
-            category: SidecarCategory::Agent,
-            source: SidecarSource::Github {
-                repo: "ryu-org/picoclaw",
-            },
-            deprecated: false,
-            recommended: false,
-        },
-        CatalogEntry {
-            name: "nemoclaw",
-            display_name: "NemoClaw",
-            description: "NVIDIA NeMo · built-in privacy & safety guardrails",
-            category: SidecarCategory::Agent,
-            source: SidecarSource::Github {
-                repo: "ryu-org/nemoclaw",
-            },
-            deprecated: false,
-            recommended: false,
-        },
-        CatalogEntry {
-            name: "ironclaw",
-            display_name: "IronClaw",
-            description: "NEAR AI agent · autonomous workflows with blockchain integration",
-            category: SidecarCategory::Agent,
-            source: SidecarSource::Github {
-                repo: "ryu-org/ironclaw",
-            },
-            deprecated: false,
-            recommended: false,
-        },
         // Tools
         CatalogEntry {
             name: "agentbrowser",
@@ -183,17 +139,6 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             },
             deprecated: false,
             recommended: true,
-        },
-        CatalogEntry {
-            name: "temporal",
-            display_name: "Temporal",
-            description: "Workflow engine for predictable, durable workflows",
-            category: SidecarCategory::Tool,
-            source: SidecarSource::Github {
-                repo: "temporalio/temporal",
-            },
-            deprecated: false,
-            recommended: false,
         },
         CatalogEntry {
             name: "spider",
@@ -216,17 +161,6 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             },
             deprecated: false,
             recommended: true,
-        },
-        CatalogEntry {
-            name: "qmd",
-            display_name: "QMD",
-            description: "Markdown knowledge base search tool",
-            category: SidecarCategory::Tool,
-            source: SidecarSource::Npm {
-                package: "@ryu/qmd",
-            },
-            deprecated: false,
-            recommended: false,
         },
         CatalogEntry {
             name: "shadow",
@@ -560,10 +494,10 @@ mod tests {
             .iter()
             .filter(|e| e.category == SidecarCategory::Sandbox)
             .collect();
-        assert_eq!(agents.len(), 6);
-        // agentbrowser, temporal, spider, llmfit, qmd, shadow, ghost (+ a
-        // concurrently-added tool in this shared tree).
-        assert_eq!(tools.len(), 8);
+        // zeroclaw + openclaw (the only claws with a real agent runtime).
+        assert_eq!(agents.len(), 2);
+        // agentbrowser, spider, llmfit, shadow, ghost, unsloth.
+        assert_eq!(tools.len(), 6);
         // llamacpp, ollama, vllm, sglang, mlx, mlx-vlm, omlx (last three Apple
         // Silicon only), docker-model-runner (adopt-only).
         assert_eq!(providers.len(), 8);

@@ -21,6 +21,9 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+mod drift;
+pub use drift::{detect_drift, DriftWarning};
+
 /// Env var with the control-plane base URL (no trailing `/api`).
 const ENV_CONTROL_PLANE_URL: &str = "CONTROL_PLANE_URL";
 /// Env var with this gateway's `rgw_` key used to authenticate to the control

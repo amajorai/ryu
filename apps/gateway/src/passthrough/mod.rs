@@ -44,6 +44,9 @@
 //!   and SSE framing is preserved. The accumulated redacted text is still scanned
 //!   once at stream end to audit any residual outbound violation. Fail-open on a
 //!   scanner-less config or an unparseable event (the raw bytes pass through).
+//!   The firewall's stable-marker `redact_outbound` secret scrubber (GitHub PATs,
+//!   `sk-` keys, AWS AKIAs, `Bearer`/`token=`/`password=` params) also runs per
+//!   text-delta and over any non-streaming (JSON) response body at stream end.
 //!   **Known limitation:** redaction is per-delta, so a secret split across two
 //!   separate text-delta events (`sk-` in one, the rest in the next) is not
 //!   caught — a cross-delta hold-back buffer is a deliberate follow-on.
@@ -512,10 +515,23 @@ fn redact_response_passthrough(body: Body, format: WireFormat, state: SharedStat
                         Vec::new()
                     } else {
                         let raw = String::from_utf8_lossy(&tail).to_string();
-                        let (redacted, text) =
-                            s.state.with_firewall(|fw| redact_sse_event(s.format, fw, &raw));
-                        s.accumulated.push_str(&text);
-                        redacted.into_bytes()
+                        // SSE events are processed incrementally above; a non-empty
+                        // tail with no `data:` line is a non-streaming (JSON) body —
+                        // redact the FULL body once (OUTBOUND-DLP contract). Heuristic
+                        // note: a JSON body that itself contains the literal `data:`
+                        // (e.g. a data: URI in output) routes to the SSE path and is
+                        // passed through un-redacted — acceptable best-effort.
+                        if raw.contains("data:") {
+                            let (redacted, text) =
+                                s.state.with_firewall(|fw| redact_sse_event(s.format, fw, &raw));
+                            s.accumulated.push_str(&text);
+                            redacted.into_bytes()
+                        } else {
+                            let (redacted, _hits) =
+                                s.state.with_firewall(|fw| fw.redact_outbound(&raw));
+                            s.accumulated.push_str(&redacted);
+                            redacted.into_bytes()
+                        }
                     };
                     audit_outbound(&s.state, s.format, &s.accumulated);
                     if tail_out.is_empty() {
@@ -645,6 +661,7 @@ fn redact_sse_data_json(
                 .and_then(|d| d.get("text"))
                 .and_then(Value::as_str)?;
             let redacted = fw.sanitize(text);
+            let (redacted, _) = fw.redact_outbound(&redacted);
             json["delta"]["text"] = Value::String(redacted.clone());
             Some((serde_json::to_string(&json).ok()?, redacted))
         }
@@ -660,6 +677,7 @@ fn redact_sse_data_json(
             }
             let delta = json.get("delta").and_then(Value::as_str)?;
             let redacted = fw.sanitize(delta);
+            let (redacted, _) = fw.redact_outbound(&redacted);
             json["delta"] = Value::String(redacted.clone());
             Some((serde_json::to_string(&json).ok()?, redacted))
         }
@@ -875,6 +893,33 @@ mod tests {
         let (out, text) = redact_sse_event(WireFormat::Anthropic, &fw, event);
         assert_eq!(out, event);
         assert!(text.is_empty());
+    }
+
+    /// OUTBOUND-DLP wiring proof: a GitHub OAuth PAT (`gho_…`) inside an
+    /// Anthropic `text_delta` survives a small network-chunk split and is redacted
+    /// by `redact_outbound`. `gho_` is deliberately chosen because the config-gated
+    /// `sanitize` secret set does NOT match it — only the new outbound rule does —
+    /// so a passing assertion proves the wiring, not pre-existing behavior.
+    #[test]
+    fn anthropic_response_redacts_outbound_only_secret_across_chunks() {
+        let fw = enabled_scanner();
+        let secret = "gho_abcdefghijklmnopqrstuvwxyz0123456789";
+        let transcript = format!(
+            concat!(
+                "event: content_block_delta\n",
+                "data: {{\"type\":\"content_block_delta\",\"delta\":{{\"type\":\"text_delta\",\"text\":\"here is {} done\"}}}}\n\n",
+            ),
+            secret
+        );
+        let out = redact_in_chunks(WireFormat::Anthropic, &fw, transcript.as_bytes(), 7);
+        assert!(
+            !out.contains(secret),
+            "outbound-only secret must be redacted, got: {out}"
+        );
+        assert!(
+            out.contains("[REDACTED:gh_pat]"),
+            "expected stable outbound marker: {out}"
+        );
     }
 
     #[test]

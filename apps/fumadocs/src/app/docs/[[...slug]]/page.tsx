@@ -12,6 +12,7 @@ import { notFound } from "next/navigation";
 
 import { APIPage } from "@/components/api-page";
 import { getMDXComponents } from "@/components/mdx";
+import { LevelBadge } from "@/components/mdx/level-badge";
 import { gitConfig } from "@/lib/layout.shared";
 import { getPageImage, source } from "@/lib/source";
 
@@ -24,6 +25,11 @@ export default async function Page(props: PageProps<"/docs/[[...slug]]">) {
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
+      {page.data.level === undefined ? null : (
+        <div className="mb-1">
+          <LevelBadge level={page.data.level} />
+        </div>
+      )}
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription className="mb-0">
         {page.data.description}

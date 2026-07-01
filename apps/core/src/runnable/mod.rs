@@ -397,6 +397,7 @@ mod tests {
             description: None,
             system_prompt: None,
             tools: vec![],
+            approval_tools: vec![],
             composio_actions: vec![],
             skills: vec![],
             identity_profile_ids: vec![],

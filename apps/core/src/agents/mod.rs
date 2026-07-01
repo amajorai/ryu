@@ -141,6 +141,15 @@ pub struct AgentRecord {
     /// [`crate::identity`] vault), governed by the Gateway grant + audit.
     #[serde(default)]
     pub identity_profile_ids: Vec<String>,
+    /// Tool ids (MCP `<server>__<tool>`) that require a human-in-the-loop
+    /// approval before this agent may execute them (Layer A of the approval
+    /// policy — see [`crate::approvals::policy`]). An **empty** list means the
+    /// agent has no per-agent gated tools (the safe default — opt-in, like
+    /// `identity_profile_ids`). Composes with the global approval mode + risk
+    /// tags + the Gateway consult via logical OR: any layer requiring approval
+    /// gates the call.
+    #[serde(default)]
+    pub approval_tools: Vec<String>,
     /// Legacy flat model identifier. Kept for backward compatibility;
     /// the `chat_model` slot is the authoritative slot going forward.
     #[serde(default)]
@@ -788,6 +797,9 @@ impl AgentStore {
             description: input.description,
             system_prompt: input.system_prompt,
             tools: input.tools,
+            // Concurrent wip(orchestrator) added `approval_tools` to AgentRecord
+            // without wiring an input/DB source; default empty so the crate builds.
+            approval_tools: Vec::new(),
             composio_actions: input.composio_actions,
             skills: input.skills,
             identity_profile_ids: input.identity_profile_ids,
@@ -1174,6 +1186,9 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRecord> {
         description: row.get(2)?,
         system_prompt: row.get(3)?,
         tools,
+        // Concurrent wip(orchestrator) added `approval_tools` without a DB column;
+        // default empty so the crate builds (no persistence to read yet).
+        approval_tools: Vec::new(),
         composio_actions,
         skills,
         identity_profile_ids,

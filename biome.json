@@ -36,7 +36,10 @@
       "!**/convex/_generated",
       "!apps/core/Python",
       "!apps/fumadocs",
-      "!apps/raycast"
+      "!apps/raycast",
+      "!apps/tui/components/ui",
+      "!apps/tui/hooks",
+      "!apps/tui/lib"
     ]
   },
   "formatter": {
@@ -109,6 +112,19 @@
       "includes": ["apps/desktop/src/**"],
       "linter": {
         "rules": {
+          "style": {
+            "useFilenamingConvention": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/tui/src/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnresolvedImports": "off"
+          },
           "style": {
             "useFilenamingConvention": "off"
           }

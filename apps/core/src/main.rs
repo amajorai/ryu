@@ -24,7 +24,9 @@ mod hardware;
 mod hf_auth;
 mod identity;
 mod identity_verify;
+mod experience;
 mod inference;
+mod learning;
 mod mcp_catalog;
 mod meetings;
 mod mesh;
@@ -58,6 +60,7 @@ mod teams;
 mod telemetry;
 mod tool_exec;
 mod update;
+mod usage;
 mod voice;
 mod webhook_ingress;
 mod workflow;
@@ -67,10 +70,7 @@ use tokio::sync::Mutex;
 
 use sidecar::{
     adapters::AcpAgentRegistry,
-    agents::{
-        HermesManager, IronClawManager, NanoClawManager, NemoClawManager, OpenClawManager,
-        PicoClawManager, ZeroClawManager,
-    },
+    agents::{HermesManager, OpenClawManager, ZeroClawManager},
     install_state::InstallStatusStore,
     onboarding::SetupManager,
     providers::{
@@ -82,8 +82,7 @@ use sidecar::{
     },
     tailscale::TailscaleManager,
     tools::{
-        ghost::GhostManager, llmfit::LlmFit, qmd::QmdManager, shadow::ShadowManager,
-        spider::SpiderManager, temporal::TemporalManager,
+        ghost::GhostManager, llmfit::LlmFit, shadow::ShadowManager, spider::SpiderManager,
     },
     SidecarManager,
 };
@@ -253,19 +252,13 @@ async fn main() {
         // GPU, so it only starts once a user installs it or runs `bun run dev:unsloth`.
         Arc::new(UnslothManager::new().with_downloads(download_center.clone())),
         // Tools
-        Arc::new(TemporalManager::new().with_downloads(download_center.clone())),
         Arc::new(SpiderManager::new()),
         Arc::new(LlmFit::new()),
-        Arc::new(QmdManager::new()),
         Arc::new(ShadowManager::new().with_downloads(download_center.clone())),
         Arc::new(GhostManager::new().with_downloads(download_center.clone())),
         // Agents
         Arc::new(ZeroClawManager::new().with_downloads(download_center.clone())),
         Arc::new(OpenClawManager::new()),
-        Arc::new(NanoClawManager::new()),
-        Arc::new(PicoClawManager::new().with_downloads(download_center.clone())),
-        Arc::new(NemoClawManager::new()),
-        Arc::new(IronClawManager::new().with_downloads(download_center.clone())),
         Arc::new(HermesManager::new()),
         // Mesh daemon (Tailscale/Headscale, #478). Opt-in via RYU_MESH_ENABLED;
         // registered here so the catalog/install routes can reach it, but
@@ -275,10 +268,8 @@ async fn main() {
 
     let startup_order = vec![
         // Tools first
-        "temporal".into(),
         "spider".into(),
         "llmfit".into(),
-        "qmd".into(),
         "shadow".into(),
         "ghost".into(),
         // Then providers
@@ -368,6 +359,18 @@ async fn main() {
             conversations
         }
     };
+    // Full-text (FTS5) message index backing the FTS session-search recall layer.
+    // Opened best-effort (fail-open, same as the semantic index): if the FTS table
+    // can't be created, conversations still work — the FTS recall source just
+    // returns no index. Population is lazy-on-search and default-OFF, so wiring the
+    // index here materializes nothing until a user opts into FTS recall.
+    let conversations = match server::message_fts::MessageFtsIndex::open_default() {
+        Ok(index) => conversations.with_message_fts_index(index),
+        Err(e) => {
+            tracing::warn!("fts message index unavailable; fts session search disabled: {e:#}");
+            conversations
+        }
+    };
     let memory = match server::memory::MemoryStore::open_default() {
         Ok(store) => store,
         Err(e) => panic!("failed to open memory store: {e:#}"),
@@ -451,6 +454,16 @@ async fn main() {
         .await
     {
         claude_config::set_enabled(&value);
+    }
+    // Untrusted-content wrapping toggle: external/tool RESULTS re-entering the
+    // model are boundary-wrapped + chat-template-token-stripped. Default-ON (safe:
+    // only untrusted tool output, never user text); seed only to honour an
+    // explicit opt-OUT persisted by the desktop.
+    if let Ok(Some(value)) = preferences
+        .get(sidecar::untrusted::UNTRUSTED_WRAPPING_PREF_KEY)
+        .await
+    {
+        sidecar::untrusted::set_enabled(&value);
     }
     // Codex gateway-routing toggle (subscription passthrough). Same opt-in story
     // as Claude: seed the in-process flag so the (sync) ACP spawn path points the
@@ -728,6 +741,13 @@ async fn main() {
         Err(e) => tracing::warn!("identity store unavailable: {e:#}"),
     }
 
+    // Ensure the single continual-learning cycle job exists so it rides the
+    // scheduler tick loop. It no-ops unless the user opted in (and, if configured,
+    // only fires inside the sleep window), so scheduling it is always safe.
+    if let Err(e) = ensure_learning_cycle_job() {
+        tracing::warn!("learning cycle job not scheduled: {e}");
+    }
+
     // Publish the MCP registry globally so the workflow `Tool` node can invoke
     // tools (the executor is a free function with no ServerState handle).
     crate::sidecar::mcp::set_global_registry(Arc::clone(&mcp_registry));
@@ -807,6 +827,14 @@ async fn main() {
         Err(e) => panic!("failed to open finetune store: {e:#}"),
     };
 
+    // Experience buffer (continual-learning loop). Durable record of captured
+    // (user, assistant) turns + PRM scores; populated by sweeping conversations
+    // at cycle time, consumed by the reward-filtered retrain.
+    let experience_store = match crate::experience::ExperienceStore::open_default() {
+        Ok(store) => store,
+        Err(e) => panic!("failed to open experience store: {e:#}"),
+    };
+
     let server_state = server::ServerState {
         setup: Arc::clone(&setup),
         manager: Arc::clone(&sidecars),
@@ -851,11 +879,15 @@ async fn main() {
         // `kind:"document"` realtime path applies/persists/rebroadcasts against.
         collab,
         finetune: finetune_store,
+        experience: experience_store,
         // Captured for the public `/api/realtime/ws` handler's in-handler node
         // token enforcement (the public router has no `auth_token` Extension).
         // Same env source the protected router resolves below.
         node_token: std::env::var("RYU_TOKEN").ok(),
     };
+    // Publish the state for the scheduler's continual-learning job (it has no
+    // `State` extractor), mirroring the monitor/quest/identity-health engines.
+    crate::learning::set_global_state(server_state.clone());
     let auth_token = std::env::var("RYU_TOKEN").ok();
 
     // Fire the `onStartup` activation event (#443) now that `ServerState` exists.
@@ -1151,6 +1183,40 @@ fn ensure_identity_health_job() -> Result<(), String> {
             interval: interval.clone(),
         },
         target: JobTarget::IdentityHealth,
+        enabled: true,
+        require_approval: false,
+        created_at: existing
+            .as_ref()
+            .map(|j| j.created_at.clone())
+            .unwrap_or_else(|| now.clone()),
+        updated_at: now,
+        last_run_at: existing.as_ref().and_then(|j| j.last_run_at.clone()),
+        last_outcome: existing.as_ref().and_then(|j| j.last_outcome),
+        history: existing.map(|j| j.history).unwrap_or_default(),
+    };
+    job_store::save_job(&job).map_err(|e| e.to_string())
+}
+
+/// Ensure the single continual-learning cycle job exists (MetaClaw-style periodic
+/// retrain). Ticks hourly (default; `RYU_LEARNING_INTERVAL` knob) so it reliably
+/// catches the configured sleep window, but the job body no-ops unless the user
+/// opted in, only fires inside the window, and a persisted min-gap keeps it to at
+/// most one retrain per ~day (and prevents fire-on-every-restart). Mirrors
+/// [`ensure_identity_health_job`].
+fn ensure_learning_cycle_job() -> Result<(), String> {
+    use crate::scheduler::store::{self as job_store, JobTarget, Schedule, ScheduledJob};
+
+    const JOB_ID: &str = "learning-cycle";
+
+    let interval =
+        std::env::var("RYU_LEARNING_INTERVAL").unwrap_or_else(|_| "1h".to_string());
+    let now = chrono::Utc::now().to_rfc3339();
+    let existing = job_store::load_job(JOB_ID).ok();
+    let job = ScheduledJob {
+        id: JOB_ID.to_owned(),
+        name: "continual-learning cycle".to_owned(),
+        schedule: Schedule::Every { interval },
+        target: JobTarget::LearningCycle,
         enabled: true,
         require_approval: false,
         created_at: existing

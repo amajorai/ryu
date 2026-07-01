@@ -115,6 +115,10 @@ pub async fn chat_completions(
     let priority = crate::concurrency::Priority::from_header(
         headers.get("x-ryu-priority").and_then(|v| v.to_str().ok()),
     );
+    // Named tool-policy profile (#473 profiles). Core forwards the agent's
+    // selected profile name; the gateway resolves it to an allowlist preset in
+    // `effective_tool_allowlist`. Absent or unknown ⇒ today's allowlist path.
+    let tool_profile = header_string(&headers, "x-ryu-tool-profile");
 
     let ctx = authenticate(
         &state,
@@ -131,6 +135,7 @@ pub async fn chat_completions(
             companion_source,
             tool_search_requested,
             priority,
+            tool_profile,
         },
     )?;
     debug!(request_id = %ctx.request_id, "chat_completions: authenticated");

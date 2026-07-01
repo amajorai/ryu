@@ -26,6 +26,7 @@ mod skills;
 mod state;
 mod telemetry;
 mod tools;
+mod untrusted;
 
 use std::{sync::Arc, time::Duration};
 
@@ -166,6 +167,25 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         });
+    }
+
+    // Static policy-drift check (dangerous-tool-combo + elevation drift). Run
+    // unconditionally — standalone gateways with no control plane still get the
+    // check. Warn-only: nothing is blocked. The firewall is read live via
+    // `with_firewall` (at startup it equals `state.config.firewall`).
+    for warning in policy::detect_drift(
+        &state.config.tools,
+        &state.config.composio,
+        &state.config.exec_budget,
+        &state.with_firewall(|fw| fw.config().clone()),
+        &state.policy_snapshot(),
+    ) {
+        tracing::warn!(
+            code = %warning.code,
+            severity = %warning.severity,
+            "policy drift: {}",
+            warning.message
+        );
     }
 
     // Background: evict stale rate-limit buckets every 5 minutes

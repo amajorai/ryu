@@ -165,18 +165,12 @@ fn exec_wasm(engine: &wasmtime::Engine, spec: ExecSpec) -> Result<ExecOutput> {
     let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
     builder.args(&argv_refs);
 
-    // Map granted FS paths into WASI preopens.
-    // Read paths get read-only access; write paths get read+write access.
-    // Paths present in both sets get the union (read+write).
+    // Map granted FS paths into WASI preopens, honoring the declared workspace
+    // access level. `effective_mounts` applies the None/ReadOnly/ReadWrite clamp
+    // (the default ReadWrite reproduces the historical per-path behavior: read
+    // paths read-only, write paths read+write).
     let caps = &spec.capabilities;
-    let all_paths: std::collections::HashSet<_> = caps
-        .fs_read_paths
-        .iter()
-        .chain(caps.fs_write_paths.iter())
-        .collect();
-
-    for path in all_paths {
-        let writable = caps.fs_write_paths.contains(path);
+    for (path, writable) in caps.effective_mounts() {
         let dir = wasmtime_wasi::DirPerms::READ
             | if writable {
                 wasmtime_wasi::DirPerms::MUTATE
@@ -189,7 +183,7 @@ fn exec_wasm(engine: &wasmtime::Engine, spec: ExecSpec) -> Result<ExecOutput> {
             } else {
                 wasmtime_wasi::FilePerms::empty()
             };
-        builder.preopened_dir(path, path.to_string_lossy().as_ref(), dir, file)?;
+        builder.preopened_dir(&path, path.to_string_lossy().as_ref(), dir, file)?;
     }
 
     let wasi = builder.build_p1();

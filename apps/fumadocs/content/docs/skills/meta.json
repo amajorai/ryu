@@ -1,0 +1,13 @@
+{
+  "root": true,
+  "title": "Skills",
+  "description": "Ryu agent skills: reusable SKILL.md instruction packs that load on demand. The setup-ryu flagship skill, the shipped catalog, and how to author and publish your own.",
+  "icon": "Sparkles",
+  "pages": [
+    "index",
+    "setup-ryu",
+    "catalog",
+    "authoring",
+    "publishing"
+  ]
+}

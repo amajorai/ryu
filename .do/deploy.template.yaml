@@ -1,0 +1,38 @@
+# DigitalOcean App Platform deploy template for the Ryu open-core stack.
+# https://docs.digitalocean.com/products/app-platform/reference/app-spec/
+#
+# Deploy:
+#   https://cloud.digitalocean.com/apps/new?repo=https://github.com/amajorai/ryu/tree/main
+#
+# Builds ryu-core from ./Dockerfile (Core spawns + manages the Gateway on
+# loopback). App Platform injects $PORT; the image entrypoint maps it onto
+# RYU_BIND, and http_port below tells the platform which port to route to.
+#
+# Caveat: App Platform service instances have ephemeral local storage, so /data
+# does NOT persist across deploys — Core re-downloads its local model stack on
+# each deploy. For a persistent node, set a provider key (OPENAI_API_KEY) to
+# skip the local download, or run the Docker image on a Droplet with a volume.
+spec:
+  name: ryu
+  services:
+    - name: ryu
+      dockerfile_path: Dockerfile
+      git:
+        repo_clone_url: https://github.com/amajorai/ryu.git
+        branch: main
+      instance_size_slug: apps-s-1vcpu-2gb
+      instance_count: 1
+      http_port: 7980
+      health_check:
+        http_path: /api/health
+        initial_delay_seconds: 120
+        period_seconds: 30
+        timeout_seconds: 5
+        failure_threshold: 5
+      envs:
+        - key: RYU_DIR
+          value: /data
+        # Uncomment to bring your own provider and skip the local-model download:
+        # - key: OPENAI_API_KEY
+        #   scope: RUN_TIME
+        #   type: SECRET

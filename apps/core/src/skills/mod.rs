@@ -29,6 +29,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::runnable::{Runnable, RunnableKind};
 
+/// Process-wide lock for tests that mutate the global `RYU_SKILLS_DIR` /
+/// `RYU_SKILLS_ACTIVE_FILE` env vars. Several test modules (`skills`,
+/// `skills_catalog::from_source`, `sidecar::mcp::skills_tool`) point these at their
+/// own tempdirs; without serializing them a parallel `cargo test` run has one
+/// test's `remove_var` clobber another's `set_var`, so a write falls through to the
+/// real `~/.claude/skills`. Every test that touches those vars must hold this.
+#[cfg(test)]
+pub(crate) static SKILLS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // ── Disclosure mode (progressive vs full) ───────────────────────────────────────
 //
 // Progressive disclosure injects only each skill's name+description (L1) up front
@@ -1138,6 +1147,9 @@ Do something minimal.
     // the reload gate together.
     #[test]
     fn activation_set_gates_injection() {
+        let _env = SKILLS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = tempfile::tempdir().unwrap();
         let active = tempfile::tempdir().unwrap();
         let active_file = active.path().join("active.json");

@@ -706,14 +706,10 @@ pub struct SidecarStatus {
     pub running: bool,
 }
 
-/// True when the current build target is macOS Apple Silicon or Windows x86_64.
-const NANOCLAW_SUPPORTED: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"))
-    || cfg!(all(target_os = "windows", target_arch = "x86_64"));
-
 pub const SIDECAR_ORDER: &[&str] = &[
-    "temporal", "spider", "screenpipe", "llmfit", "qmd", "shadow", "ghost",
+    "spider", "screenpipe", "llmfit", "shadow", "ghost",
     "llamacpp", "ollama", "vllm",
-    "zeroclaw", "openclaw", "nanoclaw", "picoclaw", "nemoclaw", "ironclaw",
+    "zeroclaw", "openclaw",
 ];
 
 fn si(
@@ -765,21 +761,15 @@ impl App {
                 si("vllm",     "high-throughput GPU inference · requires python ≥3.9", Category::Provider, false, true),
             ],
             tools: vec![
-                si("temporal",   "workflow engine for predictable workflows (recommended)",      Category::Tool, false, true),
                 si("spider",     "web crawler, more than just search (recommended)",          Category::Tool, false, true),
                 si("screenpipe", "continuous local screen + audio recorder for context (recommended)",      Category::Tool, false, true),
                 si("llmfit",     "hardware-aware LLM model recommendations",                   Category::Tool, false, true),
-                si("qmd",        "markdown knowledge base search tool",                        Category::Tool, false, true),
                 si("shadow",     "personal intelligence engine — screen capture & OCR",        Category::Tool, false, true),
                 si("ghost",      "MCP server — AI eyes and hands for any desktop app",         Category::Tool, false, true),
             ],
             agents: vec![
                 si("zeroclaw",  "native binary · fast autonomous agent (default)",          Category::Agent, true,  true),
                 si("openclaw",  "npm global package · cross-platform JS agent",             Category::Agent, false, true),
-                si("nanoclaw",  "docker sandbox isolation · macOS M1 / Win x86 only",      Category::Agent, false, NANOCLAW_SUPPORTED),
-                si("picoclaw",  "lightweight native binary · minimal footprint · embeddable", Category::Agent, false, true),
-                si("nemoclaw",  "NVIDIA NeMo · built-in privacy & safety guardrails",      Category::Agent, false, true),
-                si("ironclaw",  "NEAR AI agent · autonomous workflows with blockchain integration", Category::Agent, false, true),
             ],
             statuses: Vec::new(),
             install_states: HashMap::new(),

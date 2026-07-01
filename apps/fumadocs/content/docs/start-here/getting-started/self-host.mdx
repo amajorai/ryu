@@ -1,0 +1,86 @@
+---
+title: "Deploy & Self-Host"
+description: "One-click deploy a Ryu node (Core + Gateway) to Render, Railway, DigitalOcean, Fly, or your own Docker host."
+---
+
+A self-hosted Ryu node is two open-source Rust services: **Core** (Apache-2.0,
+orchestrates what runs) and the **Gateway** (AGPL-3.0, governs every model
+call). You can stand one up with a single click on a container host, with
+`docker compose`, or with one command on a VPS.
+
+## One-click deploy
+
+Each button builds the repo's [`Dockerfile`](https://github.com/amajorai/ryu/blob/main/Dockerfile).
+Core runs the stack and spawns the Gateway on loopback itself, so a hosted node
+publishes only Core's port and is governed the moment it serves traffic.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/amajorai/ryu)
+&nbsp;
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new)
+&nbsp;
+[![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/amajorai/ryu/tree/main)
+
+<Callout type="warn">
+  Core downloads a fully-local model stack (llama.cpp + Gemma 4, nomic
+  embeddings, whisper) on first boot. Pick a plan with **at least 2 GB of RAM**
+  (4 GB is comfortable), or set a provider key such as `OPENAI_API_KEY` so Core
+  routes to a hosted model and skips the local download. A 512 MB instance will
+  not boot the local stack.
+</Callout>
+
+The templates live at the repo root — `render.yaml`, `railway.json`, `fly.toml`,
+and `.do/deploy.template.yaml` — so each platform auto-detects its config.
+
+## Docker
+
+The whole stack is one image. To run Core and the Gateway as the two-service
+split (the production shape):
+
+```bash
+git clone https://github.com/amajorai/ryu
+cd ryu
+docker compose up --build
+```
+
+That serves Core on `http://localhost:7980` and the Gateway on `:7981`, with
+model state persisted in a named volume. Point any OpenAI-compatible client at
+the Gateway's `/v1/chat/completions`.
+
+To run just Core (it manages the Gateway in-process):
+
+```bash
+docker build -t ryu .
+docker run -p 7980:7980 -v ryu-data:/data ryu
+```
+
+## Fly.io
+
+```bash
+fly launch --copy-config --no-deploy
+fly volumes create ryu_data --size 10
+fly deploy
+```
+
+The committed [`fly.toml`](https://github.com/amajorai/ryu/blob/main/fly.toml)
+sets the Dockerfile build, a `/data` volume, and a `/api/health` check.
+
+## One VPS, one command
+
+For a dedicated box, the Hetzner Cloud provisioner stands up a node end-to-end
+(SSH key, firewall, server, Core + Gateway as systemd units). See
+[Deploying Ryu](/docs/academy/cloud/deployment) for the tiers, ports, firewall
+model, and the managed-vs-self-hosted line.
+
+## What about Vercel and AWS?
+
+Core and the Gateway are long-running servers, so they need a container host
+(any of the above), not a serverless platform. **Vercel** is serverless: it is
+perfect for the documentation site (`apps/fumadocs`, a Next.js app) but cannot
+host Core or the Gateway. On **AWS**, run the same Docker image on Lightsail
+Containers, App Runner, or ECS/Fargate with a persistent volume for `/data`.
+
+<Callout type="info">
+  The Gateway is **AGPL-3.0**. If you host a *modified* Gateway, section 13 of
+  the AGPL requires you to offer your modified source to its users. Core is
+  Apache-2.0 with no such obligation.
+</Callout>

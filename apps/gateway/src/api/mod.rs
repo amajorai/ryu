@@ -58,6 +58,10 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/exec/budget/check", post(audit::check_exec_budget))
         // Unified tool gateway: governance front for direct tool/code execution (#475)
         .route("/v1/exec/tool", post(crate::tools::exec::exec_tool))
+        // Pre-exec command governance (COMMAND-SCAN): hardline blocklist + risk
+        // patterns under manual/smart/off. Core posts { backend, command,
+        // session_id, agent } and maps the { decision, reason, findings } verdict.
+        .route("/v1/exec/scan", post(crate::tools::exec::exec_scan))
         // Config (runtime-mutable; master-key only)
         .route(
             "/v1/config",

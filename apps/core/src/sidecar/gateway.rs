@@ -165,6 +165,14 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
     if let Some(key) = crate::openrouter_auth::key() {
         tracing::info!("gateway: OpenRouter key present, enabling openrouter provider");
         env.push(("OPENROUTER_API_KEY".to_owned(), key));
+        // Managed nodes: privacy-by-default. Route only to OpenRouter providers
+        // that do not retain/train on prompts. Scoped to managed nodes so a
+        // self-host / BYOK user's own routing is never overridden, and skipped
+        // when the operator already pinned the policy explicitly.
+        if managed_node() && std::env::var_os("OPENROUTER_DATA_COLLECTION").is_none() {
+            tracing::info!("gateway: managed node — defaulting OpenRouter data_collection=deny");
+            env.push(("OPENROUTER_DATA_COLLECTION".to_owned(), "deny".to_owned()));
+        }
     } else if managed_node() {
         // On a managed node OpenRouter is the expected zero-setup default; warn
         // (do not fail) so an operator notices a missing credential.
@@ -284,6 +292,12 @@ const ENV_CREDITS_INTERNAL_SECRET: &str = "RYU_CREDITS_INTERNAL_SECRET";
 const ENV_CREDITS_URL: &str = "GATEWAY_CREDITS_URL";
 /// Optional wallet-empty action override (`stop` | `downgrade`). Default `stop`.
 const ENV_CREDITS_WALLET_EMPTY_ACTION: &str = "GATEWAY_CREDITS_WALLET_EMPTY_ACTION";
+/// Per-tool-call cost in micro-USD for billable Composio executions (#496).
+/// Composio is not free, so on the managed plan each executed `composio__*` tool
+/// call debits the org wallet by this amount (at cost). Operator-provisioned on a
+/// managed node; same name on both sides — Core forwards it to the gateway.
+/// Default `0` ⇒ tool calls stay free until a deployment sets a real rate.
+const ENV_CREDITS_COST_PER_TOOL_CALL: &str = "GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD";
 
 /// Env var flagging this Core as a **managed node** (e.g. a Ryu Cloud host).
 /// On a managed node Core self-registers to the control plane and the gateway
@@ -384,16 +398,26 @@ fn credits_spawn_env() -> Vec<(String, String)> {
         .map(|s| s.trim().to_ascii_lowercase())
         .filter(|s| s == "stop" || s == "downgrade")
         .unwrap_or_else(|| "stop".to_owned());
+    // Per-tool-call (Composio) cost: forward the operator-provisioned rate,
+    // defaulting to "0" (free) when unset so non-managed installs are unchanged.
+    // Only a valid non-negative integer is honoured; anything else falls to 0.
+    let tool_call_cost = std::env::var(ENV_CREDITS_COST_PER_TOOL_CALL)
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| s.parse::<u64>().is_ok())
+        .unwrap_or_else(|| "0".to_owned());
     tracing::info!(
         base_url = %base,
         wallet_empty_action = %action,
-        "gateway: activating credits debit hook (usage debited at cost, markup_bps=0)"
+        tool_call_cost_micro_usd = %tool_call_cost,
+        "gateway: activating credits debit hook (usage + tool calls debited at cost, markup_bps=0)"
     );
     vec![
         (ENV_CREDITS_ENABLED.to_owned(), "true".to_owned()),
         (ENV_CREDITS_URL.to_owned(), base),
         (ENV_CREDITS_INTERNAL_SECRET.to_owned(), secret),
         ("GATEWAY_CREDITS_MARKUP_BPS".to_owned(), "0".to_owned()),
+        (ENV_CREDITS_COST_PER_TOOL_CALL.to_owned(), tool_call_cost),
         (ENV_CREDITS_WALLET_EMPTY_ACTION.to_owned(), action),
     ]
 }
@@ -671,6 +695,148 @@ pub async fn check_exec_budget(backend: &str, command: &str) -> ExecBudgetOutcom
                 ExecBudgetOutcome::Allow
             } else {
                 ExecBudgetOutcome::Deny(format!(
+                    "gateway unreachable ({e}); set RYU_ALLOW_GATEWAY_FALLBACK=1 to allow"
+                ))
+            }
+        }
+    }
+}
+
+// ── Command-approval scan gate (POST /v1/exec/scan) ──────────────────────────
+//
+// A second, orthogonal pre-run gate alongside the budget check: the gateway
+// scans the actual command against its policy (firewall patterns, allow/deny
+// rules) and returns a verdict. Unlike the budget gate this control is OPT-IN —
+// it only calls the gateway when `RYU_EXEC_APPROVAL_MODE` is set to something
+// other than `off`, so an install that never sets it behaves exactly as before
+// (the scan short-circuits to Allow with no network call). When enabled it is
+// fail-closed on the same terms as the budget gate: unreachable / non-2xx /
+// parse error => Deny unless `RYU_ALLOW_GATEWAY_FALLBACK=1`.
+
+/// Env var selecting the command-approval mode. Unset or `off` (case-insensitive)
+/// disables the scan entirely (Core does not call the gateway and always allows).
+/// Any other value enables the fail-closed scan gate.
+const ENV_EXEC_APPROVAL_MODE: &str = "RYU_EXEC_APPROVAL_MODE";
+
+/// Whether the command-approval scan gate is enabled. Off when the env var is
+/// unset or equals `off` (case-insensitive, trimmed) — preserving prior behavior
+/// for any install that does not opt in.
+fn exec_approval_enabled() -> bool {
+    match std::env::var(ENV_EXEC_APPROVAL_MODE) {
+        Ok(v) => !matches!(v.trim().to_ascii_lowercase().as_str(), "" | "off"),
+        Err(_) => false,
+    }
+}
+
+/// Outcome of a pre-run exec scan (`POST /v1/exec/scan`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecScanOutcome {
+    /// The gateway allows the command (or the gate is disabled).
+    Allow,
+    /// The gateway denied the command (policy violation, or fail-closed on an
+    /// unreachable/unparseable gateway). Carries a human-readable reason.
+    Deny(String),
+    /// The gateway requires human approval before the command may run. Carries
+    /// the gateway's reason so the caller can surface it.
+    ApprovalRequired(String),
+}
+
+/// Map a gateway `decision` string (+ `reason`) to an [`ExecScanOutcome`].
+/// `allow` allows; `approval_required` requires approval; **any other value**
+/// (including `deny` and unknown verdicts) is a fail-closed deny.
+fn map_scan_decision(decision: &str, reason: &str) -> ExecScanOutcome {
+    match decision {
+        "allow" => ExecScanOutcome::Allow,
+        "approval_required" => ExecScanOutcome::ApprovalRequired(if reason.is_empty() {
+            "command requires approval".to_owned()
+        } else {
+            reason.to_owned()
+        }),
+        _ => ExecScanOutcome::Deny(if reason.is_empty() {
+            "command denied by gateway policy".to_owned()
+        } else {
+            reason.to_owned()
+        }),
+    }
+}
+
+/// Scan a command against gateway policy before running it
+/// (`POST /v1/exec/scan`). Mirrors [`check_exec_budget`]'s base-url, auth, and
+/// fail-closed semantics.
+///
+/// Short-circuits to `Allow` **without** any network call when the gate is
+/// disabled (`RYU_EXEC_APPROVAL_MODE` unset or `off`), so behavior is unchanged
+/// for installs that do not opt in.
+///
+/// Fail-closed when enabled: an unreachable gateway, a non-2xx response, or an
+/// unparseable body all map to `Deny` unless `RYU_ALLOW_GATEWAY_FALLBACK=1` is
+/// set (then `Allow`), identical to the budget gate.
+pub async fn check_exec_scan(
+    backend: &str,
+    command: &str,
+    session_id: Option<&str>,
+    agent: Option<&str>,
+) -> ExecScanOutcome {
+    // Opt-in: with the gate off, never touch the network and always allow.
+    if !exec_approval_enabled() {
+        return ExecScanOutcome::Allow;
+    }
+
+    let base = gateway_url();
+    let endpoint = format!("{}/v1/exec/scan", base.trim_end_matches('/'));
+    let token = gateway_token();
+
+    let client = reqwest::Client::new();
+    let mut req = client
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(5))
+        .json(&serde_json::json!({
+            "backend": backend,
+            "command": command,
+            "session_id": session_id,
+            "agent": agent,
+        }));
+    if let Some(tok) = token {
+        req = req.bearer_auth(tok);
+    }
+
+    match req.send().await {
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(body) => {
+                let decision = body
+                    .get("decision")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("deny");
+                let reason = body.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+                map_scan_decision(decision, reason)
+            }
+            Err(e) => {
+                tracing::warn!("exec scan: could not parse gateway response: {e}");
+                if allow_fallback() {
+                    ExecScanOutcome::Allow
+                } else {
+                    ExecScanOutcome::Deny(
+                        "gateway response parse error; set RYU_ALLOW_GATEWAY_FALLBACK=1 to allow"
+                            .to_owned(),
+                    )
+                }
+            }
+        },
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::warn!("exec scan: gateway returned {status}: {body}");
+            ExecScanOutcome::Deny(format!("gateway denied exec scan: HTTP {status}"))
+        }
+        Err(e) => {
+            tracing::warn!("exec scan: gateway unreachable: {e}");
+            if allow_fallback() {
+                tracing::warn!(
+                    "exec scan: gateway unreachable but RYU_ALLOW_GATEWAY_FALLBACK=1, allowing"
+                );
+                ExecScanOutcome::Allow
+            } else {
+                ExecScanOutcome::Deny(format!(
                     "gateway unreachable ({e}); set RYU_ALLOW_GATEWAY_FALLBACK=1 to allow"
                 ))
             }
@@ -972,17 +1138,28 @@ mod tests {
         }
     }
 
+    /// Serializes the credits tests that mutate process-global env vars. cargo
+    /// runs tests in one process and in parallel, so without this two of them can
+    /// race on the same vars between `EnvGuard::capture` and its `Drop` restore.
+    /// Poison-tolerant: a panicking test must not cascade-fail the rest.
+    static CREDITS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_credits_env() -> std::sync::MutexGuard<'static, ()> {
+        CREDITS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     const CREDITS_ENV: &[&str] = &[
         ENV_CREDITS_ENABLED,
         ENV_CREDITS_INTERNAL_SECRET,
         ENV_CREDITS_URL,
         ENV_CREDITS_WALLET_EMPTY_ACTION,
+        ENV_CREDITS_COST_PER_TOOL_CALL,
         "RYU_CONTROL_PLANE_URL",
         "RYU_SERVER_URL",
     ];
 
     #[test]
     fn credits_env_absent_when_unconfigured() {
+        let _lock = lock_credits_env();
         let _g = EnvGuard::capture(CREDITS_ENV);
         // Nothing set → NOP, no vars injected (graceful degrade preserved).
         assert!(credits_spawn_env().is_empty());
@@ -1002,6 +1179,7 @@ mod tests {
 
     #[test]
     fn credits_env_present_when_configured() {
+        let _lock = lock_credits_env();
         let _g = EnvGuard::capture(CREDITS_ENV);
         std::env::set_var(ENV_CREDITS_ENABLED, "1");
         std::env::set_var(ENV_CREDITS_INTERNAL_SECRET, "  top-secret  ");
@@ -1020,6 +1198,8 @@ mod tests {
         assert_eq!(get(ENV_CREDITS_INTERNAL_SECRET), Some("top-secret"));
         // Markup pinned to 0 — margin is at deposit (B2).
         assert_eq!(get("GATEWAY_CREDITS_MARKUP_BPS"), Some("0"));
+        // Per-tool-call cost defaults to 0 (free) until a node provisions a rate.
+        assert_eq!(get(ENV_CREDITS_COST_PER_TOOL_CALL), Some("0"));
         // Wallet-empty action defaults to Stop.
         assert_eq!(get(ENV_CREDITS_WALLET_EMPTY_ACTION), Some("stop"));
         // Base derived from the control-plane URL + the `/api` mount.
@@ -1028,6 +1208,7 @@ mod tests {
 
     #[test]
     fn credits_base_url_resolution() {
+        let _lock = lock_credits_env();
         let _g = EnvGuard::capture(CREDITS_ENV);
 
         // Default local dev when nothing is set.
@@ -1049,6 +1230,7 @@ mod tests {
 
     #[test]
     fn credits_wallet_empty_action_downgrade_passthrough() {
+        let _lock = lock_credits_env();
         let _g = EnvGuard::capture(CREDITS_ENV);
         std::env::set_var(ENV_CREDITS_ENABLED, "yes");
         std::env::set_var(ENV_CREDITS_INTERNAL_SECRET, "s");
@@ -1059,6 +1241,33 @@ mod tests {
             .find(|(k, _)| k == ENV_CREDITS_WALLET_EMPTY_ACTION)
             .map(|(_, v)| v.as_str());
         assert_eq!(action, Some("downgrade"));
+    }
+
+    #[test]
+    fn credits_tool_call_cost_passthrough() {
+        // #496: an operator-provisioned per-tool-call (Composio) cost is forwarded
+        // to the gateway verbatim; a non-integer value falls back to "0" (free).
+        let _lock = lock_credits_env();
+        let _g = EnvGuard::capture(CREDITS_ENV);
+        std::env::set_var(ENV_CREDITS_ENABLED, "1");
+        std::env::set_var(ENV_CREDITS_INTERNAL_SECRET, "s");
+
+        std::env::set_var(ENV_CREDITS_COST_PER_TOOL_CALL, "1500");
+        let env = credits_spawn_env();
+        let cost = env
+            .iter()
+            .find(|(k, _)| k == ENV_CREDITS_COST_PER_TOOL_CALL)
+            .map(|(_, v)| v.as_str());
+        assert_eq!(cost, Some("1500"));
+
+        // Garbage → 0, never propagated as an invalid value.
+        std::env::set_var(ENV_CREDITS_COST_PER_TOOL_CALL, "not-a-number");
+        let env = credits_spawn_env();
+        let cost = env
+            .iter()
+            .find(|(k, _)| k == ENV_CREDITS_COST_PER_TOOL_CALL)
+            .map(|(_, v)| v.as_str());
+        assert_eq!(cost, Some("0"));
     }
 
     #[test]
@@ -1174,5 +1383,98 @@ mod tests {
             !crate::sidecar::mcp::sandbox::is_enabled(),
             "sandbox OFF must flip sandbox::is_enabled() back"
         );
+    }
+
+    // ── Command-approval scan gate (check_exec_scan) ─────────────────────────
+
+    /// Serializes the scan-gate tests: they mutate the process-global
+    /// `RYU_EXEC_APPROVAL_MODE` / `RYU_GATEWAY_URL` / `RYU_ALLOW_GATEWAY_FALLBACK`
+    /// env vars, and cargo runs tests in one process in parallel. Poison-tolerant.
+    static SCAN_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_scan_env() -> std::sync::MutexGuard<'static, ()> {
+        SCAN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    const SCAN_ENV: &[&str] = &[
+        ENV_EXEC_APPROVAL_MODE,
+        ENV_GATEWAY_URL,
+        ENV_ALLOW_GATEWAY_FALLBACK,
+    ];
+
+    #[test]
+    fn exec_scan_verdict_mapping() {
+        // The pure decision mapper: allow → Allow, approval_required → Approval,
+        // deny / anything else → fail-closed Deny.
+        assert_eq!(map_scan_decision("allow", ""), ExecScanOutcome::Allow);
+        assert_eq!(
+            map_scan_decision("approval_required", "needs sign-off"),
+            ExecScanOutcome::ApprovalRequired("needs sign-off".to_owned())
+        );
+        assert_eq!(
+            map_scan_decision("deny", "blocked by firewall"),
+            ExecScanOutcome::Deny("blocked by firewall".to_owned())
+        );
+        // Unknown verdict is fail-closed (Deny), never a silent allow.
+        assert!(matches!(
+            map_scan_decision("wat", ""),
+            ExecScanOutcome::Deny(_)
+        ));
+        // Empty reasons get sensible defaults.
+        assert!(matches!(
+            map_scan_decision("approval_required", ""),
+            ExecScanOutcome::ApprovalRequired(_)
+        ));
+    }
+
+    #[test]
+    fn exec_scan_off_mode_reads_env() {
+        let _lock = lock_scan_env();
+        let _g = EnvGuard::capture(SCAN_ENV);
+        // Unset → disabled.
+        assert!(!exec_approval_enabled());
+        // "off" (any case, trimmed) → disabled.
+        for v in ["off", "OFF", " Off "] {
+            std::env::set_var(ENV_EXEC_APPROVAL_MODE, v);
+            assert!(!exec_approval_enabled(), "{v:?} should disable the gate");
+        }
+        // Any other value → enabled.
+        for v in ["on", "enforce", "prompt"] {
+            std::env::set_var(ENV_EXEC_APPROVAL_MODE, v);
+            assert!(exec_approval_enabled(), "{v:?} should enable the gate");
+        }
+    }
+
+    #[tokio::test]
+    async fn exec_scan_off_mode_short_circuits_without_network() {
+        let _lock = lock_scan_env();
+        let _g = EnvGuard::capture(SCAN_ENV);
+        // Gate disabled + a guaranteed-unreachable gateway + NO fallback. If the
+        // off-mode path touched the network it would fail-closed to Deny; an Allow
+        // proves it short-circuited before any HTTP call.
+        std::env::remove_var(ENV_EXEC_APPROVAL_MODE);
+        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
+        std::env::remove_var(ENV_ALLOW_GATEWAY_FALLBACK);
+        let out = check_exec_scan("deno", "rm -rf /", Some("sess"), Some("ryu")).await;
+        assert_eq!(out, ExecScanOutcome::Allow);
+    }
+
+    #[tokio::test]
+    async fn exec_scan_unreachable_denies_unless_fallback() {
+        let _lock = lock_scan_env();
+        let _g = EnvGuard::capture(SCAN_ENV);
+        // Gate enabled, gateway unreachable, no fallback → fail-closed Deny.
+        std::env::set_var(ENV_EXEC_APPROVAL_MODE, "enforce");
+        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
+        std::env::remove_var(ENV_ALLOW_GATEWAY_FALLBACK);
+        let denied = check_exec_scan("deno", "echo hi", None, None).await;
+        assert!(
+            matches!(denied, ExecScanOutcome::Deny(_)),
+            "unreachable gateway must fail closed, got {denied:?}"
+        );
+
+        // Same, but with the fallback opt-in → Allow.
+        std::env::set_var(ENV_ALLOW_GATEWAY_FALLBACK, "1");
+        let allowed = check_exec_scan("deno", "echo hi", None, None).await;
+        assert_eq!(allowed, ExecScanOutcome::Allow);
     }
 }

@@ -96,6 +96,15 @@ model you requested, and a per-agent chat-slot override always wins over a rule.
 
 </Steps>
 
+## Check your work
+
+- Send a coding question and read the `x-routed-model` response header, it names your coding rule's
+  target (e.g. `claude-sonnet-4-5`). Send a greeting and the header names the cheap local model.
+- Break the classifier on purpose (stop it, or set an unroutable `classifier_model`) and requests
+  keep the model you asked for rather than failing, smart routing fails open.
+- The rules only take effect after a gateway refresh/restart, so if a change seems ignored, confirm
+  the snapshot reloaded.
+
 ## Going further
 
 - Cap what any of these models can spend: [Cap spend with a budget](/docs/cookbook/cap-spend-with-a-budget).

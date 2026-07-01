@@ -2,10 +2,10 @@
   "root": true,
   "title": "CLI",
   "description": "The Rust terminal UI (binary `ryu`): chat with goals and double-check, a fuzzy command palette, live list tabs, device login, GitOps apply/diff, and LAN node discovery, all over the same Core.",
-  "icon": "terminal",
+  "icon": "Terminal",
   "pages": [
-    "cli/index.mdx",
-    "cli/getting-started.mdx",
-    "cli/parity.mdx"
+    "index",
+    "getting-started",
+    "parity"
   ]
 }

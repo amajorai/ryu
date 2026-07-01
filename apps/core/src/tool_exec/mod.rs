@@ -335,9 +335,53 @@ pub async fn execute_code(
     let backend = executor.backend();
 
     // Pre-run gateway budget gate (fail-closed).
-    use crate::sidecar::gateway::{check_exec_budget, report_exec_audit, ExecBudgetOutcome};
+    use crate::sidecar::gateway::{
+        check_exec_budget, check_exec_scan, report_exec_audit, ExecBudgetOutcome, ExecScanOutcome,
+    };
     if let ExecBudgetOutcome::Deny(reason) = check_exec_budget(backend, "tool_exec").await {
         return ExecOutcome::error(format!("gateway denied execution: {reason}"));
+    }
+
+    // Pre-run command-approval scan gate (opt-in via RYU_EXEC_APPROVAL_MODE;
+    // Allow with no network call when unset/off, so prior behavior is preserved).
+    // The actual program is the command scanned so the gateway sees real content.
+    match check_exec_scan(backend, &code, None, Some(agent_id)).await {
+        ExecScanOutcome::Allow => {}
+        ExecScanOutcome::Deny(reason) => {
+            // Block + audit the denied exec via the same reporter the budget path
+            // uses, then surface the error the way a budget deny is surfaced.
+            report_exec_audit(
+                backend,
+                "tool_exec",
+                0,
+                1,
+                None,
+                Some(format!("scan denied: {reason}")),
+            )
+            .await;
+            return ExecOutcome::error(format!("gateway denied execution: {reason}"));
+        }
+        ExecScanOutcome::ApprovalRequired(reason) => {
+            // The approvals engine is fire-and-forget and `ExecOutcome` has no
+            // pre-run pending-gate variant, so there is no in-process way to raise
+            // an approval and block this synchronous, deadline-bounded exec on the
+            // decision. Fail closed: treat approval-required as a deny, audit it,
+            // and warn clearly.
+            tracing::warn!(
+                %reason,
+                "exec scan requires approval but no in-process approval-await path exists; denying"
+            );
+            report_exec_audit(
+                backend,
+                "tool_exec",
+                0,
+                1,
+                None,
+                Some(format!("scan approval_required (denied): {reason}")),
+            )
+            .await;
+            return ExecOutcome::error(format!("execution requires approval: {reason}"));
+        }
     }
 
     let started = std::time::Instant::now();
@@ -445,12 +489,54 @@ pub async fn resume_execution_opt(
     content: Value,
 ) -> Option<ExecOutcome> {
     // Pre-resume gateway budget gate (fail-closed), mirroring `execute_code`.
-    use crate::sidecar::gateway::{check_exec_budget, report_exec_audit, ExecBudgetOutcome};
+    use crate::sidecar::gateway::{
+        check_exec_budget, check_exec_scan, report_exec_audit, ExecBudgetOutcome, ExecScanOutcome,
+    };
     let backend = CodeExecutor::default_backend().backend();
     if let ExecBudgetOutcome::Deny(reason) = check_exec_budget(backend, "tool_exec").await {
         return Some(ExecOutcome::error(format!(
             "gateway denied resume: {reason}"
         )));
+    }
+
+    // Pre-resume command-approval scan gate (opt-in). LIMITATION: the resumed
+    // program's source is parked inside the backend and not available at this
+    // layer, so the scan can only carry the "tool_exec" label — the gateway
+    // cannot inspect the actual resumed code here (unlike `execute_code`, which
+    // passes the full program). The gate still enforces mode + fail-closed
+    // reachability semantics on resume.
+    match check_exec_scan(backend, "tool_exec", None, Some(agent_id)).await {
+        ExecScanOutcome::Allow => {}
+        ExecScanOutcome::Deny(reason) => {
+            report_exec_audit(
+                backend,
+                "tool_exec",
+                0,
+                1,
+                None,
+                Some(format!("scan denied (resume): {reason}")),
+            )
+            .await;
+            return Some(ExecOutcome::error(format!("gateway denied resume: {reason}")));
+        }
+        ExecScanOutcome::ApprovalRequired(reason) => {
+            tracing::warn!(
+                %reason,
+                "exec scan requires approval on resume but no in-process approval-await path exists; denying"
+            );
+            report_exec_audit(
+                backend,
+                "tool_exec",
+                0,
+                1,
+                None,
+                Some(format!("scan approval_required (resume, denied): {reason}")),
+            )
+            .await;
+            return Some(ExecOutcome::error(format!(
+                "resume requires approval: {reason}"
+            )));
+        }
     }
 
     let started = std::time::Instant::now();

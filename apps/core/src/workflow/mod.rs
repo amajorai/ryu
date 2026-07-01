@@ -361,6 +361,11 @@ pub enum WorkflowTrigger {
         cron: Option<String>,
         #[serde(default)]
         every: Option<String>,
+        /// When true, each scheduled firing waits for a human-in-the-loop
+        /// approval (an inbox request, see [`crate::approvals`]) before the
+        /// workflow runs. Off by default (autonomous).
+        #[serde(default)]
+        require_approval: bool,
     },
     /// Run when an HTTP POST hits the workflow's public ingress URL. The URL is a
     /// status surface exposed via the existing webhook-ingress seam; `secret`

@@ -2,6 +2,7 @@ import { getPageTreePeers } from "fumadocs-core/page-tree";
 import { Card, Cards } from "fumadocs-ui/components/card";
 import type { ReactNode } from "react";
 
+import { LevelBadge } from "@/components/mdx/level-badge";
 import { source } from "@/lib/source";
 
 function lookup(href: string) {
@@ -23,9 +24,23 @@ export function DocCard({
   description?: ReactNode;
 }) {
   const page = lookup(href);
+  const level = page?.data.level;
+  const cardTitle = title ?? page?.data.title ?? href;
 
   return (
-    <Card href={href} title={title ?? page?.data.title ?? href}>
+    <Card
+      href={href}
+      title={
+        level === undefined ? (
+          cardTitle
+        ) : (
+          <span className="inline-flex flex-wrap items-center gap-2">
+            {cardTitle}
+            <LevelBadge level={level} />
+          </span>
+        )
+      }
+    >
       {description ?? page?.data.description}
     </Card>
   );

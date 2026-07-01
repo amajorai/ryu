@@ -86,6 +86,15 @@ the desktop app to a confirm dialog and installs the model: nothing installs wit
 confirmation. See [Models](/docs/desktop/models).
 </Callout>
 
+## Check your work
+
+- The installed model's detail shows it as the **active** model after you click **Use this model**,
+  and Chat routes to it.
+- Pull your network cable or turn on airplane mode, then send a message. It still answers, proof the
+  turn ran entirely on your machine with no provider call.
+- If the reply is sluggish, check the model's device-fit verdict. A `partial-offload` or `cpu`
+  verdict runs but slower; prefer a quant marked `great` or `ok` for a responsive chat.
+
 ## Going further
 
 - Add a vision model and send it images: the `mmproj` projector convention in [Models](/docs/desktop/models).

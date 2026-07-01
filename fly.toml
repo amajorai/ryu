@@ -1,0 +1,41 @@
+# Fly.io deploy config for the Ryu open-core stack.
+#
+#   fly launch --copy-config --no-deploy   # create the app from this file
+#   fly volumes create ryu_data --size 10  # persistent /data for the model stack
+#   fly deploy
+#
+# Runs ryu-core (Core spawns + manages the Gateway on loopback). Fly routes to
+# internal_port; the image entrypoint binds RYU_BIND to $PORT (set below to
+# match internal_port).
+app = "ryu"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  RYU_DIR = "/data"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    path = "/api/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "120s"
+
+# Core downloads a local model stack on first boot; give it room (or set a
+# provider key to run smaller). Persist /data with a Fly volume (see header).
+[[mounts]]
+  source = "ryu_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "4gb"

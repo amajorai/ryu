@@ -24,7 +24,7 @@ tool's server segment (`classify_kind` in `catalog.rs`) and serializes lowercase
 | `kind` | Source | Notes |
 |---|---|---|
 | `mcp` | An external MCP server | The default for any non-built-in, non-Composio server |
-| `builtin` | A reserved built-in tool server | shadow, spider, exa, sandbox, notify, channel, `search_conversations`, plus the self-build server |
+| `builtin` | A reserved built-in tool server | shadow, spider, exa, sandbox, notify, channel, `search_conversations`, `threads`, `delegate`, `skills`, plus the self-build server |
 | `composio` | A Composio action | Searchable, never listed (see below) |
 | `app` | A plugin tool exposed as a Runnable | The synthetic `app` server segment |
 
@@ -140,11 +140,40 @@ discovery is open, but executing any tool the search surfaced still passes throu
 [Programmatic tool calling](/docs/core/programmatic-tool-calling) for `execute` and `resume`, and
 [Gateway tools](/docs/gateway/tools) for the exec-budget and exec-audit applied on the call path.
 
+## Untrusted tool-result wrapping
+
+A tool result is untrusted input. A malicious MCP server or a poisoned web page can return text that
+impersonates the chat transcript (`<|im_start|>system ...`) or smuggles new instructions to steer a
+high-privilege model. Core neutralizes tool results on its own seams before they re-enter the model,
+mirroring the gateway's [openai-compat tool loop](/docs/gateway/agent-hardening#untrusted-content-wrapping-tool-results).
+The shared-shape helper lives in `apps/core/src/sidecar/untrusted.rs`.
+
+Two operations run on a result:
+
+- **Strip template tokens** - remove known chat-template control tokens (`<|im_start|>`, `<|im_end|>`,
+  `<|system|>`, `<|user|>`, `<|assistant|>`, `<|eot_id|>`, `<|start_header_id|>`, `<|end_header_id|>`,
+  `<|endoftext|>`, `<|begin_of_text|>`, `<|end_of_text|>`) and the literal boundary markers, so a
+  result cannot embed a fake closing marker to break out of the wrapper.
+- **Wrap** - surround the stripped text in `<<<EXTERNAL_UNTRUSTED_CONTENT>>>` ...
+  `<<<END_EXTERNAL_UNTRUSTED_CONTENT>>>` boundary markers.
+
+The neutralization is applied at two Core seams:
+
+| Seam | Source | What is neutralized |
+|---|---|---|
+| ACP/MCP bridge | `apps/core/src/sidecar/adapters/mcp_bridge.rs` | Every external, registry, Composio, `execute`, and `resume` tool result before it becomes a `CallToolResult`. The internal `tool_search` / `describe` discovery meta-tools are excluded so the discovery contract stays intact |
+| PTC plane | `apps/core/src/tool_exec/deno_backend.rs` | `strip_control` also strips template tokens (token-strip only, never wraps) so the sanitized tool value stays structurally intact JSON |
+
+Gating follows the firewall pattern and is default-on: the `untrusted-content-wrapping` preference
+seeds an in-process `WRAP_ENABLED` flag at startup (`main.rs`) and on change (`server/mod.rs`).
+Default-on is safe because only untrusted tool output is affected, never user text.
+
 ## Related
 
 <Cards>
   <DocCard href="/docs/core/mcp-registry" />
   <DocCard href="/docs/gateway/tools" />
+  <DocCard href="/docs/gateway/agent-hardening" />
   <DocCard href="/docs/core/programmatic-tool-calling" />
   <DocCard href="/docs/core/identity-vault" />
 </Cards>

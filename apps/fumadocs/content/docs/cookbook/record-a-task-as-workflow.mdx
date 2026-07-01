@@ -94,6 +94,15 @@ through the Ghost engine, mirroring how a recorded recipe replays step by step.
   complete recipe as a single `recipe` node. See [Recorded Automations](/docs/desktop/productivity/recipes).
 </Callout>
 
+## Check your work
+
+- After you stop recording, the canvas shows a real DAG: an `Input` node, one `ghost_action` node
+  per captured action (labelled from its target, e.g. "click to Compose"), and an `Output` node.
+- Each `ghost_action` node carries an action verb, a target, and params you can edit or reorder
+  before running, it is not an opaque macro.
+- **Run now** (or `POST /api/workflows/:id/run`) replays the steps through the Ghost engine, so the
+  same clicks and typing happen again.
+
 ## Going further
 
 - Add reliability to a flaky step: per-node retry and timeout in [Workflows](/docs/core/workflows#reliability-and-durable-execution).

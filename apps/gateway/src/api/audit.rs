@@ -91,10 +91,12 @@ pub async fn query_audit(
     // Enrich each model-call row with a DERIVED estimated cost (#548, P6) so the
     // desktop trace viewer can show per-run cost without re-deriving the rate. The
     // GenAI OTel conventions define no cost attribute (cost is derived from tokens),
-    // so this is the one place the gateway exposes its estimate. The rate is the
-    // single source already used for wallet debit + the control-plane report
-    // (`control_plane.cost_per_1k_micro_usd`), so they never diverge. A rate of 0
-    // (cost attribution disabled) maps to `null` — not a misleading "$0.00".
+    // so this is the one place the gateway exposes its estimate. This flat rate
+    // matches the control-plane report and shared-budget basis. NOTE: it is only
+    // an ESTIMATE — OpenRouter wallet debits now use the provider's real
+    // `usage.cost`, so this trace-view figure intentionally diverges from the
+    // authoritative wallet charge for OpenRouter runs. A rate of 0 (cost
+    // attribution disabled) maps to `null` — not a misleading "$0.00".
     let per_1k = state.config.control_plane.cost_per_1k_micro_usd;
     let entries: Vec<Value> = entries
         .into_iter()

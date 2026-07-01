@@ -1,0 +1,18 @@
+{
+  "root": true,
+  "title": "Security",
+  "description": "Ryu's security model: the trust boundary, sandboxing, command approval and HITL, credential and environment scrubbing, outbound DLP, SSRF protection, network binding and token auth, channel allowlists, and a deployment hardening checklist.",
+  "icon": "ShieldCheck",
+  "pages": [
+    "index",
+    "trust-model",
+    "sandboxing-isolation",
+    "command-approval",
+    "credential-scrubbing",
+    "outbound-dlp",
+    "ssrf-protection",
+    "network-binding-auth",
+    "channel-allowlists",
+    "hardening-checklist"
+  ]
+}

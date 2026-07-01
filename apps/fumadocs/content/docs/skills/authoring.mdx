@@ -1,0 +1,64 @@
+---
+title: "Authoring a skill"
+description: "How to write a Ryu agent skill: the SKILL.md front-matter and body, declaring tools, choosing always-on versus on-demand, and keeping the instructions tight."
+---
+
+A skill is one `SKILL.md` file. Writing a good one is mostly about being precise in the body and honest in the front-matter. This page walks through the structure and the choices that matter.
+
+## Start from the file
+
+Create the skill at the universal location under its own id directory:
+
+```bash
+~/.claude/skills/my-skill/SKILL.md
+```
+
+The id is the directory name. Core derives the skill id from it, so keep it short, lowercase, and hyphenated.
+
+## Write the front-matter
+
+```markdown
+---
+name: "My Skill"
+description: "One line the model reads to decide whether to load this skill."
+allowed-tools:
+  - "agentbrowser"
+enabled: true
+always-on: false
+---
+```
+
+- `name` is required and is the display name.
+- `description` is the single most important field under progressive disclosure. The model sees only this line up front, so write it as a clear trigger for when the skill applies, not as marketing.
+- `allowed-tools` lists the tools the skill needs. Core surfaces them to the tool bridge; the Gateway enforces the grant. Only list tools the body actually uses.
+- `enabled` defaults to `true`. Set `false` to ship a skill that is installed but dormant.
+- `always-on` defaults to `false`. Set `true` only for a skill that must always be in context, since it costs tokens every turn.
+
+## Write the body
+
+Everything below the closing `---` is the instruction body. It is injected verbatim when the skill is active, so write it as direct instructions to the model.
+
+- Lead with the behavior, not the backstory. Tell the model what to do and when.
+- Be specific about tools. If the skill grants `agentbrowser`, say when to reach for it and what to do with the result.
+- Keep it tight. A focused half-page beats three pages the model has to wade through. Split a sprawling skill into two.
+- State the stop conditions. Tell the model when the skill does not apply so it does not over-trigger.
+
+```markdown
+---
+name: "Web Researcher"
+description: "Enables web search; use when the task needs current facts."
+allowed-tools:
+  - "agentbrowser"
+---
+When the task depends on information you do not already have, search
+the web with the browser tool, read the top sources, and cite what
+you used. Do not search for things you already know.
+```
+
+## Choose disclosure
+
+Most skills should be on-demand. Leave `always-on` at `false` and write a sharp `description` so the model loads the skill exactly when it is relevant. Reserve `always-on` for a skill that genuinely must shape every turn, or for a model too weak to self-load reliably. See [Skills](/docs/skills) for how disclosure decides what reaches the model.
+
+## Test it
+
+Drop the file in place, start a session with the skill installed, and give the model a prompt that should trigger it. Confirm the model loads the skill and that the turn changes the way the body intends. When you are happy, see [publishing](/docs/skills/publishing) to share it.

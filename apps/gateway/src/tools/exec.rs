@@ -167,6 +167,50 @@ async fn exec_kind_forward(
     }
 }
 
+use crate::firewall::cmdscan::{scan_command, ApprovalMode, ScanVerdict};
+
+/// Request body for `POST /v1/exec/scan` (COMMAND-SCAN CONTRACT, verbatim shape).
+#[derive(Debug, Deserialize)]
+pub struct ExecScanBody {
+    pub backend: String,
+    pub command: String,
+    // Accepted for transport tolerance / audit correlation on the Core side; not
+    // consulted by the pure scanner (verdict is a function of backend+command).
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub agent: Option<String>,
+}
+
+/// `POST /v1/exec/scan` — pre-exec command governance. Returns the verbatim
+/// `{ decision, reason, findings }` shape. Trusted-forwarder / master-key only
+/// (same governance gate as the exec-budget endpoints; NO mesh check, matching
+/// its sibling `check_exec_budget`). Mode is read from `RYU_EXEC_APPROVAL_MODE`
+/// at this boundary; the scanner itself is pure. The HARDLINE blocklist always
+/// denies regardless of mode.
+pub async fn exec_scan(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(body): Json<ExecScanBody>,
+) -> Result<Json<ScanVerdict>, GatewayError> {
+    let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
+    let ctx = authenticate(&state, AuthInputs::with_key(raw_key))?;
+    let is_trusted =
+        ctx.is_master_key || ctx.key_config.as_ref().is_some_and(|k| k.trusted_forwarder);
+    if !is_trusted {
+        return Err(GatewayError::Unauthorized(
+            "Exec scan requires a trusted-forwarder or master key.".to_string(),
+        ));
+    }
+    let mode = std::env::var("RYU_EXEC_APPROVAL_MODE")
+        .map(|s| ApprovalMode::from_env_str(&s))
+        .unwrap_or(ApprovalMode::Manual);
+    let verdict = scan_command(&body.backend, &body.command, mode);
+    Ok(Json(verdict))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +269,26 @@ mod tests {
         assert!(
             matches!(result, Err(GatewayError::Unauthorized(_))),
             "non-trusted caller must be rejected"
+        );
+    }
+
+    /// `/v1/exec/scan` rejects a non-trusted, non-master caller (same gate as the
+    /// exec-budget governance endpoints).
+    #[tokio::test]
+    async fn exec_scan_rejects_non_trusted_key() {
+        use crate::state::AppState;
+        use axum::extract::State;
+        use std::sync::Arc;
+
+        let state = Arc::new(AppState::new(crate::config::GatewayConfig::default()));
+        let headers = HeaderMap::new();
+        let body: ExecScanBody =
+            serde_json::from_value(json!({ "backend": "bash", "command": "ls" })).unwrap();
+
+        let result = exec_scan(State(state), headers, Json(body)).await;
+        assert!(
+            matches!(result, Err(GatewayError::Unauthorized(_))),
+            "non-trusted caller must be rejected from exec scan"
         );
     }
 }

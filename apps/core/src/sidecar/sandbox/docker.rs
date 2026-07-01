@@ -172,22 +172,12 @@ fn caps_to_flags(caps: &SandboxCapabilities) -> Vec<String> {
         flags.push("none".to_owned());
     }
 
-    // Filesystem: build a deduplicated path set, using `rw` when a path
-    // appears in both read and write sets.
-    let mut mounts: std::collections::HashMap<std::path::PathBuf, bool> =
-        std::collections::HashMap::new();
-
-    for path in &caps.fs_read_paths {
-        mounts.entry(path.clone()).or_insert(false);
-    }
-    for path in &caps.fs_write_paths {
-        // write set wins — rw overrides a prior ro entry.
-        mounts.insert(path.clone(), true);
-    }
-
-    for (path, writable) in &mounts {
+    // Filesystem: derive the effective mount set, which honors the declared
+    // workspace access level (None strips all mounts, ReadOnly clamps every
+    // mount to `ro`, ReadWrite keeps the historical per-path rw/ro logic).
+    for (path, writable) in caps.effective_mounts() {
         let host = path.display();
-        let mode = if *writable { "rw" } else { "ro" };
+        let mode = if writable { "rw" } else { "ro" };
         // Mount at the same path inside the container for transparency.
         flags.push("-v".to_owned());
         flags.push(format!("{host}:{host}:{mode}"));
@@ -573,6 +563,41 @@ mod tests {
         assert!(
             mount.ends_with(":rw"),
             "path in both read + write sets must be :rw"
+        );
+    }
+
+    /// Workspace access `ReadOnly` clamps a write path's mount to `:ro`.
+    #[test]
+    fn caps_read_only_access_clamps_write_mount() {
+        let mut caps = SandboxCapabilities::default();
+        caps.fs_write_paths
+            .insert(std::path::PathBuf::from("/tmp/ws"));
+        caps.workspace_access = crate::sidecar::sandbox::WorkspaceAccess::ReadOnly;
+        let flags = caps_to_flags(&caps);
+        let mount = flags
+            .windows(2)
+            .find(|w| w[0] == "-v")
+            .map(|w| w[1].clone())
+            .expect("must have a mount value");
+        assert!(
+            mount.ends_with(":ro"),
+            "read-only access must clamp a write path to :ro, got {mount}"
+        );
+    }
+
+    /// Workspace access `None` strips every FS mount, leaving no `-v` flags.
+    #[test]
+    fn caps_none_access_emits_no_mounts() {
+        let mut caps = SandboxCapabilities::default();
+        caps.fs_read_paths
+            .insert(std::path::PathBuf::from("/data/ro"));
+        caps.fs_write_paths
+            .insert(std::path::PathBuf::from("/tmp/ws"));
+        caps.workspace_access = crate::sidecar::sandbox::WorkspaceAccess::None;
+        let flags = caps_to_flags(&caps);
+        assert!(
+            !flags.contains(&"-v".to_owned()),
+            "None access must emit no -v mounts"
         );
     }
 

@@ -11,12 +11,10 @@ export const gitConfig = {
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      // Mirror the landing header (apps/web): ghost mark + lowercase "ryu". The
-      // docs cap weight at medium, so this stays lighter than the marketing site.
+      // Just the ghost mark — the animated outline logo, no wordmark.
       title: (
-        <span className="inline-flex items-center gap-2">
+        <span className="inline-flex items-center">
           <RyuLogo />
-          <span className="font-medium text-lg lowercase">ryu</span>
         </span>
       ),
     },

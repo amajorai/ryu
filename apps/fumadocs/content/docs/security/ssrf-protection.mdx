@@ -1,0 +1,44 @@
+---
+title: "SSRF protection"
+description: "How Ryu guards outbound fetches against server-side request forgery, including cloud-metadata and homograph host attacks."
+---
+
+Whenever Core fetches a user-or-model-supplied URL, it routes through a guard rather than a raw HTTP client. The guard lives in `apps/core/src/server/mod.rs` - `resolve_guarded_host`, `guarded_get_with_bearer`, and the `is_blocked_ip*` helpers. Every caller of the guarded fetch path inherits these protections.
+
+## Existing protections
+
+- Blocks loopback, private, link-local, CGNAT, and ULA address ranges
+- Pins the client connection to the validated IP, so DNS cannot be re-resolved to a different address after the check (no DNS-rebinding window)
+- Forbids redirects, so a redirect cannot bounce a request to an internal target
+- Caps the response body size
+
+## Added protections
+
+This change extends the same guard helpers, so all existing callers benefit automatically.
+
+### Cloud-metadata hostname denylist
+
+The `169.254.169.254` metadata IP was already blocked. The guard now also rejects the metadata *hostnames*, case-insensitive - a host equal to or ending in `metadata.google.internal` or `metadata.goog`, plus the bare host `metadata`. This closes the gap where a name resolves to the metadata endpoint through DNS rather than a literal IP.
+
+### Homograph and hostile-host guard
+
+The guard rejects a host that:
+
+- contains non-ASCII characters
+- contains zero-width or bidi control characters
+- fails to round-trip through IDNA / punycode encoding (a decode mismatch)
+- contains embedded control characters or whitespace
+
+This blocks lookalike-domain (homograph) attacks and hosts crafted with invisible or directional Unicode to disguise their real target.
+
+<Callout type="info">
+All of this lives inside the existing guard helpers, not at individual call sites, so a normal `https://` host still resolves and fetches exactly as before. Only hostile or metadata-targeting hosts are rejected.
+</Callout>
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/security/outbound-dlp" />
+  <DocCard href="/docs/security/network-binding-auth" />
+  <DocCard href="/docs/security/trust-model" />
+</Cards>

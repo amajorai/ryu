@@ -37,6 +37,101 @@ use serde::{Deserialize, Serialize};
 
 use crate::sidecar::BoxFuture;
 
+// ── Scope + workspace access ─────────────────────────────────────────────────
+
+/// How long a sandbox context lives and how widely it is shared.
+///
+/// Ryu's built-in sandboxes (wasmtime, Deno PTC) are historically **per-exec**:
+/// each call spins up a fresh context that is torn down the moment the command
+/// exits. `SandboxScope` lets an agent *declare* a broader lifetime so a future
+/// scheduler can reuse one context across calls (mirroring OpenClaw's
+/// per-session / per-agent / shared scoping).
+///
+/// This is declarative metadata only: the default [`SandboxScope::Exec`] is
+/// exactly today's behavior, and the wider variants have no runtime effect
+/// until a backend chooses to honor them. Declaring a wider scope never
+/// loosens isolation on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxScope {
+    /// One context per exec call, torn down immediately. The current default.
+    #[default]
+    Exec,
+    /// One context reused across every call from the same agent.
+    Agent,
+    /// One context reused across every call in the same session.
+    Session,
+    /// One context shared node-wide across all agents and sessions.
+    Shared,
+}
+
+impl SandboxScope {
+    /// Parse a scope name string into the enum, erroring on unknown names.
+    pub fn from_name(name: &str) -> Result<Self> {
+        match name.trim() {
+            "exec" => Ok(Self::Exec),
+            "agent" => Ok(Self::Agent),
+            "session" => Ok(Self::Session),
+            "shared" => Ok(Self::Shared),
+            other => Err(anyhow!("unknown sandbox scope '{other}'")),
+        }
+    }
+
+    /// Canonical string name for this scope.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Exec => "exec",
+            Self::Agent => "agent",
+            Self::Session => "session",
+            Self::Shared => "shared",
+        }
+    }
+}
+
+/// Level of access a sandbox has to its mounted workspace filesystem.
+///
+/// This clamps the FS mounts derived from [`SandboxCapabilities::fs_read_paths`]
+/// and [`SandboxCapabilities::fs_write_paths`]. It can only *tighten* access,
+/// never expand it: a path that is not in the capability sets is never mounted
+/// regardless of the level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceAccess {
+    /// No workspace FS access: every mount is stripped, regardless of the
+    /// capability path sets.
+    None,
+    /// Read-only: every mounted path is clamped to read, even paths that also
+    /// appear in `fs_write_paths`.
+    ReadOnly,
+    /// Read + write: the `fs_read_paths` / `fs_write_paths` sets define access
+    /// exactly. This is the historical default and preserves today's per-exec
+    /// behavior; tighter levels only remove access.
+    #[default]
+    ReadWrite,
+}
+
+impl WorkspaceAccess {
+    /// Parse a workspace-access name string into the enum, erroring on unknown
+    /// names. Accepts both `read_only`/`read-only` spellings for ergonomics.
+    pub fn from_name(name: &str) -> Result<Self> {
+        match name.trim() {
+            "none" => Ok(Self::None),
+            "read_only" | "read-only" | "ro" => Ok(Self::ReadOnly),
+            "read_write" | "read-write" | "rw" => Ok(Self::ReadWrite),
+            other => Err(anyhow!("unknown workspace access '{other}'")),
+        }
+    }
+
+    /// Canonical string name for this access level.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ReadOnly => "read_only",
+            Self::ReadWrite => "read_write",
+        }
+    }
+}
+
 // ── Capability descriptor ────────────────────────────────────────────────────
 
 /// Capabilities granted to a sandbox execution.
@@ -51,16 +146,55 @@ pub struct SandboxCapabilities {
     pub fs_write_paths: HashSet<PathBuf>,
     /// Whether outbound network access is permitted.
     pub network: bool,
+    /// Declared lifetime/sharing scope for this sandbox context. Default
+    /// [`SandboxScope::Exec`] = one context per exec (today's behavior).
+    pub scope: SandboxScope,
+    /// Access level applied to the mounted workspace filesystem. Default
+    /// [`WorkspaceAccess::ReadWrite`] honors the FS path sets exactly (today's
+    /// behavior); [`WorkspaceAccess::ReadOnly`] clamps mounts to read and
+    /// [`WorkspaceAccess::None`] strips them entirely.
+    pub workspace_access: WorkspaceAccess,
 }
 
 impl Default for SandboxCapabilities {
-    /// Returns the deny-all default: no FS paths, no network.
+    /// Returns the deny-all default: no FS paths, no network, per-exec scope,
+    /// and the passthrough [`WorkspaceAccess::ReadWrite`] level (which is a
+    /// no-op ceiling over the empty path sets).
     fn default() -> Self {
         Self {
             fs_read_paths: HashSet::new(),
             fs_write_paths: HashSet::new(),
             network: false,
+            scope: SandboxScope::Exec,
+            workspace_access: WorkspaceAccess::ReadWrite,
         }
+    }
+}
+
+impl SandboxCapabilities {
+    /// Return the effective mount set after applying [`Self::workspace_access`],
+    /// as `(path, writable)` pairs. Shared by the FS-touching backends so the
+    /// three-way clamp semantics stay identical across wasmtime and docker:
+    ///
+    /// - [`WorkspaceAccess::None`] → empty (no mounts at all).
+    /// - [`WorkspaceAccess::ReadOnly`] → every path, `writable = false`.
+    /// - [`WorkspaceAccess::ReadWrite`] → union of both sets, `writable` true
+    ///   only for paths in `fs_write_paths` (the historical per-path logic).
+    pub fn effective_mounts(&self) -> Vec<(PathBuf, bool)> {
+        if self.workspace_access == WorkspaceAccess::None {
+            return Vec::new();
+        }
+        let allow_write = self.workspace_access == WorkspaceAccess::ReadWrite;
+        let mut mounts: std::collections::HashMap<PathBuf, bool> =
+            std::collections::HashMap::new();
+        for path in &self.fs_read_paths {
+            mounts.entry(path.clone()).or_insert(false);
+        }
+        for path in &self.fs_write_paths {
+            // Write set wins under ReadWrite; ReadOnly forces every mount to ro.
+            mounts.insert(path.clone(), allow_write);
+        }
+        mounts.into_iter().collect()
     }
 }
 
@@ -389,6 +523,107 @@ mod tests {
         assert_eq!(caps.fs_read_paths.len(), 1);
         assert!(caps.network);
         assert!(caps.fs_write_paths.is_empty());
+    }
+
+    // ── SandboxScope + WorkspaceAccess ────────────────────────────────────────
+
+    #[test]
+    fn scope_and_access_defaults_match_today() {
+        // The default capability descriptor must describe today's per-exec,
+        // honor-the-path-sets behavior so adding the fields is a no-op.
+        let caps = SandboxCapabilities::default();
+        assert_eq!(caps.scope, SandboxScope::Exec);
+        assert_eq!(caps.workspace_access, WorkspaceAccess::ReadWrite);
+        assert_eq!(SandboxScope::default(), SandboxScope::Exec);
+        assert_eq!(WorkspaceAccess::default(), WorkspaceAccess::ReadWrite);
+    }
+
+    #[test]
+    fn scope_from_name_roundtrips_and_rejects_unknown() {
+        for (name, variant) in [
+            ("exec", SandboxScope::Exec),
+            ("agent", SandboxScope::Agent),
+            ("session", SandboxScope::Session),
+            ("shared", SandboxScope::Shared),
+        ] {
+            assert_eq!(SandboxScope::from_name(name).unwrap(), variant);
+            assert_eq!(variant.as_str(), name);
+        }
+        assert!(SandboxScope::from_name("galaxy").is_err());
+    }
+
+    #[test]
+    fn access_from_name_accepts_aliases_and_rejects_unknown() {
+        assert_eq!(
+            WorkspaceAccess::from_name("none").unwrap(),
+            WorkspaceAccess::None
+        );
+        for alias in ["read_only", "read-only", "ro"] {
+            assert_eq!(
+                WorkspaceAccess::from_name(alias).unwrap(),
+                WorkspaceAccess::ReadOnly
+            );
+        }
+        for alias in ["read_write", "read-write", "rw"] {
+            assert_eq!(
+                WorkspaceAccess::from_name(alias).unwrap(),
+                WorkspaceAccess::ReadWrite
+            );
+        }
+        assert!(WorkspaceAccess::from_name("append").is_err());
+    }
+
+    #[test]
+    fn scope_and_access_serde_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&SandboxScope::Session).unwrap(),
+            "\"session\""
+        );
+        assert_eq!(
+            serde_json::to_string(&WorkspaceAccess::ReadOnly).unwrap(),
+            "\"read_only\""
+        );
+        let scope: SandboxScope = serde_json::from_str("\"shared\"").unwrap();
+        assert_eq!(scope, SandboxScope::Shared);
+        let access: WorkspaceAccess = serde_json::from_str("\"none\"").unwrap();
+        assert_eq!(access, WorkspaceAccess::None);
+    }
+
+    // ── effective_mounts (the shared FS clamp) ────────────────────────────────
+
+    #[test]
+    fn effective_mounts_read_write_is_todays_behavior() {
+        let mut caps = SandboxCapabilities::default();
+        caps.fs_read_paths.insert(PathBuf::from("/data/in"));
+        caps.fs_write_paths.insert(PathBuf::from("/data/out"));
+        let mounts: std::collections::HashMap<PathBuf, bool> =
+            caps.effective_mounts().into_iter().collect();
+        assert_eq!(mounts.len(), 2);
+        assert_eq!(mounts[&PathBuf::from("/data/in")], false);
+        assert_eq!(mounts[&PathBuf::from("/data/out")], true);
+    }
+
+    #[test]
+    fn effective_mounts_read_only_clamps_write_paths() {
+        let mut caps = SandboxCapabilities::default();
+        caps.fs_write_paths.insert(PathBuf::from("/data/out"));
+        caps.workspace_access = WorkspaceAccess::ReadOnly;
+        let mounts = caps.effective_mounts();
+        assert_eq!(mounts.len(), 1);
+        // A path that was writable is clamped to read-only.
+        assert_eq!(mounts[0], (PathBuf::from("/data/out"), false));
+    }
+
+    #[test]
+    fn effective_mounts_none_strips_all() {
+        let mut caps = SandboxCapabilities::default();
+        caps.fs_read_paths.insert(PathBuf::from("/data/in"));
+        caps.fs_write_paths.insert(PathBuf::from("/data/out"));
+        caps.workspace_access = WorkspaceAccess::None;
+        assert!(
+            caps.effective_mounts().is_empty(),
+            "None access must strip every mount"
+        );
     }
 
     // ── SandboxBackend ────────────────────────────────────────────────────────

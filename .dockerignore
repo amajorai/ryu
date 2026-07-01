@@ -1,0 +1,14 @@
+# Keep the Docker build context small and free of host artifacts / secrets.
+.git
+**/node_modules
+**/target
+**/.next
+**/dist
+**/.turbo
+**/.env
+**/.env.*
+**/*.log
+**/.DS_Store
+# Rust / desktop / native build outputs not needed for server or web images.
+apps/desktop/src-tauri/target
+apps/*/build

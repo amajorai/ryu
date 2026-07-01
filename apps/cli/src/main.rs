@@ -315,6 +315,10 @@ async fn run_command(args: Vec<String>) -> anyhow::Result<()> {
             run_open_command(&args[1..]);
         }
 
+        "tui" => {
+            run_tui_command(&api_url, token.as_deref())?;
+        }
+
         cmd => {
             eprintln!("unknown command: {cmd}");
             eprintln!();
@@ -380,12 +384,84 @@ fn build_deep_link(args: &[String]) -> String {
     format!("ryu://open/{}", urlencoding::encode(first))
 }
 
+/// Launch the modern Bun + OpenTUI terminal UI (apps/tui) as an interactive
+/// child process that inherits this terminal. The active node's URL/token are
+/// passed via env so the TUI talks to the same Core as the rest of the CLI.
+///
+/// What to run is resolved in this order:
+///   1. `RYU_TUI_CMD` — full command line (escape hatch for packaged installs).
+///   2. Walk up from the current dir for a monorepo root containing
+///      `apps/tui/package.json`, then `bun run --filter tui dev` from there.
+///   3. Otherwise, print guidance and error out.
+fn run_tui_command(api_url: &str, token: Option<&str>) -> anyhow::Result<()> {
+    let mut cmd = if let Ok(raw) = std::env::var("RYU_TUI_CMD") {
+        let mut parts = raw.split_whitespace();
+        let Some(program) = parts.next() else {
+            eprintln!("error: RYU_TUI_CMD is set but empty");
+            return Ok(());
+        };
+        let mut c = std::process::Command::new(program);
+        c.args(parts);
+        c
+    } else if let Some(root) = find_monorepo_root() {
+        let mut c = std::process::Command::new("bun");
+        c.args(["run", "--filter", "tui", "dev"]);
+        c.current_dir(root);
+        c
+    } else {
+        eprintln!("error: could not locate the modern TUI (apps/tui).");
+        eprintln!();
+        eprintln!("Run `ryu tui` from inside the Ryu repository, or set RYU_TUI_CMD to the");
+        eprintln!("command that launches it, e.g.:");
+        eprintln!("  RYU_TUI_CMD=\"bun run /path/to/ryu/apps/tui/src/index.tsx\" ryu tui");
+        return Ok(());
+    };
+
+    // Point the TUI at the active node. Only set the bearer token when present.
+    cmd.env("RYU_CORE_URL", api_url);
+    if let Some(t) = token {
+        cmd.env("RYU_CORE_TOKEN", t);
+    }
+
+    // Inherit stdio (default) so the Bun TUI takes over this terminal, and block
+    // until it exits, then propagate a non-zero exit code.
+    match cmd.status() {
+        Ok(status) => {
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("error: failed to launch the TUI: {e}");
+            eprintln!();
+            eprintln!("Make sure `bun` is installed and on your PATH, or set RYU_TUI_CMD.");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Walk up from the current directory looking for the monorepo root — the first
+/// ancestor that contains `apps/tui/package.json`.
+fn find_monorepo_root() -> Option<std::path::PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if dir.join("apps").join("tui").join("package.json").is_file() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
 fn print_usage() {
     print_logo_ansi();
     eprintln!("usage: ryu [command]");
     eprintln!();
     eprintln!("General:");
     eprintln!("  (no args)                      open control panel TUI");
+    eprintln!("  tui                            open the modern (OpenTUI) terminal UI");
     eprintln!("  status                         show sidecar statuses");
     eprintln!("  start <name|all>               start a sidecar or all");
     eprintln!("  stop  <name|all>               stop a sidecar or all");

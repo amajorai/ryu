@@ -3,6 +3,8 @@ use tracing::warn;
 
 use crate::config::{FirewallConfig, FirewallPolicy};
 
+pub mod cmdscan;
+
 /// A pattern match found in text.
 #[derive(Debug, Clone)]
 pub struct FirewallMatch {
@@ -22,6 +24,7 @@ pub struct FirewallScanner {
     pii_patterns: Vec<(String, Regex)>,
     secret_patterns: Vec<(String, Regex)>,
     injection_patterns: Vec<(String, Regex)>,
+    outbound_patterns: Vec<(&'static str, Regex)>,
 }
 
 impl FirewallScanner {
@@ -29,12 +32,20 @@ impl FirewallScanner {
         let pii_patterns = build_pii_patterns();
         let secret_patterns = build_secret_patterns();
         let injection_patterns = build_injection_patterns();
+        let outbound_patterns = build_outbound_patterns();
+
+        // Seed the process-global untrusted-content wrapping flag from config.
+        // This is the single chokepoint hit at startup AND on every hot-swap
+        // (`AppState::update_firewall_config`), so the tool loop always reads a
+        // live value without threading config through its signature.
+        crate::untrusted::set_enabled(config.wrap_untrusted_tool_results);
 
         Self {
             config,
             pii_patterns,
             secret_patterns,
             injection_patterns,
+            outbound_patterns,
         }
     }
 
@@ -239,6 +250,26 @@ impl FirewallScanner {
         (result, detected)
     }
 
+    /// Redact secret-like tokens from outbound response/log/error text.
+    ///
+    /// Unlike `sanitize`, this is NOT config-gated on `redact_pii`/`redact_secrets`
+    /// — secret egress is always scrubbed when the firewall is enabled. Each match
+    /// is replaced with a STABLE marker (e.g. `[REDACTED:gh_pat]`) so the same
+    /// secret shape always produces the same placeholder. Returns the redacted text
+    /// and the list of marker labels that fired (for audit).
+    pub fn redact_outbound(&self, text: &str) -> (String, Vec<&'static str>) {
+        let mut result = text.to_string();
+        let mut hits: Vec<&'static str> = Vec::new();
+        for (marker, re) in &self.outbound_patterns {
+            if re.is_match(&result) {
+                hits.push(*marker);
+                let placeholder = format!("[REDACTED:{marker}]");
+                result = re.replace_all(&result, placeholder.as_str()).to_string();
+            }
+        }
+        (result, hits)
+    }
+
     fn find_match(
         &self,
         text: &str,
@@ -327,6 +358,48 @@ fn build_secret_patterns() -> Vec<(String, Regex)> {
     ];
 
     compile_patterns(&raw)
+}
+
+/// Compiled outbound secret-egress patterns with STABLE `&'static str` markers.
+///
+/// Distinct from `build_secret_patterns` (which returns owned `String` names and
+/// feeds the config-gated inbound/outbound scan). These markers are the stable
+/// redaction labels (`[REDACTED:gh_pat]`, …) surfaced to callers, so they must
+/// stay `&'static str` and not route through `compile_patterns`.
+fn build_outbound_patterns() -> Vec<(&'static str, Regex)> {
+    // (marker, regex). Order matters: more specific token shapes first so a
+    // GitHub PAT is not partially eaten by a generic param rule.
+    let raw: [(&'static str, &str); 7] = [
+        // GitHub PATs: ghp_ (classic), gho_/ghu_/ghs_/ghr_ (OAuth/user/server/refresh)
+        ("gh_pat", r"\bgh[pousr]_[A-Za-z0-9]{20,255}\b"),
+        // GitHub fine-grained PAT
+        ("gh_pat", r"\bgithub_pat_[A-Za-z0-9_]{22,255}\b"),
+        // OpenAI-style sk- keys (incl. sk-proj-, sk-ant-)
+        ("openai_key", r"\bsk-[A-Za-z0-9_\-]{20,}\b"),
+        // AWS access key id
+        ("aws_akid", r"\bAKIA[0-9A-Z]{16}\b"),
+        // Bearer <token>
+        ("bearer", r"(?i)\bbearer\s+[A-Za-z0-9\-._~+/]{16,}=*"),
+        // token= / api_key= / apikey= / access_token= query-or-form params
+        (
+            "token_param",
+            r"(?i)\b(?:api[_-]?key|access[_-]?token|token)=[A-Za-z0-9\-._~+/]{8,}",
+        ),
+        // password= / secret= / passwd= query-or-form params
+        (
+            "secret_param",
+            r#"(?i)\b(?:password|passwd|secret)=[^&\s"']{4,}"#,
+        ),
+    ];
+    raw.iter()
+        .filter_map(|(marker, pat)| match Regex::new(pat) {
+            Ok(re) => Some((*marker, re)),
+            Err(e) => {
+                tracing::error!("Failed to compile outbound pattern '{marker}': {e}");
+                None
+            }
+        })
+        .collect()
 }
 
 fn build_injection_patterns() -> Vec<(String, Regex)> {
@@ -532,5 +605,98 @@ mod tests {
         // to its pre-#199 behavior (PII + secrets redacted when both flags true).
         assert!(!regular.contains("user@example.com"));
         assert!(!regular.contains("sk-abcdefghijklmnopqrstu"));
+    }
+
+    // ── Outbound DLP redaction tests (OUTBOUND-DLP contract) ──────────────────
+
+    /// `redact_outbound` ignores the config gates, so a default scanner suffices.
+    fn default_scanner() -> FirewallScanner {
+        FirewallScanner::new(FirewallConfig::default())
+    }
+
+    #[test]
+    fn redact_outbound_masks_github_classic_pat() {
+        let fw = default_scanner();
+        let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+        let (out, hits) = fw.redact_outbound(&format!("token is {secret} ok"));
+        assert!(!out.contains(secret), "classic PAT must be redacted: {out}");
+        assert!(out.contains("[REDACTED:gh_pat]"), "got: {out}");
+        assert!(hits.contains(&"gh_pat"));
+    }
+
+    #[test]
+    fn redact_outbound_masks_github_oauth_pat() {
+        let fw = default_scanner();
+        // gho_ is caught ONLY by the outbound rule (not by sanitize's secret set).
+        let secret = "gho_abcdefghijklmnopqrstuvwxyz0123456789";
+        let (out, hits) = fw.redact_outbound(&format!("bearer {secret}"));
+        assert!(!out.contains(secret), "OAuth PAT must be redacted: {out}");
+        assert!(out.contains("[REDACTED:gh_pat]"));
+        assert!(hits.contains(&"gh_pat"));
+    }
+
+    #[test]
+    fn redact_outbound_masks_openai_key() {
+        let fw = default_scanner();
+        let secret = "sk-abcdefghijklmnopqrstuvwx";
+        let (out, hits) = fw.redact_outbound(&format!("key={secret}"));
+        assert!(!out.contains(secret), "sk- key must be redacted: {out}");
+        assert!(out.contains("[REDACTED:openai_key]"));
+        assert!(hits.contains(&"openai_key"));
+    }
+
+    #[test]
+    fn redact_outbound_masks_aws_akid() {
+        let fw = default_scanner();
+        let secret = "AKIAIOSFODNN7EXAMPLE";
+        let (out, hits) = fw.redact_outbound(&format!("aws {secret} end"));
+        assert!(!out.contains(secret), "AKIA id must be redacted: {out}");
+        assert!(out.contains("[REDACTED:aws_akid]"));
+        assert!(hits.contains(&"aws_akid"));
+    }
+
+    #[test]
+    fn redact_outbound_masks_bearer_token() {
+        let fw = default_scanner();
+        let text = "Authorization: Bearer abcdef0123456789ABCDEF";
+        let (out, hits) = fw.redact_outbound(text);
+        assert!(
+            !out.contains("abcdef0123456789ABCDEF"),
+            "bearer token must be redacted: {out}"
+        );
+        assert!(out.contains("[REDACTED:bearer]"));
+        assert!(hits.contains(&"bearer"));
+    }
+
+    #[test]
+    fn redact_outbound_masks_token_and_password_params() {
+        let fw = default_scanner();
+        let (out, hits) = fw.redact_outbound("?token=abcd1234efgh&password=hunter2secret");
+        assert!(!out.contains("abcd1234efgh"), "token= must be redacted: {out}");
+        assert!(
+            !out.contains("hunter2secret"),
+            "password= must be redacted: {out}"
+        );
+        assert!(hits.contains(&"token_param"));
+        assert!(hits.contains(&"secret_param"));
+    }
+
+    #[test]
+    fn redact_outbound_marker_is_stable() {
+        let fw = default_scanner();
+        let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+        let (out, _) = fw.redact_outbound(&format!("{secret} then {secret}"));
+        // Same shape twice → identical placeholder both times, secret gone.
+        assert!(!out.contains(secret));
+        assert_eq!(out.matches("[REDACTED:gh_pat]").count(), 2, "got: {out}");
+    }
+
+    #[test]
+    fn redact_outbound_clean_text_unchanged() {
+        let fw = default_scanner();
+        let text = "The quick brown fox jumps over the lazy dog.";
+        let (out, hits) = fw.redact_outbound(text);
+        assert_eq!(out, text, "clean text must pass through unchanged");
+        assert!(hits.is_empty(), "no markers should fire on clean text");
     }
 }

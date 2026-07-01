@@ -1,0 +1,37 @@
+---
+title: "Outbound DLP and firewall"
+description: "Redacting secret-like tokens out of response bodies, error surfaces, and logs before they leave the Gateway."
+---
+
+The Gateway firewall scans traffic in both directions. The outbound side is data-loss prevention - it redacts secret-like tokens from response text and from error and log surfaces, so a secret that leaked into a model response or an error message does not flow back to the caller verbatim. For the broader firewall, policies, and inbound scanning, see [Gateway security](/docs/gateway/security).
+
+## What gets redacted
+
+The redactor (`scan_outbound` / `redact_outbound`) matches against compiled, top-level regexes - never compiled inside the request path.
+
+| Pattern | Example |
+|---|---|
+| GitHub PATs | `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` followed by base62 |
+| OpenAI-style keys | `sk-...` |
+| AWS access keys | `AKIA...` |
+| Bearer tokens | `Bearer <token>` |
+| Credential params | `token=`, `api_key=`, `password=`, `secret=` in query or form bodies |
+
+Each match is replaced with a stable redaction marker, for example `[REDACTED:gh_pat]`, so the shape of the response is preserved while the secret is gone.
+
+## Non-streaming vs streaming
+
+- **Non-streaming responses** are redacted in full - the complete body is scanned and rewritten before it reaches the caller.
+- **Streaming responses** use a best-effort buffered-window approach. The redactor carries a small tail across chunk boundaries so a secret split between two chunks is still caught, then rewrites the assistant text in place.
+
+<Callout type="warn">
+Streaming redaction is best-effort. The buffered window catches a secret split across a chunk boundary, but a pathological split or a redaction gap in the streaming path is a known limitation - where full streaming redaction is infeasible, the redactor redacts what it can and leaves a clear TODO and a log entry rather than silently passing the secret. Treat the non-streaming path as the strong guarantee and the streaming path as best-effort. The full live round-trip has not been exercised end to end.
+</Callout>
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/security/credential-scrubbing" />
+  <DocCard href="/docs/security/ssrf-protection" />
+  <DocCard href="/docs/gateway/security" />
+</Cards>

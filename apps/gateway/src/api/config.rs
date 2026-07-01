@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use crate::{
     config::{
         ApiKeyConfig, AuthConfig, BudgetConfig, FirewallConfig, GatewayConfig, ProviderKind,
-        ProvidersConfig, RoutingConfig, SmartRoutingConfig,
+        ProvidersConfig, RoutingConfig, SmartRoutingConfig, ToolProfile, ToolsConfig,
     },
     error::GatewayError,
     pipeline::{authenticate, AuthInputs},
@@ -28,6 +28,23 @@ struct ConfigView {
     providers: ProvidersView,
     auth: AuthView,
     routing: RoutingView,
+    /// Tool-loop config: master switch + named tool-policy profiles. Profiles
+    /// carry no secrets, so they are returned verbatim for the UI to read/edit
+    /// (mirrors how `firewall` / `smart_routing` are surfaced).
+    tools: ToolsConfigView,
+    /// Static policy-drift warnings (dangerous-tool-combo + elevation drift).
+    /// Computed from the LIVE firewall config plus the tool / composio / exec
+    /// budget config and the distributed policy. Empty on a clean config.
+    drift: Vec<crate::policy::DriftWarning>,
+}
+
+/// Redacted view of ToolsConfig: the master switch and the named tool-policy
+/// profiles (presets). `always_on` tool defs and the loop tuning knobs are
+/// omitted; profiles are the operator-facing policy surface.
+#[derive(Serialize)]
+struct ToolsConfigView {
+    enabled: bool,
+    profiles: std::collections::HashMap<String, ToolProfile>,
 }
 
 /// Redacted auth config: key values are omitted; only names + metadata are shown.
@@ -223,12 +240,32 @@ pub async fn get_config(
         smart_routing: routing.smart_routing.clone(),
     };
 
+    // Tool-policy profiles are static config (read from state.config like
+    // routing); a PUT change takes effect on the next gateway restart.
+    let tools_view = ToolsConfigView {
+        enabled: state.config.tools.enabled,
+        profiles: state.config.tools.profiles.clone(),
+    };
+
+    // Compute drift from the LIVE firewall config (so PUT hot-swaps are
+    // reflected) plus the static tool / composio / exec-budget config and the
+    // current distributed policy snapshot. Warn-only: nothing is blocked.
+    let drift = crate::policy::detect_drift(
+        &state.config.tools,
+        &state.config.composio,
+        &state.config.exec_budget,
+        &firewall_cfg,
+        &state.policy_snapshot(),
+    );
+
     let view = ConfigView {
         firewall: firewall_cfg,
         budgets: budget_cfg,
         providers: redact_providers(&state.config.providers),
         auth: redact_auth(&auth_cfg),
         routing: routing_view,
+        tools: tools_view,
+        drift,
     };
 
     Ok(Json(json!(view)))
@@ -246,8 +283,9 @@ pub struct AuthConfigPatch {
 }
 
 /// Partial config update accepted by `PUT /v1/config`.
-/// `firewall` and `budgets` are hot-swapped live. `routing` is persisted and
-/// takes effect on the next gateway restart (the router is not live-swappable).
+/// `firewall` and `budgets` are hot-swapped live. `routing` and `tools` are
+/// persisted and take effect on the next gateway restart (neither is
+/// live-swappable; the request path reads the startup snapshot).
 /// `auth.api_keys` is hot-swapped live. Provider credentials and master_key
 /// require an environment-variable change.
 #[derive(Deserialize)]
@@ -258,6 +296,11 @@ pub struct ConfigPatch {
     /// and `require_auth` flag are unchanged; they are environment-variable-only.
     pub auth: Option<AuthConfigPatch>,
     pub routing: Option<RoutingConfig>,
+    /// When present, replaces the tool-loop config (master switch + named
+    /// tool-policy profiles). Like `routing`, this is persisted and takes effect
+    /// on the next gateway restart; the request path reads `state.config.tools`
+    /// directly, which is fixed at startup.
+    pub tools: Option<ToolsConfig>,
 }
 
 /// Apply a config change live, then persist to `gateway.toml`. The live state
@@ -282,9 +325,11 @@ pub async fn put_config(
         && patch.budgets.is_none()
         && patch.auth.is_none()
         && patch.routing.is_none()
+        && patch.tools.is_none()
     {
         return Err(GatewayError::BadRequest(
-            "Patch body must include at least one of: firewall, budgets, auth, routing".to_string(),
+            "Patch body must include at least one of: firewall, budgets, auth, routing, tools"
+                .to_string(),
         ));
     }
 
@@ -302,6 +347,9 @@ pub async fn put_config(
     }
     if let Some(routing) = &patch.routing {
         updated_config.routing = routing.clone();
+    }
+    if let Some(tools) = &patch.tools {
+        updated_config.tools = tools.clone();
     }
 
     // Persist first: if the write fails, we leave live config unchanged.

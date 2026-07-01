@@ -30,6 +30,7 @@ pub mod capabilities;
 pub mod device;
 pub mod gguf;
 pub mod installed;
+pub mod llmfit;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -969,6 +970,7 @@ pub fn record_default_download(
         size_bytes,
         format: ModelFormat::Gguf,
         mmproj,
+        finetune_base: None,
     })
 }
 
@@ -1612,6 +1614,7 @@ pub async fn install_file(
         size_bytes,
         format: ModelFormat::Gguf,
         mmproj,
+        finetune_base: None,
     })?;
 
     // The installed state just changed — drop cached detail for this repo and all
@@ -1673,6 +1676,8 @@ pub async fn install_from_descriptor(
         // Single-URL descriptor installs (non-HF seam sources) carry no repo
         // tree to discover a companion projector — text-only binding.
         mmproj: None,
+        // Plain weight install, not a fine-tune merge.
+        finetune_base: None,
     })?;
 
     // Installed state changed — drop cached detail for this repo + all lists.
@@ -1800,6 +1805,7 @@ pub async fn install_snapshot(
         // Snapshot (safetensors/MLX) engines resolve their own vision tower from
         // the repo config — the GGUF `mmproj` companion concept does not apply.
         mmproj: None,
+        finetune_base: None,
     })?;
 
     cache_invalidate(repo_id);

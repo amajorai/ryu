@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 use crate::sidecar::adapters::{
     AgentAdapter, AgentConfig, AgentInfo, ChatChunk, ChatRequest, ImagePart, MemoryEntry, ToolInfo,
 };
+use crate::sidecar::gateway::{check_exec_scan, ExecScanOutcome};
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::BoxFuture;
 
@@ -644,6 +645,9 @@ pub async fn run_acp_prompt(
     // independent of the earlier `session/new` crash — that was the backslash-
     // stripping bug in `ryu_pi_acp_cmd`, now fixed; it happened with `mcpServers: []`
     // too, so the bridge was never its cause.
+    // Effective agent id, cloned before the bridge consumes `agent_id` below, so
+    // the ACP permission seam can label its command-approval scans.
+    let scan_agent = agent_id.clone();
     let bridge_supported = !spawn_cmd.contains("pi-acp");
     let ryu_mcp_server = match (&mcp, bridge_supported) {
         (Some(registry), true) => {
@@ -775,6 +779,7 @@ pub async fn run_acp_prompt(
                             let tx_chunk = tx.clone();
                             let tx_perm = tx.clone();
                             let interactive = turn.interactive;
+                            let scan_agent = scan_agent.clone();
                             MatchDispatch::new(message)
                                 .if_notification(async move |notification: SessionNotification| {
                                     match notification.update {
@@ -816,7 +821,35 @@ pub async fn run_acp_prompt(
                                 .await
                                 .if_request(
                                     async move |req: RequestPermissionRequest, responder| {
-                                        let outcome = if interactive {
+                                        // Security seam: pre-scan LLM-emitted shell/exec
+                                        // commands through the gateway command-approval
+                                        // scanner before granting. A Deny short-circuits
+                                        // to reject regardless of mode (headless would
+                                        // otherwise auto-approve the first option). In
+                                        // headless mode ApprovalRequired also rejects (no
+                                        // human to consult) - fail closed. This is
+                                        // accident prevention, not containment; ACP agents
+                                        // are first-party binaries, so we gate their
+                                        // commands rather than scrub their env. See
+                                        // SECURITY.md.
+                                        let tool_call_json =
+                                            serde_json::to_value(&req.tool_call)
+                                                .unwrap_or(serde_json::Value::Null);
+                                        let scan_reject = match acp_exec_scan_verdict(
+                                            &tool_call_json,
+                                            &scan_agent,
+                                        )
+                                        .await
+                                        {
+                                            ExecScanOutcome::Deny(_) => true,
+                                            ExecScanOutcome::ApprovalRequired(_) => {
+                                                !interactive
+                                            }
+                                            ExecScanOutcome::Allow => false,
+                                        };
+                                        let outcome = if scan_reject {
+                                            RequestPermissionOutcome::Cancelled
+                                        } else if interactive {
                                             // Surface the request to the user and await
                                             // their decision; cancel (reject) on timeout.
                                             let request_id = next_permission_id();
@@ -880,6 +913,58 @@ pub async fn run_acp_prompt(
         })
         .await
         .map_err(|e| anyhow::anyhow!("ACP connection: {e}"))
+}
+
+/// Best-effort extraction of a shell command from a serialized ACP tool call.
+///
+/// Exec-capable agents surface the command under a handful of shapes: a
+/// `command`/`cmd`/`script`/`shellCommand` string (or an argv array) either at
+/// the top level or nested under `rawInput`/`raw_input`/`input`. Returns `None`
+/// when nothing command-like is present, so non-exec tool calls are not scanned.
+/// The scanner is a heuristic accident-prevention layer, not containment, so a
+/// command it cannot see is out of scope by design.
+fn extract_exec_command(tool_call: &serde_json::Value) -> Option<String> {
+    fn command_in(obj: &serde_json::Value) -> Option<String> {
+        for key in ["command", "cmd", "script", "shellCommand"] {
+            if let Some(s) = obj.get(key).and_then(serde_json::Value::as_str) {
+                if !s.trim().is_empty() {
+                    return Some(s.to_owned());
+                }
+            }
+        }
+        // Some agents pass argv as an array of strings.
+        if let Some(arr) = obj.get("command").and_then(serde_json::Value::as_array) {
+            let joined = arr
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !joined.trim().is_empty() {
+                return Some(joined);
+            }
+        }
+        None
+    }
+
+    if let Some(c) = command_in(tool_call) {
+        return Some(c);
+    }
+    for key in ["rawInput", "raw_input", "input"] {
+        if let Some(c) = tool_call.get(key).and_then(command_in) {
+            return Some(c);
+        }
+    }
+    None
+}
+
+/// Run an ACP tool call's command (if any) through the gateway command-approval
+/// scanner. `Allow` when no command is recoverable; `check_exec_scan` itself
+/// short-circuits to `Allow` when `RYU_EXEC_APPROVAL_MODE` is unset or `off`.
+async fn acp_exec_scan_verdict(tool_call: &serde_json::Value, agent: &str) -> ExecScanOutcome {
+    match extract_exec_command(tool_call) {
+        Some(command) => check_exec_scan("acp", &command, None, Some(agent)).await,
+        None => ExecScanOutcome::Allow,
+    }
 }
 
 /// Build a `ToolCall` event from an ACP `ToolCall` notification.
@@ -2057,6 +2142,31 @@ mod tests {
             reg.find_by_prefix("ryu").is_some(),
             "Ryu entry must exist in registry"
         );
+    }
+
+    #[test]
+    fn extract_exec_command_finds_command_shapes() {
+        // Top-level command string.
+        let tc = serde_json::json!({ "command": "rm -rf /tmp/x" });
+        assert_eq!(
+            extract_exec_command(&tc).as_deref(),
+            Some("rm -rf /tmp/x")
+        );
+        // Nested under rawInput as an argv array.
+        let tc = serde_json::json!({
+            "kind": "execute",
+            "rawInput": { "command": ["git", "push", "--force"] }
+        });
+        assert_eq!(
+            extract_exec_command(&tc).as_deref(),
+            Some("git push --force")
+        );
+        // Non-exec tool call (a file read) yields nothing to scan.
+        let tc = serde_json::json!({ "kind": "read", "path": "/etc/hosts" });
+        assert!(extract_exec_command(&tc).is_none());
+        // Empty command string is treated as absent.
+        let tc = serde_json::json!({ "command": "   " });
+        assert!(extract_exec_command(&tc).is_none());
     }
 
     // ── Pi as default-installed+enabled agent (U041) ──────────────────────────

@@ -29,6 +29,7 @@
 //! - **Tool-call** (slice 2): an `approval`-kind elicitation envelope at the tool
 //!   dispatch chokepoint, so PTC parks and chat/ACP surface it. Not in slice 1.
 
+pub mod policy;
 pub mod store;
 
 use std::sync::OnceLock;

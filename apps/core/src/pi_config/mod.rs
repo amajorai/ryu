@@ -409,7 +409,10 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         auth_key: "openrouter",
         auth_env: "OPENROUTER_API_KEY",
         auth_kind: "api-key",
-        suggested_models: &["anthropic/claude-sonnet-4", "openai/gpt-4o"],
+        // `openrouter/auto` is OpenRouter's Auto Router: it picks the best model
+        // per prompt at no extra fee. Listed first so managed users get a
+        // zero-decision "just route it well" option.
+        suggested_models: &["openrouter/auto", "anthropic/claude-sonnet-4", "openai/gpt-4o"],
     },
 ];
 

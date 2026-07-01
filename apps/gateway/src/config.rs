@@ -95,6 +95,16 @@ pub struct CreditsConfig {
     /// (pass-through at cost).
     #[serde(default)]
     pub markup_bps: u64,
+    /// Per-tool-call cost in micro-USD for billable (Composio) tool executions.
+    /// Composio charges per action execution, so on the managed plan each
+    /// executed `composio__*` tool call debits the org wallet by this amount
+    /// (× the count of calls in the request), at cost — the same `debit_amount`
+    /// markup that token usage uses. Default: 0 ⇒ tool calls are free until a
+    /// deployment provisions a real rate (managed nodes set it via
+    /// `GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD`). Builtin/MCP/app tools are
+    /// never billed here — only Composio executions.
+    #[serde(default)]
+    pub cost_per_tool_call_micro_usd: u64,
     /// What the budget layer does when an org's wallet is empty: `stop` (default)
     /// aborts the next request; `downgrade` reroutes to `wallet_empty_downgrade_to`.
     #[serde(default)]
@@ -130,6 +140,7 @@ impl Default for CreditsConfig {
             base_url: default_control_plane_url(),
             internal_secret: None,
             markup_bps: 0,
+            cost_per_tool_call_micro_usd: 0,
             wallet_empty_action: WalletEmptyAction::default(),
             wallet_empty_downgrade_to: None,
             timeout_ms: default_credits_timeout_ms(),
@@ -147,6 +158,13 @@ impl CreditsConfig {
             .saturating_mul(BPS_DENOM.saturating_add(self.markup_bps))
             .saturating_add(BPS_DENOM / 2)
             / BPS_DENOM
+    }
+
+    /// The raw (pre-markup) cost in micro-USD for `n` billable tool calls. Pass
+    /// the result through [`Self::debit_amount`] to apply the platform markup,
+    /// exactly like token cost. Saturating to avoid overflow.
+    pub fn tool_call_cost_micro_usd(&self, n: u64) -> u64 {
+        self.cost_per_tool_call_micro_usd.saturating_mul(n)
     }
 
     /// Whether the hook is active: enabled with both a control-plane URL and an
@@ -180,6 +198,38 @@ pub struct ToolsConfig {
     /// How many top search hits to describe + inject per `tool_search`. Default: 5.
     #[serde(default = "default_describe_top_n")]
     pub describe_top_n: usize,
+    /// Named tool-policy profiles (presets) layered ABOVE the per-request
+    /// `x-ryu-tools` allowlist, modeled on OpenClaw's profile layering
+    /// (profile → allow/deny → sandbox, checked in that order). A request
+    /// selects one by name via `x-ryu-tool-profile`; the gateway resolves it to
+    /// an effective allowlist (see `effective_tool_allowlist`). Default: empty
+    /// map ⇒ no profiles ⇒ the allowlist path is byte-for-byte unchanged. An
+    /// unknown/typo'd profile name falls back to today's behavior, never deny-all.
+    #[serde(default)]
+    pub profiles: HashMap<String, ToolProfile>,
+}
+
+/// A named tool-policy profile (preset). Resolves to an allowlist that an
+/// explicit per-request `x-ryu-tools` allow/deny still overrides.
+///
+/// Resolution (in `effective_tool_allowlist`): seed the allow set from `allow`
+/// (or the wildcard `"*"` when `unrestricted`), union the explicit
+/// `x-ryu-tools` CSV on top, then strip any id listed in `deny` (deny wins over
+/// allow). `always_on` tools are appended last and are never deny-stripped.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ToolProfile {
+    /// Fully-qualified tool ids this profile grants. Ignored when `unrestricted`.
+    #[serde(default)]
+    pub allow: Vec<String>,
+    /// Fully-qualified tool ids this profile denies. Deny wins over `allow` and
+    /// over the per-request `x-ryu-tools` grant. Does not strip `always_on`.
+    #[serde(default)]
+    pub deny: Vec<String>,
+    /// The "full"/unrestricted preset: resolves the allow set to the wildcard
+    /// `"*"`, which `ToolLoopContext::is_allowed` treats as allow-any. Opt-in:
+    /// only a request that explicitly selects this profile gets the wildcard.
+    #[serde(default)]
+    pub unrestricted: bool,
 }
 
 fn default_tools_max_rounds() -> u8 {
@@ -196,6 +246,7 @@ impl Default for ToolsConfig {
             always_on: Vec::new(),
             max_rounds: default_tools_max_rounds(),
             describe_top_n: default_describe_top_n(),
+            profiles: HashMap::new(),
         }
     }
 }
@@ -357,6 +408,36 @@ pub struct OpenRouterProviderConfig {
     pub site_url: String,
     #[serde(default = "openrouter_site_name")]
     pub site_name: String,
+    /// `provider.data_collection` policy sent on every request: "deny" uses only
+    /// providers that do not retain/train on prompts, "allow" permits them.
+    /// Empty (the default) omits the field entirely, leaving OpenRouter's own
+    /// default and — crucially — NOT overriding a BYOK caller's own routing
+    /// intent. Managed Ryu Cloud nodes set this to "deny" for privacy-by-default
+    /// (via `OPENROUTER_DATA_COLLECTION`, wired in Core's gateway spawn env).
+    #[serde(default = "openrouter_data_collection")]
+    pub data_collection: String,
+    /// Require zero-data-retention endpoints (`provider.zdr`). Default off.
+    #[serde(default)]
+    pub zdr: bool,
+    /// Provider sort preference: "price" | "throughput" | "latency". Empty → omit.
+    #[serde(default)]
+    pub sort: String,
+    /// Add the `response-healing` plugin (repairs malformed JSON). Default off
+    /// until its billing is confirmed.
+    #[serde(default)]
+    pub response_healing: bool,
+    /// Send the legacy `usage: {include: true}` flag. Current OpenRouter always
+    /// returns `usage.cost` (read by `response_cost_micro_usd` for at-cost credit
+    /// metering), so this only helps older or OpenRouter-compatible endpoints.
+    /// Default on for compatibility; harmless no-op on modern OpenRouter.
+    #[serde(default = "default_true")]
+    pub usage_accounting: bool,
+    /// Reserved: per-org OpenRouter sub-keys minted via the management-key API
+    /// (`/api/v1/keys`) so per-tenant spend is capped and attributed at
+    /// OpenRouter. Empty today (single shared account key); the per-request key
+    /// selection through the pipeline is the follow-up to the provisioning loop.
+    #[serde(default)]
+    pub org_api_keys: std::collections::HashMap<String, String>,
 }
 
 fn openrouter_base_url() -> String {
@@ -367,6 +448,12 @@ fn openrouter_site_url() -> String {
 }
 fn openrouter_site_name() -> String {
     "ryu-gateway".to_string()
+}
+fn openrouter_data_collection() -> String {
+    // Empty → the `provider.data_collection` field is omitted, so out-of-the-box
+    // behaviour is unchanged and a BYOK caller's own routing is never overridden.
+    // Managed nodes opt in to "deny" via env.
+    String::new()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -687,6 +774,14 @@ pub struct FirewallConfig {
     /// are redacted when policy = Sanitize. Defaults to true.
     #[serde(default = "default_true")]
     pub redact_secrets: bool,
+
+    /// Whether external tool RESULTS re-entering the model on the openai-compat
+    /// tool loop are wrapped in untrusted-content boundary markers and stripped
+    /// of LLM chat-template control tokens (injection defense). Defaults to true;
+    /// it only affects untrusted tool output (never user text), so it is safe to
+    /// keep on. Set to false to disable the wrapping.
+    #[serde(default = "default_true")]
+    pub wrap_untrusted_tool_results: bool,
 }
 
 impl Default for FirewallConfig {
@@ -699,6 +794,7 @@ impl Default for FirewallConfig {
             log_detections: true,
             redact_pii: true,
             redact_secrets: true,
+            wrap_untrusted_tool_results: true,
         }
     }
 }
@@ -741,6 +837,15 @@ fn parse_bool_env(raw: &str) -> Option<bool> {
         "0" | "false" | "no" | "off" => Some(false),
         _ => None,
     }
+}
+
+/// Read a boolean flag from the environment, falling back to `default` when the
+/// variable is unset or holds an unrecognised value.
+fn env_bool(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| parse_bool_env(&v))
+        .unwrap_or(default)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1074,11 +1179,23 @@ impl GatewayConfig {
                 std::env::var("OPENROUTER_SITE_URL").unwrap_or_else(|_| openrouter_site_url());
             let site_name =
                 std::env::var("OPENROUTER_SITE_NAME").unwrap_or_else(|_| openrouter_site_name());
+            let data_collection = std::env::var("OPENROUTER_DATA_COLLECTION")
+                .unwrap_or_else(|_| openrouter_data_collection());
+            let zdr = env_bool("OPENROUTER_ZDR", false);
+            let sort = std::env::var("OPENROUTER_SORT").unwrap_or_default();
+            let response_healing = env_bool("OPENROUTER_RESPONSE_HEALING", false);
+            let usage_accounting = env_bool("OPENROUTER_USAGE_ACCOUNTING", true);
             config.providers.openrouter = Some(OpenRouterProviderConfig {
                 api_key: key,
                 base_url,
                 site_url,
                 site_name,
+                data_collection,
+                zdr,
+                sort,
+                response_healing,
+                usage_accounting,
+                org_api_keys: std::collections::HashMap::new(),
             });
         }
 
@@ -1415,6 +1532,11 @@ impl GatewayConfig {
         if let Ok(raw) = std::env::var("GATEWAY_CREDITS_MARKUP_BPS") {
             if let Ok(bps) = raw.trim().parse::<u64>() {
                 config.credits.markup_bps = bps;
+            }
+        }
+        if let Ok(raw) = std::env::var("GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD") {
+            if let Ok(cost) = raw.trim().parse::<u64>() {
+                config.credits.cost_per_tool_call_micro_usd = cost;
             }
         }
         if let Ok(raw) = std::env::var("GATEWAY_CREDITS_WALLET_EMPTY_ACTION") {

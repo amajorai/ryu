@@ -124,6 +124,42 @@ fn channel_context(channel_name: &str) -> RequestContext {
         tool_search_requested: false,
         // Bot traffic is interactive (a user is waiting on the other end).
         priority: crate::concurrency::Priority::Interactive,
+        // Channel messages don't select a named tool-policy profile.
+        tool_profile: None,
+    }
+}
+
+/// Per-platform / global allowed-chat list for inbound channel traffic.
+///
+/// Env: `RYU_CHANNEL_ALLOWED_USERS` (global, all platforms) and
+/// `RYU_CHANNEL_ALLOWED_USERS_<PLATFORM>` (e.g. `_TELEGRAM`). Comma-separated
+/// chat ids. When BOTH are unset for a platform the channel is OPEN (current
+/// behavior preserved) — the open warning is emitted once at spawn time, not
+/// per-message. NOTE: `InboundMessage` carries only `chat_id`, so this gates on
+/// the originating chat/conversation, not an individual sender user id.
+fn channel_allowlist(platform: &str) -> Option<Vec<String>> {
+    let per_platform_key = format!("RYU_CHANNEL_ALLOWED_USERS_{}", platform.to_ascii_uppercase());
+    let raw = std::env::var(&per_platform_key)
+        .ok()
+        .or_else(|| std::env::var("RYU_CHANNEL_ALLOWED_USERS").ok())?;
+    let list: Vec<String> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if list.is_empty() {
+        None
+    } else {
+        Some(list)
+    }
+}
+
+/// Whether a chat is permitted for this platform. Open (true) when unset.
+fn channel_chat_allowed(platform: &str, chat_id: &str) -> bool {
+    match channel_allowlist(platform) {
+        Some(list) => list.iter().any(|allowed| allowed == chat_id),
+        None => true,
     }
 }
 
@@ -137,6 +173,17 @@ pub async fn handle_message<C: Channel + ?Sized>(
     state: SharedState,
     message: InboundMessage,
 ) {
+    // Channel allowlist gate: reject inbound from a chat not on the platform's
+    // (or global) allowlist. Unset ⇒ open (warned once at spawn, not here).
+    if !channel_chat_allowed(channel.name(), &message.chat_id) {
+        warn!(
+            channel = channel.name(),
+            chat_id = %message.chat_id,
+            "channel inbound rejected: chat not in allowlist"
+        );
+        return;
+    }
+
     let body = build_request_body(channel.model(), channel.system_prompt(), &message.text);
     let ctx = channel_context(channel.name());
     let request_id = ctx.request_id.clone();
@@ -450,6 +497,13 @@ fn spawn_channel<C: Channel + 'static>(state: &SharedState, channel: anyhow::Res
         Ok(channel) => {
             let channel = Arc::new(channel);
             let name = channel.name();
+            if channel_allowlist(name).is_none() {
+                warn!(
+                    channel = name,
+                    "channel registered with NO allowlist (RYU_CHANNEL_ALLOWED_USERS[_{}] unset) — all chats accepted",
+                    name.to_uppercase()
+                );
+            }
             info!(channel = name, "registering channel");
             let state = Arc::clone(state);
             tokio::spawn(async move {
@@ -511,5 +565,46 @@ mod tests {
         assert_eq!(ctx.api_key, "channel:telegram");
         assert_eq!(ctx.user_name.as_deref(), Some("telegram-bot"));
         assert!(!ctx.is_master_key);
+    }
+
+    /// Channel allowlist behavior. Run as ONE sequential test because it mutates
+    /// process-global env (`RYU_CHANNEL_ALLOWED_USERS[_*]`); parallel sub-tests
+    /// would race. Each phase sets/removes only what it needs and cleans up.
+    #[test]
+    fn channel_allowlist_gating() {
+        // Clean slate.
+        std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS");
+        std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS_TELEGRAM");
+        std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS_SLACK");
+
+        // 1. Fully unset ⇒ open (current behavior preserved).
+        assert!(channel_allowlist("telegram").is_none());
+        assert!(channel_chat_allowed("telegram", "123"));
+
+        // 2. Per-platform set ⇒ listed id allowed, others rejected.
+        std::env::set_var("RYU_CHANNEL_ALLOWED_USERS_TELEGRAM", "123, 456");
+        assert!(channel_chat_allowed("telegram", "123"));
+        assert!(channel_chat_allowed("telegram", "456"));
+        assert!(!channel_chat_allowed("telegram", "999"));
+        // A different platform with no list of its own stays open.
+        assert!(channel_chat_allowed("slack", "999"));
+
+        // 3. Global applies when per-platform is unset.
+        std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS_TELEGRAM");
+        std::env::set_var("RYU_CHANNEL_ALLOWED_USERS", "777");
+        assert!(channel_chat_allowed("telegram", "777"));
+        assert!(!channel_chat_allowed("telegram", "123"));
+
+        // 4. Per-platform OVERRIDES global (global ignored when per-platform set).
+        std::env::set_var("RYU_CHANNEL_ALLOWED_USERS_TELEGRAM", "123");
+        assert!(channel_chat_allowed("telegram", "123"));
+        assert!(
+            !channel_chat_allowed("telegram", "777"),
+            "global should be ignored once per-platform is present"
+        );
+
+        // Cleanup.
+        std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS");
+        std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS_TELEGRAM");
     }
 }

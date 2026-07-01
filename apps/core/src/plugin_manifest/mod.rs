@@ -381,7 +381,8 @@ const MANIFEST_FILE_NAMES: &[&str] = &["plugin.json", "ryu.json"];
 /// Built-in plugin manifests compiled into the binary, always present regardless of
 /// whether the user has a `~/.ryu/plugins/` directory.
 ///
-/// - `sample.plugin.json` — Research Assistant demo for first-run and integration tests.
+/// (`sample.plugin.json` — the Research Assistant demo — is kept as a test-only
+/// fixture and is deliberately NOT shipped as a built-in.)
 /// - `spider.plugin.json` — Spider web crawler tool plugin (U040).
 /// - `exa.plugin.json` — Exa neural search tool plugin (U040, BYOK).
 /// - `ghost.plugin.json` — Ghost desktop-automation MCP tool (system plugin, Windows-first).
@@ -393,7 +394,6 @@ const MANIFEST_FILE_NAMES: &[&str] = &["plugin.json", "ryu.json"];
 /// - `engines.plugin.json` — Local engine bindings (llama.cpp + embeddings) as a default-on Core plugin (#448).
 /// - `durable.plugin.json` — Durable workflow execution engine as a default-on Core plugin (#448 dogfood).
 const BUILTIN_MANIFESTS: &[&str] = &[
-    include_str!("fixtures/sample.plugin.json"),
     include_str!("fixtures/spider.plugin.json"),
     include_str!("fixtures/exa.plugin.json"),
     include_str!("fixtures/ghost.plugin.json"),
@@ -780,11 +780,13 @@ mod tests {
                 "built-in '{id}' must load (engines.ryu must be satisfiable)"
             );
         }
+        // The Research Assistant demo is no longer a shipped built-in (it was a
+        // first-run sample); it must NOT appear in the catalog.
         assert!(
-            manifests
+            !manifests
                 .iter()
                 .any(|m| m.id == "com.example.research-assistant"),
-            "built-in research assistant manifest should be loaded"
+            "sample research assistant manifest must not be a built-in"
         );
         assert!(
             manifests.iter().any(|m| m.id == "io.ryu.spider"),

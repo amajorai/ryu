@@ -45,6 +45,12 @@ pub enum JobTarget {
     /// ([`crate::identity::health`]); a single fixed-id job ensured at startup
     /// (there is no per-connection CRUD hook), so it rides the same tick loop.
     IdentityHealth,
+    /// Run one continual-learning cycle (sweep conversations → PRM-score → reward-
+    /// filter → dispatch a retrain from the original base). Backed by
+    /// [`crate::learning`]; a single fixed-id job ensured at startup that no-ops
+    /// unless the user opted in (and, if a sleep window is set, only fires within
+    /// it). Rides the same tick loop as the others.
+    LearningCycle,
 }
 
 /// The schedule on which a job fires.

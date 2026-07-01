@@ -70,6 +70,21 @@ pub async fn capability(State(state): State<ServerState>) -> impl IntoResponse {
 /// `apps/unsloth-sidecar` for the schema) plus an optional `target`
 /// (`local` | `remote`).
 pub async fn start(State(state): State<ServerState>, Json(body): Json<Value>) -> Response {
+    match dispatch(&state, body).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err((code, err)) => (code, Json(err)).into_response(),
+    }
+}
+
+/// Start a fine-tune job (local or remote), returning the sidecar/remote response
+/// JSON on success or a `(status, error-json)` on failure. Shared by the
+/// `/api/finetune/start` handler above and the continual-learning cycle
+/// ([`crate::learning::run_cycle`] with `execute: true`), so both go through the
+/// same GPU gate, sidecar-ensure, and job-record path.
+pub(crate) async fn dispatch(
+    state: &ServerState,
+    body: Value,
+) -> Result<Value, (StatusCode, Value)> {
     let base_model = body
         .get("base_model_id")
         .and_then(Value::as_str)
@@ -77,11 +92,10 @@ pub async fn start(State(state): State<ServerState>, Json(body): Json<Value>) ->
         .trim()
         .to_string();
     if base_model.is_empty() {
-        return (
+        return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "missing `base_model_id`" })),
-        )
-            .into_response();
+            json!({ "error": "missing `base_model_id`" }),
+        ));
     }
 
     let target = body
@@ -91,18 +105,17 @@ pub async fn start(State(state): State<ServerState>, Json(body): Json<Value>) ->
         .to_string();
 
     if target == "remote" {
-        return start_remote(&state, &body, base_model).await;
+        return dispatch_remote(state, &body, base_model).await;
     }
 
     // Gate local training on the node's GPU.
     let dev = DeviceInfo::detect();
     let (can_local, reason) = local_capability(&dev);
     if !can_local {
-        return (
+        return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": reason, "can_train_local": false })),
-        )
-            .into_response();
+            json!({ "error": reason, "can_train_local": false }),
+        ));
     }
 
     // The Unsloth sidecar is opt-in (not in startup_order) — ensure it's up.
@@ -143,16 +156,15 @@ pub async fn start(State(state): State<ServerState>, Json(body): Json<Value>) ->
             if let Err(e) = state.finetune.record(&job).await {
                 tracing::warn!("recording finetune job failed: {e:#}");
             }
-            (StatusCode::OK, Json(resp)).into_response()
+            Ok(resp)
         }
-        Err(e) => (
+        Err(e) => Err((
             StatusCode::BAD_GATEWAY,
-            Json(json!({
+            json!({
                 "error": format!("{e:#}"),
                 "hint": "Install the Unsloth fine-tuning tool from the Store, or run `bun run dev:unsloth`.",
-            })),
-        )
-            .into_response(),
+            }),
+        )),
     }
 }
 
@@ -160,7 +172,11 @@ pub async fn start(State(state): State<ServerState>, Json(body): Json<Value>) ->
 /// the target node's connection as `body.remote = { url, token }`; we forward the
 /// job to that node's Core (forcing it to train *locally* there), then record it
 /// with the remote coordinates so `get`/`stream`/`cancel` proxy back to it.
-async fn start_remote(state: &ServerState, body: &Value, base_model: String) -> Response {
+async fn dispatch_remote(
+    state: &ServerState,
+    body: &Value,
+    base_model: String,
+) -> Result<Value, (StatusCode, Value)> {
     let remote = body.get("remote");
     let url = remote
         .and_then(|r| r.get("url"))
@@ -174,11 +190,10 @@ async fn start_remote(state: &ServerState, body: &Value, base_model: String) -> 
         .and_then(Value::as_str)
         .map(str::to_string);
     if url.is_empty() {
-        return (
+        return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "remote target needs `remote.url`" })),
-        )
-            .into_response();
+            json!({ "error": "remote target needs `remote.url`" }),
+        ));
     }
 
     // Forward verbatim but force the remote to train locally (it is the GPU node)
@@ -199,14 +214,13 @@ async fn start_remote(state: &ServerState, body: &Value, base_model: String) -> 
             let status = resp.status();
             let json_body = resp.json::<Value>().await.unwrap_or_else(|_| json!({}));
             if !status.is_success() {
-                return (
+                return Err((
                     StatusCode::BAD_GATEWAY,
-                    Json(json!({
+                    json!({
                         "error": format!("remote node returned {status}"),
                         "detail": json_body,
-                    })),
-                )
-                    .into_response();
+                    }),
+                ));
             }
             let job_id = json_body
                 .get("job_id")
@@ -239,13 +253,12 @@ async fn start_remote(state: &ServerState, body: &Value, base_model: String) -> 
             if let Err(e) = state.finetune.record(&job).await {
                 tracing::warn!("recording remote finetune job failed: {e:#}");
             }
-            (StatusCode::OK, Json(json_body)).into_response()
+            Ok(json_body)
         }
-        Err(e) => (
+        Err(e) => Err((
             StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": format!("remote node unreachable: {e}") })),
-        )
-            .into_response(),
+            json!({ "error": format!("remote node unreachable: {e}") }),
+        )),
     }
 }
 
@@ -447,12 +460,14 @@ pub async fn merge(State(state): State<ServerState>, Json(body): Json<Value>) ->
                     .unwrap_or("")
                     .to_string();
                 let model = InstalledModel {
-                    repo_id: base,
+                    repo_id: base.clone(),
                     filename: format!("{stem}.gguf"),
                     stem: stem.to_string(),
                     size_bytes: resp.get("size_bytes").and_then(Value::as_u64),
                     format: ModelFormat::Gguf,
                     mmproj: None,
+                    // Provenance: this GGUF is a merged fine-tune of `base`.
+                    finetune_base: Some(base),
                 };
                 if let Err(e) = installed::record(model) {
                     tracing::warn!("recording merged model '{stem}' failed: {e:#}");

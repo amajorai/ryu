@@ -858,6 +858,11 @@ mod tests {
 
     #[test]
     fn install_from_local_dir_with_nested_skills_layout() {
+        // Serialize with other tests that mutate the shared RYU_SKILLS_* env vars,
+        // so a parallel run never lets one test's remove_var clobber this set_var.
+        let _env = crate::skills::SKILLS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Build a fake repo: skills/<category>/<name>/SKILL.md + a resource file.
         let root = std::env::temp_dir().join(format!("ryu-local-install-src-{}", uniq()));
         let skill_dir = root.join("skills").join("web").join("my-cool-skill");

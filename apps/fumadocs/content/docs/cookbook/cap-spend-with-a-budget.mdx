@@ -88,6 +88,16 @@ the web dashboard, then watch them in the desktop dialog.
 
 </Steps>
 
+## Check your work
+
+- Set a low `token_budget_total` on a test key and drive it past the cap. With `downgrade_to` set,
+  requests keep succeeding but on the cheaper model; leave it unset and the gateway returns
+  `BudgetExceeded` once the cap is hit.
+- `GET /v1/config` returns the live budget view, so you can confirm the cap and current usage
+  without a restart.
+- Budgets hot-swap: a `PUT /api/gateway/config` with a `budgets` patch takes effect immediately,
+  unlike routing, which needs a refresh.
+
 ## Going further
 
 - Pair budgets with smart routing so cheap requests never touch an expensive model in the first place: [Route by task](/docs/cookbook/route-by-task).

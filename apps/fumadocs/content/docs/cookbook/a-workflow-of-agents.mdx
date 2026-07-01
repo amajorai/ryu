@@ -12,6 +12,14 @@ result. It is for developers who want to compose Runnables in code rather than w
 - [The SDK](/docs/develop/sdk): the `defineWorkflow` and `defineAgent` factories.
 - [Workflows](/docs/core/workflows): the Core DAG engine, for when you want a workflow as data rather than code.
 
+## Prerequisites
+
+- **Bun** on your PATH (`bun` and `bunx`).
+- A scaffolded plugin project. If you do not have one, start from
+  [Build your first agent in code](/docs/cookbook/first-sdk-agent).
+- **A running Ryu Core** (it runs the gateway sidecar) with a routable model, since both agent
+  steps call the model through `ctx.gateway`.
+
 ## Steps
 
 <Steps>
@@ -24,7 +32,7 @@ Each step is a [Runnable](/docs/start-here/architecture/runnable-model). Start w
 calling the model through `ctx.gateway`:
 
 ```ts
-import { defineAgent } from "@ryu/sdk";
+import { defineAgent } from "@ryuhq/sdk";
 
 export const researcher = defineAgent({
   id: "agent-researcher",
@@ -59,7 +67,7 @@ A workflow is a Runnable with `kind = "workflow"`. List the agents in `steps` an
 `run()` in order inside the workflow body, threading one step's output into the next:
 
 ```ts
-import { defineWorkflow } from "@ryu/sdk";
+import { defineWorkflow } from "@ryuhq/sdk";
 import { researcher, writer } from "./agents";
 
 export const report = defineWorkflow({
@@ -99,6 +107,15 @@ you want triggers, retries, human-in-the-loop gates, durable resume, or a visual
 workflow as data with the [Core workflow engine](/docs/core/workflows) instead, and let your agents
 be its `prompt`/`agent_delegate` nodes.
 </Callout>
+
+## Check your work
+
+- Run `bunx ryu dev src/workflow.ts`, pass a `topic`, and the run returns one `report` paragraph,
+  not the intermediate facts, proof the two steps ran in order.
+- The paragraph is written *from* the researcher's facts: change the `topic` and the writer's output
+  tracks it, confirming `facts` threaded from the first step into the second.
+- Both calls are governed by the shared `ctx.gateway`. If the gateway cannot route the model, the
+  run fails at the first step rather than producing a partial report.
 
 ## Going further
 

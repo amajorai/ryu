@@ -1,0 +1,69 @@
+# Self-host the Ryu open-core stack with Docker Compose.
+#
+#   docker compose up --build
+#
+# This runs Core and Gateway as two separate services (the production shape),
+# using the one image built from ./Dockerfile. Core decides *what runs*; the
+# Gateway governs *what is allowed* on every model call. Core reaches the
+# Gateway over the compose network rather than spawning it in-process
+# (RYU_GATEWAY_MANAGED=0 + RYU_GATEWAY_URL), so each can be scaled and inspected
+# on its own.
+#
+# Point any OpenAI-compatible client at Core on http://localhost:7980. On first
+# boot Core downloads a fully-local model stack (llama.cpp + Gemma 4, nomic
+# embeddings, whisper) into the /data volume, so it works with no API key. To
+# skip that download on a small host, set a provider key (e.g. OPENAI_API_KEY)
+# in the environment and Core routes there instead.
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ryu:local
+    # Override the entrypoint: this service IS the gateway, bound to all
+    # interfaces inside the compose network. `--bind=` (with the equals sign)
+    # is how ryu-gateway takes its listen address.
+    entrypoint: ["ryu-gateway", "--bind=0.0.0.0:7981"]
+    environment:
+      # Provider credentials live on the Gateway. Uncomment and supply your own,
+      # or leave unset to use Core's first-run local model stack.
+      # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      RYU_GATEWAY_PORT: "7981"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7981/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ryu:local
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      RYU_BIND: "0.0.0.0:7980"
+      RYU_DIR: "/data"
+      # Use the gateway service instead of spawning a local one.
+      RYU_GATEWAY_MANAGED: "0"
+      RYU_GATEWAY_URL: "http://gateway:7981"
+    ports:
+      - "7980:7980"
+    volumes:
+      - ryu-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7980/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 5
+
+volumes:
+  ryu-data:

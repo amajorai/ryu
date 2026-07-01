@@ -1,0 +1,53 @@
+---
+title: "Skills"
+description: "Ryu agent skills are reusable SKILL.md instruction packs that load on demand, give any model new behavior for a turn, and travel with the open Agent Skills standard."
+---
+
+A Ryu agent skill is a small, self-contained instruction pack that teaches a model how to do one thing well. Each skill is a single `SKILL.md` file with a YAML front-matter header and a Markdown body. The front-matter names the skill and describes it in one line; the body is the instruction text that gets injected into the model's context when the skill is active. Skills are how you give any model new behavior without touching application code or fine-tuning a checkpoint.
+
+Ryu follows the open Agent Skills standard, the same `~/.claude/skills/<id>/SKILL.md` layout that Claude Code and the skills CLI read. A skill you install for Ryu works in those tools too, and a skill written for them works in Ryu. The collection in `apps/skills` is the set of skills Ryu ships and maintains, led by the flagship [setup-ryu](/docs/skills/setup-ryu) skill.
+
+<Callout type="info">
+  Core owns skill selection, loading, and instruction injection into the outgoing request body. The Gateway owns what is allowed, measured, and paid for. A skill changes the turn in Core, and the Gateway counts the skill-tagged call toward budget and audit through the `x-ryu-skill-ids` header.
+</Callout>
+
+## The SKILL.md format
+
+A `SKILL.md` file starts with a YAML front-matter block delimited by `---` lines, followed by the Markdown instruction body. Unknown front-matter keys are ignored, so skills from newer spec versions still load in older Cores.
+
+```markdown
+---
+name: "Web Researcher"
+description: "Enables web search and tells the model when to use it."
+allowed-tools:
+  - "agentbrowser"
+  - "spider"
+enabled: true
+always-on: false
+---
+You have access to web-search tools. Search the web when you need
+factual, up-to-date information, then cite what you used.
+```
+
+The front-matter fields are:
+
+- `name` - the human-readable display name. This is the only required field.
+- `description` - a one-line summary. Under progressive disclosure this is what the model sees up front to decide whether to load the skill.
+- `allowed-tools` - an optional list of tool names the skill declares it needs. Core surfaces them to the tool bridge for the turn; the Gateway enforces the grant.
+- `enabled` - when `false` the skill is installed but skipped during selection. Defaults to `true`.
+- `always-on` - when `true` the full body is injected up front instead of being loaded on demand. Defaults to `false`.
+
+## Progressive disclosure
+
+By default Ryu uses progressive disclosure. Only each skill's name and description are injected up front, and the model loads the full body on demand through the `skills__load` tool when it decides the skill is relevant. This keeps the context small even with many skills installed.
+
+Progressive disclosure needs a tool loop, so it runs on the ACP plane. The no-tool, OpenAI-compatible fast path keeps full injection regardless, so a weak model is never starved of a skill it cannot self-load. An `always-on` skill is always injected in full, which is the escape hatch for a critical skill or a model that cannot reliably load skills itself.
+
+## In this section
+
+<Cards>
+  <DocCard href="/docs/skills/setup-ryu" />
+  <DocCard href="/docs/skills/catalog" />
+  <DocCard href="/docs/skills/authoring" />
+  <DocCard href="/docs/skills/publishing" />
+</Cards>

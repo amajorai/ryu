@@ -1,0 +1,44 @@
+---
+title: "Security"
+description: "How Ryu isolates execution, governs commands, scrubs secrets, redacts outbound data, and locks down its network surface."
+---
+
+**Ryu is local-first.** Core runs on `127.0.0.1:7980` and the Gateway on `127.0.0.1:7981`, both bound to loopback by default. The model is treated as untrusted - it never receives raw credentials, and every command it tries to run, every subprocess it spawns, and every byte it sends outbound passes through a layered defense.
+
+<Callout type="info">
+Security in Ryu is defense in depth, not a single gate. A command is scanned before it runs, child processes get a scrubbed environment, outbound responses are redacted, and the network surface stays loopback-only unless you explicitly expose it with a token. Each layer is honest about what it does and does not cover - look for the warning callouts.
+</Callout>
+
+## Trust and isolation
+
+<Cards>
+  <DocCard href="/docs/security/trust-model" />
+  <DocCard href="/docs/security/sandboxing-isolation" />
+</Cards>
+
+## Execution governance
+
+<Cards>
+  <DocCard href="/docs/security/command-approval" />
+</Cards>
+
+## Data protection
+
+<Cards>
+  <DocCard href="/docs/security/credential-scrubbing" />
+  <DocCard href="/docs/security/outbound-dlp" />
+</Cards>
+
+## Network and access
+
+<Cards>
+  <DocCard href="/docs/security/ssrf-protection" />
+  <DocCard href="/docs/security/network-binding-auth" />
+  <DocCard href="/docs/security/channel-allowlists" />
+</Cards>
+
+## Operations
+
+<Cards>
+  <DocCard href="/docs/security/hardening-checklist" />
+</Cards>

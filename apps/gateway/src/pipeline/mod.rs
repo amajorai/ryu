@@ -77,6 +77,12 @@ pub struct RequestContext {
     /// ahead of background fan-out (delegate / threads / scheduler) when the
     /// resident engine's batch slots are full.
     pub priority: crate::concurrency::Priority,
+    /// Named tool-policy profile selected for this request (#473 profiles), from
+    /// `x-ryu-tool-profile`. Resolves to an allowlist preset in
+    /// `effective_tool_allowlist` that the explicit `x-ryu-tools` allow/deny
+    /// still overrides. `None` (or an unknown name) ⇒ no profile ⇒ today's
+    /// allowlist behavior, unchanged.
+    pub tool_profile: Option<String>,
 }
 
 /// Describes the degraded mode the pipeline entered, if any, for this request.
@@ -162,6 +168,8 @@ pub struct AuthInputs<'a> {
     pub tool_search_requested: bool,
     /// Local-engine admission priority (#queue), from `x-ryu-priority`.
     pub priority: crate::concurrency::Priority,
+    /// Named tool-policy profile (#473 profiles), from `x-ryu-tool-profile`.
+    pub tool_profile: Option<String>,
 }
 
 impl<'a> AuthInputs<'a> {
@@ -197,6 +205,7 @@ pub fn authenticate(
         companion_source,
         tool_search_requested,
         priority,
+        tool_profile,
     } = inputs;
     // Use the live auth config (via RwLock) so keys added via PUT /v1/config
     // take effect immediately without a gateway restart.
@@ -222,6 +231,7 @@ pub fn authenticate(
                 companion_source,
                 tool_search_requested,
                 priority,
+                tool_profile: tool_profile.clone(),
             });
         }
 
@@ -255,6 +265,7 @@ pub fn authenticate(
                     companion_source,
                     tool_search_requested,
                     priority,
+                    tool_profile: tool_profile.clone(),
                 });
             }
         }
@@ -292,6 +303,7 @@ pub fn authenticate(
                     companion_source,
                     tool_search_requested,
                     priority,
+                    tool_profile: tool_profile.clone(),
                 });
             }
         }
@@ -773,6 +785,7 @@ pub async fn run(
             )
             .await
         } else if let Some(composio) = &state.composio {
+            // Legacy Composio loop: returns (response, billable_tool_calls).
             state.metrics.inc_composio_calls();
             let entity_id = ctx
                 .user_id
@@ -781,13 +794,15 @@ pub async fn run(
             // Per-agent allowlist (#456): when Core forwards `x-ryu-tools`,
             // scope the tool loop to exactly those actions; otherwise fall back
             // to the gateway's global `composio.actions` config.
+            // `"*"` is stripped for the same reason as in `parse_tool_actions`:
+            // the client header must not be able to introduce a wildcard grant.
             let per_request: Vec<String> = ctx
                 .tool_actions
                 .as_deref()
                 .map(|s| {
                     s.split(',')
                         .map(str::trim)
-                        .filter(|x| !x.is_empty())
+                        .filter(|x| !x.is_empty() && *x != "*")
                         .map(String::from)
                         .collect()
                 })
@@ -801,11 +816,15 @@ pub async fn run(
                 .run_tool_loop(&mut body, provider, &decision.model, entity_id, allowed)
                 .await
         } else {
-            provider.complete(&decision.model, &body).await
+            // Plain completion: no tool loop ⇒ no billable tool calls.
+            provider
+                .complete(&decision.model, &body)
+                .await
+                .map(|v| (v, 0u64))
         };
 
         match completion_result {
-            Ok(mut response) => {
+            Ok((mut response, billable_tool_calls)) => {
                 state.circuit_breaker.record_success(provider.name());
                 // Determine degraded mode: we served via a fallback when the primary
                 // was skipped and a different provider is now responding (#218).
@@ -961,12 +980,33 @@ pub async fn run(
                 // active and the request carries an org.
                 if let Some(org_id) = ctx.org_id.clone().filter(|s| !s.is_empty()) {
                     if state.config.credits.is_active() {
-                        let cost = request_cost_micro_usd(&state, input_tokens, output_tokens);
+                        let reported_cost = response["usage"]["cost"].as_f64();
+                        let cost = response_cost_micro_usd(
+                            &state,
+                            reported_cost,
+                            input_tokens,
+                            output_tokens,
+                        );
                         let state2 = Arc::clone(&state);
                         let request_id = ctx.request_id.clone();
-                        tokio::spawn(debit_wallet_for_request(state2, org_id, request_id, cost));
+                        tokio::spawn(debit_wallet_for_request(
+                            state2,
+                            org_id,
+                            request_id,
+                            "gateway_usage",
+                            cost,
+                        ));
                     }
                 }
+
+                // Tool-call (Composio) debit (#496): separate ledger row, fires
+                // only when this request executed billable Composio tools.
+                spawn_tool_call_debit(
+                    &state,
+                    ctx.org_id.as_deref(),
+                    &ctx.request_id,
+                    billable_tool_calls,
+                );
 
                 return Ok(PipelineOutput {
                     response,
@@ -1224,7 +1264,20 @@ pub async fn run_stream(
             )
             .await
             {
-                Ok(buffered) => Ok(crate::tools::value_to_sse_stream(&buffered)),
+                Ok((buffered, billable_tool_calls)) => {
+                    // Tools have fully executed by the time the loop returns, so
+                    // the tool-call (Composio) debit fires here rather than at
+                    // stream end — the synthesized SSE carries only the final
+                    // turn and would drop the count (#496). The token debit still
+                    // fires at stream end on the real usage frame.
+                    spawn_tool_call_debit(
+                        &state,
+                        ctx.org_id.as_deref(),
+                        &ctx.request_id,
+                        billable_tool_calls,
+                    );
+                    Ok(crate::tools::value_to_sse_stream(&buffered))
+                }
                 Err(e) => Err(e),
             }
         } else {
@@ -1612,22 +1665,77 @@ fn tool_signal_active(ctx: &RequestContext, cfg: &crate::config::ToolsConfig) ->
     ctx.tools_header_present || ctx.tool_search_requested
 }
 
-/// Effective egress tool allowlist (FQ ids) for the unified loop: the
-/// per-request `x-ryu-tools` CSV when present, else the registry's `always_on`
-/// tool names (so always-on tools are callable without a header). `tool_search`
-/// is always permitted by the loop itself, independent of this list.
-fn effective_tool_allowlist(ctx: &RequestContext, cfg: &crate::config::ToolsConfig) -> Vec<String> {
-    let mut allowed: Vec<String> = ctx
-        .tool_actions
+/// Parse the per-request `x-ryu-tools` CSV into a list of FQ tool ids.
+///
+/// The wildcard `"*"` is stripped here: it grants *every* tool
+/// ([`crate::tools::ToolLoopContext::is_allowed`]) and may only originate from a
+/// server-configured `unrestricted` profile, never from the client-controlled
+/// header. Without this filter, `x-ryu-tools: *` would bypass the allowlist
+/// entirely (both on the no-profile path and when unioned onto a non-`unrestricted`
+/// profile's allow set).
+fn parse_tool_actions(ctx: &RequestContext) -> Vec<String> {
+    ctx.tool_actions
         .as_deref()
         .map(|s| {
             s.split(',')
                 .map(str::trim)
-                .filter(|x| !x.is_empty())
+                .filter(|x| !x.is_empty() && *x != "*")
                 .map(String::from)
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// Effective egress tool allowlist (FQ ids) for the unified loop.
+///
+/// Default path (no profile, or an unknown profile name): the per-request
+/// `x-ryu-tools` CSV when present, else empty, plus the registry's `always_on`
+/// tool names (so always-on tools are callable without a header). This is the
+/// byte-for-byte original behavior — selecting no profile changes nothing.
+///
+/// Profile path (`ctx.tool_profile` names a configured `cfg.profiles` entry),
+/// modeled on OpenClaw's profile layering (profile → allow/deny):
+///   1. seed the allow set from `profile.allow` (or the wildcard `"*"` when the
+///      profile is `unrestricted` — the "full" preset);
+///   2. union the explicit `x-ryu-tools` CSV on top (explicit allow augments the
+///      profile);
+///   3. strip any id listed in `profile.deny` (deny wins over allow);
+///   4. append `always_on` names last — they are never deny-stripped, preserving
+///      the always-on contract.
+///
+/// `tool_search` is always permitted by the loop itself, independent of this
+/// list. An unrestricted profile's `"*"` is honored by
+/// [`crate::tools::ToolLoopContext::is_allowed`].
+fn effective_tool_allowlist(ctx: &RequestContext, cfg: &crate::config::ToolsConfig) -> Vec<String> {
+    let profile = ctx
+        .tool_profile
+        .as_deref()
+        .and_then(|name| cfg.profiles.get(name));
+
+    let mut allowed: Vec<String> = match profile {
+        // Profile selected and configured: seed from the profile's allow set.
+        Some(p) => {
+            let mut seed: Vec<String> = if p.unrestricted {
+                vec!["*".to_string()]
+            } else {
+                p.allow.clone()
+            };
+            // Explicit per-request allow augments/overrides the profile.
+            for id in parse_tool_actions(ctx) {
+                if !seed.contains(&id) {
+                    seed.push(id);
+                }
+            }
+            // Deny wins over allow (does NOT strip always_on, appended below).
+            if !p.deny.is_empty() {
+                seed.retain(|id| !p.deny.contains(id));
+            }
+            seed
+        }
+        // No profile, or an unknown/typo'd name: exactly today's behavior.
+        None => parse_tool_actions(ctx),
+    };
+
     for def in &cfg.always_on {
         if let Some(name) = def["function"]["name"].as_str() {
             allowed.push(name.to_string());
@@ -1811,16 +1919,77 @@ fn most_severe(a: Option<BudgetDecision>, b: Option<BudgetDecision>) -> Option<B
     }
 }
 
-/// Estimated spend in micro-USD for the given token totals, using the same
-/// per-1k-token rate the control-plane reporter attributes spend with. Keeping
-/// the rate in one config field (`control_plane.cost_per_1k_micro_usd`) means
-/// the debit and the aggregate report never diverge.
+/// Flat estimated spend in micro-USD for the given token totals, using the same
+/// per-1k-token rate (`control_plane.cost_per_1k_micro_usd`) the control-plane
+/// reporter, shared-budget reconciliation, and audit-trace cost-view all use, so
+/// those flat-basis systems stay consistent with each other.
+///
+/// NOTE: this is the FALLBACK basis. For OpenRouter traffic the wallet debit now
+/// uses the provider's real `usage.cost` via [`response_cost_micro_usd`], so the
+/// authoritative wallet ledger intentionally diverges from the flat-rate
+/// reporter/analytics for those requests. The flat systems are approximate
+/// spend attribution + an independent shared-budget guardrail; they do not read
+/// the wallet ledger. (Follow-up to fully unify: thread real cost onto the audit
+/// record so the reporter sums it too.)
 fn request_cost_micro_usd(state: &AppState, input_tokens: u64, output_tokens: u64) -> u64 {
     let per_1k = state.config.control_plane.cost_per_1k_micro_usd;
     input_tokens
         .saturating_add(output_tokens)
         .saturating_mul(per_1k)
         / 1000
+}
+
+/// Debit cost in micro-USD, preferring the provider's *reported actual* spend
+/// over the flat per-1k estimate. OpenRouter returns `usage.cost` (in USD) when
+/// the request enables usage accounting; using it means the wallet is debited
+/// the true cost of whichever model actually ran — essential for mixed-price
+/// traffic and the `openrouter/auto` router, where one slug spans a 10x+ price
+/// range. Providers that report no cost (OpenAI/Anthropic direct) fall back to
+/// the estimate, so behaviour is unchanged for them.
+fn response_cost_micro_usd(
+    state: &AppState,
+    reported_cost_usd: Option<f64>,
+    input_tokens: u64,
+    output_tokens: u64,
+) -> u64 {
+    reported_cost_usd
+        .and_then(cost_usd_to_micro)
+        .unwrap_or_else(|| request_cost_micro_usd(state, input_tokens, output_tokens))
+}
+
+/// Convert a provider-reported USD cost to micro-USD, rejecting non-positive or
+/// non-finite values (so the caller falls back to the token estimate).
+fn cost_usd_to_micro(cost_usd: f64) -> Option<u64> {
+    if cost_usd.is_finite() && cost_usd > 0.0 {
+        Some((cost_usd * 1_000_000.0).round() as u64)
+    } else {
+        None
+    }
+}
+
+/// Extract the provider-reported generation cost (USD) from an assembled SSE
+/// transcript. OpenRouter includes `usage.cost` in the terminal usage frame when
+/// usage accounting is enabled; mirrors [`sse_parse_usage`]. `None` when absent.
+fn sse_parse_cost(raw: &str) -> Option<f64> {
+    let mut best = None;
+    for line in raw.lines() {
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim();
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        let Ok(json) = serde_json::from_str::<Value>(data) else {
+            continue;
+        };
+        if let Some(cost) = json["usage"]["cost"].as_f64() {
+            if cost.is_finite() && cost > 0.0 {
+                best = Some(cost);
+            }
+        }
+    }
+    best
 }
 
 /// Best-effort post-call wallet debit (#486). Computes the marked-up debit for a
@@ -1833,11 +2002,15 @@ fn request_cost_micro_usd(state: &AppState, input_tokens: u64, output_tokens: u6
 /// `warn!`) and the flag is left untouched. A zero debit (cache hits, 0-token
 /// modalities) is skipped (the endpoint rejects `amountMicroUsd <= 0`).
 ///
-/// `refId = request_id` makes the debit idempotent: a retried hook is a no-op.
+/// `ref_id` makes the debit idempotent: a retried hook is a no-op. Token usage
+/// passes `ref_id = request_id`; the per-request tool-call (Composio) debit passes
+/// `ref_id = "{request_id}:composio"` with `reason = "composio"` so it lands as a
+/// distinct ledger row instead of being deduped against the token debit (#496).
 async fn debit_wallet_for_request(
     state: Arc<AppState>,
     org_id: String,
-    request_id: String,
+    ref_id: String,
+    reason: &'static str,
     cost_micro_usd: u64,
 ) {
     let credits = &state.config.credits;
@@ -1856,8 +2029,8 @@ async fn debit_wallet_for_request(
     let body = json!({
         "orgId": org_id,
         "amountMicroUsd": amount,
-        "reason": "gateway_usage",
-        "refId": request_id,
+        "reason": reason,
+        "refId": ref_id,
     });
 
     let resp = state
@@ -1881,7 +2054,7 @@ async fn debit_wallet_for_request(
                     if v["wentNonPositive"].as_bool().unwrap_or(false) {
                         warn!(
                             org_id = %org_id,
-                            request_id = %request_id,
+                            ref_id = %ref_id,
                             "credits: org wallet emptied; next request will be gated"
                         );
                     }
@@ -1891,7 +2064,7 @@ async fn debit_wallet_for_request(
                     audit_debit_failure(
                         &state,
                         &org_id,
-                        &request_id,
+                        &ref_id,
                         &format!("credits debit response unparseable: {e}"),
                     );
                 }
@@ -1910,7 +2083,7 @@ async fn debit_wallet_for_request(
             audit_debit_failure(
                 &state,
                 &org_id,
-                &request_id,
+                &ref_id,
                 &format!("credits debit failed: control plane returned {status}"),
             );
         }
@@ -1919,11 +2092,50 @@ async fn debit_wallet_for_request(
             audit_debit_failure(
                 &state,
                 &org_id,
-                &request_id,
+                &ref_id,
                 &format!("credits debit failed (transport): {e}"),
             );
         }
     }
+}
+
+/// Best-effort per-request debit for billable (Composio) tool calls (#496).
+/// Composio charges per action execution, so on the managed plan each executed
+/// `composio__*` tool call costs the org `cost_per_tool_call_micro_usd`. This
+/// fires ONE debit for the whole request (`count × per-call cost`, at cost via
+/// `debit_amount`) under `reason="composio"` and a distinct
+/// `refId="{request_id}:composio"` so it is not deduped against the token debit.
+/// A no-op when credits are inactive, the org is absent, the count is zero, or
+/// the per-call cost is unset (0) — so it costs nothing until a deployment
+/// provisions a rate. Spawned by the caller so it never adds client latency.
+fn spawn_tool_call_debit(
+    state: &Arc<AppState>,
+    org_id: Option<&str>,
+    request_id: &str,
+    billable_tool_calls: u64,
+) {
+    if billable_tool_calls == 0 {
+        return;
+    }
+    let Some(org_id) = org_id.filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let credits = &state.config.credits;
+    if !credits.is_active() {
+        return;
+    }
+    let cost = credits.tool_call_cost_micro_usd(billable_tool_calls);
+    if cost == 0 {
+        return;
+    }
+    let ref_id = format!("{request_id}:composio");
+    tokio::spawn(debit_wallet_for_request(
+        Arc::clone(state),
+        org_id.to_string(),
+        ref_id,
+        "composio",
+        cost,
+    ));
 }
 
 /// Record a failed (fail-open) wallet debit in the durable audit log (#486 AC).
@@ -2162,12 +2374,18 @@ fn attach_stream_observer(
                     // Best-effort + org-gated, mirroring the non-streaming path.
                     if let Some(org_id) = s.ctx.org_id.clone().filter(|o| !o.is_empty()) {
                         if s.state.config.credits.is_active() {
-                            let cost =
-                                request_cost_micro_usd(&s.state, input_tokens, output_tokens);
+                            let reported_cost = sse_parse_cost(&s.accumulated);
+                            let cost = response_cost_micro_usd(
+                                &s.state,
+                                reported_cost,
+                                input_tokens,
+                                output_tokens,
+                            );
                             debit_wallet_for_request(
                                 Arc::clone(&s.state),
                                 org_id,
                                 s.ctx.request_id.clone(),
+                                "gateway_usage",
                                 cost,
                             )
                             .await;
@@ -2476,6 +2694,7 @@ mod tests {
             companion_source: false,
             tool_search_requested: search,
             priority: crate::concurrency::Priority::Interactive,
+            tool_profile: None,
         }
     }
 
@@ -2507,6 +2726,195 @@ mod tests {
             ..crate::config::ToolsConfig::default()
         };
         assert!(!tool_signal_active(&new_header, &disabled));
+    }
+
+    // ─── Tool-policy profile resolution (#473 profiles) ──────────────────────
+
+    use crate::config::{ToolProfile, ToolsConfig};
+
+    /// A `RequestContext` with an `x-ryu-tools` CSV and a selected profile name.
+    fn profile_ctx(tool_actions: Option<&str>, profile: Option<&str>) -> RequestContext {
+        let mut ctx = signal_ctx(tool_actions, tool_actions.is_some(), false);
+        ctx.tool_profile = profile.map(str::to_string);
+        ctx
+    }
+
+    /// A ToolsConfig with `always_on` containing a single tool named `name`.
+    fn cfg_with_always_on(name: &str) -> ToolsConfig {
+        ToolsConfig {
+            always_on: vec![json!({"type":"function","function":{"name": name}})],
+            ..ToolsConfig::default()
+        }
+    }
+
+    #[test]
+    fn allowlist_no_profile_is_unchanged_default_behavior() {
+        // Default-safety guard: with no profile selected the resolved list is
+        // exactly the x-ryu-tools CSV followed by the always_on names, in order.
+        let cfg = cfg_with_always_on("search__web");
+        let ctx = profile_ctx(Some("spider__crawl, exa__find"), None);
+        assert_eq!(
+            effective_tool_allowlist(&ctx, &cfg),
+            vec![
+                "spider__crawl".to_string(),
+                "exa__find".to_string(),
+                "search__web".to_string(),
+            ]
+        );
+        // No header and no profile ⇒ just always_on (the pre-profile behavior).
+        let bare = profile_ctx(None, None);
+        assert_eq!(
+            effective_tool_allowlist(&bare, &cfg),
+            vec!["search__web".to_string()]
+        );
+    }
+
+    #[test]
+    fn allowlist_client_wildcard_header_cannot_grant_arbitrary_tools() {
+        // Regression: a client-supplied `x-ryu-tools: *` must NOT introduce the
+        // wildcard grant. `"*"` may only come from an `unrestricted` profile.
+        let cfg = ToolsConfig::default();
+
+        // No profile: the bare `*` header resolves to an empty allowlist, not "*".
+        let bare = profile_ctx(Some("*"), None);
+        assert!(
+            !effective_tool_allowlist(&bare, &cfg).contains(&"*".to_string()),
+            "client wildcard leaked into the no-profile allowlist"
+        );
+
+        // `*` mixed with a real id keeps the real id and drops the wildcard.
+        let mixed = profile_ctx(Some("spider__crawl, *"), None);
+        let out = effective_tool_allowlist(&mixed, &cfg);
+        assert!(out.contains(&"spider__crawl".to_string()));
+        assert!(
+            !out.contains(&"*".to_string()),
+            "client wildcard survived alongside an explicit tool id"
+        );
+
+        // A non-`unrestricted` profile cannot be escalated to "*" via the header.
+        let mut scoped_cfg = ToolsConfig::default();
+        scoped_cfg.profiles.insert(
+            "messaging".to_string(),
+            ToolProfile {
+                allow: vec!["slack__send".to_string()],
+                ..ToolProfile::default()
+            },
+        );
+        let escalate = profile_ctx(Some("*"), Some("messaging"));
+        let scoped = effective_tool_allowlist(&escalate, &scoped_cfg);
+        assert!(scoped.contains(&"slack__send".to_string()));
+        assert!(
+            !scoped.contains(&"*".to_string()),
+            "client wildcard escalated a scoped profile to unrestricted"
+        );
+    }
+
+    #[test]
+    fn allowlist_messaging_profile_resolves_to_allow_plus_always_on() {
+        let mut cfg = cfg_with_always_on("search__web");
+        cfg.profiles.insert(
+            "messaging".to_string(),
+            ToolProfile {
+                allow: vec!["slack__send".to_string(), "gmail__send".to_string()],
+                ..ToolProfile::default()
+            },
+        );
+        // No x-ryu-tools header: the profile's allow list seeds the allowlist.
+        let ctx = profile_ctx(None, Some("messaging"));
+        assert_eq!(
+            effective_tool_allowlist(&ctx, &cfg),
+            vec![
+                "slack__send".to_string(),
+                "gmail__send".to_string(),
+                "search__web".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn allowlist_explicit_tools_union_on_top_of_profile() {
+        let mut cfg = ToolsConfig::default();
+        cfg.profiles.insert(
+            "messaging".to_string(),
+            ToolProfile {
+                allow: vec!["slack__send".to_string()],
+                ..ToolProfile::default()
+            },
+        );
+        // Explicit x-ryu-tools augments the profile (union; explicit entry appears
+        // even though it is not in the profile).
+        let ctx = profile_ctx(Some("github__pr"), Some("messaging"));
+        let out = effective_tool_allowlist(&ctx, &cfg);
+        assert!(out.contains(&"slack__send".to_string()));
+        assert!(out.contains(&"github__pr".to_string()));
+    }
+
+    #[test]
+    fn allowlist_deny_wins_over_allow_and_explicit() {
+        let mut cfg = ToolsConfig::default();
+        cfg.profiles.insert(
+            "messaging".to_string(),
+            ToolProfile {
+                allow: vec!["slack__send".to_string(), "slack__admin".to_string()],
+                deny: vec!["slack__admin".to_string(), "github__pr".to_string()],
+                ..ToolProfile::default()
+            },
+        );
+        // deny strips both a profile-allowed id and an explicitly-granted id.
+        let ctx = profile_ctx(Some("github__pr"), Some("messaging"));
+        let out = effective_tool_allowlist(&ctx, &cfg);
+        assert!(out.contains(&"slack__send".to_string()));
+        assert!(!out.contains(&"slack__admin".to_string()));
+        assert!(!out.contains(&"github__pr".to_string()));
+    }
+
+    #[test]
+    fn allowlist_deny_does_not_strip_always_on() {
+        // Invariant: always_on tools are never deny-stripped, even if a profile
+        // lists one in its deny set.
+        let mut cfg = cfg_with_always_on("search__web");
+        cfg.profiles.insert(
+            "messaging".to_string(),
+            ToolProfile {
+                allow: vec!["slack__send".to_string()],
+                deny: vec!["search__web".to_string()],
+                ..ToolProfile::default()
+            },
+        );
+        let ctx = profile_ctx(None, Some("messaging"));
+        let out = effective_tool_allowlist(&ctx, &cfg);
+        assert!(
+            out.contains(&"search__web".to_string()),
+            "always_on must survive a profile deny entry"
+        );
+    }
+
+    #[test]
+    fn allowlist_unknown_profile_falls_back_to_default() {
+        // A stale / typo'd profile name must NOT deny-all — it behaves exactly as
+        // if no profile were selected.
+        let cfg = cfg_with_always_on("search__web");
+        let ctx = profile_ctx(Some("spider__crawl"), Some("does-not-exist"));
+        assert_eq!(
+            effective_tool_allowlist(&ctx, &cfg),
+            vec!["spider__crawl".to_string(), "search__web".to_string()]
+        );
+    }
+
+    #[test]
+    fn allowlist_unrestricted_profile_resolves_to_wildcard() {
+        let mut cfg = cfg_with_always_on("search__web");
+        cfg.profiles.insert(
+            "full".to_string(),
+            ToolProfile {
+                unrestricted: true,
+                ..ToolProfile::default()
+            },
+        );
+        let ctx = profile_ctx(None, Some("full"));
+        let out = effective_tool_allowlist(&ctx, &cfg);
+        assert!(out.contains(&"*".to_string()), "full profile seeds wildcard");
+        assert!(out.contains(&"search__web".to_string()));
     }
 
     #[test]
@@ -3024,6 +3432,40 @@ mod tests {
         assert_eq!(output, 10);
     }
 
+    /// sse_parse_cost pulls OpenRouter's `usage.cost` from the terminal frame.
+    #[test]
+    fn sse_parse_cost_extracts_reported_cost() {
+        let raw = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":8,",
+            "\"cost\":0.0023}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        assert_eq!(sse_parse_cost(raw), Some(0.0023));
+    }
+
+    /// No `usage.cost` (non-OpenRouter provider) → None, so the debit falls back
+    /// to the flat token estimate.
+    #[test]
+    fn sse_parse_cost_absent_returns_none() {
+        let raw = concat!(
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        assert_eq!(sse_parse_cost(raw), None);
+    }
+
+    /// cost_usd_to_micro converts dollars to micro-USD and rejects junk values.
+    #[test]
+    fn cost_usd_to_micro_converts_and_rejects_nonpositive() {
+        assert_eq!(cost_usd_to_micro(0.0023), Some(2300));
+        assert_eq!(cost_usd_to_micro(1.0), Some(1_000_000));
+        assert_eq!(cost_usd_to_micro(0.0), None);
+        assert_eq!(cost_usd_to_micro(-1.0), None);
+        assert_eq!(cost_usd_to_micro(f64::NAN), None);
+        assert_eq!(cost_usd_to_micro(f64::INFINITY), None);
+    }
+
     /// attach_stream_observer writes a non-zero audit row at stream end when the
     /// SSE fixture contains a terminal usage frame (AC2 of issue #179).
     #[tokio::test]
@@ -3094,6 +3536,7 @@ mod tests {
             companion_source: false,
             tool_search_requested: false,
             priority: crate::concurrency::Priority::Interactive,
+            tool_profile: None,
         };
 
         let body = Body::from(fixture);

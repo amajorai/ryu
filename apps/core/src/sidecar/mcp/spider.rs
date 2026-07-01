@@ -124,14 +124,16 @@ pub async fn dispatch(tool: &str, arguments: Value) -> Result<Value> {
 async fn do_crawl(arguments: Value) -> Result<Value> {
     let url = require_string(&arguments, "url")?;
 
-    // Reject non-http/https schemes to prevent file://, ldap://, etc. injection.
-    let parsed = url::Url::parse(&url).map_err(|e| anyhow::anyhow!("invalid URL '{url}': {e}"))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err(anyhow::anyhow!(
-            "URL scheme '{}' is not allowed — only http and https are accepted",
-            parsed.scheme()
-        ));
-    }
+    // SSRF egress screen: reject non-http/https schemes (file://, ldap://, etc.)
+    // AND — default-on, host-allowlist escape hatch — resolve the host and reject
+    // loopback / RFC1918 / link-local (incl. 169.254.169.254 metadata) / ULA /
+    // CGNAT destinations before shelling out to the crawler. See
+    // `crate::server::screen_agent_egress_url`. Residual: the crawler re-resolves
+    // the host itself, so this pre-dispatch screen cannot IP-pin the connection
+    // (a narrow DNS-rebinding TOCTOU window remains, inherent to a shell-out
+    // crawler). Disable with `RYU_AGENT_EGRESS_SSRF_GUARD=0`; allowlist specific
+    // hosts with `RYU_AGENT_EGRESS_ALLOW_HOSTS`.
+    crate::server::screen_agent_egress_url(&url).await?;
 
     // Clamp depth/limit to the same bounds the schema advertises, ensuring a
     // caller who bypasses the MCP schema (e.g. raw JSON) cannot exceed them.
@@ -280,5 +282,21 @@ mod tests {
         // the scheme check before it ever reaches argv.
         let err = dispatch("crawl", json!({ "url": "--config=/etc/shadow" })).await;
         assert!(err.is_err(), "flag-like URL must be rejected");
+    }
+
+    #[tokio::test]
+    async fn metadata_ip_is_blocked() {
+        // The cloud-metadata endpoint must be rejected before any shell-out. This
+        // relies on the default-on egress guard and an IP literal (no DNS).
+        let err = dispatch("crawl", json!({ "url": "http://169.254.169.254/" })).await;
+        assert!(err.is_err(), "cloud metadata IP must be blocked");
+    }
+
+    #[tokio::test]
+    async fn private_ip_is_blocked() {
+        for url in ["http://10.0.0.1/", "http://127.0.0.1/", "https://192.168.1.1/"] {
+            let err = dispatch("crawl", json!({ "url": url })).await;
+            assert!(err.is_err(), "private/loopback IP {url} must be blocked");
+        }
     }
 }

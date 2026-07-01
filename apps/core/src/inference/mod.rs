@@ -163,6 +163,31 @@ pub struct SamplingConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub samplers: Option<String>,
 
+    // ── Output control (structured decoding, token bias, prefill) ─────────────
+    /// OpenAI-standard token-bias map: token-id (as a string key) → additive logit
+    /// bias, roughly `-100..100`. `-100` effectively bans a token, `+100` forces it
+    /// (Inferencer's "token exclusion"). Canonical object form; emitted as-is for
+    /// OpenAI-compatible engines and converted to llama.cpp's `[[id, bias], …]`
+    /// array form for llama.cpp. Skipped for Ollama/MLX (endpoint does not read it).
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub logit_bias: Map<String, Value>,
+    /// Structured-output constraint, passed through verbatim as the OpenAI-standard
+    /// `response_format` (e.g. `{"type":"json_object"}` or `{"type":"json_schema",
+    /// "json_schema":{…}}`). Honoured by OpenAI-compat providers, vLLM, SGLang, and
+    /// llama.cpp (which compiles a JSON schema to a grammar internally).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<Value>,
+    /// llama.cpp GBNF grammar for constrained decoding, emitted as the `grammar`
+    /// body field. llama.cpp only; other engines use `response_format` instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grammar: Option<String>,
+    /// Assistant-message prefill (Inferencer's "prompt prefilling"): text the model
+    /// must continue from, to force a format, a JSON opening, or a tone. Appended as
+    /// a final assistant message; llama.cpp additionally gets `continue_final_message`
+    /// so it continues the turn rather than starting a fresh one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefill: Option<String>,
+
     /// Raw passthrough: arbitrary body fields merged verbatim, overriding any
     /// typed field above. The escape hatch for knobs the typed surface omits.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
@@ -209,6 +234,18 @@ impl SamplingConfig {
         );
         if other.samplers.is_some() {
             out.samplers = other.samplers.clone();
+        }
+        if other.response_format.is_some() {
+            out.response_format = other.response_format.clone();
+        }
+        if other.grammar.is_some() {
+            out.grammar = other.grammar.clone();
+        }
+        if other.prefill.is_some() {
+            out.prefill = other.prefill.clone();
+        }
+        if !other.logit_bias.is_empty() {
+            out.logit_bias = other.logit_bias.clone();
         }
         if !other.stop.is_empty() {
             out.stop = other.stop.clone();
@@ -284,12 +321,43 @@ impl SamplingConfig {
                 if let Some(s) = &self.samplers {
                     body.insert("samplers".to_owned(), Value::String(s.clone()));
                 }
+                // Structured output: llama.cpp honours OpenAI `response_format`
+                // (compiled to a grammar internally) and a raw GBNF `grammar`.
+                if let Some(rf) = &self.response_format {
+                    body.insert("response_format".to_owned(), rf.clone());
+                }
+                if let Some(g) = self.grammar.as_ref().filter(|s| !s.is_empty()) {
+                    body.insert("grammar".to_owned(), Value::String(g.clone()));
+                }
+                // llama.cpp reads logit_bias as an array of `[token_id, bias]`
+                // pairs (integer ids only), not the OpenAI object form.
+                if !self.logit_bias.is_empty() {
+                    let pairs: Vec<Value> = self
+                        .logit_bias
+                        .iter()
+                        .filter_map(|(k, v)| {
+                            let id: i64 = k.parse().ok()?;
+                            let bias = serde_json::Number::from_f64(v.as_f64()?)?;
+                            Some(Value::Array(vec![Value::Number(id.into()), Value::Number(bias)]))
+                        })
+                        .collect();
+                    if !pairs.is_empty() {
+                        body.insert("logit_bias".to_owned(), Value::Array(pairs));
+                    }
+                }
             }
             Engine::Vllm | Engine::Sglang => {
                 set_i!("top_k", self.top_k);
                 set_f!("min_p", self.min_p);
                 // vLLM + SGLang spell the repeat penalty `repetition_penalty`.
                 set_f!("repetition_penalty", self.repeat_penalty);
+                // Both accept the OpenAI-standard structured-output + bias fields.
+                if let Some(rf) = &self.response_format {
+                    body.insert("response_format".to_owned(), rf.clone());
+                }
+                if !self.logit_bias.is_empty() {
+                    body.insert("logit_bias".to_owned(), Value::Object(self.logit_bias.clone()));
+                }
             }
             Engine::Mlx => {
                 // mlx_lm's body accepts `repetition_penalty` but not top_k/min_p,
@@ -298,7 +366,34 @@ impl SamplingConfig {
             }
             // Ollama: only the 7 standard fields above survive its OpenAI endpoint.
             // Everything else is set in the Modelfile (see ollama_modelfile_params).
-            Engine::Ollama | Engine::Other => {}
+            Engine::Ollama => {}
+            // Remote OpenAI-compatible providers: `response_format` and `logit_bias`
+            // are OpenAI-standard, so they are safe to emit (unlike the non-standard
+            // samplers, which stay gated to the local arms above).
+            Engine::Other => {
+                if let Some(rf) = &self.response_format {
+                    body.insert("response_format".to_owned(), rf.clone());
+                }
+                if !self.logit_bias.is_empty() {
+                    body.insert("logit_bias".to_owned(), Value::Object(self.logit_bias.clone()));
+                }
+            }
+        }
+
+        // Assistant prefill: continue from caller-provided text (force a JSON
+        // opening, a format, a tone). Appended as a final assistant message so the
+        // model continues it; llama.cpp needs `continue_final_message` to continue
+        // the final turn rather than open a fresh one (and `add_generation_prompt`
+        // off so no new assistant header is templated). The Anthropic-compatible
+        // path continues an assistant tail natively.
+        if let Some(pfx) = self.prefill.as_ref().filter(|s| !s.is_empty()) {
+            if let Some(Value::Array(msgs)) = body.get_mut("messages") {
+                msgs.push(serde_json::json!({ "role": "assistant", "content": pfx }));
+            }
+            if matches!(engine, Engine::LlamaCpp) {
+                body.insert("continue_final_message".to_owned(), Value::Bool(true));
+                body.insert("add_generation_prompt".to_owned(), Value::Bool(false));
+            }
         }
 
         // Raw passthrough — applied last so it always wins. Allowed on every
@@ -831,6 +926,124 @@ mod tests {
         let m = base.merge(&over);
         assert_eq!(m.temperature, Some(0.2));
         assert_eq!(m.top_k, Some(40), "untouched field kept from base");
+    }
+
+    #[test]
+    fn logit_bias_array_for_llamacpp_object_for_openai() {
+        let mut logit_bias = Map::new();
+        logit_bias.insert("50256".into(), serde_json::json!(-100));
+        let s = SamplingConfig {
+            logit_bias,
+            ..Default::default()
+        };
+
+        let mut llama = Map::new();
+        s.apply_to_body(Engine::LlamaCpp, &mut llama);
+        assert_eq!(
+            llama["logit_bias"],
+            serde_json::json!([[50256, -100.0]]),
+            "llama.cpp wants an array of [id, bias] pairs"
+        );
+
+        let mut other = Map::new();
+        s.apply_to_body(Engine::Other, &mut other);
+        assert_eq!(
+            other["logit_bias"],
+            serde_json::json!({ "50256": -100 }),
+            "OpenAI-compat wants the object form verbatim"
+        );
+
+        let mut ollama = Map::new();
+        s.apply_to_body(Engine::Ollama, &mut ollama);
+        assert!(
+            !ollama.contains_key("logit_bias"),
+            "Ollama endpoint does not read logit_bias"
+        );
+    }
+
+    #[test]
+    fn response_format_standard_and_llamacpp_grammar_llamacpp_only() {
+        let s = SamplingConfig {
+            response_format: Some(serde_json::json!({ "type": "json_object" })),
+            grammar: Some("root ::= \"yes\" | \"no\"".into()),
+            ..Default::default()
+        };
+
+        for e in [Engine::LlamaCpp, Engine::Vllm, Engine::Sglang, Engine::Other] {
+            let mut body = Map::new();
+            s.apply_to_body(e, &mut body);
+            assert_eq!(
+                body["response_format"],
+                serde_json::json!({ "type": "json_object" }),
+                "response_format is OpenAI-standard on {e:?}"
+            );
+        }
+
+        let mut llama = Map::new();
+        s.apply_to_body(Engine::LlamaCpp, &mut llama);
+        assert!(llama.contains_key("grammar"), "GBNF grammar on llama.cpp");
+        let mut other = Map::new();
+        s.apply_to_body(Engine::Other, &mut other);
+        assert!(
+            !other.contains_key("grammar"),
+            "grammar is llama.cpp-only, never sent to remote OpenAI"
+        );
+    }
+
+    #[test]
+    fn prefill_appends_assistant_message_and_continues_on_llamacpp() {
+        let s = SamplingConfig {
+            prefill: Some("{\"answer\":".into()),
+            ..Default::default()
+        };
+
+        let mut llama = Map::new();
+        llama.insert(
+            "messages".into(),
+            serde_json::json!([{ "role": "user", "content": "hi" }]),
+        );
+        s.apply_to_body(Engine::LlamaCpp, &mut llama);
+        let msgs = llama["messages"].as_array().expect("messages array");
+        assert_eq!(msgs.len(), 2, "prefill appends an assistant message");
+        assert_eq!(msgs[1]["role"], "assistant");
+        assert_eq!(msgs[1]["content"], "{\"answer\":");
+        assert_eq!(llama["continue_final_message"], serde_json::json!(true));
+        assert_eq!(llama["add_generation_prompt"], serde_json::json!(false));
+
+        let mut other = Map::new();
+        other.insert(
+            "messages".into(),
+            serde_json::json!([{ "role": "user", "content": "hi" }]),
+        );
+        s.apply_to_body(Engine::Other, &mut other);
+        assert_eq!(
+            other["messages"].as_array().expect("messages").len(),
+            2,
+            "prefill still appends on remote (Anthropic-compat continues it)"
+        );
+        assert!(
+            !other.contains_key("continue_final_message"),
+            "continue flag is llama.cpp-only"
+        );
+    }
+
+    #[test]
+    fn merge_carries_output_control_fields() {
+        let base = SamplingConfig::default();
+        let mut logit_bias = Map::new();
+        logit_bias.insert("1".into(), serde_json::json!(5));
+        let over = SamplingConfig {
+            prefill: Some("Sure,".into()),
+            grammar: Some("root ::= .".into()),
+            response_format: Some(serde_json::json!({ "type": "json_object" })),
+            logit_bias,
+            ..Default::default()
+        };
+        let m = base.merge(&over);
+        assert_eq!(m.prefill.as_deref(), Some("Sure,"));
+        assert!(m.grammar.is_some());
+        assert!(m.response_format.is_some());
+        assert_eq!(m.logit_bias.len(), 1);
     }
 
     #[test]

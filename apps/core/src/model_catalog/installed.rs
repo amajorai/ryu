@@ -45,6 +45,12 @@ pub struct InstalledModel {
     /// loads its projector even when this field is absent (legacy records).
     #[serde(default)]
     pub mmproj: Option<String>,
+    /// When this model was produced by merging a fine-tune adapter into a GGUF
+    /// (the Unsloth path), the base model it was trained from (a HF repo id).
+    /// `None` for ordinary catalog installs. Lets the catalog mark a model as
+    /// "fine-tuned" and show its lineage without re-deriving it from job history.
+    #[serde(default)]
+    pub finetune_base: Option<String>,
 }
 
 /// A resolved active-model selection persisted in the preferences KV under

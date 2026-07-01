@@ -165,6 +165,12 @@ impl ComposioClient {
     /// `entity_id` is passed to `execute()` on every action call to select
     /// the correct connected account. Callers should prefer
     /// `RequestContext::user_id` and fall back to `ComposioConfig::entity_id`.
+    ///
+    /// Returns the final assistant turn plus the number of executed (billable)
+    /// Composio actions across all rounds. Every action this loop dispatches is a
+    /// Composio execution, so the count is every allowed call reaching `execute`;
+    /// allowlist-denied calls are not counted. The caller debits them at cost
+    /// (#496 managed-plan tool-call cost).
     pub async fn run_tool_loop(
         &self,
         body: &mut Value,
@@ -172,12 +178,13 @@ impl ComposioClient {
         model: &str,
         entity_id: &str,
         allowed: &[String],
-    ) -> Result<Value, GatewayError> {
+    ) -> Result<(Value, u64), GatewayError> {
         // Inject action tool definitions before the first completion so the
         // model knows which actions are available (scoped to `allowed`).
         self.inject_tools(body, allowed);
 
         let mut response = provider.complete(model, body).await?;
+        let mut billable_tool_calls: u64 = 0;
 
         for round in 0..self.config.max_rounds {
             let tool_calls = match response["choices"][0]["message"]["tool_calls"].as_array() {
@@ -201,6 +208,7 @@ impl ComposioClient {
                 let input: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
 
                 let result = if allowed.iter().any(|a| a == name) {
+                    billable_tool_calls = billable_tool_calls.saturating_add(1);
                     match self.execute(name, input, entity_id).await {
                         Ok(r) => r,
                         Err(e) => {
@@ -226,6 +234,6 @@ impl ComposioClient {
             response = provider.complete(model, body).await?;
         }
 
-        Ok(response)
+        Ok((response, billable_tool_calls))
     }
 }

@@ -1,7 +1,7 @@
 //! Generic sidecar download manager.
 //!
 //! Handles downloading, checksum verification, atomic installation, and version
-//! tracking for all Ryu sidecar binaries (ZeroClaw, Temporal, llama.cpp,
+//! tracking for all Ryu sidecar binaries (ZeroClaw, llama.cpp,
 //! Screenpipe).
 //!
 //! Git and Rust toolchain are **build dependencies** for ZeroClaw (it is
@@ -526,33 +526,6 @@ impl SidecarManifest for ZeroClawManifest {
     }
 }
 
-pub struct TemporalManifest;
-
-impl SidecarManifest for TemporalManifest {
-    fn name(&self) -> &str {
-        "temporal"
-    }
-
-    fn release_url(&self) -> String {
-        let tag = self.target_version();
-        let platform = platform_tag();
-        format!(
-            "https://github.com/temporalio/cli/releases/download/{tag}/temporal_cli_{platform}.tar.gz"
-        )
-    }
-
-    fn binary_name(&self) -> &str {
-        if cfg!(target_os = "windows") {
-            "temporal.exe"
-        } else {
-            "temporal"
-        }
-    }
-
-    fn target_version(&self) -> &str {
-        "v1.1.2"
-    }
-}
 
 pub struct LlamaCppManifest;
 
@@ -1060,7 +1033,6 @@ impl DownloadManager {
                 .expect("reqwest client"),
             manifests: vec![
                 Arc::new(ZeroClawManifest),
-                Arc::new(TemporalManifest),
                 Arc::new(LlamaCppManifest),
                 Arc::new(ScreenpipeManifest),
                 Arc::new(SpiderManifest),

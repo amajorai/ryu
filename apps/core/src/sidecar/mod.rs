@@ -4,6 +4,7 @@ pub mod agent_runner;
 pub mod agents;
 pub mod control_plane;
 pub mod download_manager;
+pub mod env_scrub;
 pub mod external_runtime;
 pub mod gateway;
 pub mod gateway_policy;
@@ -19,6 +20,7 @@ pub mod resources;
 pub mod sandbox;
 pub mod tailscale;
 pub mod tools;
+pub mod untrusted;
 
 pub use process::ProcessHandle;
 

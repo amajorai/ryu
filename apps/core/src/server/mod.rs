@@ -21,12 +21,14 @@ pub mod data_admin;
 pub mod finetune;
 pub mod git;
 pub mod hardware_api;
+pub mod learning;
 pub mod hardware_ws;
 pub mod identity_api;
 pub mod media;
 pub mod meetings_api;
 pub mod memory;
 pub mod message_index;
+pub mod message_fts;
 pub mod monitors_api;
 pub mod openapi;
 pub mod predict_api;
@@ -38,6 +40,7 @@ pub mod retrieval;
 pub mod spaces;
 pub mod sync;
 pub mod trace;
+pub mod usage_api;
 pub mod voice;
 pub mod voice_ws;
 pub mod worktree;
@@ -208,6 +211,12 @@ pub struct ServerState {
     /// this is the system-of-record for the job list (survives restarts). Read by
     /// the `/api/finetune/*` surface ([`crate::server::finetune`]).
     pub finetune: crate::finetune::FinetuneStore,
+    /// Experience buffer (`~/.ryu/experience.db`) for the MetaClaw-style
+    /// continual-learning loop: captured `(user, assistant)` turns + PRM scores,
+    /// the dataset source for a reward-filtered LoRA retrain. Populated by
+    /// sweeping conversations at cycle time (never on the chat hot path). Read by
+    /// the `/api/learn/*` + `/api/experience/*` surface ([`crate::server::learning`]).
+    pub experience: crate::experience::ExperienceStore,
     /// The configured node-admittance token (`RYU_TOKEN`), captured so the public
     /// `GET /api/realtime/ws` handler can enforce it in-handler (the public router
     /// has no `auth_token` request Extension, unlike the protected router's
@@ -676,7 +685,9 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             post(models_catalog_uninstall),
         )
         .route("/api/models/device", get(models_device))
+        .route("/api/models/llmfit-estimate", get(models_llmfit_estimate))
         .route("/api/models/engines", get(models_engines))
+        .route("/api/models/installed", get(models_installed))
         // Live hardware snapshot for this node (CPU/RAM/disk/GPU) — backs the
         // desktop node selector's per-node "what's this machine" view.
         .route("/api/system/info", get(system_info_handler))
@@ -779,6 +790,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── ACP session config (agent-reported permission modes / models /
         //    config options like reasoning effort), Zed-style ──
         .route("/api/agents/:id/acp-config", get(acp_config))
+        // ── Per-agent subscription usage (5h + weekly rate-limit windows read
+        //    from the CLI's own local OAuth token, à la CodexBar/openusage).
+        //    Backs the chat "usage bar"; Claude + Codex in v1. ──
+        .route("/api/agents/:id/usage", get(usage_api::agent_usage))
         // ── Per-agent capabilities (tools / reasoning / vision), Jan-style.
         //    GET resolves auto-detection + overrides; PUT persists overrides. ──
         .route(
@@ -910,8 +925,11 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // Goal + double-check are now plugins (io.ryu.goal / io.ryu.double-check)
         // driven by the plugin turn-hook runtime; their old Core endpoints are
         // removed. See docs/plugin-runtime.md.
-        // ── Side questions (`/btw`): ephemeral answer over the conversation ──
+        // ── Side questions (`/btw`): answer over the conversation, persisted as
+        //    a listable "side chat" keyed to its parent conversation ──────────
         .route("/api/btw", post(btw_handler))
+        .route("/api/btw/:id", axum::routing::delete(delete_btw_handler))
+        .route("/api/conversations/:id/btw", get(list_btw_handler))
         // ── Predictive typing: system-wide inline autocomplete brain ──────────
         .route(
             "/api/predict/config",
@@ -1040,6 +1058,14 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             get(finetune::get).delete(finetune::cancel),
         )
         .route("/api/finetune/:id/stream", get(finetune::stream))
+        // ── Continual-learning loop (experience buffer + PRM + skill synthesis) ──
+        .route("/api/learn/config", get(learning::config))
+        .route("/api/learn/sweep", post(learning::sweep))
+        .route("/api/learn/score", post(learning::score))
+        .route("/api/learn/synthesize", post(learning::synthesize))
+        .route("/api/learn/cycle", post(learning::cycle))
+        .route("/api/learn/exclude", post(learning::exclude))
+        .route("/api/experience/list", get(learning::list))
         // ── Generative-media data path (image/video) — proxies to sd-server ──
         .route("/api/images/generate", post(media::generate_image))
         .route("/api/video/generate", post(media::generate_video))
@@ -1465,6 +1491,12 @@ async fn set_preference(
             // No gateway respawn needed — the flag is read on Core's spawn path.
             if key == crate::claude_config::CLAUDE_GATEWAY_ROUTING_PREF_KEY {
                 crate::claude_config::set_enabled(&body.value);
+            }
+            // Untrusted-content wrapping toggle: keep the in-process flag in sync
+            // so the next tool result wraps (or, on opt-out, does not) before it
+            // re-enters the model. Read on Core's tool-result path.
+            if key == crate::sidecar::untrusted::UNTRUSTED_WRAPPING_PREF_KEY {
+                crate::sidecar::untrusted::set_enabled(&body.value);
             }
             // Generic per-agent gateway routing: keep the in-process map in sync so
             // the next spawn of any toggled agent injects (or omits) OPENAI_BASE_URL.
@@ -2000,6 +2032,10 @@ async fn route_single_turn(
         Some(crate::sidecar::adapters::AutoRecallConfig {
             retrieval: state.retrieval.clone(),
             top_k: resolve_auto_recall_top_k(state).await,
+            // FTS (lexical) session search is a sub-source of auto-recall: default
+            // OFF, only contributes when explicitly enabled. Resolved here so a
+            // disabled feature does zero FTS work inside route_chat_stream.
+            fts_enabled: resolve_fts_recall_enabled(state).await,
         })
     } else {
         None
@@ -3001,6 +3037,66 @@ pub(crate) fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
     }
 }
 
+/// Cloud-metadata hostnames that must never be fetched, in addition to the
+/// 169.254.169.254 IP already screened by [`is_blocked_ip`]. Matched
+/// case-insensitively as an exact host or a domain suffix.
+const BLOCKED_METADATA_HOSTS: &[&str] = &["metadata.google.internal", "metadata.goog"];
+
+/// SSRF host-name guard applied inside every resolve path so all callers
+/// benefit. Returns `Err(reason)` when the host must be rejected. Rejects:
+/// - cloud-metadata hostnames (`metadata.google.internal`, `metadata.goog`,
+///   and bare `metadata`), case-insensitive, exact or domain-suffix match;
+/// - hostile / homograph hosts: any non-ASCII character (covers unicode
+///   homographs, zero-width joiners, and bidi-control code points), any
+///   embedded control character or whitespace, or a domain that fails to
+///   round-trip through IDNA/punycode (decode mismatch).
+///
+/// IP literals are passed through (they are screened by [`is_blocked_ip`]
+/// after resolution); only domain names get the IDNA round-trip.
+fn screen_guarded_hostname(host: &str) -> Result<(), String> {
+    if host.is_empty() {
+        return Err("host is empty".to_owned());
+    }
+    // Control characters or whitespace anywhere in the host are illegal. This
+    // also rejects leading/trailing whitespace and embedded newlines (checked
+    // on the raw input, before any trimming, so a trailing `\n` cannot slip
+    // through).
+    if host.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("host contains control or whitespace characters".to_owned());
+    }
+    // Non-ASCII covers unicode homographs, zero-width joiners, and bidi marks.
+    if !host.is_ascii() {
+        return Err("non-ASCII host is not allowed".to_owned());
+    }
+    // Strip a single trailing dot (absolute FQDN form) for the remaining
+    // checks so `example.com.` is treated like `example.com`.
+    let bare = host.strip_suffix('.').unwrap_or(host);
+    let lower = bare.to_ascii_lowercase();
+    // Cloud-metadata hostname denylist (the IP form is screened separately).
+    let is_metadata = lower == "metadata"
+        || BLOCKED_METADATA_HOSTS
+            .iter()
+            .any(|deny| lower == *deny || lower.ends_with(&format!(".{deny}")));
+    if is_metadata {
+        return Err("cloud metadata host is not allowed".to_owned());
+    }
+    // IP literals (bracketed IPv6 from `host_str`, bare IPv4/IPv6 from clone
+    // parsing) are handled by `is_blocked_ip` after resolution; don't run the
+    // IDNA round-trip on them.
+    let unbracketed = lower.trim_start_matches('[').trim_end_matches(']');
+    if unbracketed.parse::<std::net::IpAddr>().is_ok() {
+        return Ok(());
+    }
+    // IDNA round-trip: an ASCII domain must parse + re-serialize unchanged. A
+    // host that decodes to a different value (malformed/ambiguous punycode) is
+    // rejected.
+    match url::Host::parse(bare) {
+        Ok(parsed) if parsed.to_string().eq_ignore_ascii_case(bare) => Ok(()),
+        Ok(_) => Err("host failed IDNA round-trip".to_owned()),
+        Err(e) => Err(format!("invalid host: {e}")),
+    }
+}
+
 /// `POST /api/apps/install` — install an app by fetching its `ryu.json` from an
 /// `https://` URL, validating it, writing it under the apps dir, and hot-reloading.
 ///
@@ -3050,6 +3146,9 @@ async fn install_app_from_url(
             StatusCode::BAD_REQUEST,
             "Private/loopback URLs are not allowed".to_owned(),
         );
+    }
+    if let Err(e) = screen_guarded_hostname(&host) {
+        return json_error(StatusCode::BAD_REQUEST, e);
     }
     let port = parsed.port_or_known_default().unwrap_or(443);
 
@@ -4266,18 +4365,19 @@ async fn install_agent_runtime(
             agents::archive_agent::ensure_installed(spec, &downloads).await?;
             return Ok(());
         }
-        // Native managed agents with dedicated npm-prefix installers.
+        // Native managed agents with dedicated installers/downloaders. ZeroClaw
+        // fetches a GitHub-release binary through the download center so its
+        // install shows real progress in the Agents tab (kind `agent`/name),
+        // instead of only being added to the picker.
         match id.as_str() {
             "openclaw" => {
                 agents::openclaw::installer::ensure_installed().await?;
                 return Ok(());
             }
-            "nanoclaw" => {
-                agents::nanoclaw::installer::ensure_installed().await?;
-                return Ok(());
-            }
-            "nemoclaw" => {
-                agents::nemoclaw::installer::ensure_installed().await?;
+            "zeroclaw" => {
+                agents::zeroclaw::ZeroClawDownloader::new()
+                    .ensure_installed(&downloads)
+                    .await?;
                 return Ok(());
             }
             _ => {}
@@ -4952,7 +5052,7 @@ async fn import_agent(
 /// endpoint so they all report the same per-engine reality.
 fn binary_installed_on_disk(name: &str) -> bool {
     // Sidecars without a file-based binary: trust the store.
-    if matches!(name, "openclaw" | "nanoclaw" | "vllm") {
+    if matches!(name, "openclaw" | "vllm") {
         return true;
     }
     // Parakeet installs an ONNX model directory (not a binary in ~/.ryu/bin).
@@ -5271,6 +5371,41 @@ async fn resolve_auto_recall_enabled(state: &ServerState) -> bool {
     match std::env::var("RYU_AUTO_RECALL_ENABLED") {
         Ok(v) => parse_auto_recall_enabled(Some(&v)),
         Err(_) => true,
+    }
+}
+
+/// Preference key for the FTS (full-text, lexical) session-search recall layer:
+/// the keyword complement to the semantic auto-recall half. DEFAULT OFF — an unset
+/// pref means disabled; only an explicit enable token (`true`/`1`/`on`/`yes`, any
+/// case) turns it on. This is a *sub-source* of auto-recall: it contributes only
+/// when auto-recall is enabled (default on) AND this pref is enabled (default off),
+/// so no session text is full-text-recalled unless the user opts in. Env fallback
+/// `RYU_FTS_RECALL_ENABLED`.
+const FTS_RECALL_ENABLED_PREF: &str = "fts-recall-enabled";
+
+/// Parse the FTS-recall enabled flag from a raw pref/env string. PURE so it is
+/// unit-testable without a store. Default OFF: `None` or any unrecognised value is
+/// disabled; only an explicit enable token (`true`/`1`/`on`/`yes`, any case) turns
+/// it on. Mirrors [`parse_auto_recall_enabled`] but with the opposite default.
+fn parse_fts_recall_enabled(raw: Option<&str>) -> bool {
+    match raw {
+        None => false,
+        Some(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "true" | "1" | "on" | "yes"
+        ),
+    }
+}
+
+/// Resolve whether the FTS recall layer is enabled: pref → env
+/// (`RYU_FTS_RECALL_ENABLED`) → default OFF.
+async fn resolve_fts_recall_enabled(state: &ServerState) -> bool {
+    if let Ok(Some(pref)) = state.preferences.get(FTS_RECALL_ENABLED_PREF).await {
+        return parse_fts_recall_enabled(Some(&pref));
+    }
+    match std::env::var("RYU_FTS_RECALL_ENABLED") {
+        Ok(v) => parse_fts_recall_enabled(Some(&v)),
+        Err(_) => false,
     }
 }
 
@@ -5621,10 +5756,58 @@ async fn btw_handler(
     };
 
     match call_side_model(&state, &model, &effort, system, user.as_str()).await {
-        Ok(text) => Json(json!({ "answer": text, "model": model })).into_response(),
+        Ok(text) => {
+            // Persist the aside as a "side chat" keyed to its parent conversation
+            // so it can be listed later (in the Context rail and the sidebar). This
+            // is best-effort: a persistence failure never fails the answer, and a
+            // request that carried only a client-held transcript (no Core
+            // conversation id) is simply not persisted.
+            let mut entry_id: Option<String> = None;
+            if let Some(cid) = body.conversation_id.as_deref().filter(|s| !s.is_empty()) {
+                match state
+                    .conversations
+                    .append_btw(cid, question, &text, Some(&model))
+                    .await
+                {
+                    Ok(entry) => entry_id = Some(entry.id),
+                    Err(e) => tracing::warn!("failed to persist btw entry: {e:#}"),
+                }
+            }
+            Json(json!({ "answer": text, "model": model, "id": entry_id })).into_response()
+        }
         Err(e) => json_error(
             StatusCode::BAD_GATEWAY,
             format!("side-question model unavailable: {e}"),
+        ),
+    }
+}
+
+/// `GET /api/conversations/:id/btw` — list persisted `/btw` side chats for a
+/// conversation, newest first.
+async fn list_btw_handler(
+    State(state): State<ServerState>,
+    Path(conversation_id): Path<String>,
+) -> axum::response::Response {
+    match state.conversations.list_btw(&conversation_id).await {
+        Ok(entries) => Json(entries).into_response(),
+        Err(e) => json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("could not list side chats: {e}"),
+        ),
+    }
+}
+
+/// `DELETE /api/btw/:id` — delete a single persisted side chat.
+async fn delete_btw_handler(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    match state.conversations.delete_btw(&id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => json_error(StatusCode::NOT_FOUND, "side chat not found".to_string()),
+        Err(e) => json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("could not delete side chat: {e}"),
         ),
     }
 }
@@ -8237,6 +8420,60 @@ async fn models_device() -> Json<serde_json::Value> {
     Json(serde_json::to_value(device).unwrap_or_default())
 }
 
+/// `GET /api/models/llmfit-estimate?repo=&context=&quant=` — on-demand hardware
+/// fit + tok/s estimate for one model via the optional `llmfit` sidecar. It is
+/// slow (~15s, networked) and only matches llmfit's curated catalog, so the
+/// desktop calls it ONLY on an explicit "Estimate speed" click, never while
+/// listing models. Always 200: the body's `installed`/`matched` flags tell the
+/// UI whether to render the estimate, prompt to install llmfit, or fall back to
+/// the instant native verdict.
+#[utoipa::path(
+    get,
+    path = "/api/models/llmfit-estimate",
+    tag = "Models",
+    summary = "On-demand llmfit fit + tok/s estimate for one model",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn models_llmfit_estimate(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(repo) = params.get("repo").filter(|s| !s.is_empty()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "missing required `repo` query parameter" })),
+        );
+    };
+    let context = params.get("context").and_then(|s| s.parse::<u32>().ok());
+    let quant = params
+        .get("quant")
+        .map(String::as_str)
+        .filter(|s| !s.is_empty());
+    let estimate = crate::model_catalog::llmfit::estimate(repo, context, quant).await;
+    (
+        StatusCode::OK,
+        Json(serde_json::to_value(estimate).unwrap_or_default()),
+    )
+}
+
+/// `GET /api/models/installed` — the flat list of models present on disk, each
+/// with its local `stem` (the servable ref), origin `repo_id`, format, size, and
+/// `finetune_base` when it is a merged fine-tune. Unlike `/api/models/catalog`
+/// (HF browse, keyed by repo id), this exposes every installed model by its own
+/// stem — including fine-tuned GGUFs, which collapse under their base repo in the
+/// catalog view. Backs the "your fine-tuned models" list and the agent model
+/// picker.
+#[utoipa::path(
+    get,
+    path = "/api/models/installed",
+    tag = "Models",
+    summary = "List installed models by stem (with fine-tune provenance)",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn models_installed() -> Json<serde_json::Value> {
+    let models = crate::model_catalog::installed::load_present();
+    Json(json!({ "models": models }))
+}
+
 /// `GET /api/models/engines` — the format → engine capability map for THIS node,
 /// with per-engine `supported` flags and the currently resident engine. The
 /// desktop renders compatibility annotations + the format facet from this
@@ -8373,6 +8610,7 @@ async fn validate_remote_base_url(raw: &str) -> Result<(), String> {
     if host.eq_ignore_ascii_case("localhost") {
         return Err("private/loopback base_url is not allowed".to_owned());
     }
+    screen_guarded_hostname(&host)?;
     let port = parsed.port_or_known_default().unwrap_or(443);
     let resolve_host = host.clone();
     let resolved: Vec<std::net::SocketAddr> = tokio::task::spawn_blocking(move || {
@@ -8408,6 +8646,7 @@ pub(crate) async fn resolve_guarded_host(
     if host.eq_ignore_ascii_case("localhost") {
         return Err("private/loopback host is not allowed".to_owned());
     }
+    screen_guarded_hostname(host)?;
     let resolve_host = host.to_string();
     let resolved: Vec<std::net::SocketAddr> = tokio::task::spawn_blocking(move || {
         use std::net::ToSocketAddrs;
@@ -8425,6 +8664,106 @@ pub(crate) async fn resolve_guarded_host(
         return Err("private/loopback host is not allowed".to_owned());
     }
     Ok(resolved)
+}
+
+// ── Agent tool-egress SSRF screen ────────────────────────────────────────────
+//
+// The first-party guarded_get chain protects Core's own catalog/model/skill
+// fetches. Agent browsing tools (the built-in Spider crawl tool) shell out to an
+// external binary and would otherwise crawl arbitrary URLs with no Core-side IP
+// screening, so http://169.254.169.254/ (cloud metadata) or http://10.0.0.1/
+// (RFC1918) would be reachable. `screen_agent_egress_url` is the shared
+// pre-dispatch screen for that egress path: it accepts http and https (Spider
+// crawls both), reuses the same resolve + is_blocked_ip guard as the first-party
+// path, and is default-on with a host-allowlist escape hatch.
+
+/// Env var toggling the agent tool-egress SSRF screen. Default-on: absent or any
+/// non-disable value keeps the screen active. Set to `0`/`false`/`off`/`no`
+/// (case-insensitive) to disable.
+const ENV_AGENT_EGRESS_SSRF_GUARD: &str = "RYU_AGENT_EGRESS_SSRF_GUARD";
+/// Env var holding a comma-separated host allowlist that bypasses the egress
+/// screen (case-insensitive, whitespace-trimmed, empty entries ignored).
+const ENV_AGENT_EGRESS_ALLOW_HOSTS: &str = "RYU_AGENT_EGRESS_ALLOW_HOSTS";
+
+/// Pure: is the egress guard enabled for this env value? Default-on — only an
+/// explicit disable token (`0`/`false`/`off`/`no`, case-insensitive, trimmed)
+/// turns it off. Mirrors [`parse_auto_recall_enabled`] so the behavior is
+/// unit-testable without mutating process env.
+fn agent_egress_guard_enabled_from(val: Option<&str>) -> bool {
+    match val {
+        Some(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no"
+        ),
+        None => true,
+    }
+}
+
+/// Pure: is `host` present in the comma-separated allowlist `list`? Case- and
+/// whitespace-insensitive; empty entries are ignored. Unit-testable without env.
+fn host_is_allowlisted_in(host: &str, list: Option<&str>) -> bool {
+    let Some(list) = list else {
+        return false;
+    };
+    list.split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .any(|entry| entry.eq_ignore_ascii_case(host))
+}
+
+/// Runtime wrapper: read [`ENV_AGENT_EGRESS_SSRF_GUARD`] and classify.
+fn agent_egress_guard_enabled() -> bool {
+    agent_egress_guard_enabled_from(std::env::var(ENV_AGENT_EGRESS_SSRF_GUARD).ok().as_deref())
+}
+
+/// Runtime wrapper: is `host` in [`ENV_AGENT_EGRESS_ALLOW_HOSTS`]?
+fn host_is_allowlisted(host: &str) -> bool {
+    host_is_allowlisted_in(
+        host,
+        std::env::var(ENV_AGENT_EGRESS_ALLOW_HOSTS).ok().as_deref(),
+    )
+}
+
+/// SSRF egress screen for agent browsing tools that fetch arbitrary URLs.
+///
+/// Parses `url`, requires an `http`/`https` scheme (rejecting `file://`,
+/// `ldap://`, etc.), and — unless the guard is disabled or the host is
+/// allowlisted — resolves the host and rejects it if any resolved IP is
+/// loopback / RFC1918 private / link-local (incl. 169.254.169.254 metadata) /
+/// ULA / CGNAT, reusing [`resolve_guarded_host`]. Returns the parsed URL so the
+/// caller can dispatch it.
+///
+/// Residual (DNS-rebinding TOCTOU): a shell-out crawler re-resolves the host
+/// itself, so Core cannot IP-pin the connection (unlike [`guarded_get`]). This
+/// pre-dispatch screen narrows but cannot fully close the window between Core's
+/// resolve and the crawler's resolve. Best achievable for a shell-out crawler;
+/// closing it fully requires fetching in-process.
+pub(crate) async fn screen_agent_egress_url(url: &str) -> anyhow::Result<url::Url> {
+    let trimmed = url.trim();
+    let parsed =
+        url::Url::parse(trimmed).map_err(|e| anyhow::anyhow!("invalid URL '{trimmed}': {e}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        anyhow::bail!(
+            "URL scheme '{}' is not allowed — only http and https are accepted",
+            parsed.scheme()
+        );
+    }
+    if !agent_egress_guard_enabled() {
+        return Ok(parsed);
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("URL has no host: {trimmed}"))?
+        .to_owned();
+    if host_is_allowlisted(&host) {
+        return Ok(parsed);
+    }
+    let default_port = if parsed.scheme() == "https" { 443 } else { 80 };
+    let port = parsed.port_or_known_default().unwrap_or(default_port);
+    resolve_guarded_host(&host, port)
+        .await
+        .map_err(|e| anyhow::anyhow!("blocked egress to {host}: {e}"))?;
+    Ok(parsed)
 }
 
 /// SSRF-guarded HTTPS GET, shared by the catalog fetch paths so they all get the
@@ -9476,13 +9815,11 @@ async fn install_sidecar(
     State(state): State<ServerState>,
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Json<serde_json::Value> {
-    use crate::sidecar::agents::picoclaw::PicoClawDownloader;
     use crate::sidecar::agents::zeroclaw::ZeroClawDownloader;
     use crate::sidecar::providers::llamacpp::LlamaCppDownloader;
     use crate::sidecar::providers::ollama::OllamaDownloader;
     use crate::sidecar::tools::screenpipe::ScreenpipeDownloader;
     use crate::sidecar::tools::spider::SpiderDownloader;
-    use crate::sidecar::tools::temporal::TemporalDownloader;
 
     let setup = Arc::clone(&state.setup);
     let install_status = Arc::clone(&state.install_status);
@@ -9535,14 +9872,6 @@ async fn install_sidecar(
                 .ensure_installed(&downloads)
                 .await
                 .map(|_| "installed".to_string()),
-            "picoclaw" => PicoClawDownloader::new()
-                .ensure_installed(&downloads)
-                .await
-                .map(|_| "installed".to_string()),
-            "temporal" => TemporalDownloader::new()
-                .ensure_installed(&downloads)
-                .await
-                .map(|_| "installed".to_string()),
             "whispercpp" => {
                 crate::sidecar::providers::whispercpp::WhisperCppDownloader::new()
                     .ensure_installed(&downloads)
@@ -9588,24 +9917,6 @@ async fn install_sidecar(
                     crate::downloads::DownloadKind::Agent,
                     "OpenClaw".to_string(),
                     async { crate::sidecar::agents::openclaw::installer::ensure_installed().await },
-                )
-                .await
-                .map(|_| "installed".to_string()),
-            "nanoclaw" => downloads
-                .register_indeterminate(
-                    "agent:nanoclaw".to_string(),
-                    crate::downloads::DownloadKind::Agent,
-                    "NanoClaw".to_string(),
-                    async { crate::sidecar::agents::nanoclaw::installer::ensure_installed().await },
-                )
-                .await
-                .map(|_| "installed".to_string()),
-            "nemoclaw" => downloads
-                .register_indeterminate(
-                    "agent:nemoclaw".to_string(),
-                    crate::downloads::DownloadKind::Agent,
-                    "NemoClaw".to_string(),
-                    async { crate::sidecar::agents::nemoclaw::installer::ensure_installed().await },
                 )
                 .await
                 .map(|_| "installed".to_string()),
@@ -12792,6 +13103,181 @@ mod auto_recall_pref_tests {
             assert!(
                 parse_auto_recall_enabled(Some(v)),
                 "{v:?} should keep auto-recall on"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod fts_recall_pref_tests {
+    use super::parse_fts_recall_enabled;
+
+    #[test]
+    fn default_off_when_unset() {
+        assert!(!parse_fts_recall_enabled(None));
+    }
+
+    #[test]
+    fn explicit_enable_tokens_turn_it_on() {
+        for v in ["true", "1", "on", "yes", "TRUE", "On", " yes "] {
+            assert!(
+                parse_fts_recall_enabled(Some(v)),
+                "{v:?} should enable fts recall"
+            );
+        }
+    }
+
+    #[test]
+    fn disable_tokens_and_garbage_stay_off() {
+        for v in ["false", "0", "off", "no", "", "anything"] {
+            assert!(
+                !parse_fts_recall_enabled(Some(v)),
+                "{v:?} should keep fts recall off"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod ssrf_host_guard_tests {
+    use super::screen_guarded_hostname;
+
+    #[test]
+    fn allows_normal_https_hosts() {
+        assert!(screen_guarded_hostname("example.com").is_ok());
+        assert!(screen_guarded_hostname("huggingface.co").is_ok());
+        assert!(screen_guarded_hostname("sub.domain.example.org").is_ok());
+        // Trailing-dot FQDN still allowed.
+        assert!(screen_guarded_hostname("example.com.").is_ok());
+        // Uppercase host is normalized, not rejected.
+        assert!(screen_guarded_hostname("EXAMPLE.COM").is_ok());
+    }
+
+    #[test]
+    fn blocks_cloud_metadata_hosts() {
+        assert!(screen_guarded_hostname("metadata").is_err());
+        assert!(screen_guarded_hostname("metadata.google.internal").is_err());
+        assert!(screen_guarded_hostname("METADATA.GOOGLE.INTERNAL").is_err());
+        assert!(screen_guarded_hostname("metadata.goog").is_err());
+        assert!(screen_guarded_hostname("foo.metadata.google.internal").is_err());
+        assert!(screen_guarded_hostname("metadata.google.internal.").is_err());
+        // A host that merely contains the word but isn't a suffix match is fine.
+        assert!(screen_guarded_hostname("metadata-service.example.com").is_ok());
+    }
+
+    #[test]
+    fn blocks_non_ascii_and_homograph_hosts() {
+        // Cyrillic 'а' homograph of ascii 'a'.
+        assert!(screen_guarded_hostname("ex\u{0430}mple.com").is_err());
+        // Zero-width joiner / bidi control embedded.
+        assert!(screen_guarded_hostname("examp\u{200d}le.com").is_err());
+        assert!(screen_guarded_hostname("ex\u{202e}ample.com").is_err());
+        // Raw unicode label.
+        assert!(screen_guarded_hostname("\u{043f}\u{0440}\u{0438}\u{043c}\u{0435}\u{0440}.\u{0440}\u{0444}").is_err());
+    }
+
+    #[test]
+    fn blocks_control_and_whitespace_hosts() {
+        assert!(screen_guarded_hostname("exa mple.com").is_err());
+        assert!(screen_guarded_hostname("example.com\n").is_err());
+        assert!(screen_guarded_hostname("example\t.com").is_err());
+        assert!(screen_guarded_hostname("example.com\0").is_err());
+        assert!(screen_guarded_hostname("").is_err());
+    }
+
+    #[test]
+    fn ip_literals_pass_through_for_later_ip_screen() {
+        // IP literals are screened by is_blocked_ip after resolution, not here.
+        assert!(screen_guarded_hostname("93.184.216.34").is_ok());
+        assert!(screen_guarded_hostname("[2606:2800:220:1:248:1893:25c8:1946]").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod agent_egress_screen_tests {
+    use super::{
+        agent_egress_guard_enabled_from, host_is_allowlisted_in, is_blocked_ip,
+        screen_agent_egress_url,
+    };
+
+    #[test]
+    fn guard_default_on_and_disable_tokens() {
+        // Absent env => on (secure default).
+        assert!(agent_egress_guard_enabled_from(None));
+        // Explicit disable tokens (case-insensitive, trimmed) => off.
+        for v in ["0", "false", "off", "no", "FALSE", "Off", " no "] {
+            assert!(
+                !agent_egress_guard_enabled_from(Some(v)),
+                "{v:?} should disable the egress guard"
+            );
+        }
+        // Anything else keeps it on.
+        for v in ["1", "true", "on", "yes", "", "anything"] {
+            assert!(
+                agent_egress_guard_enabled_from(Some(v)),
+                "{v:?} should keep the egress guard on"
+            );
+        }
+    }
+
+    #[test]
+    fn allowlist_parsing_is_case_and_whitespace_insensitive() {
+        assert!(host_is_allowlisted_in(
+            "169.254.169.254",
+            Some("169.254.169.254")
+        ));
+        // Whitespace around entries is trimmed; case is ignored.
+        assert!(host_is_allowlisted_in(
+            "internal.example.com",
+            Some(" a.com , Internal.Example.COM ,b.com")
+        ));
+        // Empty entries are ignored and non-members are rejected.
+        assert!(!host_is_allowlisted_in("evil.com", Some("a.com,,b.com")));
+        assert!(!host_is_allowlisted_in("evil.com", Some("")));
+        assert!(!host_is_allowlisted_in("evil.com", None));
+    }
+
+    #[test]
+    fn ip_screen_ranges_match_first_party_guard() {
+        // Sanity-check the reused classifier covers the intended ranges.
+        for ip in [
+            "169.254.169.254",
+            "10.0.0.1",
+            "127.0.0.1",
+            "192.168.1.1",
+            "172.16.0.1",
+            "fc00::1",
+            "fe80::1",
+        ] {
+            assert!(
+                is_blocked_ip(ip.parse().unwrap()),
+                "{ip} must be classified as blocked"
+            );
+        }
+        assert!(!is_blocked_ip("93.184.216.34".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn non_http_scheme_is_rejected() {
+        assert!(screen_agent_egress_url("file:///etc/passwd").await.is_err());
+        assert!(screen_agent_egress_url("ftp://example.com").await.is_err());
+        assert!(screen_agent_egress_url("not a url").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn metadata_and_private_ip_literals_are_blocked_by_default() {
+        // Default-on (no env mutation): IP-literal hosts are screened directly,
+        // no DNS needed.
+        for url in [
+            "http://169.254.169.254/",
+            "http://10.0.0.1/",
+            "http://127.0.0.1/",
+            "https://192.168.1.1/",
+            "http://[fc00::1]/",
+        ] {
+            assert!(
+                screen_agent_egress_url(url).await.is_err(),
+                "{url} must be blocked by the egress screen"
             );
         }
     }

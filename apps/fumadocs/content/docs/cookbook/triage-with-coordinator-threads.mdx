@@ -113,6 +113,16 @@ the reply inline rather than dispatching in the background.
 
 </Steps>
 
+## Check your work
+
+- After dispatch, `threads__list_threads` shows one thread per task, each with a `run_status` that
+  moves from `running` to `done` (or `failed`) as workers finish.
+- `threads__read_thread` returns a worker's latest messages plus its `run_status`, so the
+  coordinator knows a result is ready before summarizing it.
+- With `isolate: true` in a git repo, each worker gets its own worktree, so two workers editing the
+  same files never clobber each other. More than 8 concurrent dispatches queue for a slot rather
+  than being rejected.
+
 ## Threads vs delegate: which one
 
 Both fan work out, but they answer different needs.

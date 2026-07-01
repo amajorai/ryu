@@ -1,0 +1,13 @@
+{
+  "root": true,
+  "title": "MCP Server",
+  "description": "The Ryu Core MCP server: connect Claude Desktop or any MCP host to your node. Quickstart config, the full tool list, remote-node configuration, and security.",
+  "icon": "PlugZap",
+  "pages": [
+    "index",
+    "quickstart",
+    "tools",
+    "configuration",
+    "security"
+  ]
+}
