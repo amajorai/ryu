@@ -17,7 +17,11 @@ dependencies = [
 # `pip install -e ".[train]"` — the training stack. Unsloth pulls torch,
 # transformers, peft, bitsandbytes; install the CUDA-matched torch first
 # (Core's external_runtime handles per-machine CUDA matching at spawn).
-train = ["unsloth", "trl>=0.9", "datasets>=2.16"]
+# TRL is pinned to a range matching trainer.py's API: `dataset_text_field` +
+# `max_seq_length` live on SFTConfig (>=0.12) and `SFTTrainer(tokenizer=...)` is
+# still accepted (renamed to `processing_class` and removed ~0.16). Keep in this
+# window — a real GPU run will break outside it.
+train = ["unsloth", "trl>=0.12,<0.16", "datasets>=2.16"]
 
 [project.scripts]
 ryu-unsloth = "ryu_unsloth.__main__:main"

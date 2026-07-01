@@ -5,6 +5,7 @@
     "mcp-server",
     "typescript-sdk",
     "plugin-json-manifest",
+    "plugin-runtime",
     "agent-skills",
     "desktop-companion",
     "channel-bot",

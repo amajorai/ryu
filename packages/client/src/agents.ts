@@ -4,14 +4,14 @@
 // streaming chat endpoint (/api/chat/stream). This is the primary surface for
 // embedding a Ryu Core agent in any TypeScript app.
 
-import { buildHeaders, buildUrl, request } from "./request";
+import { buildHeaders, buildUrl, request } from "./request.ts";
 import type {
 	Agent,
 	AgentSummary,
 	Message,
 	RyuClientOptions,
 	StreamChunk,
-} from "./types";
+} from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Wire shapes (snake_case from Core)

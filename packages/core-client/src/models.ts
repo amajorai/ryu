@@ -52,26 +52,26 @@ export interface ModelCard {
 	/** Model architecture from GGUF metadata (e.g. "llama", "gemma3"). */
 	architecture: string | null;
 	author: string;
+	/** Whether an engine that can serve `format` is runnable on this node. */
+	compatible: boolean;
 	/** Context window in tokens (the single prompt+completion budget). */
 	contextLength: number | null;
 	createdAt: string | null;
 	downloads: number;
+	/** Weight format this card was surfaced under (the query facet). */
+	format: ModelFormat;
 	gated: boolean;
 	id: string;
 	installed: boolean;
 	lastModified: string | null;
 	likes: number;
 	name: string;
+	/** Engine label needed for an incompatible card (e.g. "vLLM"); null when OK. */
+	needsEngine: string | null;
 	/** Parameter count from GGUF metadata (e.g. 8_000_000_000). */
 	params: number | null;
 	pipelineTag: string | null;
 	tags: string[];
-	/** Weight format this card was surfaced under (the query facet). */
-	format: ModelFormat;
-	/** Whether an engine that can serve `format` is runnable on this node. */
-	compatible: boolean;
-	/** Engine label needed for an incompatible card (e.g. "vLLM"); null when OK. */
-	needsEngine: string | null;
 }
 
 /** Plain-language device-fit verdict, worst → best. Mirrors Core's `FitVerdict`. */
@@ -126,25 +126,25 @@ export interface DeviceInfo {
 export interface ModelDetail {
 	card: ModelCard;
 	device: DeviceInfo;
-	/** Weight format of this detail view. */
-	format: ModelFormat;
 	/** Per-quant files. Populated only for GGUF; empty for snapshot formats. */
 	files: ModelFile[];
+	/** Weight format of this detail view. */
+	format: ModelFormat;
+	readme: string | null;
+	/** Coarse snapshot fit verdict; empty for GGUF. */
+	repoFit: string;
+	/** Conservative snapshot fit sentence (never "partial offload"); empty for GGUF. */
+	repoFitLabel: string;
+	/** Total snapshot repo size (summed shards); null for GGUF. */
+	repoSizeBytes: number | null;
+	stats: AaStats | null;
+	statsApiKeyPresent: boolean;
 	/**
 	 * True when this GGUF repo ships a multimodal projector: installing any quant
 	 * also auto-installs the matching vision adapter, and the served model accepts
 	 * images. False for text-only and snapshot repos.
 	 */
 	vision: boolean;
-	readme: string | null;
-	stats: AaStats | null;
-	statsApiKeyPresent: boolean;
-	/** Total snapshot repo size (summed shards); null for GGUF. */
-	repoSizeBytes: number | null;
-	/** Coarse snapshot fit verdict; empty for GGUF. */
-	repoFit: string;
-	/** Conservative snapshot fit sentence (never "partial offload"); empty for GGUF. */
-	repoFitLabel: string;
 }
 
 // ── Wire shapes (snake_case from Core) ──────────────────────────────────────
@@ -152,21 +152,21 @@ export interface ModelDetail {
 interface CardWire {
 	architecture?: string | null;
 	author: string;
+	compatible?: boolean;
 	context_length?: number | null;
 	created_at?: string | null;
 	downloads?: number;
+	format?: ModelFormat;
 	gated?: boolean;
 	id: string;
 	installed?: boolean;
 	last_modified?: string | null;
 	likes?: number;
 	name: string;
+	needs_engine?: string | null;
 	params?: number | null;
 	pipeline_tag?: string | null;
 	tags?: string[];
-	format?: ModelFormat;
-	compatible?: boolean;
-	needs_engine?: string | null;
 }
 
 interface FileWire {
@@ -544,9 +544,9 @@ export interface NodeEngine {
 
 /** Per-format engine support on this node. */
 export interface NodeFormatSupport {
+	engines: NodeEngine[];
 	format: ModelFormat;
 	supported: boolean;
-	engines: NodeEngine[];
 }
 
 /** The format → engine capability map for a node, plus the resident engine. */

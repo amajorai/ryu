@@ -1,4 +1,4 @@
-# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="center" alt="" />&nbsp; @ryu/config
+# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; @ryu/config
 
 > Shared workspace config. Part of [Ryu](../../README.md).
 

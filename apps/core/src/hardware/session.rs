@@ -24,9 +24,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use super::codec::{
-    self, DownlinkEncoder, UplinkDecoder, DOWNLINK_RATE, FRAME_MS, UPLINK_RATE,
-};
+use super::codec::{self, DownlinkEncoder, UplinkDecoder, DOWNLINK_RATE, FRAME_MS, UPLINK_RATE};
 use super::protocol::{AudioFormat, Caps, DeviceType, Emotion, Mode, RhpServerMsg};
 use crate::agents::AgentStore;
 use crate::meetings::MeetingEngine;
@@ -75,7 +73,8 @@ pub mod live {
     use std::sync::OnceLock;
     use tokio::sync::{mpsc, Mutex};
 
-    static REGISTRY: OnceLock<Mutex<HashMap<String, mpsc::Sender<SessionOutput>>>> = OnceLock::new();
+    static REGISTRY: OnceLock<Mutex<HashMap<String, mpsc::Sender<SessionOutput>>>> =
+        OnceLock::new();
 
     fn registry() -> &'static Mutex<HashMap<String, mpsc::Sender<SessionOutput>>> {
         REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
@@ -254,11 +253,11 @@ impl HardwareSession {
                 segment_id: segment.id.to_string(),
             })]),
             // A silent chunk is the common case, not an error worth surfacing.
-            Err(e) if e.contains("silence") || e.contains("empty") => Ok(vec![
-                SessionOutput::control(RhpServerMsg::AmbientSkip {
+            Err(e) if e.contains("silence") || e.contains("empty") => {
+                Ok(vec![SessionOutput::control(RhpServerMsg::AmbientSkip {
                     reason: "silence".to_string(),
-                }),
-            ]),
+                })])
+            }
             Err(e) => Ok(vec![SessionOutput::control(RhpServerMsg::AmbientSkip {
                 reason: e,
             })]),
@@ -396,6 +395,7 @@ pub async fn run_chat_turn(
         conversation_id.clone(),
         deps.agent_id.clone(),
         prompt,
+        None,
         false,
         Arc::clone(&deps.registry),
         deps.conversations.clone(),
@@ -424,7 +424,9 @@ pub async fn run_chat_turn(
     // 3) Stream the reply as sentence-sized chat_delta chunks (v1: not per-token).
     for chunk in sentence_chunks(&reply) {
         if out_tx
-            .send(SessionOutput::Control(RhpServerMsg::ChatDelta { text: chunk }))
+            .send(SessionOutput::Control(RhpServerMsg::ChatDelta {
+                text: chunk,
+            }))
             .await
             .is_err()
         {
@@ -455,7 +457,9 @@ pub async fn run_chat_turn(
         .await;
     match synthesize_downlink(&reply).await {
         Ok(packets) => {
-            let _ = out_tx.send(SessionOutput::Control(RhpServerMsg::TtsStart)).await;
+            let _ = out_tx
+                .send(SessionOutput::Control(RhpServerMsg::TtsStart))
+                .await;
             for packet in packets {
                 if abort.load(Ordering::SeqCst) {
                     break;
@@ -464,7 +468,9 @@ pub async fn run_chat_turn(
                     return;
                 }
             }
-            let _ = out_tx.send(SessionOutput::Control(RhpServerMsg::TtsEnd)).await;
+            let _ = out_tx
+                .send(SessionOutput::Control(RhpServerMsg::TtsEnd))
+                .await;
         }
         Err(e) => {
             tracing::warn!("hardware: TTS synthesis failed: {e:#}");

@@ -128,10 +128,7 @@ pub async fn build_otlp_layer<S>(
     prefs: &PreferencesStore,
 ) -> Option<(Box<dyn Layer<S> + Send + Sync>, SdkTracerProvider)>
 where
-    S: tracing::Subscriber
-        + for<'a> tracing_subscriber::registry::LookupSpan<'a>
-        + Send
-        + Sync,
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
     let enabled = crate::privacy::diagnostics_export_enabled(prefs).await;
     let endpoint = crate::privacy::diagnostics_otlp_endpoint(prefs).await;

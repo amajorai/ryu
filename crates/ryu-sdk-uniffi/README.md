@@ -1,4 +1,4 @@
-# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="center" alt="" />&nbsp; ryu-sdk-uniffi
+# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; ryu-sdk-uniffi
 
 > UniFFI binding surface over the Ryu SDK Rust kernel: the multi-language path. Part of [Ryu](../../README.md).
 

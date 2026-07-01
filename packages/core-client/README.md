@@ -1,4 +1,4 @@
-# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="center" alt="" />&nbsp; @ryu/core-client
+# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; @ryu/core-client
 
 > The platform-agnostic, typed client for a Ryu Core node. Part of [Ryu](../../README.md).
 

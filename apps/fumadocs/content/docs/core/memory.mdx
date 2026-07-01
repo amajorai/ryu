@@ -14,9 +14,12 @@ across conversations for a given user and agent. This page covers long-term memo
 Long-term memory is stored encrypted in the same SQLite database as conversations
 (`~/.ryu/conversations.db`), in a `memory_entries` table.
 
-- **Encryption** - ChaCha20-Poly1305 AEAD. The 32-byte key lives at `~/.ryu/memory.key` with
-  owner-only permissions on Unix. Each entry gets its own random 12-byte nonce. Entries that fail to
-  decrypt are skipped rather than crashing recall.
+- **Encryption** - each entry is sealed at rest with Core's unified `FieldCipher`
+  (ChaCha20-Poly1305 AEAD), the same cipher used across the backend. The master key is resolved
+  from the environment, then the OS keychain, then a local file, and a legacy `~/.ryu/memory.key`
+  is adopted as that master key on first run. Each entry gets its own random nonce, and entries
+  that fail to decrypt are skipped rather than crashing recall. See
+  [Encryption at rest](/docs/core/encryption-at-rest) for the full model.
 - **Per-agent** - one agent's memory does not bleed into another's. Memory is keyed by the user and
   agent pair.
 - **Opt-in on the chat path** - long-term memory is recorded and recalled when the chat request
@@ -40,8 +43,8 @@ retrieval path the desktop uses to surface relevant context. See the
 [HTTP API reference](/docs/develop/api-reference) for the request shape.
 
 <Callout type="info">
-  Memory encryption uses a single local key today. There is no key rotation or remote escrow.
-  Treat `~/.ryu/memory.key` as a secret: lose it and the encrypted entries become unreadable.
+  Memory encryption uses a single local master key today. There is no key rotation or remote
+  escrow. Treat that key as a secret: lose it and the encrypted entries become unreadable.
 </Callout>
 
 ## Searchable chat history and auto-recall

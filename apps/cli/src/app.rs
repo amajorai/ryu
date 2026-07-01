@@ -495,7 +495,7 @@ pub struct App {
     /// Agents configured on Core, fetched from `GET /api/agents`.
     pub agents_list: Vec<Agent>,
     /// Id of the agent selected for the current chat session. `None` means the
-    /// throwaway `/ai` playground backend; `Some(id)` routes through Core.
+    /// Selected Core agent id for chat routing.
     pub selected_agent: Option<String>,
     /// Whether the agent picker overlay is open on the Chat tab.
     pub agent_picker_open: bool,

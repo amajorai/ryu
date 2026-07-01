@@ -315,6 +315,135 @@ pub(crate) fn extract_all_to_dir(data: &[u8], dest_dir: &Path) -> anyhow::Result
     Ok(written)
 }
 
+/// The basename of a release-archive entry path (last component after `/` or `\`).
+fn archive_basename(entry_name: &str) -> &str {
+    entry_name.rsplit(['/', '\\']).next().unwrap_or(entry_name)
+}
+
+/// True when `file_name` is the wanted binary itself.
+fn is_wanted_binary(file_name: &str, binary_name: &str) -> bool {
+    file_name == binary_name || file_name == format!("{binary_name}.exe")
+}
+
+/// True when `file_name` is a shared library that must sit beside the binary so
+/// its same-directory rpath (`@loader_path` / `$ORIGIN`) resolves at launch.
+fn is_shared_library(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    lower.ends_with(".dylib")
+        || lower.ends_with(".dll")
+        || lower.ends_with(".so")
+        || lower.contains(".so.")
+}
+
+/// Write `bytes` to `dest_dir/file_name` via a temp file + atomic rename.
+fn write_flattened(dest_dir: &Path, file_name: &str, bytes: &[u8]) -> anyhow::Result<PathBuf> {
+    let dest = dest_dir.join(file_name);
+    let tmp = dest.with_extension("download-tmp");
+    std::fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, &dest)
+        .with_context(|| format!("rename {} -> {}", tmp.display(), dest.display()))?;
+    Ok(dest)
+}
+
+/// Extract `binary_name` **plus every sibling shared library** from a release
+/// archive into `dest_dir`, flattening any internal directory prefix. Returns the
+/// path to the extracted binary.
+///
+/// Modern llama.cpp builds split the engine across many `@loader_path`-relative
+/// shared libs (libggml, libllama, libggml-metal, …); pulling out just the
+/// `llama-server` binary yields a file that fails to launch with a dyld
+/// "Library not loaded" error. Like [`extract_all_to_dir`] (used for whisper.cpp's
+/// Windows DLLs) this co-locates the libs, but keeps the bin dir clean by skipping
+/// the archive's other CLI tools. Handles `.zip` (Windows) and `.tar.gz`
+/// (macOS/Linux).
+pub(crate) fn extract_binary_with_libs(
+    data: &[u8],
+    binary_name: &str,
+    dest_dir: &Path,
+    is_zip: bool,
+) -> anyhow::Result<PathBuf> {
+    std::fs::create_dir_all(dest_dir)
+        .with_context(|| format!("creating {}", dest_dir.display()))?;
+
+    if is_zip {
+        extract_binary_with_libs_from_zip(data, binary_name, dest_dir)
+    } else {
+        extract_binary_with_libs_from_tar_gz(data, binary_name, dest_dir)
+    }
+}
+
+fn extract_binary_with_libs_from_zip(
+    data: &[u8],
+    binary_name: &str,
+    dest_dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    use std::io::{Cursor, Read};
+    use zip::ZipArchive;
+
+    let reader = Cursor::new(data);
+    let mut archive = ZipArchive::new(reader).context("reading zip archive")?;
+    let mut binary_path = None;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).context("reading zip entry")?;
+        let entry_name = file.name().to_string();
+        if entry_name.ends_with('/') {
+            continue;
+        }
+        let file_name = archive_basename(&entry_name).to_string();
+        let is_binary = is_wanted_binary(&file_name, binary_name);
+        if !(is_binary || is_shared_library(&file_name)) {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .context("reading zip entry bytes")?;
+        let dest = write_flattened(dest_dir, &file_name, &bytes)?;
+        if is_binary {
+            binary_path = Some(dest);
+        }
+    }
+
+    binary_path.ok_or_else(|| anyhow::anyhow!("binary '{binary_name}' not found in zip archive"))
+}
+
+fn extract_binary_with_libs_from_tar_gz(
+    data: &[u8],
+    binary_name: &str,
+    dest_dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+    use tar::Archive;
+
+    let gz = GzDecoder::new(data);
+    let mut archive = Archive::new(gz);
+    let mut binary_path = None;
+
+    for entry in archive.entries().context("reading tar entries")? {
+        let mut entry = entry.context("reading tar entry")?;
+        let path = entry.path().context("getting entry path")?;
+        let file_name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+        let is_binary = is_wanted_binary(&file_name, binary_name);
+        if !(is_binary || is_shared_library(&file_name)) {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        entry
+            .read_to_end(&mut bytes)
+            .context("reading tar entry bytes")?;
+        let dest = write_flattened(dest_dir, &file_name, &bytes)?;
+        if is_binary {
+            binary_path = Some(dest);
+        }
+    }
+
+    binary_path.ok_or_else(|| anyhow::anyhow!("binary '{binary_name}' not found in archive"))
+}
+
 /// Current OS + architecture tag used to select the right release asset.
 #[cfg(target_os = "macos")]
 pub(crate) fn platform_tag() -> &'static str {

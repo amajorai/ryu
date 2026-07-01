@@ -20,7 +20,5 @@
       }
     }
   ],
-  "permission_grants": [
-    "mcp:exa"
-  ]
+  "permission_grants": ["mcp:exa"]
 }

@@ -1,0 +1,133 @@
+---
+title: "Deployment"
+description: "Stand up a node and devices end to end: prerequisites, running Core local or remote, sidecars, then flash, pair, dashboard, a first Mode B smoke test, and troubleshooting."
+---
+
+This page takes you from nothing to a device that hears you and talks back through your own node. It deploys the node, then points to [Firmware](/docs/hardware/firmware) and [Pairing](/docs/hardware/pairing) for those steps rather than repeating them.
+
+<Callout type="info">
+  Status: Core is build-verified; the firmware is flash-ready but not yet hardware-tested. Treat the device steps as first bring-up.
+</Callout>
+
+## Architecture in one picture
+
+<Mermaid chart={`flowchart LR
+  DeviceB["Device"] -->|"Mode B WSS"| Node["Node Ryu Core"]
+  DeviceA["Device"] -->|"Mode A BLE"| Phone["Phone"]
+  Phone -->|"WSS"| Node
+  DeviceP["Device"] -->|"HTTP poll image"| Node
+  Node --> Work["chat TTS whisper meetings dashboard"]
+`} />
+
+The device does no inference. Core does ASR, the LLM, TTS, and dashboard rendering. The dashboard image path is Mode B (WiFi) only.
+
+## Prerequisites
+
+**Node host** (your desktop, a server, or a Pi):
+
+- Rust toolchain (stable) and **CMake on PATH**. The `opus` crate vendors and builds libopus via CMake; keep the repo's `.cargo/config.toml` (it sets `CMAKE_POLICY_VERSION_MINIMUM=3.5` so a newer CMake still builds the vendored libopus).
+- Sidecars for full chat: whisper.cpp (ASR) and OuteTTS (TTS), the same sidecars the rest of Ryu uses. Core manages them.
+
+**Firmware build host** - ESP-IDF >= 5.1 with the ESP32-S3 toolchain. See [Firmware](/docs/hardware/firmware).
+
+**Mobile build host** - Bun and the Expo toolchain. BLE needs a custom dev client, not Expo Go.
+
+## Run the node
+
+### Local / loopback (dev)
+
+```bash
+cargo run --manifest-path apps/core/Cargo.toml
+```
+
+This binds `127.0.0.1:7980` and skips auth on loopback, which is fine for a USB-tethered first test but not for real devices over the network. Confirm it is up with `GET http://127.0.0.1:7980/api/hardware/devices`, which returns `[]` before any pairing.
+
+### Remote / always-on (real devices)
+
+Real devices need to reach the node over the network, authenticated.
+
+<Steps>
+  <Step>
+    Bind beyond loopback and set a token. Core fails closed without a token on a non-loopback bind.
+
+    ```bash
+    RYU_BIND=0.0.0.0:7980 RYU_TOKEN="<strong-random-secret>" \
+      cargo run --manifest-path apps/core/Cargo.toml --release
+    ```
+  </Step>
+  <Step>
+    Expose it privately with Tailscale rather than opening a public port. Install Tailscale on the node host, then put the relay phone (and any direct-WiFi device's network) on the same tailnet.
+  </Step>
+  <Step>
+    Pin the URL handed back at pairing so devices get a stable address:
+
+    ```bash
+    RYU_HARDWARE_NODE_URL="https://<node>.<tailnet>.ts.net"
+    ```
+
+    If unset, the node derives the URL from the request `Host` header, then MagicDNS, then `RYU_BIND`.
+  </Step>
+</Steps>
+
+### Sidecars
+
+For full interactive chat the node needs whisper.cpp (ASR) and OuteTTS (TTS) running; ambient capture additionally exercises the meetings chunk pipeline. Start Core once and let it manage them.
+
+### Pi as node (optional)
+
+A Pi 5 can **be** the node (run Core on it) so the desk hub has local inference. Same commands; install Rust and CMake on the Pi. Otherwise the desk is a thin client to a remote node like the others. The Pi is the node host here, not the desk device itself.
+
+## Flash, pair, and dashboard
+
+These steps have their own pages:
+
+- **Flash the firmware** - see [Firmware](/docs/hardware/firmware) for the `idf.py` build and flash commands and board config.
+- **Pair and provision** - see [Pairing](/docs/hardware/pairing) for the QR and BLE flow. Pair against the same node URL the devices will use.
+- **Set up the dashboard** - see [Dashboard](/docs/hardware/dashboard) to author a device dashboard and have the desk e-ink or watch view show it.
+
+## First end-to-end smoke test (do Mode B first)
+
+Mode B avoids the BLE relay, so it isolates the core path. Do it first.
+
+<Steps>
+  <Step>
+    Run Core (loopback is fine for a USB-tethered first test): `cargo run --manifest-path apps/core/Cargo.toml`.
+  </Step>
+  <Step>
+    Pair over loopback (`POST /api/hardware/pair`) and provision the device with the `device_token` and `ws://127.0.0.1:7980/api/hardware/ws`, plus WiFi creds for an over-the-air test.
+  </Step>
+  <Step>
+    **Chat** - press the button, speak, and expect `stt` (transcript on screen), then `chat_delta` (the reply), then TTS audio.
+  </Step>
+  <Step>
+    **Barge-in** - start talking while it is speaking. The device sends `abort` and TTS stops immediately.
+  </Step>
+  <Step>
+    **Ambient** - set `mode=ambient`; speech is transcribed into the device's long-running meeting and flows into recall and summary.
+  </Step>
+  <Step>
+    **Dashboard** - author a widget; the desk e-ink (or the watch dashboard view) shows it, and editing it triggers a re-poll.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+| Symptom | Likely cause and fix |
+|---|---|
+| Core won't build, CMake error about policy `< 3.5` | Ensure the root `.cargo/config.toml` (`CMAKE_POLICY_VERSION_MINIMUM=3.5`) exists and CMake is on PATH. Do not "fix" it by installing an older CMake; the shim handles new CMake. |
+| Phone never finds the device over BLE | UUID mismatch or BLE permissions. Confirm `ble_prov.c` and `ble.ts` use the same `7e1a...` UUIDs, that Android `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` are granted, and that you are on a dev client, not Expo Go. |
+| Paired but no chat | Sidecars down (whisper or OuteTTS) or wrong `node_url`. Check Core logs and verify the provisioned URL is reachable from the device's network. |
+| Assistant talks over me | Firmware build missing the `abort`-on-speech-onset path, or Core not honoring `abort`. |
+| Mode A drops and stays dead | An older relay without reconnect. The current relay reconnects with backoff and replays `hello`; rebuild the dev client. |
+| Dashboard blank / no image | The device is Mode A (relay); the image path is WiFi-only, so provision WiFi creds for Mode B. Or no device dashboard has been authored yet. |
+| Dashboard shows shapes but no text | The node host has no system fonts; install fonts so `resvg` can render text. |
+| e-ink ghosting builds up | Expected; the desk firmware does a periodic full refresh. If it never clears, check the ghosting budget. |
+| RGB565 colors look wrong on the watch | Byte order is big-endian end to end (Core emits big-endian, firmware swaps to little-endian). Do not change one side to little-endian. |
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/hardware/firmware" />
+  <DocCard href="/docs/hardware/pairing" />
+  <DocCard href="/docs/hardware/security" />
+</Cards>

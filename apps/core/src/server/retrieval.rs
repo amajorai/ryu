@@ -547,7 +547,25 @@ impl RetrievalStore {
                  created_at      INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source);
-             CREATE INDEX IF NOT EXISTS idx_chunks_space  ON chunks(space_id);",
+             CREATE INDEX IF NOT EXISTS idx_chunks_space  ON chunks(space_id);
+
+             -- Filterable metadata sidecar for OKF (Open Knowledge Format) chunks.
+             -- One row per indexed chunk; `chunk_id` joins back to `chunks.id`.
+             -- `tags` and `links` are JSON arrays so cross-links survive as
+             -- progressive-disclosure edges without a separate edge table.
+             CREATE TABLE IF NOT EXISTS okf_chunks (
+                 chunk_id     TEXT PRIMARY KEY,
+                 bundle_id    TEXT NOT NULL,
+                 concept_path TEXT NOT NULL,
+                 okf_type     TEXT NOT NULL,
+                 tags         TEXT NOT NULL DEFAULT '[]',
+                 resource     TEXT,
+                 links        TEXT NOT NULL DEFAULT '[]',
+                 chunk_index  INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_okf_bundle  ON okf_chunks(bundle_id);
+             CREATE INDEX IF NOT EXISTS idx_okf_concept ON okf_chunks(bundle_id, concept_path);
+             CREATE INDEX IF NOT EXISTS idx_okf_type    ON okf_chunks(okf_type);",
         )
         .context("initializing retrieval schema")?;
 
@@ -593,6 +611,246 @@ impl RetrievalStore {
         )
         .context("indexing chunk")?;
         Ok(())
+    }
+
+    /// Ingest a parsed OKF [`Bundle`](crate::okf::Bundle) into the retrieval
+    /// index so an agent can read it as grounded knowledge.
+    ///
+    /// Each concept's body is chunked, embedded via the store's configured
+    /// embedder (reusing the same path as [`index_chunk`](Self::index_chunk)),
+    /// and indexed as `Space`-source chunks scoped to a synthetic space whose id
+    /// is `bundle_id` — so the existing `space_ids` retrieval filter can target a
+    /// single bundle. Alongside each chunk a row is written to `okf_chunks` with
+    /// the filterable metadata `{ okf_type, tags, resource, source_bundle_id,
+    /// concept_path }` plus the concept's cross-links (preserved as edges for
+    /// progressive disclosure).
+    ///
+    /// **Idempotent on `concept_path`**: the call first removes any previously
+    /// ingested chunks for `bundle_id` (via [`remove_okf_bundle`](Self::remove_okf_bundle)),
+    /// then re-inserts. Re-ingesting an updated bundle therefore replaces stale
+    /// chunks and drops concepts that no longer exist — no orphans accumulate.
+    pub async fn ingest_okf_bundle(
+        &self,
+        bundle_id: &str,
+        bundle: &crate::okf::Bundle,
+    ) -> Result<OkfIngestSummary> {
+        // Re-index is a full replace: clear the prior generation first so removed
+        // concepts and shrunk bodies do not leave orphaned chunks behind.
+        self.remove_okf_bundle(bundle_id).await?;
+
+        // Embed every chunk up front (no DB lock held during network/CPU work),
+        // then commit all rows in a single transaction.
+        let mut rows: Vec<OkfRow> = Vec::new();
+        let model = self.embedder.model_id().to_string();
+        let now = chrono::Utc::now().timestamp_millis();
+        for concept in &bundle.concepts {
+            let header = okf_chunk_header(concept);
+            let tags_json =
+                serde_json::to_string(&concept.tags).unwrap_or_else(|_| "[]".to_owned());
+            let links: Vec<&str> = concept.links.iter().map(|l| l.target.as_str()).collect();
+            let links_json = serde_json::to_string(&links).unwrap_or_else(|_| "[]".to_owned());
+            let body_chunks = chunk_okf_body(&concept.body);
+            for (idx, body_chunk) in body_chunks.into_iter().enumerate() {
+                // Prepend a header (title/type/description) so each chunk carries
+                // enough context to be retrievable on its own.
+                let content = if header.is_empty() {
+                    body_chunk
+                } else if body_chunk.is_empty() {
+                    header.clone()
+                } else {
+                    format!("{header}\n{body_chunk}")
+                };
+                let embedding = self.embedder.embed(&content).await?;
+                let blob = encode_embedding(&embedding);
+                let chunk_id = format!("okf:{bundle_id}:{}#{idx}", concept.file_path);
+                rows.push(OkfRow {
+                    chunk_id,
+                    content,
+                    blob,
+                    concept_path: concept.file_path.clone(),
+                    okf_type: concept.type_.clone(),
+                    tags_json: tags_json.clone(),
+                    resource: concept.resource.clone(),
+                    links_json: links_json.clone(),
+                    chunk_index: idx as i64,
+                });
+            }
+        }
+
+        let chunk_count = rows.len();
+        let concept_count = bundle.concepts.len();
+        let conn = self.conn.lock().await;
+        let tx = conn
+            .unchecked_transaction()
+            .context("opening okf ingest transaction")?;
+        for row in &rows {
+            tx.execute(
+                "INSERT INTO chunks (id, source, space_id, content, embedding, embedding_model, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(id) DO UPDATE SET
+                     source          = excluded.source,
+                     space_id        = excluded.space_id,
+                     content         = excluded.content,
+                     embedding       = excluded.embedding,
+                     embedding_model = excluded.embedding_model,
+                     created_at      = excluded.created_at",
+                params![
+                    row.chunk_id,
+                    ChunkSource::Space.as_str(),
+                    bundle_id,
+                    row.content,
+                    row.blob,
+                    model,
+                    now
+                ],
+            )
+            .context("indexing okf chunk")?;
+            tx.execute(
+                "INSERT INTO okf_chunks (chunk_id, bundle_id, concept_path, okf_type, tags, resource, links, chunk_index)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(chunk_id) DO UPDATE SET
+                     bundle_id    = excluded.bundle_id,
+                     concept_path = excluded.concept_path,
+                     okf_type     = excluded.okf_type,
+                     tags         = excluded.tags,
+                     resource     = excluded.resource,
+                     links        = excluded.links,
+                     chunk_index  = excluded.chunk_index",
+                params![
+                    row.chunk_id,
+                    bundle_id,
+                    row.concept_path,
+                    row.okf_type,
+                    row.tags_json,
+                    row.resource,
+                    row.links_json,
+                    row.chunk_index
+                ],
+            )
+            .context("indexing okf metadata")?;
+        }
+        tx.commit().context("committing okf ingest")?;
+
+        Ok(OkfIngestSummary {
+            bundle_id: bundle_id.to_owned(),
+            concepts: concept_count,
+            chunks: chunk_count,
+        })
+    }
+
+    /// Remove every chunk (and its metadata) that was ingested for `bundle_id`.
+    /// Returns the number of metadata rows removed. Safe to call for an unknown
+    /// bundle (no-op, returns 0).
+    pub async fn remove_okf_bundle(&self, bundle_id: &str) -> Result<usize> {
+        let conn = self.conn.lock().await;
+        let tx = conn
+            .unchecked_transaction()
+            .context("opening okf remove transaction")?;
+        tx.execute(
+            "DELETE FROM chunks WHERE id IN (SELECT chunk_id FROM okf_chunks WHERE bundle_id = ?1)",
+            params![bundle_id],
+        )
+        .context("deleting okf chunks")?;
+        let removed = tx
+            .execute(
+                "DELETE FROM okf_chunks WHERE bundle_id = ?1",
+                params![bundle_id],
+            )
+            .context("deleting okf metadata")?;
+        tx.commit().context("committing okf removal")?;
+        Ok(removed)
+    }
+
+    /// Return the cross-link edges preserved for a bundle: `(concept_path,
+    /// link_target)` pairs, deduplicated, for progressive-disclosure traversal.
+    pub async fn okf_links(&self, bundle_id: &str) -> Result<Vec<OkfEdge>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT concept_path, links FROM okf_chunks WHERE bundle_id = ?1")
+            .context("preparing okf links query")?;
+        let rows = stmt
+            .query_map(params![bundle_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .context("querying okf links")?;
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for row in rows {
+            let (concept_path, links_json) = row?;
+            let targets: Vec<String> = serde_json::from_str(&links_json).unwrap_or_default();
+            for target in targets {
+                if seen.insert((concept_path.clone(), target.clone())) {
+                    out.push(OkfEdge {
+                        concept_path: concept_path.clone(),
+                        target,
+                    });
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Reconstruct the OKF concepts previously ingested under `bundle_id` so the
+    /// bundle can be exported back to an OKF directory.
+    ///
+    /// Ingest stores each concept's body as one or more chunks, each prefixed
+    /// with a context header (`{title} [{type}] {description}`). This reverses
+    /// that: rows are grouped by `concept_path` (ordered by `chunk_index`), the
+    /// per-chunk header is stripped, and the bodies are rejoined. `title` and
+    /// `description` are recovered from the header; `type`, `tags`, `resource`,
+    /// and cross-links come from the `okf_chunks` sidecar; `timestamp` from the
+    /// chunk's `created_at`.
+    ///
+    /// This is **lossy by design**: the body is reassembled from normalized
+    /// chunks (original paragraph and whitespace boundaries are not perfectly
+    /// preserved) and only metadata the index retained survives. It is faithful
+    /// enough to re-emit a shareable bundle, not byte-identical to the source.
+    pub async fn reconstruct_okf_concepts(
+        &self,
+        bundle_id: &str,
+    ) -> Result<Vec<crate::okf::Concept>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT o.concept_path, o.okf_type, o.tags, o.resource, o.links, c.content, c.created_at
+                 FROM okf_chunks o JOIN chunks c ON c.id = o.chunk_id
+                 WHERE o.bundle_id = ?1
+                 ORDER BY o.concept_path, o.chunk_index",
+            )
+            .context("preparing okf export query")?;
+        let rows = stmt
+            .query_map(params![bundle_id], |row| {
+                Ok(OkfExportRow {
+                    concept_path: row.get(0)?,
+                    okf_type: row.get(1)?,
+                    tags_json: row.get(2)?,
+                    resource: row.get(3)?,
+                    links_json: row.get(4)?,
+                    content: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })
+            .context("querying okf export rows")?;
+
+        // Rows arrive ordered by concept_path; collapse contiguous runs into one
+        // Concept each.
+        let mut concepts: Vec<crate::okf::Concept> = Vec::new();
+        let mut group: Vec<OkfExportRow> = Vec::new();
+        for row in rows {
+            let row = row?;
+            if group
+                .first()
+                .is_some_and(|f| f.concept_path != row.concept_path)
+            {
+                concepts.push(concept_from_export_rows(&group));
+                group.clear();
+            }
+            group.push(row);
+        }
+        if !group.is_empty() {
+            concepts.push(concept_from_export_rows(&group));
+        }
+        Ok(concepts)
     }
 
     /// Return the set of `Memory`-source chunk ids already indexed *under the
@@ -775,6 +1033,189 @@ pub fn build_context_block(chunks: &[ScoredChunk]) -> Option<String> {
         ));
     }
     Some(block)
+}
+
+// ── OKF ingest ──────────────────────────────────────────────────────────────
+
+/// Maximum characters per OKF body chunk before splitting on word boundaries.
+/// Mirrors the Space chunk size so the embedder sees comparably sized units.
+const OKF_CHUNK_CHAR_SIZE: usize = 1_000;
+
+/// Outcome of [`RetrievalStore::ingest_okf_bundle`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OkfIngestSummary {
+    /// The bundle id the concepts were indexed under.
+    pub bundle_id: String,
+    /// Number of concepts ingested.
+    pub concepts: usize,
+    /// Number of chunks written (concepts may split into multiple chunks).
+    pub chunks: usize,
+}
+
+/// A preserved cross-link edge: a concept points at a link target. Relationships
+/// are untyped (OKF v0.1), so only source and target are recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OkfEdge {
+    /// Bundle-relative path of the concept that contains the link.
+    pub concept_path: String,
+    /// Link target as written (bundle-absolute `/x.md` or relative `./x.md`).
+    pub target: String,
+}
+
+/// One materialized chunk row, embedded and ready to commit. Internal to the
+/// ingest path so embedding (async, lock-free) and DB writes (locked) stay split.
+struct OkfRow {
+    chunk_id: String,
+    content: String,
+    blob: Vec<u8>,
+    concept_path: String,
+    okf_type: String,
+    tags_json: String,
+    resource: Option<String>,
+    links_json: String,
+    chunk_index: i64,
+}
+
+/// One row read back during export: a single indexed chunk plus the concept
+/// metadata the `okf_chunks` sidecar carries. Internal to
+/// [`RetrievalStore::reconstruct_okf_concepts`].
+struct OkfExportRow {
+    concept_path: String,
+    okf_type: String,
+    tags_json: String,
+    resource: Option<String>,
+    links_json: String,
+    content: String,
+    created_at: i64,
+}
+
+/// Reassemble one [`crate::okf::Concept`] from its ordered chunk rows.
+///
+/// `rows` must be non-empty and all share a `concept_path`. The first chunk's
+/// header yields `title`/`description`; bodies are stripped of their headers and
+/// rejoined with blank lines.
+fn concept_from_export_rows(rows: &[OkfExportRow]) -> crate::okf::Concept {
+    let first = &rows[0];
+    let okf_type = first.okf_type.clone();
+    let tags: Vec<String> = serde_json::from_str(&first.tags_json).unwrap_or_default();
+    let link_targets: Vec<String> = serde_json::from_str(&first.links_json).unwrap_or_default();
+
+    let mut title: Option<String> = None;
+    let mut description: Option<String> = None;
+    let mut body_parts: Vec<String> = Vec::new();
+    for (idx, row) in rows.iter().enumerate() {
+        let (header, body_chunk) = split_chunk_header(&row.content);
+        if idx == 0 {
+            let (t, d) = parse_chunk_header(header, &okf_type);
+            title = t;
+            description = d;
+        }
+        let body_chunk = body_chunk.trim();
+        if !body_chunk.is_empty() {
+            body_parts.push(body_chunk.to_owned());
+        }
+    }
+    let body = body_parts.join("\n\n");
+
+    let timestamp =
+        chrono::DateTime::from_timestamp_millis(first.created_at).map(|dt| dt.to_rfc3339());
+
+    let links = link_targets
+        .into_iter()
+        .map(|target| {
+            let relative = !target.starts_with('/');
+            crate::okf::Link {
+                text: target.clone(),
+                target,
+                relative,
+            }
+        })
+        .collect();
+
+    crate::okf::Concept {
+        file_path: first.concept_path.clone(),
+        type_: okf_type,
+        title,
+        description,
+        resource: first.resource.clone(),
+        timestamp,
+        tags,
+        extra: std::collections::BTreeMap::new(),
+        body,
+        links,
+    }
+}
+
+/// Split a stored chunk into its leading header line and the body remainder.
+/// Ingest always prepends a non-empty header followed by `\n`, so a present
+/// newline marks the boundary; without one the whole content is the header
+/// (an empty-body concept).
+fn split_chunk_header(content: &str) -> (&str, &str) {
+    content.split_once('\n').unwrap_or((content, ""))
+}
+
+/// Recover `(title, description)` from a chunk header of the form
+/// `{title} [{type}] {description}`. The bracketed type acts as the delimiter;
+/// either side may be empty. If the marker is absent, the whole header is taken
+/// as the title.
+fn parse_chunk_header(header: &str, okf_type: &str) -> (Option<String>, Option<String>) {
+    let marker = format!("[{okf_type}]");
+    if let Some(pos) = header.find(&marker) {
+        let before = header[..pos].trim();
+        let after = header[pos + marker.len()..].trim();
+        let title = (!before.is_empty()).then(|| before.to_owned());
+        let description = (!after.is_empty()).then(|| after.to_owned());
+        (title, description)
+    } else {
+        let header = header.trim();
+        ((!header.is_empty()).then(|| header.to_owned()), None)
+    }
+}
+
+/// Build a short context header for a concept's chunks so each chunk is
+/// retrievable on its own (title + bracketed type + description).
+fn okf_chunk_header(concept: &crate::okf::Concept) -> String {
+    let mut parts = Vec::new();
+    if let Some(title) = concept.title.as_deref().filter(|s| !s.is_empty()) {
+        parts.push(title.to_owned());
+    }
+    parts.push(format!("[{}]", concept.type_));
+    if let Some(desc) = concept.description.as_deref().filter(|s| !s.is_empty()) {
+        parts.push(desc.to_owned());
+    }
+    parts.join(" ")
+}
+
+/// Split a concept body into chunks of at most [`OKF_CHUNK_CHAR_SIZE`] chars,
+/// breaking on paragraph then word boundaries. An empty body yields no chunks so
+/// the header alone still carries the concept (handled by the caller).
+fn chunk_okf_body(body: &str) -> Vec<String> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return vec![String::new()];
+    }
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    for paragraph in trimmed.split("\n\n") {
+        for word in paragraph.split_whitespace() {
+            if current.chars().count() + word.chars().count() + 1 > OKF_CHUNK_CHAR_SIZE
+                && !current.is_empty()
+            {
+                chunks.push(std::mem::take(&mut current));
+            }
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+        if !current.is_empty() {
+            chunks.push(std::mem::take(&mut current));
+        }
+    }
+    if chunks.is_empty() {
+        chunks.push(trimmed.to_owned());
+    }
+    chunks
 }
 
 #[cfg(test)]
@@ -1029,5 +1470,156 @@ mod tests {
         let registry = ModelRegistry::default();
         assert_eq!(registry.embedder.id, "nomic-embed-text-v1.5");
         assert_eq!(registry.reranker.id, "BAAI/bge-reranker");
+    }
+
+    // ── OKF ingest ────────────────────────────────────────────────────────────
+
+    fn sample_bundle() -> crate::okf::Bundle {
+        let orders = crate::okf::Concept::parse(
+            "tables/orders.md",
+            "---\ntype: BigQuery Table\ntitle: Orders\ntags:\n- sales\n---\n\
+             # Schema\n\nThe orders fact table records customer purchases. \
+             See [Customers](/tables/customers.md).\n",
+        )
+        .expect("parse orders");
+        let recipe = crate::okf::Concept::parse(
+            "recipes/bread.md",
+            "---\ntype: Playbook\ntitle: Bread\n---\n\
+             Preheat the oven to 200 degrees and bake the sourdough loaf.\n",
+        )
+        .expect("parse recipe");
+        crate::okf::Bundle {
+            root: std::path::PathBuf::from("/tmp/bundle"),
+            concepts: vec![orders, recipe],
+            index: None,
+            log: None,
+            okf_version: Some("0.1".to_owned()),
+            warnings: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn ingests_okf_bundle_and_retrieves_concept() {
+        let store = RetrievalStore::open_in_memory().unwrap();
+        let summary = store
+            .ingest_okf_bundle("b1", &sample_bundle())
+            .await
+            .unwrap();
+        assert_eq!(summary.concepts, 2);
+        assert!(summary.chunks >= 2);
+
+        let opts = RetrievalOptions {
+            top_k: 1,
+            ..Default::default()
+        };
+        let hits = store
+            .retrieve("orders fact table customer purchases", &opts)
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        // Indexed as a Space scoped to the bundle id.
+        assert_eq!(hits[0].source, ChunkSource::Space);
+        assert_eq!(hits[0].space_id.as_deref(), Some("b1"));
+        assert!(hits[0].content.contains("Orders"));
+    }
+
+    #[tokio::test]
+    async fn okf_cross_links_are_preserved_as_edges() {
+        let store = RetrievalStore::open_in_memory().unwrap();
+        store
+            .ingest_okf_bundle("b1", &sample_bundle())
+            .await
+            .unwrap();
+        let edges = store.okf_links("b1").await.unwrap();
+        assert!(edges
+            .iter()
+            .any(|e| e.concept_path == "tables/orders.md" && e.target == "/tables/customers.md"));
+    }
+
+    #[tokio::test]
+    async fn reingest_is_idempotent_on_concept_path() {
+        let store = RetrievalStore::open_in_memory().unwrap();
+        let first = store
+            .ingest_okf_bundle("b1", &sample_bundle())
+            .await
+            .unwrap();
+        // Re-ingesting the same bundle replaces rather than duplicates.
+        let second = store
+            .ingest_okf_bundle("b1", &sample_bundle())
+            .await
+            .unwrap();
+        assert_eq!(first.chunks, second.chunks);
+
+        let edges = store.okf_links("b1").await.unwrap();
+        // Exactly one edge for the cross-link, not duplicated by re-ingest.
+        let customer_edges = edges
+            .iter()
+            .filter(|e| e.target == "/tables/customers.md")
+            .count();
+        assert_eq!(customer_edges, 1);
+    }
+
+    #[tokio::test]
+    async fn remove_okf_bundle_clears_chunks() {
+        let store = RetrievalStore::open_in_memory().unwrap();
+        store
+            .ingest_okf_bundle("b1", &sample_bundle())
+            .await
+            .unwrap();
+        let removed = store.remove_okf_bundle("b1").await.unwrap();
+        assert!(removed >= 2);
+
+        let opts = RetrievalOptions {
+            top_k: 5,
+            ..Default::default()
+        };
+        let hits = store
+            .retrieve("orders fact table sourdough", &opts)
+            .await
+            .unwrap();
+        assert!(hits.is_empty());
+        // Edges gone too.
+        assert!(store.okf_links("b1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn reconstruct_okf_concepts_round_trips_metadata_and_body() {
+        let store = RetrievalStore::open_in_memory().unwrap();
+        store
+            .ingest_okf_bundle("b1", &sample_bundle())
+            .await
+            .unwrap();
+
+        let mut concepts = store.reconstruct_okf_concepts("b1").await.unwrap();
+        assert_eq!(concepts.len(), 2);
+        concepts.sort_by(|a, b| a.file_path.cmp(&b.file_path));
+
+        // recipes/bread.md sorts before tables/orders.md.
+        let bread = &concepts[0];
+        assert_eq!(bread.file_path, "recipes/bread.md");
+        assert_eq!(bread.type_, "Playbook");
+        assert_eq!(bread.title.as_deref(), Some("Bread"));
+        assert!(bread.body.contains("Preheat the oven"));
+
+        let orders = &concepts[1];
+        assert_eq!(orders.file_path, "tables/orders.md");
+        assert_eq!(orders.type_, "BigQuery Table");
+        assert_eq!(orders.title.as_deref(), Some("Orders"));
+        assert_eq!(orders.tags, vec!["sales".to_owned()]);
+        assert!(orders.body.contains("orders fact table"));
+        // Cross-link target survives reconstruction.
+        assert!(orders
+            .links
+            .iter()
+            .any(|l| l.target == "/tables/customers.md"));
+        // Timestamp is stamped from the indexed chunk's created_at.
+        assert!(orders.timestamp.is_some());
+
+        // Unknown bundle yields no concepts (not an error).
+        assert!(store
+            .reconstruct_okf_concepts("nope")
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

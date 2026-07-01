@@ -46,18 +46,18 @@ export type RhpSurface = "eink" | "lcd";
 /** Audio format descriptor (mic uplink and TTS downlink). */
 export interface RhpAudioFormat {
 	codec: "opus";
-	/** 16000 for mic uplink, 24000 for TTS downlink. */
-	sample_rate: number;
 	/** 60 ms frames. */
 	frame_ms: number;
+	/** 16000 for mic uplink, 24000 for TTS downlink. */
+	sample_rate: number;
 }
 
 /** Capability profile a device advertises in `hello`. */
 export interface RhpCaps {
-	display: boolean;
 	camera: boolean;
-	speaker: boolean;
+	display: boolean;
 	mic: boolean;
+	speaker: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,15 +66,15 @@ export interface RhpCaps {
 
 /** First frame on connect: identifies the device and its capabilities. */
 export interface RhpHello {
-	type: "hello";
+	audio: RhpAudioFormat;
+	caps: RhpCaps;
 	/** Stable per-device id (from NVS, set at pairing). */
 	device_id: string;
 	device_type: RhpDeviceType;
 	fw_version: string;
 	/** True if tunneled via the phone (Mode A relay). */
 	relay: boolean;
-	audio: RhpAudioFormat;
-	caps: RhpCaps;
+	type: "hello";
 }
 
 /** Device operating-mode change. */
@@ -85,14 +85,14 @@ export interface RhpModeMsg {
 
 /** Chat-turn boundary. */
 export interface RhpListen {
-	type: "listen";
 	state: RhpListenState;
+	type: "listen";
 }
 
 /** Typed/derived text input (fallback path when no mic turn). */
 export interface RhpText {
-	type: "text";
 	content: string;
+	type: "text";
 }
 
 /** Barge-in: stop current TTS + generation. */
@@ -102,19 +102,19 @@ export interface RhpAbort {
 
 /** Announces that the next BINARY frame is a JPEG of these dimensions. */
 export interface RhpCameraMeta {
+	bytes: number;
+	fmt: string;
+	h: number;
 	type: "camera_meta";
 	w: number;
-	h: number;
-	fmt: string;
-	bytes: number;
 }
 
 /** Periodic device telemetry. */
 export interface RhpTelemetry {
-	type: "telemetry";
 	battery_pct: number;
-	rssi: number;
 	charging: boolean;
+	rssi: number;
+	type: "telemetry";
 }
 
 /** Liveness probe. */
@@ -142,30 +142,30 @@ export type RhpClientMsgType = RhpClientMsg["type"];
 
 /** Acknowledges `hello`; carries session ids and the TTS downlink format. */
 export interface RhpHelloAck {
-	type: "hello_ack";
-	session_id: string;
 	/** Present (long-running meeting id) only if the device is ambient-capable. */
 	ambient_session_id?: string;
+	session_id: string;
 	tts: RhpAudioFormat;
+	type: "hello_ack";
 }
 
 /** Live transcript of the user's speech (display it). */
 export interface RhpStt {
-	type: "stt";
-	text: string;
 	final: boolean;
+	text: string;
+	type: "stt";
 }
 
 /** One streamed assistant-token chunk. */
 export interface RhpChatDelta {
-	type: "chat_delta";
 	text: string;
+	type: "chat_delta";
 }
 
 /** End of the streamed assistant turn. */
 export interface RhpChatEnd {
-	type: "chat_end";
 	conversation_id: string;
+	type: "chat_end";
 }
 
 /** Face state change. */
@@ -186,29 +186,29 @@ export interface RhpTtsEnd {
 
 /** An ambient chunk was transcribed and indexed. */
 export interface RhpAmbientAck {
-	type: "ambient_ack";
 	segment_id: string;
+	type: "ambient_ack";
 }
 
 /** An ambient chunk was skipped (e.g. silence). */
 export interface RhpAmbientSkip {
-	type: "ambient_skip";
 	reason: string;
+	type: "ambient_skip";
 }
 
 /** Desk ambient/e-ink display update. `payload` is widget-specific JSON. */
 export interface RhpDisplay {
-	type: "display";
-	surface: RhpSurface;
-	widget: string;
 	payload: Record<string, unknown>;
+	surface: RhpSurface;
+	type: "display";
+	widget: string;
 }
 
 /** Protocol or processing error. */
 export interface RhpError {
-	type: "error";
 	code: string;
 	message: string;
+	type: "error";
 }
 
 /** Liveness response. */
@@ -244,8 +244,8 @@ export type RhpMessage = RhpClientMsg | RhpServerMsg;
 /** POST /api/hardware/pair request body. */
 export interface RhpPairRequest {
 	device_id: string;
-	pairing_nonce: string;
 	device_type: RhpDeviceType;
+	pairing_nonce: string;
 }
 
 /** POST /api/hardware/pair response body. */
@@ -258,14 +258,14 @@ export interface RhpPairResponse {
 
 /** One entry in GET /api/hardware/devices. */
 export interface RhpDevice {
-	device_id: string;
-	type: RhpDeviceType;
-	name: string;
-	/** Epoch milliseconds of last activity, or null if never seen. */
-	last_seen: number | null;
-	online: boolean;
 	/** Latest reported battery percent, or null if unknown. */
 	battery_pct: number | null;
+	device_id: string;
+	/** Epoch milliseconds of last activity, or null if never seen. */
+	last_seen: number | null;
+	name: string;
+	online: boolean;
+	type: RhpDeviceType;
 }
 
 /** GET /api/hardware/devices response body. */
@@ -283,8 +283,8 @@ export interface RhpDeviceUpdate {
  */
 export interface RhpPairingPayload {
 	device_id: string;
-	nonce: string;
 	device_type: RhpDeviceType;
+	nonce: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,16 +306,16 @@ export type RhpPalette = "mono" | "rgba" | "rgb565";
  * `DeviceProfile` `{ w, h, bit_depth, palette, rotation }`.
  */
 export interface RhpScreen {
-	/** Panel width in pixels. */
-	w: number;
-	/** Panel height in pixels. */
-	h: number;
 	/** Bits per pixel of the encoding: 1 (mono e-ink), 16 (RGB565), 24/32 (PNG). */
 	bit_depth: number;
+	/** Panel height in pixels. */
+	h: number;
 	/** Final byte encoding for this panel. */
 	palette: RhpPalette;
 	/** Clockwise rotation (degrees) the device applies on blit. */
 	rotation: number;
+	/** Panel width in pixels. */
+	w: number;
 }
 
 /**
@@ -332,10 +332,10 @@ export interface RhpScreen {
 export interface RhpDisplayManifest {
 	/** Relative URL of the rendered image (carries the `rev` query). */
 	image_url: string;
-	/** Content hash; re-poll skips the image fetch when this is unchanged. */
-	rev: string;
 	/** Seconds until the next poll. */
 	refresh_rate: number;
+	/** Content hash; re-poll skips the image fetch when this is unchanged. */
+	rev: string;
 	/** Panel geometry + encoding. */
 	screen: RhpScreen;
 }
@@ -346,8 +346,8 @@ export interface RhpDisplayManifest {
  * (kind + source + layout); a PUT with `widgets` replaces the device's selection.
  */
 export interface RhpDeviceDashboard {
-	device_id: string;
 	dashboard_id: string;
+	device_id: string;
 	refresh_rate: number;
 	screen: RhpScreen;
 	widgets: unknown[];

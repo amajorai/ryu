@@ -1,0 +1,72 @@
+---
+title: "Dashboard"
+description: "The TRMNL-style dashboard surface: the node renders Ryu's existing Home dashboard to an image, the device polls and blits it, and edits nudge a re-poll."
+---
+
+The desk hub (e-ink) and the watch (LCD) both show a customizable widget dashboard, following the [TRMNL](https://docs.trmnl.com/go/how-it-works) model: the **node renders the dashboard to an image** and the device just polls and displays it. Ryu does not build a new widget system for hardware; it reuses the existing Home dashboard, its widget engine, and the `dashboard_builder` tools.
+
+## Server renders, device displays
+
+The device is dumb on purpose. It never composes widgets; it fetches a finished image at its own resolution and depth and blits it.
+
+<Steps>
+  <Step>
+    The device polls the node on an interval: `GET /api/hardware/display/:device_id`.
+  </Step>
+  <Step>
+    The node renders that device's dashboard to an image and returns a small JSON envelope with the `image_url`, a content `rev` hash (so the device skips re-download when nothing changed), a `refresh_rate` in seconds, and a `screen` descriptor (width, height, bit depth, rotation).
+  </Step>
+  <Step>
+    The device downloads the image (1-bit packed for e-ink, color raster for LCD) and displays it. E-ink uses partial refresh with a periodic full clear; the device may deep-sleep until the next poll.
+  </Step>
+</Steps>
+
+The envelope looks like this:
+
+```jsonc
+{ "image_url": "/api/hardware/display/:device_id/image?rev=<hash>",
+  "rev": "<content-hash>",
+  "refresh_rate": 300,
+  "screen": { "w": 800, "h": 480, "bit_depth": 1, "rotation": 0 } }
+```
+
+## Reuse, not reinvention
+
+The dashboard a device shows is a **device-scoped dashboard**: its own layout, widget selection, and refresh rate, stored alongside the existing dashboards. The same `dashboard_builder` chat and tools that build your desktop dashboard target a device by `device_id` - for example "add a clock and calendar widget to my desk." The watch can share a dashboard or use a compact variant.
+
+On the node, `dashboard/render.rs` takes a dashboard (layout plus current widget data) and a device profile (resolution, bit depth, palette) and produces an image. It builds an SVG layout and rasterizes it with `resvg` and `tiny-skia`, so there is no headless Chromium dependency on the node. For e-ink it dithers to 1-bit and packs to the panel format; for the watch LCD it outputs a 240x240 color raster.
+
+## Poll, nudge, and refresh rate
+
+The device refreshes on its `refresh_rate` (default 300 s, with a server floor of 30 s). For faster reaction to edits, the node can also send the RHP `display` control message over the live WebSocket to tell a device its dashboard changed and to re-poll now. So editing a widget on the desktop reflects on the device within the debounce rather than waiting for the next scheduled poll.
+
+The REST surface adds to the protocol's endpoints:
+
+```
+GET  /api/hardware/display/:device_id            -> { image_url, rev, refresh_rate, screen }
+GET  /api/hardware/display/:device_id/image?rev= -> image bytes (1-bit packed | png)
+GET  /api/hardware/devices/:id/dashboard         -> device dashboard config
+PUT  /api/hardware/devices/:id/dashboard         -> set layout / widget selection / refresh_rate
+```
+
+## Per-device behavior
+
+- **Desk** - primary surface is the e-ink dashboard via the TRMNL poll-bitmap path. An optional secondary LCD can run the live island face and chat over the WebSocket.
+- **Watch** - gains a dashboard view mode alongside face and chat: a compact color raster on the round LCD, switched with the button. Smaller widget set.
+- **Necklace** - no display, so no dashboard surface. Its captured data still flows into the dashboards that other devices view.
+
+<Callout type="warn">
+  Two hard constraints. First, the dashboard **image path is Mode B (WiFi) only**. `dash_client` fetches the bitmap over plain HTTP to the node origin; the BLE relay tunnels only WebSocket control and Opus audio, not the image. A relay-only (Mode A) device still receives the re-poll nudge but cannot fetch the bitmap. The always-plugged desk is always Mode B, so this is fine for it; the watch dashboard view requires known WiFi. Second, **RGB565 is big-endian end to end** - the node emits big-endian and the firmware swaps to little-endian before the LCD decode. Do not "correct" either side to little-endian.
+</Callout>
+
+<Callout type="info">
+  Server-side text rendering needs system fonts installed on the node host. Without them `resvg` draws the shapes but the text comes out blank.
+</Callout>
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/hardware/devices" />
+  <DocCard href="/docs/hardware/protocol" />
+  <DocCard href="/docs/hardware/firmware" />
+</Cards>

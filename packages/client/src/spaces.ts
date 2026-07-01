@@ -4,8 +4,8 @@
 // A Space is a named document collection backed by sqlite-vec; documents are
 // ingested (chunked + embedded) and searched via KNN.
 
-import { request } from "./request";
-import type { RyuClientOptions, Space, SpaceMatch } from "./types";
+import { request } from "./request.ts";
+import type { RyuClientOptions, Space, SpaceMatch } from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Wire shapes (snake_case from Core)

@@ -22,9 +22,9 @@
  */
 
 import { createInterface } from "node:readline";
-import type { ChatMessage } from "../model/client";
-import { ModelClient } from "../model/client";
-import { resolveGatewayUrl } from "../model/gateway";
+import type { ChatMessage } from "../model/client.ts";
+import { ModelClient } from "../model/client.ts";
+import { resolveGatewayUrl } from "../model/gateway.ts";
 
 // Top-level regex for absolute Windows/Unix path detection.
 const RE_ABSOLUTE_PATH = /^[A-Za-z]:[\\/]/;

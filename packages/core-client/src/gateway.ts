@@ -300,16 +300,16 @@ export interface SmartRule {
  * originally requested model. Takes effect after the gateway restarts.
  */
 export interface SmartRoutingConfig {
-	/** Master switch. Off by default (the classifier adds a per-request call). */
-	enabled: boolean;
-	/** The cheap model used to classify each request (any routable model id). */
-	classifier_model: string;
-	/** Ordered natural-language rules. */
-	rules: SmartRule[];
-	/** Model used when no rule matches. null/empty ⇒ keep the requested model. */
-	default_model?: string | null;
 	/** Classify once per conversation and reuse the decision. Default true. */
 	cache_by_session: boolean;
+	/** The cheap model used to classify each request (any routable model id). */
+	classifier_model: string;
+	/** Model used when no rule matches. null/empty ⇒ keep the requested model. */
+	default_model?: string | null;
+	/** Master switch. Off by default (the classifier adds a per-request call). */
+	enabled: boolean;
+	/** Ordered natural-language rules. */
+	rules: SmartRule[];
 	/** Per-classification timeout in ms. Default 4000. */
 	timeout_ms: number;
 }

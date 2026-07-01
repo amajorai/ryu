@@ -25,6 +25,15 @@ pub enum SidecarCategory {
     /// instance. Runs *alongside* the resident chat engine (powers semantic RAG),
     /// never part of the chat-engine swap.
     Embedding,
+    /// A sandbox / code-execution backend (an isolated exec runtime) — e.g.
+    /// wasmtime, Docker, microsandbox, OpenSandbox. Like `Voice`/`Media`, a
+    /// sandbox is NOT mutually-exclusive: multiple backends coexist and one is
+    /// chosen per call (a default + per-call override), so it is never part of
+    /// `LOCAL_ENGINES` / the active-engine swap. Every sandbox backend except the
+    /// built-in wasmtime is a detect-only external CLI Ryu never installs; the
+    /// picker reads live availability from `/api/sandbox/backend`, not the
+    /// catalog's install state.
+    Sandbox,
 }
 
 impl SidecarCategory {
@@ -36,6 +45,7 @@ impl SidecarCategory {
             SidecarCategory::Voice => "voice",
             SidecarCategory::Media => "media",
             SidecarCategory::Embedding => "embedding",
+            SidecarCategory::Sandbox => "sandbox",
         }
     }
 }
@@ -67,6 +77,10 @@ pub fn required_platforms(name: &str) -> &'static [&'static str] {
         // `[linux]` label reserves the future Linux-only downloader and gates the
         // generic install route there; display + install-gate only.
         "tailscale" => &["linux"],
+        // microsandbox (msb microVMs) and OpenSandbox (osb) are external CLIs
+        // backed by hypervisors/secure-container runtimes that exist only on
+        // Linux/macOS — never Windows. Display + node-support gate only.
+        "microsandbox" | "opensandbox" => &["linux", "macos"],
         _ => &[],
     }
 }
@@ -392,6 +406,67 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             deprecated: false,
             recommended: false,
         },
+        // Fine-tuning runtime — a Python sidecar (apps/unsloth-sidecar) wrapping the
+        // Apache-2.0 Unsloth library (+ TRL) for LoRA/QLoRA training. A Tool, not a
+        // Provider: it produces models (consumed via `/api/finetune/*`) rather than
+        // serving the chat engine. Opt-in; training needs an NVIDIA CUDA GPU.
+        CatalogEntry {
+            name: "unsloth",
+            display_name: "Unsloth (fine-tuning)",
+            description: "Local LoRA/QLoRA fine-tuning · Unsloth + TRL · 2x faster, ~70% less VRAM · exports GGUF for serving · needs an NVIDIA GPU",
+            category: SidecarCategory::Tool,
+            source: SidecarSource::Github {
+                repo: "unslothai/unsloth",
+            },
+            deprecated: false,
+            recommended: false,
+        },
+        // ── Sandbox backends (code-execution runtimes) ───────────────────────
+        // Detect-only externals except the built-in wasmtime. Selected per call
+        // or as the node default via `/api/sandbox/backend`; never installed
+        // through the catalog (the `source` below is provenance only).
+        CatalogEntry {
+            name: "wasmtime",
+            display_name: "Wasmtime (WASM · built-in)",
+            description: "In-process WASM/WASI sandbox · default · deny-by-default · no external deps",
+            category: SidecarCategory::Sandbox,
+            source: SidecarSource::Github {
+                repo: "bytecodealliance/wasmtime",
+            },
+            deprecated: false,
+            recommended: true,
+        },
+        CatalogEntry {
+            name: "docker",
+            display_name: "Docker",
+            description: "Run commands in Docker containers · detect-only (Core never bundles Docker)",
+            category: SidecarCategory::Sandbox,
+            source: SidecarSource::Docker { image: "docker" },
+            deprecated: false,
+            recommended: false,
+        },
+        CatalogEntry {
+            name: "microsandbox",
+            display_name: "microsandbox",
+            description: "microVM isolation via the msb CLI · detect-only · Linux/macOS only",
+            category: SidecarCategory::Sandbox,
+            source: SidecarSource::Github {
+                repo: "superradcompany/microsandbox",
+            },
+            deprecated: false,
+            recommended: false,
+        },
+        CatalogEntry {
+            name: "opensandbox",
+            display_name: "OpenSandbox",
+            description: "gVisor / Kata / Firecracker via the osb CLI · detect-only · Linux/macOS only",
+            category: SidecarCategory::Sandbox,
+            source: SidecarSource::Github {
+                repo: "opensandbox-group/OpenSandbox",
+            },
+            deprecated: false,
+            recommended: false,
+        },
     ]
 }
 
@@ -402,7 +477,10 @@ mod tests {
     #[test]
     fn registry_has_correct_count() {
         let r = static_registry();
-        assert_eq!(r.len(), 25);
+        // 26 base entries + 4 sandbox backends (wasmtime, docker, microsandbox,
+        // opensandbox). NOTE: this is a global count over a shared tree — if a
+        // concurrent feature adds a catalog row, rebase this number with it.
+        assert_eq!(r.len(), 30);
     }
 
     #[test]
@@ -478,9 +556,14 @@ mod tests {
             .iter()
             .filter(|e| e.category == SidecarCategory::Embedding)
             .collect();
+        let sandbox: Vec<_> = r
+            .iter()
+            .filter(|e| e.category == SidecarCategory::Sandbox)
+            .collect();
         assert_eq!(agents.len(), 6);
-        // agentbrowser, temporal, spider, llmfit, qmd, shadow, ghost
-        assert_eq!(tools.len(), 7);
+        // agentbrowser, temporal, spider, llmfit, qmd, shadow, ghost (+ a
+        // concurrently-added tool in this shared tree).
+        assert_eq!(tools.len(), 8);
         // llamacpp, ollama, vllm, sglang, mlx, mlx-vlm, omlx (last three Apple
         // Silicon only), docker-model-runner (adopt-only).
         assert_eq!(providers.len(), 8);
@@ -491,6 +574,8 @@ mod tests {
         // No embedding *engine* is a Store entry — the embeddings server is
         // backing infra (auto-started), not user-pickable.
         assert_eq!(embedding.len(), 0);
+        // wasmtime (built-in) + docker + microsandbox + opensandbox.
+        assert_eq!(sandbox.len(), 4);
     }
 
     #[test]

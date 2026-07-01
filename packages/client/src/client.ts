@@ -8,10 +8,10 @@
 //   const client = createRyuClient({ baseUrl: "http://localhost:7980" });
 //   for await (const chunk of client.agents.stream("pi", messages)) { ... }
 
-import { AgentsAPI } from "./agents";
-import { SessionsAPI } from "./sessions";
-import { SpacesAPI } from "./spaces";
-import type { RyuClientOptions } from "./types";
+import { AgentsAPI } from "./agents.ts";
+import { SessionsAPI } from "./sessions.ts";
+import { SpacesAPI } from "./spaces.ts";
+import type { RyuClientOptions } from "./types.ts";
 
 export class RyuClient {
 	/** Agent CRUD and chat streaming. */

@@ -9,7 +9,7 @@
 // a Core concern. Token counts / cost / provider-latency live in Gateway audit
 // only and are NOT present here.
 
-import { type ApiTarget, request } from "./client";
+import { type ApiTarget, request } from "./client.ts";
 
 // ── Wire shapes (snake_case as returned by Core) ──────────────────────────────
 

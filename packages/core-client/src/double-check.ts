@@ -11,12 +11,12 @@ import { type ApiTarget, request } from "./client.ts";
 
 /** One double-check review result. */
 export interface DoubleCheckResult {
-	/** True when the reviewer found no issues; false flags a problem (fail-loud). */
-	ok: boolean;
 	/** The reviewer's short critique (what's wrong / how to fix, or "no issues"). */
 	critique: string;
 	/** The model id that performed the review (resolved server-side). */
 	model: string;
+	/** True when the reviewer found no issues; false flags a problem (fail-loud). */
+	ok: boolean;
 }
 
 /** Review the latest assistant answer in a conversation with the side model. */

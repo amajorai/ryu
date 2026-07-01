@@ -37,20 +37,23 @@ const MAX_SUBWORKFLOW_DEPTH: usize = 8;
 /// re-enter the gate) cannot run away. See the [`NodeKind::While`] doc.
 pub const MAX_WHILE_ITERATIONS: u64 = 100;
 
-/// Decide a `While` gate, advancing its iteration counter. Pure so it is unit
+/// Decide a `While` gate against an explicit iteration cap. Pure so it is unit
 /// testable without an executor or gateway.
 ///
-/// Given the current counter value and whether the resolved condition holds,
-/// returns `(take_true_branch, next_counter)`:
-///   - condition holds AND `counter < MAX_WHILE_ITERATIONS` → continue (`true`),
-///     counter incremented.
+/// Given the current counter value, whether the resolved condition holds, and the
+/// effective cap, returns `(take_true_branch, next_counter)`:
+///   - condition holds AND `counter < cap` → continue (`true`), counter incremented.
 ///   - condition holds but the cap is reached → exit (`false`), counter unchanged
 ///     (the cap stops the loop).
 ///   - condition fails → exit (`false`), counter reset to 0 so a later re-entry
 ///     starts fresh.
-pub fn decide_while(counter: u64, condition_holds: bool) -> (bool, u64) {
+///
+/// The `cap` is the node's `max_iterations` clamped to [`MAX_WHILE_ITERATIONS`]
+/// by [`effective_while_cap`] — a workflow can lower the bound but never raise it
+/// past the hard safety maximum.
+pub fn decide_while_capped(counter: u64, condition_holds: bool, cap: u64) -> (bool, u64) {
     if condition_holds {
-        if counter < MAX_WHILE_ITERATIONS {
+        if counter < cap {
             (true, counter + 1)
         } else {
             (false, counter)
@@ -58,6 +61,23 @@ pub fn decide_while(counter: u64, condition_holds: bool) -> (bool, u64) {
     } else {
         (false, 0)
     }
+}
+
+/// Resolve a `While` node's effective iteration cap: its optional
+/// `max_iterations` override clamped to the hard [`MAX_WHILE_ITERATIONS`]
+/// ceiling, defaulting to the ceiling when unset. A `Some(0)` is treated as the
+/// default rather than an instantly-exiting loop, since a zero cap is almost
+/// certainly a misconfiguration.
+pub fn effective_while_cap(max_iterations: Option<u64>) -> u64 {
+    match max_iterations {
+        Some(n) if n > 0 => n.min(MAX_WHILE_ITERATIONS),
+        _ => MAX_WHILE_ITERATIONS,
+    }
+}
+
+/// Back-compat wrapper for [`decide_while_capped`] using the engine default cap.
+pub fn decide_while(counter: u64, condition_holds: bool) -> (bool, u64) {
+    decide_while_capped(counter, condition_holds, MAX_WHILE_ITERATIONS)
 }
 
 /// Run a workflow to completion, persisting resumable state after each node.
@@ -712,12 +732,14 @@ async fn execute_node(
         NodeKind::While {
             expr,
             body_workflow_id,
+            max_iterations,
         } => {
+            let cap = effective_while_cap(*max_iterations);
             match body_workflow_id {
                 // Real bounded loop: re-run the body sub-workflow while the
                 // condition holds. See [`run_while_loop`].
                 Some(body_id) if !body_id.is_empty() => {
-                    run_while_loop(expr, body_id, &node.id, input, run, depth).await
+                    run_while_loop(expr, body_id, cap, &node.id, input, run, depth).await
                 }
                 // One-shot guarded gate (back-compat, NOT a loop): resolve tokens,
                 // evaluate the condition, then consult the per-node iteration
@@ -732,7 +754,7 @@ async fn execute_node(
                         .get(&state_key)
                         .and_then(|v| v.parse::<u64>().ok())
                         .unwrap_or(0);
-                    let (take_true, next) = decide_while(counter, holds);
+                    let (take_true, next) = decide_while_capped(counter, holds, cap);
                     run.state.insert(state_key, next.to_string());
                     Ok(take_true.to_string())
                 }
@@ -825,6 +847,7 @@ async fn execute_node(
 async fn run_while_loop(
     expr: &str,
     body_id: &str,
+    cap: u64,
     node_id: &str,
     input: &str,
     run: &mut WorkflowRun,
@@ -872,7 +895,7 @@ async fn run_while_loop(
         };
         let resolved = resolve(expr, &ctx);
         let holds = eval_condition(&resolved, &carry);
-        let (continue_loop, next_counter) = decide_while(counter, holds);
+        let (continue_loop, next_counter) = decide_while_capped(counter, holds, cap);
         if !continue_loop {
             break;
         }
@@ -991,7 +1014,8 @@ pub fn apply_transform(op: &str, template: Option<&str>, input: &str) -> Result<
 /// Evaluate a tiny condition expression against the input.
 ///
 /// Supported forms (left side is always the literal `input`):
-///   `input == "x"`, `input != "x"`, `input contains "x"`, `input empty`,
+///   `input == "x"`, `input != "x"`, `input contains "x"`,
+///   `input starts_with "x"`, `input ends_with "x"`, `input empty`,
 ///   `input nonempty`, and the numeric comparisons `input < N`, `input > N`,
 ///   `input <= N`, `input >= N` (both operands parsed as f64; non-numeric → false).
 /// Quotes around the right-hand value are optional. The numeric operators are
@@ -1015,6 +1039,12 @@ pub fn eval_condition(expr: &str, input: &str) -> bool {
     }
     if let Some(rhs) = expr.strip_prefix("input contains") {
         return input.contains(&strip(rhs));
+    }
+    if let Some(rhs) = expr.strip_prefix("input starts_with") {
+        return input.starts_with(&strip(rhs));
+    }
+    if let Some(rhs) = expr.strip_prefix("input ends_with") {
+        return input.ends_with(&strip(rhs));
     }
     // Numeric comparisons. Check the two-char operators (`<=`/`>=`) before the
     // single-char ones so `input <= N` is not mis-parsed as `input < =N`.
@@ -2278,8 +2308,29 @@ mod tests {
         assert!(!eval_condition("input == \"yes\"", "no"));
         assert!(eval_condition("input != \"yes\"", "no"));
         assert!(eval_condition("input contains \"ell\"", "hello"));
+        assert!(eval_condition("input starts_with \"he\"", "hello"));
+        assert!(!eval_condition("input starts_with \"lo\"", "hello"));
+        assert!(eval_condition("input ends_with \"lo\"", "hello"));
+        assert!(!eval_condition("input ends_with \"he\"", "hello"));
         assert!(eval_condition("input nonempty", "x"));
         assert!(eval_condition("input empty", ""));
+    }
+
+    #[test]
+    fn while_cap_clamps_to_hard_max() {
+        // An explicit override below the ceiling is honoured.
+        assert_eq!(effective_while_cap(Some(5)), 5);
+        // Above the ceiling is clamped down (never raised past the safety cap).
+        assert_eq!(
+            effective_while_cap(Some(MAX_WHILE_ITERATIONS + 50)),
+            MAX_WHILE_ITERATIONS
+        );
+        // Unset / zero fall back to the engine default.
+        assert_eq!(effective_while_cap(None), MAX_WHILE_ITERATIONS);
+        assert_eq!(effective_while_cap(Some(0)), MAX_WHILE_ITERATIONS);
+        // The capped decision stops at the lowered bound.
+        assert_eq!(decide_while_capped(4, true, 5), (true, 5));
+        assert_eq!(decide_while_capped(5, true, 5), (false, 5));
     }
 
     #[test]
@@ -2552,6 +2603,7 @@ mod tests {
                         // gate is false: continue only while input == "go".
                         expr: "input == \"go\"".into(),
                         body_workflow_id: None,
+                        max_iterations: None,
                     },
                 },
                 WorkflowNode {
@@ -2720,6 +2772,7 @@ mod tests {
                     kind: NodeKind::While {
                         expr: "input != \"xxx\"".into(),
                         body_workflow_id: Some(body_id.clone()),
+                        max_iterations: None,
                     },
                 },
                 WorkflowNode {
@@ -2797,6 +2850,7 @@ mod tests {
                     kind: NodeKind::While {
                         expr: "input nonempty".into(),
                         body_workflow_id: Some(wf_id.clone()),
+                        max_iterations: None,
                     },
                 },
                 WorkflowNode {

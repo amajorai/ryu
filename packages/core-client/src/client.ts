@@ -14,33 +14,35 @@
 
 /** The subset of a node the api layer needs: base URL + optional bearer token. */
 export interface ApiTarget {
-  url: string
-  token: string | null
+	token: string | null;
+	url: string;
 }
 
 /** Build request headers, attaching the bearer token when present. */
 export function makeHeaders(token: string | null): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
-  return headers
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	if (token) {
+		headers.Authorization = `Bearer ${token}`;
+	}
+	return headers;
 }
 
 /** Join a node base URL and an api path without doubling slashes. */
 export function apiUrl(target: ApiTarget, path: string): string {
-  const base = target.url.replace(/\/$/, '')
-  const suffix = path.startsWith('/') ? path : `/${path}`
-  return `${base}${suffix}`
+	const base = target.url.replace(/\/$/, "");
+	const suffix = path.startsWith("/") ? path : `/${path}`;
+	return `${base}${suffix}`;
 }
 
 export interface RequestOptions {
-  method?: string
-  /** JSON-serializable body; serialized and sent with a JSON content-type. */
-  body?: unknown
-  signal?: AbortSignal
-  /** Extra headers merged over the defaults (e.g. the marketplace buyer token). */
-  headers?: Record<string, string>
+	/** JSON-serializable body; serialized and sent with a JSON content-type. */
+	body?: unknown;
+	/** Extra headers merged over the defaults (e.g. the marketplace buyer token). */
+	headers?: Record<string, string>;
+	method?: string;
+	signal?: AbortSignal;
 }
 
 /**
@@ -50,7 +52,7 @@ export interface RequestOptions {
  * holds the Core node token, a machine secret the control plane does not
  * recognize as a user). Core forwards this to the marketplace install handoff.
  */
-export const BUYER_TOKEN_HEADER = 'X-Ryu-Buyer-Token'
+export const BUYER_TOKEN_HEADER = "X-Ryu-Buyer-Token";
 
 /**
  * Surface-injected source of the control-plane (Better-Auth) session token used
@@ -58,11 +60,11 @@ export const BUYER_TOKEN_HEADER = 'X-Ryu-Buyer-Token'
  * token; mobile wires it to its secure-store token. Defaults to "no token" so
  * the shared client never assumes a platform storage API.
  */
-let buyerTokenProvider: () => string | null = () => null
+let buyerTokenProvider: () => string | null = () => null;
 
 /** Wire the surface's control-plane session-token getter (see above). */
 export function setBuyerTokenProvider(fn: () => string | null): void {
-  buyerTokenProvider = fn
+	buyerTokenProvider = fn;
 }
 
 /**
@@ -71,8 +73,8 @@ export function setBuyerTokenProvider(fn: () => string | null): void {
  * item is denied with an actionable error).
  */
 export function buyerTokenHeader(): Record<string, string> {
-  const token = buyerTokenProvider()
-  return token ? { [BUYER_TOKEN_HEADER]: token } : {}
+	const token = buyerTokenProvider();
+	return token ? { [BUYER_TOKEN_HEADER]: token } : {};
 }
 
 /**
@@ -82,20 +84,20 @@ export function buyerTokenHeader(): Record<string, string> {
  * can degrade gracefully (the status spine relies on this to flag Core as down).
  */
 export async function request<T>(
-  target: ApiTarget,
-  path: string,
-  options: RequestOptions = {}
+	target: ApiTarget,
+	path: string,
+	options: RequestOptions = {}
 ): Promise<T> {
-  const resp = await fetch(apiUrl(target, path), {
-    method: options.method ?? 'GET',
-    headers: { ...makeHeaders(target.token), ...options.headers },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    signal: options.signal,
-  })
-  if (!resp.ok) {
-    throw new Error(`${path} failed: ${resp.status}`)
-  }
-  // Some endpoints (DELETE, no-content) return an empty body.
-  const text = await resp.text()
-  return (text ? JSON.parse(text) : undefined) as T
+	const resp = await fetch(apiUrl(target, path), {
+		method: options.method ?? "GET",
+		headers: { ...makeHeaders(target.token), ...options.headers },
+		body: options.body === undefined ? undefined : JSON.stringify(options.body),
+		signal: options.signal,
+	});
+	if (!resp.ok) {
+		throw new Error(`${path} failed: ${resp.status}`);
+	}
+	// Some endpoints (DELETE, no-content) return an empty body.
+	const text = await resp.text();
+	return (text ? JSON.parse(text) : undefined) as T;
 }

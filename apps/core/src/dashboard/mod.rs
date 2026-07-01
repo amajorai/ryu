@@ -351,7 +351,12 @@ pub async fn replace_widgets(
         parsed.push(widget);
     }
     // Replace: drop existing widgets, then insert the new set.
-    for existing in engine.store.list_widgets(dashboard_id).await.unwrap_or_default() {
+    for existing in engine
+        .store
+        .list_widgets(dashboard_id)
+        .await
+        .unwrap_or_default()
+    {
         let _ = engine.store.delete_widget(&existing.id).await;
     }
     let count = parsed.len();

@@ -1,5 +1,6 @@
 // Smoke test: load the native addon and exercise the bound surface.
 import { createRequire } from "node:module";
+
 const require = createRequire(import.meta.url);
 const addon = require("./ryu_sdk_napi.node");
 
@@ -49,7 +50,9 @@ check("parseAndValidateManifest roundtrips", () => {
 		id: "com.example.x",
 		name: "X",
 		version: "1.0.0",
-		runnables: [{ id: "t", name: "T", kind: "tool", config: { slug: "web_search" } }],
+		runnables: [
+			{ id: "t", name: "T", kind: "tool", config: { slug: "web_search" } },
+		],
 	});
 	const out = JSON.parse(addon.parseAndValidateManifest(json));
 	if (out.id !== "com.example.x" || out.runnables.length !== 1) {
@@ -60,7 +63,9 @@ check("parseAndValidateManifest roundtrips", () => {
 check("parseAndValidateManifest rejects bad semver", () => {
 	let threw = false;
 	try {
-		addon.parseAndValidateManifest('{"id":"com.example.x","name":"X","version":"nope","runnables":[]}');
+		addon.parseAndValidateManifest(
+			'{"id":"com.example.x","name":"X","version":"nope","runnables":[]}'
+		);
 	} catch {
 		threw = true;
 	}

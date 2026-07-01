@@ -19,7 +19,9 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::ServerState;
-use crate::quests::{DetectionMode, Quest, QuestStatus, DETECTION_MODE_PREF, JUDGE_EFFORT_PREF, JUDGE_MODEL_PREF};
+use crate::quests::{
+    DetectionMode, Quest, QuestStatus, DETECTION_MODE_PREF, JUDGE_EFFORT_PREF, JUDGE_MODEL_PREF,
+};
 use crate::scheduler::store::{self as job_store, JobTarget, Schedule, ScheduledJob};
 
 /// Preference key for the detection interval (how often each quest is judged).
@@ -126,7 +128,10 @@ pub async fn create_quest(
     }
     let interval = resolve_interval(&state).await;
     if let Err(e) = sync_backing_job(&quest, &interval) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e })));
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        );
     }
     (StatusCode::OK, Json(json!({ "quest": quest })))
 }
@@ -211,7 +216,9 @@ pub async fn judge_quest(
         ),
         Ok(None) => (
             StatusCode::OK,
-            Json(json!({ "skipped": true, "reason": "not open, snoozed, detection off, or no context available" })),
+            Json(
+                json!({ "skipped": true, "reason": "not open, snoozed, detection off, or no context available" }),
+            ),
         ),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))),
     }
@@ -356,14 +363,19 @@ pub async fn set_detection_config(
         let _ = state.preferences.set(JUDGE_MODEL_PREF, model.trim()).await;
     }
     if let Some(effort) = body.effort.as_ref() {
-        let _ = state.preferences.set(JUDGE_EFFORT_PREF, effort.trim()).await;
+        let _ = state
+            .preferences
+            .set(JUDGE_EFFORT_PREF, effort.trim())
+            .await;
     }
     if let Some(interval) = body.interval.as_ref() {
         let t = interval.trim();
         if !t.is_empty() && humantime::parse_duration(t).is_err() {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("interval '{t}' is not a valid duration (e.g. 2m)") })),
+                Json(
+                    json!({ "error": format!("interval '{t}' is not a valid duration (e.g. 2m)") }),
+                ),
             );
         }
         let _ = state.preferences.set(DETECTION_INTERVAL_PREF, t).await;

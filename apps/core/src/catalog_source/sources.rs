@@ -1702,6 +1702,7 @@ impl RyuMarketplaceSource {
             CatalogKind::Skill => "skills",
             CatalogKind::Mcp => "servers",
             CatalogKind::Plugin => "items",
+            CatalogKind::Knowledge => "concepts",
         };
         let mut obj = serde_json::Map::new();
         obj.insert(key.to_string(), Value::Array(cards));
@@ -1748,6 +1749,15 @@ impl RyuMarketplaceSource {
                 "installed": false,
             }),
             CatalogKind::Plugin => serde_json::json!({
+                "id": card.id,
+                "name": card.name,
+                "description": card.description,
+                "author": card.author,
+                "version": card.version,
+                "install_source": card.install_source,
+                "installed": false,
+            }),
+            CatalogKind::Knowledge => serde_json::json!({
                 "id": card.id,
                 "name": card.name,
                 "description": card.description,
@@ -1842,6 +1852,23 @@ impl RyuMarketplaceSource {
                     repo_id: id.to_string(),
                     files: Vec::new(),
                     raw: detail.clone(),
+                })
+            }
+            CatalogKind::Knowledge => {
+                // Knowledge: the descriptor carries the OKF bundle git source
+                // (`{ source_url, ref?, bundle_id? }`); Core's privileged install
+                // path clones + ingests it via `ingest_okf_bundle`. Surface the
+                // server-stored descriptor when present, else the whole detail.
+                Ok(InstallDescriptor {
+                    kind: CatalogKind::Knowledge,
+                    source_id: self.id.clone(),
+                    repo_id: id.to_string(),
+                    files: Vec::new(),
+                    raw: if descriptor.is_null() {
+                        detail.clone()
+                    } else {
+                        descriptor
+                    },
                 })
             }
         }
@@ -1967,6 +1994,158 @@ impl CatalogSource for RyuMarketplaceSource {
     }
 }
 
+// ── OKF knowledge-bundle source (Knowledge kind) ─────────────────────────────
+
+/// A **knowledge-bundle** source backing the `Knowledge` catalog kind. It points
+/// at one Open Knowledge Format (OKF) bundle — a git-shippable directory of
+/// markdown *concepts* — hosted at a git URL (`https://…`) or, in tests, a local
+/// directory path. The opaque config shape (the shared contract) is
+/// `{ format: "okf", source_url, ref? }`: `source_url` is the bundle location and
+/// the optional `ref` is a git branch/tag/commit.
+///
+/// Seam discipline (Core vs Gateway): like every other source, this one only
+/// resolves **descriptors**. `search`/`detail` load the bundle via the
+/// [`crate::okf`] parser to list its concepts, and `install_descriptor` hands
+/// Core the `{ source_url, ref, bundle_id }` it needs to clone + ingest the
+/// bundle through the retrieval layer (`ingest_okf_bundle`) — the source itself
+/// never writes to the index.
+#[derive(Clone)]
+pub struct OkfBundleSource {
+    pub id: String,
+    pub display_name: String,
+    /// The OKF bundle location: a git URL (`https://…`) or a local directory.
+    pub source_url: String,
+    /// Optional git ref (branch/tag/commit). `None` ⇒ the default branch.
+    pub git_ref: Option<String>,
+}
+
+impl OkfBundleSource {
+    /// Load the configured bundle: a local directory via
+    /// [`crate::okf::Bundle::from_dir`] (sync, off-thread), else a git clone via
+    /// [`crate::okf::Bundle::from_git`]. Permissive parsing per the OKF contract —
+    /// malformed concept files become bundle warnings, not a hard failure.
+    pub async fn load_bundle(&self) -> Result<crate::okf::Bundle> {
+        let url = self.source_url.trim().to_string();
+        let path = std::path::Path::new(&url);
+        if path.is_dir() {
+            let p = path.to_path_buf();
+            tokio::task::spawn_blocking(move || crate::okf::Bundle::from_dir(p))
+                .await
+                .map_err(|e| anyhow::anyhow!("loading OKF bundle task panicked: {e}"))?
+        } else {
+            crate::okf::Bundle::from_git(&url, self.git_ref.as_deref()).await
+        }
+    }
+
+    /// Map one concept into a knowledge catalog card (the `id` is the concept's
+    /// bundle-relative `file_path`, so detail can resolve it back).
+    fn concept_to_card(&self, concept: &crate::okf::Concept) -> Value {
+        serde_json::json!({
+            "id": concept.file_path,
+            "type": concept.type_,
+            "title": concept.title.clone().unwrap_or_else(|| concept.file_path.clone()),
+            "description": concept.description,
+            "resource": concept.resource,
+            "tags": concept.tags,
+            "installed": false,
+        })
+    }
+
+    /// The descriptor Core needs to clone + ingest this bundle. `id` is ignored
+    /// (a knowledge source installs its whole bundle, not a single concept).
+    fn bundle_descriptor(&self) -> InstallDescriptor {
+        InstallDescriptor {
+            kind: CatalogKind::Knowledge,
+            source_id: self.id.clone(),
+            repo_id: self.source_url.clone(),
+            files: Vec::new(),
+            raw: serde_json::json!({
+                "format": "okf",
+                "source_url": self.source_url,
+                "ref": self.git_ref,
+                "bundle_id": self.id,
+            }),
+        }
+    }
+}
+
+impl CatalogSource for OkfBundleSource {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn display_name(&self) -> &str {
+        &self.display_name
+    }
+    fn kind(&self) -> CatalogKind {
+        CatalogKind::Knowledge
+    }
+
+    async fn search(&self, _client: &reqwest::Client, q: &CatalogQuery) -> Result<Value> {
+        // Loading the bundle can fail (unreachable git, etc.); degrade to an
+        // empty, labelled envelope rather than erroring the whole list.
+        let bundle = match self.load_bundle().await {
+            Ok(b) => b,
+            Err(e) => {
+                return Ok(serde_json::json!({
+                    "concepts": [],
+                    "next_cursor": serde_json::Value::Null,
+                    "note": e.to_string(),
+                }));
+            }
+        };
+        let needle = q.query.trim().to_ascii_lowercase();
+        let limit = if q.limit == 0 { usize::MAX } else { q.limit };
+        let concepts: Vec<Value> = bundle
+            .concepts
+            .iter()
+            .filter(|c| {
+                needle.is_empty()
+                    || c.file_path.to_ascii_lowercase().contains(&needle)
+                    || c.type_.to_ascii_lowercase().contains(&needle)
+                    || c.title
+                        .as_deref()
+                        .is_some_and(|t| t.to_ascii_lowercase().contains(&needle))
+                    || c.description
+                        .as_deref()
+                        .is_some_and(|d| d.to_ascii_lowercase().contains(&needle))
+                    || c.tags
+                        .iter()
+                        .any(|t| t.to_ascii_lowercase().contains(&needle))
+            })
+            .take(limit)
+            .map(|c| self.concept_to_card(c))
+            .collect();
+        Ok(serde_json::json!({
+            "concepts": concepts,
+            "next_cursor": serde_json::Value::Null,
+        }))
+    }
+
+    async fn detail(&self, _client: &reqwest::Client, id: &str) -> Result<Value> {
+        let bundle = self.load_bundle().await?;
+        let concept = bundle
+            .concepts
+            .iter()
+            .find(|c| c.file_path == id)
+            .ok_or_else(|| {
+                anyhow::anyhow!("concept `{id}` not found in OKF bundle {}", self.source_url)
+            })?;
+        // Serialize the concept verbatim (type/title/description/tags/body/links)
+        // so a client can render it without a second fetch.
+        Ok(serde_json::to_value(concept)?)
+    }
+
+    async fn install_descriptor(
+        &self,
+        _client: &reqwest::Client,
+        _id: &str,
+    ) -> Result<InstallDescriptor> {
+        // Descriptor only — Core clones + ingests the bundle in the privileged
+        // install path. The descriptor carries the git source the route needs.
+        Ok(self.bundle_descriptor())
+    }
+}
+
 /// Closed enum of concrete sources, dispatched by match. This is the
 /// object-safe substitute for `dyn CatalogSource` (no `async-trait` dep).
 #[derive(Clone)]
@@ -1979,6 +2158,7 @@ pub enum Source {
     Smithery(SmitherySource),
     RyuHostedMcp(RyuHostedMcpSource),
     RyuMarketplace(RyuMarketplaceSource),
+    OkfBundle(OkfBundleSource),
     Stub(StubSource),
 }
 
@@ -1993,6 +2173,7 @@ impl Source {
             Source::Smithery(s) => s.id(),
             Source::RyuHostedMcp(s) => s.id(),
             Source::RyuMarketplace(s) => s.id(),
+            Source::OkfBundle(s) => s.id(),
             Source::Stub(s) => s.id(),
         }
     }
@@ -2006,6 +2187,7 @@ impl Source {
             Source::Smithery(s) => s.display_name(),
             Source::RyuHostedMcp(s) => s.display_name(),
             Source::RyuMarketplace(s) => s.display_name(),
+            Source::OkfBundle(s) => s.display_name(),
             Source::Stub(s) => s.display_name(),
         }
     }
@@ -2019,6 +2201,7 @@ impl Source {
             Source::Smithery(s) => s.kind(),
             Source::RyuHostedMcp(s) => s.kind(),
             Source::RyuMarketplace(s) => s.kind(),
+            Source::OkfBundle(s) => s.kind(),
             Source::Stub(s) => s.kind(),
         }
     }
@@ -2037,6 +2220,8 @@ impl Source {
             Source::RyuHostedMcp(s) => s.index_url.as_deref(),
             // Ryu Marketplace surfaces its (optional) API base override.
             Source::RyuMarketplace(s) => s.base_url.as_deref(),
+            // A knowledge bundle surfaces its OKF source URL (git/local).
+            Source::OkfBundle(s) => Some(&s.source_url),
             Source::Smithery(_) | Source::SkillsSh(_) | Source::Stub(_) => None,
         }
     }
@@ -2051,6 +2236,7 @@ impl Source {
             Source::Smithery(s) => s.search(client, q).await,
             Source::RyuHostedMcp(s) => s.search(client, q).await,
             Source::RyuMarketplace(s) => s.search(client, q).await,
+            Source::OkfBundle(s) => s.search(client, q).await,
             Source::Stub(s) => s.search(client, q).await,
         }
     }
@@ -2064,6 +2250,7 @@ impl Source {
             Source::Smithery(s) => s.detail(client, id).await,
             Source::RyuHostedMcp(s) => s.detail(client, id).await,
             Source::RyuMarketplace(s) => s.detail(client, id).await,
+            Source::OkfBundle(s) => s.detail(client, id).await,
             Source::Stub(s) => s.detail(client, id).await,
         }
     }
@@ -2081,6 +2268,7 @@ impl Source {
             Source::Smithery(s) => s.install_descriptor(client, id).await,
             Source::RyuHostedMcp(s) => s.install_descriptor(client, id).await,
             Source::RyuMarketplace(s) => s.install_descriptor(client, id).await,
+            Source::OkfBundle(s) => s.install_descriptor(client, id).await,
             Source::Stub(s) => s.install_descriptor(client, id).await,
         }
     }
@@ -2621,6 +2809,114 @@ mod tests {
             .verify_manifest_signature(&client, "owner/skill", &detail)
             .await;
         assert!(r.is_ok(), "unsigned item should install unverified");
+    }
+
+    // ── OKF knowledge-bundle source (Knowledge kind) ──────────────────────────
+
+    /// Write a tiny OKF bundle (two concepts + a non-conforming file) into a temp
+    /// dir for the local-path source tests.
+    fn write_sample_bundle() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            dir.path().join("orders.md"),
+            "---\ntype: BigQuery Table\ntitle: Orders\ndescription: The orders fact table\ntags: [sales, warehouse]\n---\n# Schema\nSee [revenue](/metrics/revenue.md).\n",
+        )
+        .unwrap();
+        let metrics = dir.path().join("metrics");
+        std::fs::create_dir_all(&metrics).unwrap();
+        std::fs::write(
+            metrics.join("revenue.md"),
+            "---\ntype: Metric\ntitle: Revenue\n---\nTotal revenue.\n",
+        )
+        .unwrap();
+        // A file with no frontmatter is skipped (permissive), never a hard fail.
+        std::fs::write(dir.path().join("README.md"), "just prose, no frontmatter\n").unwrap();
+        dir
+    }
+
+    fn okf_source(path: &std::path::Path) -> OkfBundleSource {
+        OkfBundleSource {
+            id: "team-kb".to_string(),
+            display_name: "Team Knowledge".to_string(),
+            source_url: path.to_string_lossy().to_string(),
+            git_ref: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn okf_source_search_lists_concepts_and_filters() {
+        let dir = write_sample_bundle();
+        let src = okf_source(dir.path());
+        let client = reqwest::Client::new();
+
+        // Unfiltered: both conforming concepts, README skipped (no frontmatter).
+        let all = src
+            .search(&client, &CatalogQuery::default())
+            .await
+            .expect("search");
+        let concepts = all["concepts"].as_array().expect("concepts array");
+        assert_eq!(concepts.len(), 2);
+
+        // Filter by a tag substring → only the orders table.
+        let q = CatalogQuery {
+            query: "warehouse".to_string(),
+            ..Default::default()
+        };
+        let filtered = src.search(&client, &q).await.expect("search");
+        let arr = filtered["concepts"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["id"], "orders.md");
+        assert_eq!(arr[0]["type"], "BigQuery Table");
+    }
+
+    #[tokio::test]
+    async fn okf_source_detail_resolves_concept_and_descriptor_is_bundle() {
+        let dir = write_sample_bundle();
+        let src = okf_source(dir.path());
+        let client = reqwest::Client::new();
+
+        // Detail resolves the concept by its bundle-relative file_path.
+        let detail = src
+            .detail(&client, "metrics/revenue.md")
+            .await
+            .expect("detail");
+        assert_eq!(detail["type"], "Metric");
+        assert_eq!(detail["title"], "Revenue");
+
+        // A missing concept is a clear error, never a panic.
+        assert!(src.detail(&client, "nope.md").await.is_err());
+
+        // install_descriptor returns the WHOLE-bundle handoff (no files), with the
+        // OKF git source Core needs to clone + ingest. `id` is ignored.
+        let d = src
+            .install_descriptor(&client, "ignored")
+            .await
+            .expect("descriptor");
+        assert_eq!(d.kind, CatalogKind::Knowledge);
+        assert_eq!(d.source_id, "team-kb");
+        assert!(d.files.is_empty());
+        assert_eq!(d.raw["format"], "okf");
+        assert_eq!(d.raw["source_url"], src.source_url);
+        assert_eq!(d.raw["bundle_id"], "team-kb");
+    }
+
+    #[tokio::test]
+    async fn okf_source_search_unreachable_degrades_to_empty_note() {
+        // A non-existent local path is treated as a git URL; the clone fails and
+        // search degrades to an empty, labelled envelope (never panics/errors).
+        let src = OkfBundleSource {
+            id: "broken".to_string(),
+            display_name: "Broken".to_string(),
+            source_url: "/this/path/does/not/exist-okf".to_string(),
+            git_ref: None,
+        };
+        let client = reqwest::Client::new();
+        let value = src
+            .search(&client, &CatalogQuery::default())
+            .await
+            .expect("search degrades");
+        assert_eq!(value["concepts"].as_array().map(Vec::len), Some(0));
+        assert!(value["note"].as_str().is_some());
     }
 
     #[test]

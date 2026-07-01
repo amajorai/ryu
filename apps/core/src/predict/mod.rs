@@ -108,9 +108,7 @@ const SECURE_CONTROL_MARKERS: &[&str] = &[
 /// Pure + case-insensitive so it is unit-testable without UIA.
 pub fn is_secure_control(control: &str) -> bool {
     let lower = control.to_lowercase();
-    SECURE_CONTROL_MARKERS
-        .iter()
-        .any(|m| lower.contains(m))
+    SECURE_CONTROL_MARKERS.iter().any(|m| lower.contains(m))
 }
 
 /// True when `app` is permitted by `allowlist`. An **empty** allowlist permits

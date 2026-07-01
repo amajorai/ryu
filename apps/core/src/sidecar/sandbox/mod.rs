@@ -33,6 +33,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 
 use crate::sidecar::BoxFuture;
 
@@ -227,16 +228,106 @@ pub fn default_backend() -> SandboxBackend {
 /// over this node default.
 pub const ENV_SANDBOX_BACKEND: &str = "RYU_SANDBOX_BACKEND";
 
-/// The node's configured default backend: `RYU_SANDBOX_BACKEND` when set to a
-/// recognised name, otherwise [`default_backend`] (wasmtime). Never errors — a
-/// bad/empty value silently falls back to the wasm default, since this is a
-/// "swappable default, never a lock" knob (CLAUDE.md §1).
+/// The node's configured default backend. Resolution order:
+/// 1. the persisted picker selection ([`SandboxBackendStore`], written by
+///    `POST /api/sandbox/backend`);
+/// 2. the `RYU_SANDBOX_BACKEND` env override;
+/// 3. [`default_backend`] (wasmtime).
+///
+/// Never errors — a bad/empty value at any layer falls through to the next, since
+/// this is a "swappable default, never a lock" knob (CLAUDE.md §1).
 pub fn configured_backend() -> SandboxBackend {
+    if let Some(name) = SandboxBackendStore::load()
+        .default
+        .filter(|s| !s.trim().is_empty())
+    {
+        if let Ok(backend) = SandboxBackend::from_name(name.trim()) {
+            return backend;
+        }
+    }
     std::env::var(ENV_SANDBOX_BACKEND)
         .ok()
         .filter(|s| !s.trim().is_empty())
         .and_then(|s| SandboxBackend::from_name(s.trim()).ok())
         .unwrap_or_else(default_backend)
+}
+
+/// The sandbox backends Ryu knows how to select, in display order. `wasmtime` is
+/// the built-in default; the rest are detect-only external CLIs.
+pub const KNOWN_BACKENDS: &[&str] = &["wasmtime", "docker", "microsandbox", "opensandbox"];
+
+/// Human-facing label for a known backend (`name` for anything unknown).
+pub fn backend_display_name(name: &str) -> &str {
+    match name {
+        "wasmtime" => "Wasmtime (WASM · built-in)",
+        "docker" => "Docker",
+        "microsandbox" => "microsandbox",
+        "opensandbox" => "OpenSandbox",
+        other => other,
+    }
+}
+
+/// Whether `name` is actually runnable on this node *right now*. For wasmtime
+/// this is a compile-time fact (the `sandbox-wasmtime` feature); for the
+/// external CLIs it is a live probe of their binary (`docker version`, etc.).
+///
+/// Detection-only: never installs anything. Each external probe carries its
+/// own short timeout, so this is safe to call from a request handler.
+pub async fn detect_backend(name: &str) -> bool {
+    match name {
+        "wasmtime" => cfg!(feature = "sandbox-wasmtime"),
+        "docker" => matches!(docker::detect().await, docker::DetectResult::Available),
+        "microsandbox" => matches!(
+            microsandbox::detect().await,
+            microsandbox::DetectResult::Available
+        ),
+        "opensandbox" => matches!(
+            opensandbox::detect().await,
+            opensandbox::DetectResult::Available
+        ),
+        _ => false,
+    }
+}
+
+/// Path of the persisted default-backend selection.
+fn sandbox_backend_path() -> PathBuf {
+    crate::paths::ryu_dir().join("sandbox-backend.json")
+}
+
+/// Durable record of the picker-selected default sandbox backend, persisted to
+/// `~/.ryu/sandbox-backend.json`. Mirrors `ActiveEngineStore`'s load/save shape.
+/// Distinct from the engine swap: this is a *default*, not an exclusive resident
+/// slot — a per-call `backend` argument always overrides it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SandboxBackendStore {
+    /// Name of the selected default backend, or `None` to use the built-in
+    /// wasmtime default.
+    #[serde(default)]
+    pub default: Option<String>,
+}
+
+impl SandboxBackendStore {
+    /// Load the persisted selection, returning the default (none) when the file
+    /// is missing or unreadable.
+    pub fn load() -> Self {
+        std::fs::read_to_string(sandbox_backend_path())
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    /// Persist `default` as the selected backend (None clears the selection).
+    pub fn save(default: Option<&str>) -> Result<()> {
+        let path = sandbox_backend_path();
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let store = Self {
+            default: default.map(str::to_owned),
+        };
+        std::fs::write(&path, serde_json::to_string_pretty(&store)?)?;
+        Ok(())
+    }
 }
 
 /// Build a process/command sandbox backend (one that runs a `command` + `args`,
@@ -262,9 +353,7 @@ pub fn build_command_backend(backend: &SandboxBackend) -> Result<Box<dyn Sandbox
         SandboxBackend::Wasmtime => Err(anyhow!(
             "wasmtime is not a command backend — pass a WASM module via `wasm_b64`"
         )),
-        SandboxBackend::Subprocess => Err(anyhow!(
-            "the subprocess backend is not implemented yet"
-        )),
+        SandboxBackend::Subprocess => Err(anyhow!("the subprocess backend is not implemented yet")),
         SandboxBackend::Custom(other) => Err(anyhow!("unknown sandbox backend '{other}'")),
     }
 }
@@ -414,9 +503,7 @@ mod tests {
     fn build_command_backend_rejects_wasmtime_and_unknown() {
         assert!(build_command_backend(&SandboxBackend::Wasmtime).is_err());
         assert!(build_command_backend(&SandboxBackend::Subprocess).is_err());
-        assert!(
-            build_command_backend(&SandboxBackend::from_name("nope").unwrap()).is_err()
-        );
+        assert!(build_command_backend(&SandboxBackend::from_name("nope").unwrap()).is_err());
     }
 
     // ── configured_backend ────────────────────────────────────────────────────
@@ -425,5 +512,38 @@ mod tests {
     fn configured_backend_defaults_to_wasmtime() {
         std::env::remove_var(ENV_SANDBOX_BACKEND);
         assert_eq!(configured_backend(), SandboxBackend::Wasmtime);
+    }
+
+    // ── SandboxBackendStore ───────────────────────────────────────────────────
+
+    #[test]
+    fn sandbox_backend_store_serde_round_trips() {
+        // The persisted shape `configured_backend` reads back. Tested at the serde
+        // layer (not the filesystem) because `ryu_dir()` is process-cached, so a
+        // path-redirected file test would be unreliable in the shared test bin.
+        let store = SandboxBackendStore {
+            default: Some("docker".to_owned()),
+        };
+        let json = serde_json::to_string(&store).unwrap();
+        let back: SandboxBackendStore = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.default.as_deref(), Some("docker"));
+        // A missing/empty document → no selection (so the resolver falls through
+        // to the env/default layers).
+        let empty: SandboxBackendStore = serde_json::from_str("{}").unwrap();
+        assert!(empty.default.is_none());
+    }
+
+    #[test]
+    fn known_backends_have_display_names_and_build() {
+        for name in KNOWN_BACKENDS {
+            assert_ne!(backend_display_name(name), "");
+            // Every known backend except wasmtime is a buildable command backend.
+            if *name != "wasmtime" {
+                assert!(
+                    build_command_backend(&SandboxBackend::from_name(name).unwrap()).is_ok(),
+                    "{name} must build as a command backend"
+                );
+            }
+        }
     }
 }

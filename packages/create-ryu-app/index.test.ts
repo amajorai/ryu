@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { PluginManifestSchema } from "@ryuhq/sdk/manifest";
-import { scaffold } from "./index";
+import { scaffold } from "./index.ts";
 
 const EXPECTED_FILES = ["plugin.json", "src/agent.ts", "package.json"];
 

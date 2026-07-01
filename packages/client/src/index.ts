@@ -3,10 +3,10 @@
 // Public surface of @ryuhq/client. Import createRyuClient and any types you need
 // from this single entry point.
 
-export { AgentsAPI } from "./agents";
-export { createRyuClient, RyuClient } from "./client";
-export { SessionsAPI } from "./sessions";
-export { SpacesAPI } from "./spaces";
+export { AgentsAPI } from "./agents.ts";
+export { createRyuClient, RyuClient } from "./client.ts";
+export { SessionsAPI } from "./sessions.ts";
+export { SpacesAPI } from "./spaces.ts";
 
 export type {
 	Agent,
@@ -17,4 +17,4 @@ export type {
 	Space,
 	SpaceMatch,
 	StreamChunk,
-} from "./types";
+} from "./types.ts";

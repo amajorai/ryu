@@ -467,7 +467,10 @@ mod tests {
         let nodes = parse_nodes(&value).expect("valid nodes");
         assert_eq!(nodes.len(), 3);
         assert_eq!(nodes[0].id, "in");
-        assert!(matches!(nodes[1].kind, crate::workflow::NodeKind::Prompt { .. }));
+        assert!(matches!(
+            nodes[1].kind,
+            crate::workflow::NodeKind::Prompt { .. }
+        ));
     }
 
     #[test]

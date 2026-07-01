@@ -413,7 +413,10 @@ mod tests {
         let summary = apply_openai(&mut msgs, 0, &cfg(200, 0)).await;
         assert!(summary.is_none()); // auto_compact off
         assert_eq!(msgs.first().map(|m| m.role.as_str()), Some("system"));
-        assert_eq!(msgs.last().map(|m| ui_message_text(m)), Some("latest".to_owned()));
+        assert_eq!(
+            msgs.last().map(|m| ui_message_text(m)),
+            Some("latest".to_owned())
+        );
         // system + at least the last user turn; oldest big turns dropped.
         assert!(msgs.len() < 4);
     }
@@ -425,7 +428,10 @@ mod tests {
         let summary = apply_openai(&mut msgs, 0, &cfg(100_000, 1024)).await;
         assert!(summary.is_none());
         assert_eq!(msgs.len(), before);
-        assert_eq!(msgs.last().map(|m| ui_message_text(m)), Some("there".to_owned()));
+        assert_eq!(
+            msgs.last().map(|m| ui_message_text(m)),
+            Some("there".to_owned())
+        );
     }
 
     #[test]

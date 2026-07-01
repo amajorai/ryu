@@ -20,8 +20,8 @@
  */
 
 import { createInterface } from "node:readline";
-import type { McpStdioCommand, McpTool } from "./client";
-import { callTool, listTools, MCP_PROTOCOL_VERSION } from "./client";
+import type { McpStdioCommand, McpTool } from "./client.ts";
+import { callTool, listTools, MCP_PROTOCOL_VERSION } from "./client.ts";
 
 // ── Minimal Runnable contract ─────────────────────────────────────────────────
 

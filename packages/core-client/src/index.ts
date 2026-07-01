@@ -8,12 +8,12 @@
 // target/request types without reaching for a subpath. Domain modules are NOT
 // re-exported here on purpose (avoid a kitchen-sink barrel — see CLAUDE.md).
 export {
-  type ApiTarget,
-  type RequestOptions,
-  apiUrl,
-  BUYER_TOKEN_HEADER,
-  buyerTokenHeader,
-  makeHeaders,
-  request,
-  setBuyerTokenProvider,
-} from "./client.ts"
+	type ApiTarget,
+	apiUrl,
+	BUYER_TOKEN_HEADER,
+	buyerTokenHeader,
+	makeHeaders,
+	type RequestOptions,
+	request,
+	setBuyerTokenProvider,
+} from "./client.ts";

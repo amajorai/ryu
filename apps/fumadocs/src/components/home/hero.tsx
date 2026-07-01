@@ -4,6 +4,7 @@ import { useSearchContext } from "fumadocs-ui/contexts/search";
 import {
   ArrowRight,
   BookOpen,
+  CircuitBoard,
   Code2,
   Cpu,
   GraduationCap,
@@ -60,6 +61,14 @@ const REALMS: Realm[] = [
       "The Expo app: chat and a drawer of screens over the same Core, through the active node.",
     icon: Smartphone,
     accent: "var(--mobile-color)",
+  },
+  {
+    slug: "hardware",
+    title: "Hardware",
+    description:
+      "ESP32-S3 devices (watch, necklace, desk hub) that capture audio and camera and run all inference on a node: protocol, pairing, ambient capture, firmware, and deployment.",
+    icon: CircuitBoard,
+    accent: "var(--hardware-color)",
   },
   {
     slug: "cookbook",

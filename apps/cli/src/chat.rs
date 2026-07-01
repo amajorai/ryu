@@ -81,7 +81,7 @@ pub struct ChatOptions {
 struct ChatRequest {
     messages: Vec<ApiMessage>,
     /// Agent to route to. Present only when chatting through Core
-    /// (`/api/chat/stream`); omitted for the `/ai` playground backend.
+    /// (`/api/chat/stream`).
     #[serde(rename = "agent_id", skip_serializing_if = "Option::is_none")]
     agent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

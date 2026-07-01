@@ -17,8 +17,8 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::sources::{
-    HfSource, MarketplaceSource, ModelIndexSource, OfficialMcpSource, RyuHostedMcpSource,
-    RyuMarketplaceSource, SkillsShSource, SmitherySource, Source, StubSource,
+    HfSource, MarketplaceSource, ModelIndexSource, OfficialMcpSource, OkfBundleSource,
+    RyuHostedMcpSource, RyuMarketplaceSource, SkillsShSource, SmitherySource, Source, StubSource,
 };
 use super::CatalogKind;
 use crate::server::preferences::PreferencesStore;
@@ -119,6 +119,28 @@ fn source_from_spec(spec: CustomSourceSpec) -> Source {
                     id: spec.id,
                     display_name: spec.display_name,
                     kind: CatalogKind::Mcp,
+                }),
+            }
+        }
+        CatalogKind::Knowledge => {
+            // A custom Knowledge source's base_url is the OKF bundle location: a
+            // git URL (`https://…`) the install path clones, or (in tests) a local
+            // directory. With no base_url there is nothing to point at, so it
+            // degrades to a labelled stub. The optional git `ref` is not carried in
+            // the persisted spec (it has no `base_url`-sibling field), so a custom
+            // source tracks the default branch; pin a ref by encoding it into a
+            // dedicated source later if needed.
+            match spec.base_url.filter(|u| !u.trim().is_empty()) {
+                Some(source_url) => Source::OkfBundle(OkfBundleSource {
+                    id: spec.id,
+                    display_name: spec.display_name,
+                    source_url,
+                    git_ref: None,
+                }),
+                None => Source::Stub(StubSource {
+                    id: spec.id,
+                    display_name: spec.display_name,
+                    kind: CatalogKind::Knowledge,
                 }),
             }
         }
@@ -407,6 +429,16 @@ fn builtin_sources() -> HashMap<CatalogKind, Vec<Source>> {
             }),
         ],
     );
+    // Knowledge (OKF bundles). Primary (default active): the Ryu Marketplace
+    // federated source so every install ships a real catalog without a hardcoded
+    // bundle URL ("nothing hardcoded"). Custom git/HTTP OKF bundles are added as
+    // `OkfBundleSource`s (see `source_from_spec`).
+    map.insert(
+        CatalogKind::Knowledge,
+        vec![Source::RyuMarketplace(RyuMarketplaceSource::builtin(
+            CatalogKind::Knowledge,
+        ))],
+    );
     map
 }
 
@@ -583,6 +615,46 @@ mod tests {
         let ep = mirror.endpoint();
         assert_eq!(ep.api_base, "https://hf.mirror.example/api");
         assert_eq!(ep.host, "https://hf.mirror.example");
+    }
+
+    #[tokio::test]
+    async fn knowledge_custom_source_is_okf_bundle_or_stub() {
+        let reg = CatalogSourceRegistry::with_file(temp_path("knowledge-custom"));
+        // Every kind, including Knowledge, has a built-in primary.
+        assert!(!reg.sources_for(CatalogKind::Knowledge).is_empty());
+
+        // A custom Knowledge source WITH a base_url becomes an OkfBundleSource
+        // pointing at that OKF bundle git/HTTP location.
+        reg.add_custom(CustomSourceSpec {
+            kind: CatalogKind::Knowledge,
+            id: "team-kb".to_string(),
+            display_name: "Team KB".to_string(),
+            base_url: Some("https://github.com/acme/kb".to_string()),
+        })
+        .unwrap();
+        let bundle = reg
+            .find(CatalogKind::Knowledge, "team-kb")
+            .expect("custom knowledge source");
+        match bundle {
+            Source::OkfBundle(s) => {
+                assert_eq!(s.source_url, "https://github.com/acme/kb");
+                assert!(s.git_ref.is_none());
+            }
+            _ => panic!("expected an OkfBundle knowledge source"),
+        }
+
+        // A custom Knowledge source WITHOUT a base_url degrades to a labelled stub.
+        reg.add_custom(CustomSourceSpec {
+            kind: CatalogKind::Knowledge,
+            id: "empty-kb".to_string(),
+            display_name: "Empty KB".to_string(),
+            base_url: None,
+        })
+        .unwrap();
+        assert!(matches!(
+            reg.find(CatalogKind::Knowledge, "empty-kb"),
+            Some(Source::Stub(_))
+        ));
     }
 
     #[tokio::test]

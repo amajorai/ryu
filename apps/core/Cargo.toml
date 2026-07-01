@@ -28,6 +28,7 @@ futures-util = "0.3"
 async-stream = "0.3"
 sha2 = "0.10"
 regex = "1"
+tempfile = "3"
 hex = "0.4"
 semver = { version = "1", features = ["serde"] }
 indicatif = "0.17"
@@ -47,7 +48,19 @@ humantime = "2"
 zstd = "0.13"
 urlencoding = "2"
 base64 = { version = "0.22", features = ["alloc"] }
+# Phase 0 multi-user identity (#multiplayer): verify Better Auth JWTs OFFLINE
+# against the JWKS endpoint. EdDSA/Ed25519 is Better Auth's default signing alg
+# and jsonwebtoken 9 supports it out of the box (its `jwk` module decodes OKP
+# keys via `DecodingKey::from_jwk`). The node-admittance gate stays RYU_TOKEN;
+# this layer is the USER identity (see src/identity_verify/).
+jsonwebtoken = "9"
 rand = "0.8"
+# Phase 3 multi-user collaboration (#multiplayer): authoritative CRDT document
+# engine. `yrs` is the Rust port of Yjs with an IDENTICAL binary v1 update /
+# state-vector format, so a custom JS Yjs provider's updates apply natively — we
+# define a tiny self-framed DocSync protocol over the existing realtime DocSync
+# channel rather than pulling y-sync/yrs-axum (version traps). See src/collab/.
+yrs = "0.27"
 chacha20poly1305 = "0.10"
 # Ryu Hardware Protocol (RHP v1) audio bridging: the device link speaks Opus
 # while the rest of Core speaks WAV/PCM (whisper STT, OuteTTS). The `opus` crate
@@ -85,6 +98,9 @@ serde_yml = "0.0.12"
 # schema and the `~/.ghost/recipes/` store path. ghost-core is cross-platform
 # (no native input-tap deps — those live in ghost-eyes/ghost-hands).
 ghost-core = { path = "../../crates/ghost-core" }
+# Shared automation-permission gates. Core detects & reports (never prompts — it
+# is a background service); the desktop app / `ghost setup` do the prompting.
+ghost-permissions = { path = "../../crates/ghost-permissions" }
 # OpenAPI spec generated from the Axum handlers. `--dump-openapi` writes the spec
 # the docs site (apps/fumadocs) renders; see src/openapi.rs.
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
@@ -171,6 +187,12 @@ sandbox-wasmtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
 # Parakeet STT inference. Requires the commented transcribe-rs/once_cell/tempfile
 # optional deps above to be uncommented first:
 #   voice-parakeet = ["dep:transcribe-rs", "dep:once_cell", "dep:tempfile"]
+# TEN VAD ONNX inference for voice mode. The endpointing/barge-in state machine +
+# an energy-based probability backend are always compiled (voice mode works
+# without this); enabling `voice-vad` swaps in the noise-robust TEN VAD ONNX model.
+# Wiring the ONNX runner needs the model file in hand (preprocessing + tensor I/O),
+# at which point add its `dep:ort`/downloader deps here — see `voice::vad::tenvad`.
+voice-vad = []
 
 [dev-dependencies]
 tempfile = "3"

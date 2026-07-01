@@ -71,12 +71,13 @@
       "config": {
         "policy_type": "pii_dlp",
         "definition": {
-          "block_patterns": ["\\b\\d{16}\\b", "\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b"]
+          "block_patterns": [
+            "\\b\\d{16}\\b",
+            "\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b"
+          ]
         }
       }
     }
   ],
-  "permission_grants": [
-    "mcp:web_search"
-  ]
+  "permission_grants": ["mcp:web_search"]
 }

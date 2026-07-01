@@ -8,7 +8,7 @@
  * All model calls must go through `ctx.gateway` — no direct provider imports.
  */
 
-import type { Runnable, RunnableContext } from "./runnable-types";
+import type { Runnable, RunnableContext } from "./runnable-types.ts";
 
 /**
  * A single step inside a workflow definition.

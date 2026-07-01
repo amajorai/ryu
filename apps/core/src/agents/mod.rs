@@ -196,6 +196,37 @@ pub struct AgentRecord {
     /// `built_in` rows, which are protected at the delete layer too).
     #[serde(default)]
     pub locked: bool,
+
+    // ── Orchestration capabilities ─────────────────────────────────────────
+    /// Whether this agent may discover peers (`orchestrator__discover_agents`)
+    /// and delegate work to them (`delegate__*`). `None` is the default and is
+    /// treated as **on**: delegation has always been default-available, so
+    /// legacy rows keep it. `Some(false)` withholds delegation/discovery from
+    /// this agent's offered tool set. See [`AgentRecord::orchestrator_enabled`].
+    #[serde(default)]
+    pub orchestrator: Option<bool>,
+    /// Whether this agent may mint or reconfigure custom agents via the
+    /// `agent_builder__create_agent` tool. Defaults to **off** (`None` /
+    /// `Some(false)`): agent creation is a privileged capability (a created
+    /// child can be granted tools, so it is a privilege-escalation surface) and
+    /// must be enabled explicitly per agent. See
+    /// [`AgentRecord::can_create_agents_enabled`].
+    #[serde(default)]
+    pub can_create_agents: Option<bool>,
+}
+
+impl AgentRecord {
+    /// Whether delegation/discovery tools are offered to this agent. Absent
+    /// (`None`) means **on** — the historical default-available behaviour.
+    pub fn orchestrator_enabled(&self) -> bool {
+        self.orchestrator.unwrap_or(true)
+    }
+
+    /// Whether the agent-creation tool is offered to this agent. Absent (`None`)
+    /// means **off** — creation is opt-in per agent.
+    pub fn can_create_agents_enabled(&self) -> bool {
+        self.can_create_agents.unwrap_or(false)
+    }
 }
 
 /// Fields a client may supply when creating an agent. `id` is server-assigned.
@@ -245,6 +276,13 @@ pub struct CreateAgent {
     /// Initial version for the agent template; defaults to "1.0.0".
     #[serde(default = "default_version")]
     pub version: String,
+    // ── Orchestration capabilities ─────────────────────────────────────────
+    /// Delegation/discovery capability. `None` = default-on. See [`AgentRecord::orchestrator`].
+    #[serde(default)]
+    pub orchestrator: Option<bool>,
+    /// Agent-creation capability. `None` = default-off. See [`AgentRecord::can_create_agents`].
+    #[serde(default)]
+    pub can_create_agents: Option<bool>,
 }
 
 impl Default for CreateAgent {
@@ -268,6 +306,8 @@ impl Default for CreateAgent {
             policy_ref: None,
             inference: None,
             version: default_version(),
+            orchestrator: None,
+            can_create_agents: None,
         }
     }
 }
@@ -325,6 +365,13 @@ pub struct UpdateAgent {
     /// unlock. `None` leaves the current state unchanged.
     #[serde(default)]
     pub locked: Option<bool>,
+    // ── Orchestration capability patches ───────────────────────────────────
+    /// Toggle delegation/discovery. `Some(_)` sets the flag; `None` is unchanged.
+    #[serde(default)]
+    pub orchestrator: Option<bool>,
+    /// Toggle agent-creation. `Some(_)` sets the flag; `None` is unchanged.
+    #[serde(default)]
+    pub can_create_agents: Option<bool>,
 }
 
 fn default_version() -> String {
@@ -525,6 +572,30 @@ impl AgentStore {
             }
         }
 
+        // Step 9: orchestration capability flags. Both are *nullable* (no DEFAULT)
+        // so NULL encodes "use the code default": `orchestrator` defaults on,
+        // `can_create_agents` defaults off (see the `*_enabled` helpers). Only the
+        // flagship `ryu` is seeded with both ON, and only at the moment the column
+        // is first created — so a user who later disables a flag is not overridden
+        // on the next boot (mirrors the `installed` seed in step 5).
+        for col_def in ["orchestrator INTEGER", "can_create_agents INTEGER"] {
+            match conn.execute_batch(&format!("ALTER TABLE agents ADD COLUMN {col_def}")) {
+                Ok(()) => {
+                    let col = col_def.split_whitespace().next().unwrap_or_default();
+                    conn.execute_batch(&format!("UPDATE agents SET {col} = 1 WHERE id = 'ryu'"))
+                        .with_context(|| format!("seeding ryu {col} after adding column"))?;
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    if msg.contains("duplicate column") {
+                        // Already added in a previous run — idempotent.
+                    } else {
+                        return Err(e).context(format!("adding column: {col_def}"));
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -555,11 +626,19 @@ impl AgentStore {
             // Only the flagship `ryu` agent is installed by default; every other
             // built-in is opt-in via the agents catalog (onboarding step).
             let installed_flag: i32 = i32::from(entry.id == "ryu");
+            // The flagship `ryu` is seeded as a full orchestrator that may also
+            // create agents (it runs the builder pane). Every other built-in
+            // leaves both flags NULL = the code defaults (delegation on, creation
+            // off). Seeded here — not only in the migration — because on a fresh
+            // DB the migration's `UPDATE … WHERE id='ryu'` runs before this row
+            // exists; the migration UPDATE covers the existing-DB upgrade path.
+            let ryu_caps: Option<i64> = (entry.id == "ryu").then_some(1);
             conn.execute(
                 "INSERT OR IGNORE INTO agents
                     (id, name, description, system_prompt, tools, model, engine, built_in,
-                     chat_model, installed, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, NULL, '[]', NULL, ?4, 1, ?5, ?6, ?7, ?7)",
+                     chat_model, installed, orchestrator, can_create_agents,
+                     created_at, updated_at)
+                 VALUES (?1, ?2, ?3, NULL, '[]', NULL, ?4, 1, ?5, ?6, ?8, ?8, ?7, ?7)",
                 params![
                     entry.id,
                     entry.name,
@@ -567,7 +646,8 @@ impl AgentStore {
                     engine_id,
                     chat_model_json,
                     installed_flag,
-                    now
+                    now,
+                    ryu_caps,
                 ],
             )?;
         }
@@ -581,7 +661,7 @@ impl AgentStore {
                     created_at, updated_at,
                     chat_model, stt, tts, image_model, memory, persona, policy_ref,
                     version, locked, inference, composio_actions, skills,
-                    identity_profile_ids
+                    identity_profile_ids, orchestrator, can_create_agents
              FROM agents ORDER BY built_in DESC, created_at ASC",
         )?;
         let rows = stmt
@@ -626,7 +706,7 @@ impl AgentStore {
                         created_at, updated_at,
                         chat_model, stt, tts, image_model, memory, persona, policy_ref,
                         version, locked, inference, composio_actions, skills,
-                        identity_profile_ids
+                        identity_profile_ids, orchestrator, can_create_agents
                  FROM agents WHERE id = ?1",
                 params![id],
                 row_to_record,
@@ -671,11 +751,12 @@ impl AgentStore {
                 (id, name, description, system_prompt, tools, model, engine, built_in,
                  chat_model, stt, tts, image_model, memory, persona, policy_ref,
                  inference, version, locked, composio_actions, skills,
-                 identity_profile_ids, created_at, updated_at)
+                 identity_profile_ids, orchestrator, can_create_agents,
+                 created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0,
                      ?8, ?9, ?10, ?11, ?12, ?13, ?14,
                      ?15, ?16, 0, ?17, ?18,
-                     ?19, ?20, ?20)",
+                     ?19, ?21, ?22, ?20, ?20)",
             params![
                 id,
                 input.name,
@@ -697,6 +778,8 @@ impl AgentStore {
                 skills_json,
                 identity_json,
                 now,
+                input.orchestrator.map(i64::from),
+                input.can_create_agents.map(i64::from),
             ],
         )?;
         Ok(AgentRecord {
@@ -723,6 +806,8 @@ impl AgentStore {
             inference: input.inference,
             version: input.version,
             locked: false,
+            orchestrator: input.orchestrator,
+            can_create_agents: input.can_create_agents,
         })
     }
 
@@ -737,7 +822,8 @@ impl AgentStore {
                     "SELECT id, name, description, system_prompt, tools, model, engine, built_in,
                             created_at, updated_at,
                             chat_model, stt, tts, image_model, memory, persona, policy_ref,
-                            version, locked, inference, composio_actions, skills
+                            version, locked, inference, composio_actions, skills,
+                            identity_profile_ids, orchestrator, can_create_agents
                      FROM agents WHERE id = ?1",
                     params![id],
                     row_to_record,
@@ -770,7 +856,9 @@ impl AgentStore {
                 && patch.persona.is_none()
                 && patch.policy_ref.is_none()
                 && patch.inference.is_none()
-                && patch.version.is_none();
+                && patch.version.is_none()
+                && patch.orchestrator.is_none()
+                && patch.can_create_agents.is_none();
             if record.locked && !is_unlock_only {
                 anyhow::bail!("cannot edit locked agent '{id}'");
             }
@@ -833,6 +921,12 @@ impl AgentStore {
             if let Some(locked) = patch.locked {
                 record.locked = locked;
             }
+            if let Some(orchestrator) = patch.orchestrator {
+                record.orchestrator = Some(orchestrator);
+            }
+            if let Some(can_create_agents) = patch.can_create_agents {
+                record.can_create_agents = Some(can_create_agents);
+            }
 
             let now = chrono::Utc::now().to_rfc3339();
             record.updated_at = Some(now.clone());
@@ -851,7 +945,8 @@ impl AgentStore {
                     chat_model = ?8, stt = ?9, tts = ?10, image_model = ?11,
                     memory = ?12, persona = ?13, policy_ref = ?14, inference = ?15,
                     version = ?16, locked = ?17, composio_actions = ?18, skills = ?19,
-                    identity_profile_ids = ?20, updated_at = ?21
+                    identity_profile_ids = ?20, orchestrator = ?22,
+                    can_create_agents = ?23, updated_at = ?21
                  WHERE id = ?1",
                 params![
                     id,
@@ -875,6 +970,8 @@ impl AgentStore {
                     skills_json,
                     identity_json,
                     now,
+                    record.orchestrator.map(i64::from),
+                    record.can_create_agents.map(i64::from),
                 ],
             )?;
         }
@@ -1021,6 +1118,12 @@ impl AgentTemplate {
             policy_ref: self.agent_config.policy_ref,
             inference: None,
             version: self.version,
+            // Capabilities are not carried across export/import: an imported
+            // agent starts at the safe defaults (delegation on, creation off) so
+            // a shared template can never smuggle in the privileged
+            // agent-creation capability.
+            orchestrator: None,
+            can_create_agents: None,
         }
     }
 }
@@ -1060,6 +1163,11 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRecord> {
         .flatten()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    // Columns 23/24 are the nullable orchestration flags. Absent column or NULL
+    // value → `None` (fail-soft), which the `*_enabled` helpers map to the code
+    // default (orchestrator on, can_create_agents off).
+    let orchestrator = row.get::<_, Option<i64>>(23).ok().flatten().map(|v| v != 0);
+    let can_create_agents = row.get::<_, Option<i64>>(24).ok().flatten().map(|v| v != 0);
     Ok(AgentRecord {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -1086,6 +1194,8 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRecord> {
             .unwrap_or_else(default_version),
         locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
         inference: parse_slot(row.get(19)?),
+        orchestrator,
+        can_create_agents,
     })
 }
 
@@ -1448,6 +1558,89 @@ mod tests {
             .await
             .unwrap();
         assert!(none.identity_profile_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn orchestration_capabilities_default_and_roundtrip() {
+        let store = store();
+
+        // The flagship ryu is seeded with both capabilities ON.
+        let ryu = store.get("ryu").await.unwrap().unwrap();
+        assert!(ryu.orchestrator_enabled(), "ryu should be an orchestrator");
+        assert!(
+            ryu.can_create_agents_enabled(),
+            "ryu should be allowed to create agents (it runs the builder pane)"
+        );
+
+        // A fresh custom agent gets the safe defaults: delegation on, creation off,
+        // both stored as NULL (`None`) so the helpers apply the code defaults.
+        let made = store
+            .create(CreateAgent {
+                name: "Plain".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(made.orchestrator, None);
+        assert_eq!(made.can_create_agents, None);
+        assert!(made.orchestrator_enabled());
+        assert!(!made.can_create_agents_enabled());
+
+        // Toggling persists through the store round-trip.
+        let updated = store
+            .update(
+                &made.id,
+                UpdateAgent {
+                    orchestrator: Some(false),
+                    can_create_agents: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.orchestrator, Some(false));
+        assert_eq!(updated.can_create_agents, Some(true));
+        let refetched = store.get(&made.id).await.unwrap().unwrap();
+        assert_eq!(refetched.orchestrator, Some(false));
+        assert_eq!(refetched.can_create_agents, Some(true));
+        assert!(!refetched.orchestrator_enabled());
+        assert!(refetched.can_create_agents_enabled());
+    }
+
+    #[tokio::test]
+    async fn update_of_unrelated_field_preserves_identity_bindings() {
+        // Regression guard: `update()` reads-modifies-writes the whole row, so its
+        // SELECT must include identity_profile_ids — otherwise patching any other
+        // field silently wipes the bindings. (This previously did exactly that.)
+        let store = store();
+        let created = store
+            .create(CreateAgent {
+                name: "Bound".into(),
+                identity_profile_ids: vec!["prof_gmail".into()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // Patch only the name — identity bindings must survive untouched.
+        let updated = store
+            .update(
+                &created.id,
+                UpdateAgent {
+                    name: Some("Renamed".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.name, "Renamed");
+        assert_eq!(
+            updated.identity_profile_ids,
+            vec!["prof_gmail".to_string()],
+            "patching an unrelated field must not wipe identity bindings"
+        );
     }
 
     #[tokio::test]

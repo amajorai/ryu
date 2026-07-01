@@ -274,7 +274,10 @@ mod tests {
             serde_json::to_string(&DeviceType::Necklace).unwrap(),
             "\"necklace\""
         );
-        assert_eq!(serde_json::to_string(&Mode::Ambient).unwrap(), "\"ambient\"");
+        assert_eq!(
+            serde_json::to_string(&Mode::Ambient).unwrap(),
+            "\"ambient\""
+        );
         assert_eq!(
             serde_json::to_string(&Emotion::Surprised).unwrap(),
             "\"surprised\""

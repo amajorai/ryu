@@ -281,6 +281,10 @@ async fn run_command(args: Vec<String>) -> anyhow::Result<()> {
             run_mcp_command(&api_url, token.as_deref(), &args[1..]).await?;
         }
 
+        "okf" => {
+            run_okf_command(&api_url, token.as_deref(), &args[1..]).await?;
+        }
+
         "apply" => {
             config::run_apply(&args[1..]).await?;
         }
@@ -397,6 +401,7 @@ fn print_usage() {
     eprintln!("  skills add <id|owner/repo|url> install a skill (id or source)");
     eprintln!("  mcp list [query]               browse the MCP server catalog");
     eprintln!("  mcp add <id>                   install an MCP server (written disabled; enable to use)");
+    eprintln!("  okf export <dir> [--bundle id] export indexed knowledge as an OKF bundle");
     eprintln!();
     eprintln!("Config-as-code (GitOps):");
     eprintln!("  apply -f <file> [--org id]     validate + apply a scope's gateway.yaml");
@@ -1083,6 +1088,65 @@ async fn run_mcp_command(
             eprintln!("usage: ryu mcp <subcommand>");
             eprintln!("  list [query]   browse the MCP server catalog");
             eprintln!("  add <id>       install an MCP server (written disabled)");
+        }
+    }
+
+    Ok(())
+}
+
+/// `ryu okf export <dir> [--bundle <id>]` — emit Ryu's own indexed knowledge as
+/// an OKF bundle directory. Delegates to Core's `/api/okf/export`; Core owns the
+/// reconstruction and on-disk write (the path is resolved relative to Core).
+async fn run_okf_command(
+    api_url: &str,
+    token: Option<&str>,
+    args: &[String],
+) -> anyhow::Result<()> {
+    let sub = args.first().map(|s| s.as_str()).unwrap_or("");
+
+    match sub {
+        "export" => {
+            let mut dir: Option<&str> = None;
+            let mut bundle: Option<&str> = None;
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--bundle" | "-b" => {
+                        bundle = args.get(i + 1).map(|s| s.as_str());
+                        if bundle.is_none() {
+                            anyhow::bail!("--bundle requires a value");
+                        }
+                        i += 2;
+                    }
+                    other if dir.is_none() => {
+                        dir = Some(other);
+                        i += 1;
+                    }
+                    other => anyhow::bail!("unexpected argument: {other}"),
+                }
+            }
+            let Some(dir) = dir else {
+                anyhow::bail!("usage: ryu okf export <dir> [--bundle <id>]");
+            };
+
+            println!("Exporting OKF bundle to '{dir}'...");
+            let result = api::export_okf_bundle(api_url, token, dir, bundle).await?;
+            println!(
+                "Exported {} concept(s) to {}",
+                result.concepts, result.target_dir
+            );
+            for file in &result.files {
+                println!("  {file}");
+            }
+            println!("  index.md (listing)");
+            println!("  log.md (changelog)");
+        }
+
+        other => {
+            eprintln!("unknown okf subcommand: {other}");
+            eprintln!();
+            eprintln!("usage: ryu okf <subcommand>");
+            eprintln!("  export <dir> [--bundle <id>]   write indexed knowledge as an OKF bundle");
         }
     }
 

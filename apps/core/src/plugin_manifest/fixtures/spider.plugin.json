@@ -12,7 +12,5 @@
       }
     }
   ],
-  "permission_grants": [
-    "mcp:spider"
-  ]
+  "permission_grants": ["mcp:spider"]
 }

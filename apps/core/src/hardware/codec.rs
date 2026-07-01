@@ -99,8 +99,7 @@ pub fn pcm16_to_wav(pcm: &[i16], sample_rate: u32) -> Result<Vec<u8>> {
     };
     let mut cursor = std::io::Cursor::new(Vec::<u8>::new());
     {
-        let mut writer =
-            hound::WavWriter::new(&mut cursor, spec).context("creating WAV writer")?;
+        let mut writer = hound::WavWriter::new(&mut cursor, spec).context("creating WAV writer")?;
         for &sample in pcm {
             writer.write_sample(sample).context("writing WAV sample")?;
         }

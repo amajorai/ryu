@@ -141,11 +141,17 @@ fn host_is_trusted(host: &str, bind: &str, magic_dns: Option<&str>) -> bool {
         return super::is_blocked_ip(ip);
     }
     // Hostname: strip an optional `:port`, then match known-good names.
-    let name = host.rsplit_once(':').map_or(host, |(h, _)| h).to_ascii_lowercase();
+    let name = host
+        .rsplit_once(':')
+        .map_or(host, |(h, _)| h)
+        .to_ascii_lowercase();
     if name == "localhost" {
         return true;
     }
-    let bind_name = bind.rsplit_once(':').map_or(bind, |(h, _)| h).to_ascii_lowercase();
+    let bind_name = bind
+        .rsplit_once(':')
+        .map_or(bind, |(h, _)| h)
+        .to_ascii_lowercase();
     if name == bind_name {
         return true;
     }
@@ -203,7 +209,9 @@ pub async fn pair_device(
 }
 
 /// `GET /api/hardware/devices` — list paired devices with presence + battery.
-pub async fn list_devices(State(state): State<ServerState>) -> (StatusCode, Json<serde_json::Value>) {
+pub async fn list_devices(
+    State(state): State<ServerState>,
+) -> (StatusCode, Json<serde_json::Value>) {
     match state.hardware.list().await {
         Ok(records) => {
             let items: Vec<DeviceListItem> = records.iter().map(to_list_item).collect();
@@ -307,7 +315,12 @@ async fn ensure_device_dashboard(
     device_id: &str,
     device_name: &str,
 ) -> anyhow::Result<DeviceDashboard> {
-    if let Some(dd) = state.dashboards.store.get_device_dashboard(device_id).await? {
+    if let Some(dd) = state
+        .dashboards
+        .store
+        .get_device_dashboard(device_id)
+        .await?
+    {
         // The bound dashboard could have been deleted out from under us; recreate.
         if state
             .dashboards
@@ -396,7 +409,11 @@ pub async fn display_manifest(
     headers: HeaderMap,
 ) -> Response {
     if !device_authorized(&state, &device_id, &headers).await {
-        return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "unauthorized" }))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "unauthorized" })),
+        )
+            .into_response();
     }
     let record = match state.hardware.get(&device_id).await {
         Ok(Some(r)) => r,
@@ -617,7 +634,9 @@ pub async fn set_device_dashboard(
 
     (
         StatusCode::OK,
-        Json(json!({ "ok": true, "dashboard_id": dd.dashboard_id, "refresh_rate": dd.refresh_rate })),
+        Json(
+            json!({ "ok": true, "dashboard_id": dd.dashboard_id, "refresh_rate": dd.refresh_rate }),
+        ),
     )
 }
 

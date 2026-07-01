@@ -143,10 +143,7 @@ pub fn set_compression_policy(policy: CompressionPolicy) {
 
 /// The active compression-policy definition.
 pub fn compression_policy() -> CompressionPolicy {
-    policy_cell()
-        .read()
-        .map(|g| g.clone())
-        .unwrap_or_default()
+    policy_cell().read().map(|g| g.clone()).unwrap_or_default()
 }
 
 /// Whether the active compression service is the **bundled** headroom proxy Core

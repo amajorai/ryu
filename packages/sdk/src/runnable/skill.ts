@@ -9,7 +9,7 @@
  * All model calls must go through `ctx.gateway` — no direct provider imports.
  */
 
-import type { Runnable, RunnableContext } from "./runnable-types";
+import type { Runnable, RunnableContext } from "./runnable-types.ts";
 
 /** Options accepted by `defineSkill`. */
 export interface SkillOptions<TInput, TOutput> {

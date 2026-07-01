@@ -319,6 +319,25 @@ pub struct ChatStreamRequest {
     /// default (no hook acts on a flag it cannot see).
     #[serde(default)]
     pub plugin_flags: std::collections::HashMap<String, bool>,
+    /// Verified human author of this turn's user message — the Better Auth user
+    /// id resolved from the request's user JWT (`crate::identity_verify`). This is
+    /// SERVER-SET ONLY: `chat_stream` stamps it from the verified caller, and
+    /// `#[serde(skip)]` keeps it out of the wire format so a client request body
+    /// can never set or spoof it. It is threaded into the user-row
+    /// `append_message` so each persisted message records who actually sent it,
+    /// distinct from `agent_id` (the AI agent). `None` in the single-tenant /
+    /// loopback (anonymous) flow, preserving current behavior.
+    #[serde(skip)]
+    pub author_user_id: Option<String>,
+    /// Connector-supplied display name of the sender (e.g. a Telegram first name
+    /// or Discord username) for group/channel chats. SERVER-SET ONLY
+    /// (`#[serde(skip)]`) — a client body can neither set nor spoof it. Unlike
+    /// `author_user_id` it is NOT a verified identity and is never used for auth;
+    /// it is threaded into the user-row `append_message` purely so a
+    /// multi-participant thread can record and reason about who said what. `None`
+    /// for 1:1 / anonymous turns.
+    #[serde(skip)]
+    pub author_name: Option<String>,
 }
 
 /// Default for [`ChatStreamRequest::persist`] — normal turns persist.
@@ -495,6 +514,18 @@ fn acp_tool_ui_name(kind: &str, title: &str, input: &Value) -> (String, bool) {
         "edit" => ("Edit".to_owned(), false),
         "fetch" => ("WebFetch".to_owned(), false),
         "search" => ("WebSearch".to_owned(), false),
+        // Built-in generative-UI tool (`ui__render`). ACP exposes no stable machine
+        // tool name (the `title` is humanized per-adapter), so detect it by its
+        // unique spec-shaped input and emit a stable name the desktop matches to
+        // render the UI inline. The `{ spec: { root, elements } }` shape is specific
+        // to json-render and used by no other tool.
+        _ if input
+            .get("spec")
+            .and_then(Value::as_object)
+            .is_some_and(|s| s.contains_key("root") && s.contains_key("elements")) =>
+        {
+            ("ui__render".to_owned(), true)
+        }
         _ => {
             let name = if title.is_empty() { kind } else { title };
             (name.to_owned(), true)
@@ -1403,6 +1434,7 @@ pub async fn run_reply_text(
     conversation_id: String,
     agent_id: Option<String>,
     text: String,
+    author_name: Option<String>,
     registry: Arc<AcpAgentRegistry>,
     conversations: ConversationStore,
     agent_store: AgentStore,
@@ -1419,6 +1451,7 @@ pub async fn run_reply_text(
         conversation_id,
         agent_id,
         text,
+        author_name,
         true,
         registry,
         conversations,
@@ -1446,6 +1479,7 @@ pub async fn run_team_reply_text(
     conversation_id: String,
     team: crate::teams::TeamRecord,
     text: String,
+    author_name: Option<String>,
     registry: Arc<AcpAgentRegistry>,
     conversations: ConversationStore,
     agent_store: AgentStore,
@@ -1490,10 +1524,20 @@ pub async fn run_team_reply_text(
         .clone()
         .unwrap_or_else(|| team.members[0].clone());
 
-    // Persist the user turn once (attributed to the user, not a member).
+    // Persist the user turn once (attributed to the user, not a member). The
+    // verified author_user_id is still None on the team path (the channel caller
+    // is unauthenticated); the connector-supplied display name is carried so a
+    // multi-participant group thread records who spoke.
     if !user_text.trim().is_empty() {
         if let Err(e) = conversations
-            .append_message(&conversation_id, "user", &user_text, None)
+            .append_message(
+                &conversation_id,
+                "user",
+                &user_text,
+                None,
+                None,
+                author_name.as_deref(),
+            )
             .await
         {
             tracing::warn!("failed to persist team channel user message: {e:#}");
@@ -1599,7 +1643,14 @@ pub async fn run_team_reply_text(
     // Persist exactly one combined assistant turn attributed to the team.
     if !combined.is_empty() {
         if let Err(e) = conversations
-            .append_message(&conversation_id, "assistant", &combined, Some(&team.id))
+            .append_message(
+                &conversation_id,
+                "assistant",
+                &combined,
+                Some(&team.id),
+                None,
+                None,
+            )
             .await
         {
             tracing::warn!("failed to persist team channel assistant message: {e:#}");
@@ -1622,6 +1673,7 @@ pub(crate) async fn run_text_turn(
     conversation_id: String,
     agent_id: Option<String>,
     text: String,
+    author_name: Option<String>,
     persist: bool,
     registry: Arc<AcpAgentRegistry>,
     conversations: ConversationStore,
@@ -1637,6 +1689,7 @@ pub(crate) async fn run_text_turn(
         conversation_id,
         agent_id,
         text,
+        author_name,
         persist,
         None,
         false,
@@ -1665,6 +1718,7 @@ pub(crate) async fn run_text_turn_in(
     conversation_id: String,
     agent_id: Option<String>,
     text: String,
+    author_name: Option<String>,
     persist: bool,
     cwd: Option<String>,
     worktree_isolation: bool,
@@ -1705,6 +1759,11 @@ pub(crate) async fn run_text_turn_in(
         // member) — yield to a directly-typing user on the shared local engine.
         background: true,
         plugin_flags: std::collections::HashMap::new(),
+        // Programmatic turn, no verified human author to attribute.
+        author_user_id: None,
+        // Connector-supplied sender display name (group/channel chats); None for
+        // non-channel programmatic turns.
+        author_name,
     };
 
     // Route through the full streaming path (identical to the HTTP handler).
@@ -1786,6 +1845,63 @@ pub(crate) async fn drain_text_reply(response: Response) -> anyhow::Result<Strin
     Ok(reply)
 }
 
+/// Stream an AI SDK v6 UI-message-stream [`Response`] to `delta_tx` **incrementally**
+/// — the per-token counterpart of [`drain_text_reply`]. Each `text-delta` payload is
+/// sent as it arrives (so voice mode can caption + synthesize sentence-by-sentence
+/// instead of waiting for the whole reply). Returns `Ok(())` at the `[DONE]`
+/// sentinel / stream end, or `Err` on an `error` frame. Non-text frames are ignored.
+///
+/// Unlike `drain_text_reply` (which buffers the whole body then splits on `\n\n`),
+/// this reads the body as a data stream and carries a partial-frame buffer across
+/// chunks, so a frame split across two network reads is still parsed correctly.
+pub(crate) async fn stream_text_reply(
+    response: Response,
+    delta_tx: tokio::sync::mpsc::Sender<String>,
+) -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+
+    let mut body = response.into_body().into_data_stream();
+    let mut buf = String::new();
+    while let Some(chunk) = body.next().await {
+        let chunk = chunk.map_err(|e| anyhow::anyhow!("body read error: {e}"))?;
+        buf.push_str(&String::from_utf8_lossy(&chunk));
+
+        // Drain every complete `\n\n`-terminated frame currently in the buffer.
+        while let Some(rel) = buf.find("\n\n") {
+            let frame: String = buf[..rel].to_string();
+            buf.drain(..rel + 2);
+            let Some(data) = frame.strip_prefix("data:").map(|s| s.trim()) else {
+                continue;
+            };
+            if data == "[DONE]" {
+                return Ok(());
+            }
+            let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
+                continue;
+            };
+            match json.get("type").and_then(|t| t.as_str()) {
+                Some("text-delta") => {
+                    if let Some(delta) = json.get("delta").and_then(|d| d.as_str()) {
+                        // A closed receiver (client gone / barge-in) ends the stream.
+                        if delta_tx.send(delta.to_string()).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                }
+                Some("error") => {
+                    let msg = json
+                        .get("errorText")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("agent error");
+                    return Err(anyhow::anyhow!("{msg}"));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 // ── Agent teams orchestration ────────────────────────────────────────────────
 //
 // A team turn fans out one user message to several member agents per the team's
@@ -1851,6 +1967,9 @@ async fn run_member_text(
         // member) — yield to a directly-typing user on the shared local engine.
         background: true,
         plugin_flags: std::collections::HashMap::new(),
+        // Programmatic per-member turn, no human author to attribute.
+        author_user_id: None,
+        author_name: None,
     };
     // Team members run with auto-recall OFF: a single user message is fanned out
     // to N members, so per-member recall would be N× redundant retrieval on the
@@ -1970,11 +2089,20 @@ pub async fn route_team_chat_stream(
 
     // Persist the user turn once (attributed to no agent — it's the user's), so
     // the conversation has exactly one user row regardless of member count.
+    // TODO (Phase 0 follow-up): stamp the verified author_user_id here once the
+    // team path carries the caller (single-agent path is wired; see chat_stream).
     if req.persist {
         if let Some(ref conv_id) = conversation_id {
             if !user_text.is_empty() {
                 if let Err(e) = conversations
-                    .append_message(conv_id, "user", &user_text, None)
+                    .append_message(
+                        conv_id,
+                        "user",
+                        &user_text,
+                        None,
+                        req.author_user_id.as_deref(),
+                        req.author_name.as_deref(),
+                    )
                     .await
                 {
                     tracing::warn!("failed to persist team user message: {e:#}");
@@ -2117,7 +2245,7 @@ pub async fn route_team_chat_stream(
             if let Some(ref conv_id) = conversation_id {
                 if !combined.trim().is_empty() {
                     if let Err(e) = conversations
-                        .append_message(conv_id, "assistant", combined.trim_end(), Some(&team_id))
+                        .append_message(conv_id, "assistant", combined.trim_end(), Some(&team_id), None, None)
                         .await
                     {
                         tracing::warn!("failed to persist team assistant message: {e:#}");
@@ -2192,6 +2320,12 @@ pub async fn route_chat_stream(
                         "user",
                         &user_text,
                         req.agent_id.as_deref(),
+                        // Verified human author (Phase 0): stamped from the request's
+                        // user JWT in `chat_stream`. `None` in the anonymous /
+                        // loopback flow, which keeps the single-tenant behavior.
+                        req.author_user_id.as_deref(),
+                        // Unverified sender display name for group/channel chats.
+                        req.author_name.as_deref(),
                     )
                     .await
                 {
@@ -2413,7 +2547,8 @@ pub async fn route_chat_stream(
                         .as_deref()
                         .map(context_window::estimate_tokens)
                         .unwrap_or(0);
-                    context_window::budgeted_short_term(&conversations, id, system_tokens, cfg).await
+                    context_window::budgeted_short_term(&conversations, id, system_tokens, cfg)
+                        .await
                 }
                 None => assemble_short_term_context(&conversations, id).await,
             },
@@ -2819,7 +2954,14 @@ async fn persist_assistant_reply(
     };
     if !reply.is_empty() {
         if let Err(e) = store
-            .append_message(&conversation_id, "assistant", &reply, agent_id.as_deref())
+            .append_message(
+                &conversation_id,
+                "assistant",
+                &reply,
+                agent_id.as_deref(),
+                None,
+                None,
+            )
             .await
         {
             tracing::warn!("failed to persist assistant reply: {e:#}");
@@ -3736,6 +3878,25 @@ mod tests {
         ProviderRegistry::default()
     }
 
+    #[test]
+    fn ui_render_call_normalized_by_spec_shape() {
+        // ACP gives no stable machine name; a spec-shaped input must still map to
+        // the stable `ui__render` name (dynamic) so the desktop renders it inline,
+        // regardless of the humanized title the adapter reports.
+        let input = serde_json::json!({
+            "spec": { "root": "a", "elements": { "a": { "type": "Text" } } }
+        });
+        let (name, dynamic) = acp_tool_ui_name("other", "Render some UI", &input);
+        assert_eq!(name, "ui__render");
+        assert!(dynamic);
+    }
+
+    #[test]
+    fn non_ui_tool_falls_through_to_title() {
+        let (name, _) = acp_tool_ui_name("other", "some_custom_tool", &Value::Null);
+        assert_eq!(name, "some_custom_tool");
+    }
+
     // ── Team orchestration linchpin: the SSE drain parser ──────────────────────
 
     #[tokio::test]
@@ -4471,16 +4632,23 @@ mod tests {
     async fn short_term_context_contains_prior_turns() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("conv-st", "user", "remember the number 42", None)
+            .append_message(
+                "conv-st",
+                "user",
+                "remember the number 42",
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
         store
-            .append_message("conv-st", "assistant", "noted, 42", None)
+            .append_message("conv-st", "assistant", "noted, 42", None, None, None)
             .await
             .unwrap();
         // Current turn (persisted before routing in the real flow).
         store
-            .append_message("conv-st", "user", "what number?", None)
+            .append_message("conv-st", "user", "what number?", None, None, None)
             .await
             .unwrap();
 
@@ -4674,6 +4842,7 @@ mod tests {
             conv_id.clone(),
             None,
             "hello turn one".to_string(),
+            None,
             Arc::clone(&registry),
             conversations.clone(),
             agent_store.clone(),
@@ -4691,6 +4860,7 @@ mod tests {
             conv_id.clone(),
             None,
             "hello turn two".to_string(),
+            None,
             Arc::clone(&registry),
             conversations.clone(),
             agent_store.clone(),
@@ -4745,6 +4915,7 @@ mod tests {
             "test-conv-1".to_string(),
             None,
             "ping".to_string(),
+            None,
             registry,
             conversations,
             agent_store,

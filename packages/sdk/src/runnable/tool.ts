@@ -14,7 +14,7 @@
  * call gateway.chat() when they need model assistance.
  */
 
-import type { Runnable, RunnableContext } from "./runnable-types";
+import type { Runnable, RunnableContext } from "./runnable-types.ts";
 
 // ── JSON Schema types ─────────────────────────────────────────────────────────
 

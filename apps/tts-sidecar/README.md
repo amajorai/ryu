@@ -1,4 +1,4 @@
-# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="center" alt="" />&nbsp; Ryu TTS Sidecar
+# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; Ryu TTS Sidecar
 
 > A universal HTTP front over many text-to-speech engines. Part of [Ryu](../../README.md).
 

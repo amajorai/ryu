@@ -113,7 +113,11 @@ async fn auto_title_conversation(state: &ServerState, conversation_id: &str) {
 /// Generate a concise meeting title from its summary, applying it unless the
 /// meeting title is user-chosen. Best-effort; returns the new title when it
 /// wrote one. Called from the meeting finalize path once notes exist.
-pub async fn auto_title_meeting(state: &ServerState, meeting_id: &str, summary: &str) -> Option<String> {
+pub async fn auto_title_meeting(
+    state: &ServerState,
+    meeting_id: &str,
+    summary: &str,
+) -> Option<String> {
     let summary = summary.trim();
     if summary.chars().count() < 3 {
         return None;
@@ -124,7 +128,12 @@ pub async fn auto_title_meeting(state: &ServerState, meeting_id: &str, summary: 
     if title.is_empty() {
         return None;
     }
-    match state.meetings.store.auto_set_title(meeting_id, &title).await {
+    match state
+        .meetings
+        .store
+        .auto_set_title(meeting_id, &title)
+        .await
+    {
         Ok(Some(_)) => {
             tracing::info!("auto-titled meeting {meeting_id}: {title}");
             Some(title)
@@ -158,12 +167,20 @@ async fn local_title(state: &ServerState, system: &str, user_input: &str) -> Opt
         return None;
     }
     let base = local_engine_url(&engine)?; // e.g. http://127.0.0.1:8080/v1
-    // The served model id. llama.cpp ignores it; ollama/vllm/DMR need the real
-    // pulled name, so query `/models` and fall back to the engine name.
+                                           // The served model id. llama.cpp ignores it; ollama/vllm/DMR need the real
+                                           // pulled name, so query `/models` and fall back to the engine name.
     let model = served_model_id(state, base)
         .await
         .unwrap_or_else(|| engine.clone());
-    let body = post_completion(state, &format!("{base}/chat/completions"), &model, system, user_input, None).await?;
+    let body = post_completion(
+        state,
+        &format!("{base}/chat/completions"),
+        &model,
+        system,
+        user_input,
+        None,
+    )
+    .await?;
     extract_content(&body)
 }
 
@@ -320,7 +337,10 @@ mod tests {
     fn strips_quotes_label_and_punctuation() {
         assert_eq!(sanitize_title("\"Centering a div\""), "Centering a div");
         assert_eq!(sanitize_title("Title: CSS layout help."), "CSS layout help");
-        assert_eq!(sanitize_title("**Deploying to Vercel**"), "Deploying to Vercel");
+        assert_eq!(
+            sanitize_title("**Deploying to Vercel**"),
+            "Deploying to Vercel"
+        );
     }
 
     #[test]

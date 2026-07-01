@@ -12,17 +12,17 @@
  * import from `@ryuhq/sdk/runnable` as a single entry point.
  */
 
-export type { AgentOptions } from "./agent";
+export type { AgentOptions } from "./agent.ts";
 // biome-ignore lint/performance/noBarrelFile: intentional package entry point for @ryuhq/sdk/runnable
-export { defineAgent } from "./agent";
+export { defineAgent } from "./agent.ts";
 export type {
 	GatewayClient,
 	Runnable,
 	RunnableContext,
-} from "./runnable-types";
-export type { SkillOptions } from "./skill";
-export { defineSkill } from "./skill";
-export type { JsonSchemaProperty, ToolOptions, ToolSchema } from "./tool";
-export { defineTool } from "./tool";
-export type { WorkflowOptions, WorkflowStep } from "./workflow";
-export { defineWorkflow } from "./workflow";
+} from "./runnable-types.ts";
+export type { SkillOptions } from "./skill.ts";
+export { defineSkill } from "./skill.ts";
+export type { JsonSchemaProperty, ToolOptions, ToolSchema } from "./tool.ts";
+export { defineTool } from "./tool.ts";
+export type { WorkflowOptions, WorkflowStep } from "./workflow.ts";
+export { defineWorkflow } from "./workflow.ts";

@@ -17,8 +17,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { commandDev } from "./cli/dev";
-import { PluginManifestSchema } from "./manifest";
+import { commandDev } from "./cli/dev.ts";
+import { PluginManifestSchema } from "./manifest.ts";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

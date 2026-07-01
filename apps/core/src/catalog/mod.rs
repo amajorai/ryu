@@ -158,7 +158,10 @@ mod tests {
         let manager = CatalogManager::new();
         let store = InstallStatusStore::new();
         let items = manager.get_catalog(&store).await;
-        assert_eq!(items.len(), 23);
+        // get_catalog is a 1:1 map of the static registry (no filtering), so the
+        // counts must stay in lock-step — assert against the registry length
+        // rather than a magic number that drifts when entries are added.
+        assert_eq!(items.len(), super::registry::static_registry().len());
     }
 
     #[tokio::test]

@@ -286,11 +286,7 @@ impl Sandbox for MicrosandboxSandbox {
         let name = id.0.clone();
         Box::pin(async move {
             // Best-effort stop, then remove.
-            let _ = Command::new(binary())
-                .arg("stop")
-                .arg(&name)
-                .output()
-                .await;
+            let _ = Command::new(binary()).arg("stop").arg(&name).output().await;
 
             let output = Command::new(binary())
                 .arg("rm")
@@ -323,12 +319,10 @@ mod tests {
 
     #[tokio::test]
     async fn detect_never_hangs() {
-        let result = tokio::time::timeout(
-            Duration::from_secs(DEFAULT_DETECT_SECS * 2 + 2),
-            detect(),
-        )
-        .await
-        .expect("detect() must not hang beyond 2× timeout");
+        let result =
+            tokio::time::timeout(Duration::from_secs(DEFAULT_DETECT_SECS * 2 + 2), detect())
+                .await
+                .expect("detect() must not hang beyond 2× timeout");
         match result {
             DetectResult::Available => {}
             DetectResult::Unavailable(reason) => assert!(!reason.is_empty()),

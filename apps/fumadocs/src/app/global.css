@@ -83,6 +83,7 @@
   --gateway-color: hsl(41 100% 40%);
   --core-color: hsl(192 95% 38%);
   --develop-color: hsl(26 73% 51%);
+  --hardware-color: hsl(8 75% 53%);
 }
 
 .dark {
@@ -95,6 +96,7 @@
   --gateway-color: hsl(53 100% 76%);
   --core-color: hsl(192 80% 68%);
   --develop-color: hsl(26 100% 72%);
+  --hardware-color: hsl(8 95% 74%);
 }
 
 [data-docs-root="start-here"] {
@@ -132,6 +134,10 @@
 [data-docs-root="develop"] {
   --color-fd-primary: var(--develop-color);
   --color-fd-ring: var(--develop-color);
+}
+[data-docs-root="hardware"] {
+  --color-fd-primary: var(--hardware-color);
+  --color-fd-ring: var(--hardware-color);
 }
 
 /* Apply the Geist heading font everywhere fumadocs renders a heading: the prose

@@ -20,9 +20,7 @@
     }
   ],
   "contributes": {
-    "policies": [
-      { "id": "policy-smart-routing", "title": "Smart Routing" }
-    ]
+    "policies": [{ "id": "policy-smart-routing", "title": "Smart Routing" }]
   },
   "permission_grants": []
 }

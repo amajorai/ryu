@@ -1,4 +1,4 @@
-# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="center" alt="" />&nbsp; Ryu CLI
+# <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; Ryu CLI
 
 > A terminal UI for chatting with Ryu and managing the local stack. Part of [Ryu](../../README.md).
 
@@ -32,7 +32,7 @@ Key environment variables:
 
 ## What it does
 
-- **Chat:** multi-turn AI chat; the default chat routes to the web `/ai` endpoint, while `Ctrl+A` routes to Core (`:7980`)
+- **Chat:** multi-turn AI chat over Core (`:7980`)
 - **Sidecar management:** view status and start/stop/restart sidecars, plus a setup wizard
 - **Device login:** browser-based OAuth (`login`/`logout`/`whoami`), session listing and revocation
 - **Sessions:** list and manage active sessions

@@ -13,36 +13,42 @@
  * body). Reference only `ctx`, `host`, and language built-ins.
  */
 
-import type { Contributes, PluginManifest, TurnHookContribution } from "../manifest";
+import type {
+	Contributes,
+	PluginManifest,
+	TurnHookContribution,
+} from "../manifest.ts";
 
 /** The context a `post_assistant_turn` hook receives. */
-export type HookContext = {
-	/** The conversation id (also the natural per-conversation storage key). */
-	conversation_id?: string;
+export interface HookContext {
 	/** The agent that produced the turn. */
 	agent_id?: string;
-	/** Recent transcript (oldest → newest). */
-	transcript: Array<{ role: string; content: string }>;
+	/** The conversation id (also the natural per-conversation storage key). */
+	conversation_id?: string;
 	/** Per-request plugin flags (e.g. a composer toggle): `{ "<pluginId>": true }`. */
 	flags: Record<string, boolean>;
-};
+	/** Recent transcript (oldest → newest). */
+	transcript: Array<{ role: string; content: string }>;
+}
 
 /** Arguments to a `host.sideModel` call. */
-export type SideModelArgs = {
-	/** The user prompt for the side model. Required. */
-	prompt: string;
-	/** Optional system prompt. */
-	system?: string;
+export interface SideModelArgs {
+	/** Reasoning effort, forwarded when non-empty. */
+	effort?: string;
 	/** Explicit model id (wins over `model_pref_key`). */
 	model?: string;
 	/** A preference key Core resolves to a model id (swappable, not hardcoded). */
 	model_pref_key?: string;
-	/** Reasoning effort, forwarded when non-empty. */
-	effort?: string;
-};
+	/** The user prompt for the side model. Required. */
+	prompt: string;
+	/** Optional system prompt. */
+	system?: string;
+}
 
 /** The capability bridge available to a hook (gated by manifest grants). */
-export type HostApi = {
+export interface HostApi {
+	/** Captured logging. */
+	log(...args: unknown[]): void;
 	/** One non-streaming gateway completion. Grant: `hook:side-model`. */
 	sideModel(args: SideModelArgs): Promise<string>;
 	/** The plugin's own namespaced KV store. Grant: `storage:kv`. */
@@ -52,9 +58,7 @@ export type HostApi = {
 		delete(key: string): Promise<boolean>;
 		keys(): Promise<string[]>;
 	};
-	/** Captured logging. */
-	log(...args: unknown[]): void;
-};
+}
 
 /** What a hook asks the chat path to do after the assistant turn. */
 export type HookDirective =
@@ -68,21 +72,23 @@ export type HookRun = (
 	host: HostApi
 ) => HookDirective | Promise<HookDirective>;
 
-export type DefineTurnHookOptions = {
+export interface DefineTurnHookOptions {
 	/** Stable id for this hook, unique within the plugin. */
 	id: string;
 	/** Turn boundary (default `"post_assistant_turn"`). */
 	on?: string;
 	/** The hook body. Must be self-contained (no captured variables). */
 	run: HookRun;
-};
+}
 
 /**
  * Build a turn-hook contribution from a typed `run` function. The function source
  * is serialized into the sandbox `code` string and invoked with `ctx`/`host` at
  * run time.
  */
-export function defineTurnHook(options: DefineTurnHookOptions): TurnHookContribution {
+export function defineTurnHook(
+	options: DefineTurnHookOptions
+): TurnHookContribution {
 	const source = options.run.toString();
 	// The sandbox wraps `code` in an async IIFE where `ctx`/`host` are in scope
 	// and a bare `return` reports the directive — so call the serialized function
@@ -95,26 +101,26 @@ export function defineTurnHook(options: DefineTurnHookOptions): TurnHookContribu
 	};
 }
 
-export type DefinePluginOptions = {
+export interface DefinePluginOptions {
+	/** Activation events (default `["*"]` — driven by the enabled flag). */
+	activationEvents?: string[];
+	/** Declarative composer widgets (toggle/chip), passed verbatim to the desktop. */
+	composerControls?: Record<string, unknown>[];
+	/** Capability grants the hooks need (e.g. `["hook:side-model", "storage:kv"]`). */
+	grants?: string[];
 	/** Reverse-domain id (e.g. `"com.example.my-plugin"`). */
 	id: string;
 	/** Display name. */
 	name: string;
-	/** Semver version (e.g. `"1.0.0"`). */
-	version: string;
-	/** Capability grants the hooks need (e.g. `["hook:side-model", "storage:kv"]`). */
-	grants?: string[];
-	/** Activation events (default `["*"]` — driven by the enabled flag). */
-	activationEvents?: string[];
+	/** Declarative settings tabs (model pickers, fields), passed verbatim. */
+	settingsTabs?: Record<string, unknown>[];
+	/** Declarative slash commands, passed verbatim. */
+	slashCommands?: Record<string, unknown>[];
 	/** Turn hooks the plugin contributes. */
 	turnHooks?: TurnHookContribution[];
-	/** Declarative composer widgets (toggle/chip), passed verbatim to the desktop. */
-	composerControls?: Array<Record<string, unknown>>;
-	/** Declarative settings tabs (model pickers, fields), passed verbatim. */
-	settingsTabs?: Array<Record<string, unknown>>;
-	/** Declarative slash commands, passed verbatim. */
-	slashCommands?: Array<Record<string, unknown>>;
-};
+	/** Semver version (e.g. `"1.0.0"`). */
+	version: string;
+}
 
 /**
  * Assemble a `plugin.json` manifest for a turn-hook plugin. The result matches

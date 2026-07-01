@@ -230,8 +230,9 @@ impl SupportAccessStore {
     /// Open (or create) the audit store at a specific path.
     pub fn open(path: PathBuf) -> Result<Self> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("creating support-access audit dir {}", parent.display()))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("creating support-access audit dir {}", parent.display())
+            })?;
         }
         let conn = Connection::open(&path)
             .with_context(|| format!("opening support-access audit db {}", path.display()))?;
@@ -267,12 +268,7 @@ impl SupportAccessStore {
     }
 
     /// Append one audit entry. The only mutating operation on this store.
-    pub async fn append(
-        &self,
-        actor: &str,
-        action: &str,
-        detail: Option<&str>,
-    ) -> Result<()> {
+    pub async fn append(&self, actor: &str, action: &str, detail: Option<&str>) -> Result<()> {
         let at = now_millis();
         let conn = self.conn.lock().await;
         conn.execute(
@@ -356,7 +352,10 @@ mod tests {
         let prefs = temp_prefs();
         // Grant enabled with an expiry already in the past.
         prefs
-            .set(crate::privacy::SUPPORT_ACCESS_LOCAL_ENABLED_PREF_KEY, "true")
+            .set(
+                crate::privacy::SUPPORT_ACCESS_LOCAL_ENABLED_PREF_KEY,
+                "true",
+            )
             .await
             .unwrap();
         prefs
@@ -384,7 +383,10 @@ mod tests {
     async fn sweep_keeps_live_and_unexpiring_grants() {
         let prefs = temp_prefs();
         prefs
-            .set(crate::privacy::SUPPORT_ACCESS_LOCAL_ENABLED_PREF_KEY, "true")
+            .set(
+                crate::privacy::SUPPORT_ACCESS_LOCAL_ENABLED_PREF_KEY,
+                "true",
+            )
             .await
             .unwrap();
         // A far-future expiry must NOT be swept.

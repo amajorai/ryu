@@ -75,9 +75,9 @@ export type PanelRegion =
 	| "companion-overlay";
 
 export interface PanelContribution {
-	region: PanelRegion;
 	/** Stable id within the region (also the host's key). */
 	id: string;
+	region: PanelRegion;
 	title: string;
 	webview: { entry: string };
 }
@@ -86,16 +86,16 @@ export interface PanelContribution {
  *  `CommandAction` (from `@ryu/command/types`) so a contributed command lands in
  *  the same palette as built-ins with no shim. */
 export interface CommandContribution {
-	id: string;
-	title: string;
 	/** Group heading in the palette. Defaults to the plugin's display name. */
 	group?: string;
+	id: string;
 	/** Extra fuzzy-search terms. */
 	keywords?: string;
-	/** Right-aligned keyboard hint (e.g. "⌘⇧P"). */
-	shortcut?: string;
 	/** The side effect. Runs in the host; for sandboxed plugins it is an RPC. */
 	run(): void | Promise<void>;
+	/** Right-aligned keyboard hint (e.g. "⌘⇧P"). */
+	shortcut?: string;
+	title: string;
 }
 
 export interface SettingsSectionContribution {
@@ -130,14 +130,21 @@ export interface RyuHostServices {
 	/** Gateway-governed model access (chat/embed). Mirrors `@ryuhq/sdk` model
 	 *  client semantics; every call still routes through the Gateway. */
 	gateway: {
-		chat(model: string, messages: { role: string; content: string }[]): Promise<string>;
-	};
-	/** Read/write the plugin's own Spaces docs (scoped by grant). */
-	spaces: {
-		ingestDocument(spaceId: string, title: string, markdown: string): Promise<{ docId: string }>;
+		chat(
+			model: string,
+			messages: { role: string; content: string }[]
+		): Promise<string>;
 	};
 	/** Open a tab at a path (built-in or a route this plugin contributed). */
 	openTab(path: string): void;
+	/** Read/write the plugin's own Spaces docs (scoped by grant). */
+	spaces: {
+		ingestDocument(
+			spaceId: string,
+			title: string,
+			markdown: string
+		): Promise<{ docId: string }>;
+	};
 }
 
 // ── The host API a plugin's activate() receives ───────────────────────────────
@@ -145,24 +152,26 @@ export interface RyuHostServices {
 /** Everything a plugin can contribute. Each `register*` returns a
  *  {@link Disposable}; collect them in {@link PluginContext.subscriptions}. */
 export interface RyuPlugin {
-	registerRoute(contribution: RouteContribution): Disposable;
-	registerCommand(contribution: CommandContribution): Disposable;
-	registerPanel(contribution: PanelContribution): Disposable;
-	registerSettingsSection(contribution: SettingsSectionContribution): Disposable;
-	registerStoreSection(contribution: StoreSectionContribution): Disposable;
-	registerTheme(contribution: ThemeContribution): Disposable;
 	/** Host services the plugin calls back into (grant-gated). */
 	readonly host: RyuHostServices;
+	registerCommand(contribution: CommandContribution): Disposable;
+	registerPanel(contribution: PanelContribution): Disposable;
+	registerRoute(contribution: RouteContribution): Disposable;
+	registerSettingsSection(
+		contribution: SettingsSectionContribution
+	): Disposable;
+	registerStoreSection(contribution: StoreSectionContribution): Disposable;
+	registerTheme(contribution: ThemeContribution): Disposable;
 }
 
 /** Passed to `activate(context)`. The plugin pushes its disposables onto
  *  `subscriptions`; the host disposes them all on `deactivate`. */
 export interface PluginContext {
 	readonly plugin: RyuPlugin;
-	/** Disposables auto-cleaned on deactivate. */
-	readonly subscriptions: Disposable[];
 	/** The plugin's own id (from `plugin.json`). */
 	readonly pluginId: string;
+	/** Disposables auto-cleaned on deactivate. */
+	readonly subscriptions: Disposable[];
 }
 
 /** The shape the host expects a plugin's entry module to export. */

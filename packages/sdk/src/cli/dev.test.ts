@@ -9,12 +9,11 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { unlinkSync, writeFileSync } from "node:fs";
-import type { Server } from "bun";
 import { serve } from "bun";
-import type { ChatMessage } from "../model/client";
-import { ModelClient } from "../model/client";
-import type { DevEvent, Runnable } from "./dev";
-import { loadRunnable, probeGateway, runTurn } from "./dev";
+import type { ChatMessage } from "../model/client.ts";
+import { ModelClient } from "../model/client.ts";
+import type { DevEvent, Runnable } from "./dev.ts";
+import { loadRunnable, probeGateway, runTurn } from "./dev.ts";
 
 // ── Mock gateway ──────────────────────────────────────────────────────────────
 
@@ -26,7 +25,7 @@ const MOCK_SSE_BODY = [
 	"data: [DONE]",
 ].join("\n");
 
-let mockServer: Server;
+let mockServer: ReturnType<typeof serve>;
 let mockBaseUrl: string;
 
 beforeAll(() => {

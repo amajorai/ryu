@@ -13,11 +13,11 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { defineAgent } from "./agent";
-import type { GatewayClient, RunnableContext } from "./runnable-types";
-import { defineSkill } from "./skill";
-import { defineTool } from "./tool";
-import { defineWorkflow } from "./workflow";
+import { defineAgent } from "./agent.ts";
+import type { GatewayClient, RunnableContext } from "./runnable-types.ts";
+import { defineSkill } from "./skill.ts";
+import { defineTool } from "./tool.ts";
+import { defineWorkflow } from "./workflow.ts";
 
 // ── Mock gateway ──────────────────────────────────────────────────────────────
 
@@ -41,8 +41,10 @@ function makeMockGateway(replyContent = "mock-reply"): {
 		stream(messages) {
 			calls.push({ messages: [...messages] });
 			const delta = { content: replyContent, finishReason: null };
-			const items = [delta];
-			return items[Symbol.asyncIterator]() as AsyncGenerator<typeof delta>;
+			async function* iterate() {
+				yield delta;
+			}
+			return iterate();
 		},
 	};
 
@@ -110,7 +112,7 @@ describe("defineTool", () => {
 		expect(typeof tool.run).toBe("function");
 		// ToolRunnable exposes schema
 		expect(tool.schema.type).toBe("object");
-		expect(tool.schema.properties.query.type).toBe("string");
+		expect(tool.schema.properties.query?.type).toBe("string");
 	});
 });
 
@@ -157,7 +159,7 @@ describe("defineTool — input validation", () => {
 		expect(schema.type).toBe("object");
 		expect(schema.properties).toBeDefined();
 		expect(schema.properties.query).toBeDefined();
-		expect(schema.properties.query.type).toBe("string");
+		expect(schema.properties.query?.type).toBe("string");
 		expect(schema.required).toContain("query");
 	});
 
@@ -171,7 +173,6 @@ describe("defineTool — input validation", () => {
 		const { gateway } = makeMockGateway();
 		let caught: unknown;
 		try {
-			// @ts-expect-error — intentional: testing runtime validation
 			await searchTool.run({}, makeCtx(gateway));
 		} catch (err) {
 			caught = err;
@@ -186,7 +187,6 @@ describe("defineTool — input validation", () => {
 		const { gateway } = makeMockGateway();
 		let caught: unknown;
 		try {
-			// @ts-expect-error — intentional: testing runtime validation
 			await searchTool.run({ query: 42 }, makeCtx(gateway));
 		} catch (err) {
 			caught = err;
@@ -247,7 +247,7 @@ describe("nested invocation (agent <-> workflow peer relationship)", () => {
 		expect(result.report).toBe('Report on "TypeScript": research-result');
 		// Gateway was called exactly once (by the agent step)
 		expect(calls).toHaveLength(1);
-		expect(calls[0].messages[0].content).toBe("TypeScript");
+		expect(calls[0]?.messages[0]?.content).toBe("TypeScript");
 	});
 
 	it("agent invokes a workflow as a named tool", async () => {
@@ -286,7 +286,7 @@ describe("nested invocation (agent <-> workflow peer relationship)", () => {
 		expect(result.output).toBe("workflow-output");
 		// Gateway was called once inside the workflow
 		expect(calls).toHaveLength(1);
-		expect(calls[0].messages[0].content).toBe("Summarise: long document");
+		expect(calls[0]?.messages[0]?.content).toBe("Summarise: long document");
 	});
 });
 
@@ -306,7 +306,7 @@ describe("gateway-mandatory routing (AC4)", () => {
 		await agent.run({}, makeCtx(gateway));
 
 		expect(calls).toHaveLength(1);
-		expect(calls[0].messages[0].content).toBe("ping");
+		expect(calls[0]?.messages[0]?.content).toBe("ping");
 	});
 
 	it("workflow routes all model calls through ctx.gateway", async () => {
@@ -324,7 +324,7 @@ describe("gateway-mandatory routing (AC4)", () => {
 		await wf.run({}, makeCtx(gateway));
 
 		expect(calls).toHaveLength(1);
-		expect(calls[0].messages[0].content).toBe("workflow-ping");
+		expect(calls[0]?.messages[0]?.content).toBe("workflow-ping");
 	});
 
 	it("skill routes all model calls through ctx.gateway", async () => {
@@ -340,7 +340,7 @@ describe("gateway-mandatory routing (AC4)", () => {
 		await skill.run({ text: "skill-ping" }, makeCtx(gateway));
 
 		expect(calls).toHaveLength(1);
-		expect(calls[0].messages[0].content).toBe("skill-ping");
+		expect(calls[0]?.messages[0]?.content).toBe("skill-ping");
 	});
 
 	it("tool can optionally route model calls through ctx.gateway", async () => {
@@ -353,7 +353,7 @@ describe("gateway-mandatory routing (AC4)", () => {
 				properties: { prompt: { type: "string" } },
 				required: ["prompt"],
 			},
-			async run({ prompt }, ctx) {
+			async run({ prompt }: { prompt: string }, ctx) {
 				return await ctx.gateway.chat([{ role: "user", content: prompt }]);
 			},
 		});
@@ -361,6 +361,6 @@ describe("gateway-mandatory routing (AC4)", () => {
 		await tool.run({ prompt: "tool-ping" }, makeCtx(gateway));
 
 		expect(calls).toHaveLength(1);
-		expect(calls[0].messages[0].content).toBe("tool-ping");
+		expect(calls[0]?.messages[0]?.content).toBe("tool-ping");
 	});
 });

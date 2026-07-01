@@ -1,5 +1,6 @@
-//! llama.cpp downloader with zip extraction for all platforms, plus GGUF weight
-//! download for the bundled local chat model.
+//! llama.cpp downloader. Pulls the platform release archive (`.zip` on Windows,
+//! `.tar.gz` on macOS/Linux) and extracts the binary, plus GGUF weight download
+//! for the bundled local chat model.
 
 use std::path::PathBuf;
 
@@ -8,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 use crate::registry::{LocalModelEntry, ModelRegistry};
 use crate::sidecar::download_manager::{
-    build_http_client, extract_from_zip, ryu_dir, ProgressCallback, VersionStore,
+    build_http_client, extract_binary_with_libs, ryu_dir, ProgressCallback, VersionStore,
 };
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
@@ -31,9 +32,27 @@ const TARGET_VERSION: &str = "b9670";
 fn archive_url() -> String {
     let tag = TARGET_VERSION;
     let platform = llamacpp_platform();
+    let ext = archive_ext();
     format!(
-        "https://github.com/ggml-org/llama.cpp/releases/download/{tag}/llama-{tag}-bin-{platform}.zip"
+        "https://github.com/ggml-org/llama.cpp/releases/download/{tag}/llama-{tag}-bin-{platform}.{ext}"
     )
+}
+
+/// llama.cpp ships Windows release assets as `.zip` and macOS/Linux assets as
+/// `.tar.gz`. Requesting `.zip` for macOS/Linux 404s (the asset doesn't exist),
+/// which is why install previously stalled on those platforms while Windows
+/// worked.
+fn archive_ext() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "zip"
+    } else {
+        "tar.gz"
+    }
+}
+
+/// True when the platform release asset is a `.zip` (Windows); `.tar.gz` otherwise.
+fn archive_is_zip() -> bool {
+    cfg!(target_os = "windows")
 }
 
 /// Maps ryu platform tags to llama.cpp platform names.
@@ -118,9 +137,10 @@ impl LlamaCppDownloader {
 
         // Download the archive through the center to a deterministic temp dest
         // (so its own `.part`/resume works), then read it back to extract.
-        let archive_dest = ryu_dir()
-            .join("tmp")
-            .join(format!("llamacpp-{TARGET_VERSION}.zip"));
+        let archive_dest = ryu_dir().join("tmp").join(format!(
+            "llamacpp-{TARGET_VERSION}.{ext}",
+            ext = archive_ext()
+        ));
         let archive_path = downloads
             .download_blocking(crate::downloads::DownloadSpec {
                 kind: crate::downloads::DownloadKind::Engine,
@@ -136,24 +156,19 @@ impl LlamaCppDownloader {
             .await
             .context("reading downloaded llama.cpp archive")?;
 
-        // Extract binary from the archive (blocking I/O on thread-pool thread).
-        let binary_name = "llama-server";
-        let extracted =
-            tokio::task::spawn_blocking(move || extract_from_zip(&archive_data, binary_name))
-                .await
-                .context("spawn_blocking for zip extraction")??;
-
-        // Write extracted binary atomically.
-        if let Some(parent) = dest.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let atomic_tmp = dest.with_extension("tmp");
-        tokio::fs::write(&atomic_tmp, &extracted)
-            .await
-            .with_context(|| format!("writing {}", atomic_tmp.display()))?;
-        tokio::fs::rename(&atomic_tmp, &dest)
-            .await
-            .with_context(|| format!("rename {} → {}", atomic_tmp.display(), dest.display()))?;
+        // Extract the binary plus its sibling shared libs into ~/.ryu/bin so the
+        // engine's same-dir rpath resolves at launch (blocking I/O on a
+        // thread-pool thread).
+        let bin_dir = dest
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| ryu_dir().join("bin"));
+        let is_zip = archive_is_zip();
+        let dest = tokio::task::spawn_blocking(move || {
+            extract_binary_with_libs(&archive_data, "llama-server", &bin_dir, is_zip)
+        })
+        .await
+        .context("spawn_blocking for archive extraction")??;
 
         // Set executable bit on Unix.
         #[cfg(unix)]
@@ -205,10 +220,11 @@ impl LlamaCppDownloader {
         let url = archive_url();
         tracing::info!("downloading llama.cpp (for llama-tts) from {url}");
         // Download the archive through the center (shows in the overlay), then
-        // extract llama-tts. Shares the llama-server release zip.
-        let archive_dest = ryu_dir()
-            .join("tmp")
-            .join(format!("llamacpp-tts-{TARGET_VERSION}.zip"));
+        // extract llama-tts. Shares the llama-server release archive.
+        let archive_dest = ryu_dir().join("tmp").join(format!(
+            "llamacpp-tts-{TARGET_VERSION}.{ext}",
+            ext = archive_ext()
+        ));
         let archive_path = downloads
             .download_blocking(crate::downloads::DownloadSpec {
                 kind: crate::downloads::DownloadKind::Voice,
@@ -224,21 +240,18 @@ impl LlamaCppDownloader {
             .await
             .context("reading downloaded llama-tts archive")?;
 
-        let extracted =
-            tokio::task::spawn_blocking(move || extract_from_zip(&archive_data, "llama-tts"))
-                .await
-                .context("spawn_blocking for zip extraction")??;
-
-        if let Some(parent) = dest.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let atomic_tmp = dest.with_extension("tmp");
-        tokio::fs::write(&atomic_tmp, &extracted)
-            .await
-            .with_context(|| format!("writing {}", atomic_tmp.display()))?;
-        tokio::fs::rename(&atomic_tmp, &dest)
-            .await
-            .with_context(|| format!("rename {} → {}", atomic_tmp.display(), dest.display()))?;
+        // Extract llama-tts plus its sibling shared libs (shared with
+        // llama-server) into ~/.ryu/bin so its same-dir rpath resolves.
+        let bin_dir = dest
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| ryu_dir().join("bin"));
+        let is_zip = archive_is_zip();
+        let dest = tokio::task::spawn_blocking(move || {
+            extract_binary_with_libs(&archive_data, "llama-tts", &bin_dir, is_zip)
+        })
+        .await
+        .context("spawn_blocking for archive extraction")??;
         let _ = tokio::fs::remove_file(&archive_path).await;
 
         #[cfg(unix)]

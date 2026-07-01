@@ -668,7 +668,10 @@ mod tests {
     fn detection_mode_roundtrips() {
         assert_eq!(DetectionMode::from_pref("off"), DetectionMode::Off);
         assert_eq!(DetectionMode::from_pref("suggest"), DetectionMode::Suggest);
-        assert_eq!(DetectionMode::from_pref("auto_high"), DetectionMode::AutoHigh);
+        assert_eq!(
+            DetectionMode::from_pref("auto_high"),
+            DetectionMode::AutoHigh
+        );
         assert_eq!(DetectionMode::from_pref("auto-all"), DetectionMode::AutoAll);
         assert_eq!(DetectionMode::from_pref("garbage"), DetectionMode::Suggest);
         assert_eq!(DetectionMode::AutoHigh.as_str(), "auto_high");

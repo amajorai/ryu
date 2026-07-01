@@ -415,6 +415,8 @@ mod tests {
             inference: None,
             version: "1.0.0".into(),
             locked: false,
+            orchestrator: None,
+            can_create_agents: None,
         }
     }
 

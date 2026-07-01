@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * A minimal Ryu agent (Runnable, kind: "agent").
  *
@@ -10,26 +11,29 @@
  * Env:  RYU_GATEWAY_URL (default http://127.0.0.1:7981), RYU_GATEWAY_TOKEN, RYU_MODEL
  */
 
-import { defineModel } from "@ryuhq/sdk/model";
 import { defineAgent } from "@ryuhq/sdk";
+import { defineModel } from "@ryuhq/sdk/model";
 
 const model = defineModel(process.env.RYU_MODEL ?? "gpt-4o-mini");
 
 export const haiku = defineAgent<{ topic: string }, string>({
-  id: "agent-haiku",
-  name: "Haiku Writer",
-  async run(input) {
-    const reply = await model.chat([
-      { role: "system", content: "You write a single three-line haiku. No preamble." },
-      { role: "user", content: `Topic: ${input.topic}` },
-    ]);
-    return reply.content;
-  },
+	id: "agent-haiku",
+	name: "Haiku Writer",
+	async run(input) {
+		const reply = await model.chat([
+			{
+				role: "system",
+				content: "You write a single three-line haiku. No preamble.",
+			},
+			{ role: "user", content: `Topic: ${input.topic}` },
+		]);
+		return reply.content;
+	},
 });
 
 // Demo when run directly.
 if (import.meta.main) {
-  const topic = process.argv[2] ?? "the sea at dawn";
-  const out = await haiku.run({ topic }, { gateway: undefined as never });
-  process.stdout.write(`${out}\n`);
+	const topic = process.argv[2] ?? "the sea at dawn";
+	const out = await haiku.run({ topic }, { gateway: undefined as never });
+	process.stdout.write(`${out}\n`);
 }

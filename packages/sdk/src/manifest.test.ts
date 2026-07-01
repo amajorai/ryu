@@ -14,6 +14,7 @@
  * `apps/core/src/plugin_manifest/mod.rs` assert the same fixture parses).
  */
 
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
 	existsSync,
 	mkdirSync,
@@ -22,9 +23,8 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { agent, PluginBuilder, skill, tool, workflow } from "./builder";
-import { PluginManifestSchema } from "./manifest";
+import { agent, PluginBuilder, skill, tool, workflow } from "./builder.ts";
+import { PluginManifestSchema } from "./manifest.ts";
 
 // ── builder unit tests ────────────────────────────────────────────────────────
 
@@ -185,7 +185,9 @@ describe("round-trip: SDK build → JSON → Core schema parse", () => {
 		const result = PluginManifestSchema.safeParse(parsed);
 
 		expect(result.success).toBe(true);
-		if (!result.success) return;
+		if (!result.success) {
+			return;
+		}
 
 		const loaded = result.data;
 		expect(loaded.id).toBe("com.example.research-assistant");
@@ -220,7 +222,9 @@ describe("round-trip: SDK build → JSON → Core schema parse", () => {
 
 		const result = PluginManifestSchema.safeParse(fixture);
 		expect(result.success).toBe(true);
-		if (!result.success) return;
+		if (!result.success) {
+			return;
+		}
 
 		expect(result.data.id).toBe("com.example.research-assistant");
 		expect(result.data.runnables).toHaveLength(4);

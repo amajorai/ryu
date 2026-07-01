@@ -20,9 +20,7 @@
     }
   ],
   "contributes": {
-    "policies": [
-      { "id": "policy-firewall", "title": "Gateway Firewall" }
-    ]
+    "policies": [{ "id": "policy-firewall", "title": "Gateway Firewall" }]
   },
   "permission_grants": []
 }

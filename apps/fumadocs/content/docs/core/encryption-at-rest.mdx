@@ -1,0 +1,142 @@
+---
+title: "Encryption at Rest"
+description: "How Core seals sensitive data on disk with a unified FieldCipher, a keychain-sourced master key, and lazy plaintext migration."
+---
+
+Core protects sensitive user data on disk so that obtaining the storage (a stolen laptop, a copied
+`~/.ryu` directory, a leaked backup) does not yield plaintext chats or secrets. One crypto path,
+`apps/core/src/crypto/mod.rs`, is the seam everything hangs off: a single `FieldCipher` plus a
+swappable master key resolved from the OS keychain.
+
+This is the Core-vs-Gateway split in practice. At-rest encryption of local orchestration data is
+part of *what runs*, so it lives in Core. The Gateway's firewall and DLP govern *what is allowed
+or shared* on egress, a separate layer. The [Identity Vault](/docs/core/identity-vault) follows the
+same rule: Core owns storage and encryption, the Gateway owns scope and audit.
+
+<Callout type="warn">
+  Encryption at rest is shipped in slices and is **partial today**. Sealed now: chat message bodies
+  and conversation titles (`conversations.db`), long-term memory entries (`memory_entries`), and
+  Identity Vault credential state (`identities.db`). **Not yet sealed:** preferences and the API
+  keys stored in them (`preferences.db`), the device token (`~/.ryu/auth.json`), and Spaces/RAG
+  chunk text plus embeddings (`spaces.db`). The unit tests cover the cipher and every key-resolution
+  branch, and the real Windows Credential Manager has been round-tripped on one host, but a full
+  live HTTP run (POST a chat, confirm `enc:v1:` on disk, restart, read back) is not yet verified.
+</Callout>
+
+## The unified FieldCipher
+
+`FieldCipher` is a ChaCha20-Poly1305 AEAD with a 256-bit key and a fresh 96-bit (12-byte) random
+nonce per record. It exposes two storage shapes:
+
+- **Field envelope** for `TEXT` columns. `seal(plaintext)` returns an `enc:v1:` string; the nonce is
+  prepended to the ciphertext-plus-tag, then base64 encoded. No schema change is needed because the
+  envelope rides in the existing column.
+- **Low-level `encrypt`/`decrypt`** returning a `(nonce, ciphertext)` pair for blob columns, used by
+  the long-term memory store, which keeps `nonce` and `ciphertext` in separate `BLOB` columns.
+
+The envelope format is identical to the one described in the [Identity Vault](/docs/core/identity-vault):
+
+```
+enc:v1:<base64( nonce[12] || ciphertext+tag )>
+```
+
+The `v1` version prefix lets the scheme evolve without ambiguity. The Cloud control plane mirrors
+this `enc:v1:` style with AES-256-GCM; both are AEAD, and the version prefix lets either side move
+to `enc:v2:` later.
+
+### Seal and open, with lazy upgrade
+
+`open(stored)` is what makes migration transparent. If the value carries the `enc:v1:` prefix it is
+decrypted; otherwise it is treated as **legacy plaintext** and returned verbatim. So reads accept
+both forms, and every rewrite upgrades a row to ciphertext. There is no blocking migration and no
+schema churn: a row written before encryption was introduced keeps reading, and the next write to it
+seals it.
+
+```
+seal("hello")  -> "enc:v1:…"        // new writes are always sealed
+open("enc:v1:…") -> "hello"          // sealed values decrypt
+open("legacy row") -> "legacy row"   // pre-encryption rows pass through
+```
+
+`FieldCipher::is_sealed` reports whether a stored value already carries the envelope prefix, which an
+optional one-shot background re-encrypt sweep can use to skip rows that are already sealed.
+
+## Master-key resolution
+
+A single 32-byte master key backs the process-wide cipher (`global_cipher`). It is loaded once and
+cached, resolved in strict priority order. Every source must work **headless** (bots, scheduler, and
+channels run with no human present), so no source prompts on the default path.
+
+1. **`RYU_MASTER_KEY`** env, a base64-encoded 32-byte key. Highest priority, for
+   servers, containers, CI, or operator-controlled key injection. Never written to disk or the
+   keychain by Core.
+2. **OS keychain** (default where reachable) via the `keyring` crate: Windows Credential Manager,
+   macOS Keychain, or Linux Secret Service. Service `ryu`, account `master-key`. The key lives
+   **outside `~/.ryu`**, so a copy of the data directory alone cannot decrypt it. Headless-safe: the
+   OS unlocks it for the logged-in or service account with no prompt.
+3. **File fallback** at `~/.ryu/master.key` (owner-only `0600` on Unix), used only when neither the
+   env var nor a working keychain is present, for example a headless Linux box with no Secret
+   Service. This is the degraded level, kept so Core never fails to start.
+
+On first run, if the chosen source has no key but a legacy `~/.ryu/memory.key` exists, that key is
+**adopted as the master key** so existing encrypted `memory_entries` still decrypt, and it is
+promoted into the keychain. The master key thus unifies memory, conversations, and identity state
+under one key and one custody path.
+
+**Fail-closed.** If the master key cannot be loaded, the stores refuse to open with an error rather
+than silently using an ephemeral key. A throwaway key would make every existing encrypted row
+unreadable and write new rows that die on the next restart, which is silent corruption. The file
+fallback generates and persists a key on first use, so this only triggers on a genuine filesystem
+failure.
+
+<Callout type="warn">
+  **Data-loss footgun.** The master key is the only thing that can decrypt local chats. If the OS
+  keychain entry is lost (re-imaged machine, new OS user, cleared credential store) and
+  `RYU_MASTER_KEY` is not set, the encrypted data is permanently unrecoverable. Operators who care
+  about durability should set `RYU_MASTER_KEY` (backed up safely) as the source of truth.
+
+  **Headless caveat (Windows).** The Credential Manager backend may not resolve under a service
+  account with no loaded user profile, so a headless Core can silently land on the file fallback (the
+  "key next to data" weakness). Headless deployments should set `RYU_MASTER_KEY` explicitly rather
+  than rely on the keychain. Which path a given headless host actually takes still needs empirical
+  confirmation.
+</Callout>
+
+## What is sealed today
+
+Metadata stays plaintext by design so the app keeps functioning (lists, ordering, routing): ids,
+roles, timestamps, model selection, and token counts are never sealed. Only content and secrets are
+encrypted, and only in the stores below.
+
+| Store | Sealed now? | Field(s) | Where |
+|---|---|---|---|
+| `conversations.db` messages | Yes | message `content`, conversation `title` | `server/conversations.rs` (sealed on append, fork, and sync insert; opened on read) |
+| `conversations.db` `memory_entries` | Yes | entry text (`nonce` + `ciphertext` blob columns) | `server/memory.rs` (refit onto the unified master key) |
+| `identities.db` connections | Yes | credential `encrypted_state` | `identity/store.rs`, `identity/source/manual.rs` (see [Identity Vault](/docs/core/identity-vault)) |
+| `message-embeddings.db` | No (pending) | vectors + metadata only, no message text | text is not co-located (snippets are re-read and decrypted from `conversations.db` on hit), but the vectors themselves are unsealed content-derived data |
+| `preferences.db` | No (pending) | secret values (`hf-token`, `composio-api-key`, `openrouter-api-key`, …) | `server/preferences.rs` plaintext today |
+| `~/.ryu/auth.json` | No (pending) | device `token` | plaintext today |
+| `spaces.db` (RAG) | No (pending) | chunk `content` + embeddings | plaintext today; embeddings are content-derived and invertible, so they count as content |
+| monitors / agents / teams / traces / plugins / workflows DBs | No | mostly metadata | plaintext |
+
+The Gateway has one separate secret-at-rest gap: `audit.db` persists the raw `api_key` unredacted on
+disk (redaction is applied on read). Gateway chat caches are in-memory only, so no chat content is at
+rest there.
+
+## Relationship to the Cloud control plane
+
+The same three data classes (content, secrets, metadata) drive the Cloud control plane
+(`packages/db/src/crypto.ts`), which seals synced conversation content and title,
+`IntegrationToken.secret`, and channel bot secrets with a server-held master key (`RYU_DB_MASTER_KEY`)
+under an AES-256-GCM `enc:v1:` envelope. An opt-in zero-access mode (key derived client-side from a
+user passcode, server stores only ciphertext it cannot read) is planned but not yet shipped. This
+page covers Core's local at-rest layer; the Cloud envelope is the server-managed counterpart.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/core/identity-vault" />
+  <DocCard href="/docs/core/memory" />
+  <DocCard href="/docs/core/conversations-sessions" />
+  <DocCard href="/docs/gateway/governance" />
+</Cards>

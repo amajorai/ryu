@@ -222,7 +222,10 @@ mod tests {
             .await
             .unwrap();
         store
-            .set(DIAGNOSTICS_OTLP_ENDPOINT_PREF_KEY, " https://otlp.example  ")
+            .set(
+                DIAGNOSTICS_OTLP_ENDPOINT_PREF_KEY,
+                " https://otlp.example  ",
+            )
             .await
             .unwrap();
         assert!(!product_analytics_enabled(&store).await);

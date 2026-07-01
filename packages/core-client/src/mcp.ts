@@ -6,7 +6,7 @@
 // tool list to a single agent's allowlist, and test-calls a tool. Wire shapes
 // mirror `apps/core/src/sidecar/mcp/mod.rs` (snake_case fields, no serde rename).
 
-import { type ApiTarget, request } from "./client";
+import { type ApiTarget, request } from "./client.ts";
 
 /** A registered MCP server as Core summarizes it for the listing endpoint. */
 export interface McpServer {

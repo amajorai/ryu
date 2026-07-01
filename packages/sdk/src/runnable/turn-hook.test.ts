@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { PluginManifestSchema } from "../manifest";
-import { definePlugin, defineTurnHook, type HookDirective } from "./turn-hook";
+import { PluginManifestSchema } from "../manifest.ts";
+import {
+	definePlugin,
+	defineTurnHook,
+	type HookDirective,
+} from "./turn-hook.ts";
 
 describe("defineTurnHook", () => {
 	it("serializes the run function into sandbox code and defaults `on`", () => {

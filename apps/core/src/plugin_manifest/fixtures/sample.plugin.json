@@ -38,10 +38,7 @@
       }
     }
   ],
-  "permission_grants": [
-    "mcp:web_search",
-    "mcp:file_read"
-  ],
+  "permission_grants": ["mcp:web_search", "mcp:file_read"],
   "companion": {
     "label": "Research Assistant",
     "icon": "magnifying-glass",

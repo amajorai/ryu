@@ -23,6 +23,11 @@ target/
 # Environment variables
 .env
 .env*.local
+# Extension store-publishing credentials (real OAuth secrets / API keys live here).
+# Keep only the .example tracked.
+.env.submit
+.env.submit.backup-*
+!.env.submit.example
 
 # IDEs and editors
 .vscode/*

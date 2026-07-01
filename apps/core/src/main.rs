@@ -1,13 +1,16 @@
 mod agent_routing;
 mod agents;
+mod approvals;
 mod auth;
 mod capabilities;
 mod catalog;
 mod catalog_source;
 mod claude_config;
 mod codex_config;
+mod collab;
 mod composio_auth;
 mod composio_catalog;
+mod composio_connect;
 mod composio_triggers;
 mod connections;
 mod crash;
@@ -16,9 +19,11 @@ mod dashboard;
 mod data_path;
 mod downloads;
 mod events;
+mod finetune;
 mod hardware;
 mod hf_auth;
 mod identity;
+mod identity_verify;
 mod inference;
 mod mcp_catalog;
 mod meetings;
@@ -26,10 +31,10 @@ mod mesh;
 mod model_catalog;
 mod model_format;
 mod monitors;
+mod okf;
 mod openrouter_auth;
 mod paths;
 mod pi_config;
-mod approvals;
 mod plugin_host;
 mod plugin_manifest;
 mod plugin_storage;
@@ -37,6 +42,7 @@ mod plugins;
 mod predict;
 mod privacy;
 mod quests;
+mod realtime;
 mod recipes;
 mod registry;
 mod runnable;
@@ -52,6 +58,7 @@ mod teams;
 mod telemetry;
 mod tool_exec;
 mod update;
+mod voice;
 mod webhook_ingress;
 mod workflow;
 
@@ -67,11 +74,11 @@ use sidecar::{
     install_state::InstallStatusStore,
     onboarding::SetupManager,
     providers::{
-        DockerModelRunnerManager, llamacpp::LlamaCppEmbedManager,
-        llamacpp::LlamaCppManager, mlx::MlxManager,
+        llamacpp::LlamaCppEmbedManager, llamacpp::LlamaCppManager, mlx::MlxManager,
         mlx_vlm::MlxVlmManager, ollama::OllamaManager, omlx::OmlxManager, outetts::OuteTtsManager,
         parakeet::ParakeetManager, ryutts::RyuTtsManager, sdcpp::StableDiffusionManager,
-        sglang::SglangManager, vllm::VllmManager, whispercpp::WhisperCppManager,
+        sglang::SglangManager, unsloth::UnslothManager, vllm::VllmManager,
+        whispercpp::WhisperCppManager, DockerModelRunnerManager,
     },
     tailscale::TailscaleManager,
     tools::{
@@ -241,6 +248,10 @@ async fn main() {
         // alongside the resident chat engine (NOT in startup_order: diffusion
         // models are multi-GB, so it only starts once a user installs it).
         Arc::new(StableDiffusionManager::new().with_downloads(download_center.clone())),
+        // Unsloth fine-tuning sidecar — Python LoRA/QLoRA training runtime. Opt-in;
+        // NOT in startup_order — training is heavy + on-demand and needs a CUDA
+        // GPU, so it only starts once a user installs it or runs `bun run dev:unsloth`.
+        Arc::new(UnslothManager::new().with_downloads(download_center.clone())),
         // Tools
         Arc::new(TemporalManager::new().with_downloads(download_center.clone())),
         Arc::new(SpiderManager::new()),
@@ -302,6 +313,20 @@ async fn main() {
     // `start_all` runs (see the `seed_installed_from_disk` call below).
     let seed_names = startup_order.clone();
     let sidecars = SidecarManager::new(all_sidecars, startup_order, Arc::clone(&setup));
+
+    // Preflight the OS permissions the native capture/automation sidecars (ghost,
+    // shadow) depend on. Core only detects and reports — it is a background
+    // service and cannot show the system dialogs; prompting is the desktop app's
+    // and `ghost setup`'s job. Missing grants are logged loudly so a degraded
+    // sidecar has an obvious cause instead of failing silently downstream.
+    for cap in ghost_permissions::ALL {
+        if ghost_permissions::required(cap) && !ghost_permissions::granted(cap) {
+            tracing::warn!(
+                "{} permission not granted — ghost/shadow capture will be degraded until it is enabled (desktop onboarding, System Settings, or `ghost setup`)",
+                cap.label()
+            );
+        }
+    }
 
     // Local ryu-gateway (data plane). Created before the server state so the
     // `/api/engine/active` swap endpoint can re-point the gateway's `local`
@@ -377,9 +402,7 @@ async fn main() {
         Err(e) => panic!("failed to open support-access audit store: {e:#}"),
     };
     match support_access::sweep_expired(&preferences).await {
-        Ok(true) => tracing::info!(
-            "support-access: expired local grant auto-disabled at startup"
-        ),
+        Ok(true) => tracing::info!("support-access: expired local grant auto-disabled at startup"),
         Ok(false) => {}
         Err(e) => tracing::warn!("support-access: startup expiry sweep failed: {e:#}"),
     }
@@ -663,8 +686,9 @@ async fn main() {
         Ok(store) => store,
         Err(e) => panic!("failed to open approvals store: {e:#}"),
     };
-    let approval_engine = crate::approvals::ApprovalEngine::new(approval_store, reqwest::Client::new())
-        .with_monitors(monitor_engine.store.clone());
+    let approval_engine =
+        crate::approvals::ApprovalEngine::new(approval_store, reqwest::Client::new())
+            .with_monitors(monitor_engine.store.clone());
     crate::approvals::set_global_engine(approval_engine.clone());
     {
         let sweep_engine = approval_engine.clone();
@@ -757,7 +781,31 @@ async fn main() {
     // gets its first user message on this channel; the consumer (spawned below,
     // once `ServerState` exists) asks the default local model for a concise title.
     let (auto_title_tx, auto_title_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let conversations = conversations.with_auto_title(auto_title_tx);
+    // Room-keyed realtime fan-out registry (Phase 1). Built ONCE here and shared
+    // (Clone is Arc-backed) between the conversation store — which publishes a live
+    // `Events` frame on every persisted turn — and `ServerState` below, which the
+    // `/api/realtime/ws` handler subscribes against. Both MUST be the same instance
+    // or publishes reach a registry no socket is listening to.
+    let realtime = crate::realtime::RoomRegistry::new();
+    let conversations = conversations
+        .with_auto_title(auto_title_tx)
+        .with_realtime(realtime.clone());
+
+    // Authoritative CRDT document engine (Phase 3). Backed by `~/.ryu/collab.db`
+    // (an append-only update log + compacted snapshots), keyed by document id.
+    // Driven by the `kind:"document"` path of `/api/realtime/ws`. Built ONCE here
+    // and shared (Clone is Arc-backed) into `ServerState` below so every socket
+    // resolves the same in-memory replica per live document.
+    let collab = crate::collab::DocRegistry::new(Arc::new(
+        crate::collab::CollabStore::open_default().expect("opening collab.db"),
+    ));
+
+    // Fine-tuning job store (Unsloth integration). Durable record of fine-tune
+    // jobs; the training itself runs in the opt-in `unsloth` sidecar.
+    let finetune_store = match crate::finetune::FinetuneStore::open_default() {
+        Ok(store) => store,
+        Err(e) => panic!("failed to open finetune store: {e:#}"),
+    };
 
     let server_state = server::ServerState {
         setup: Arc::clone(&setup),
@@ -795,6 +843,18 @@ async fn main() {
         mesh: crate::mesh::MeshHandle::new(),
         connections: crate::connections::ConnectionRegistry::new(),
         hardware: hardware_store,
+        // Room-keyed realtime fan-out registry (Phase 1). Production tunables
+        // (5-min hibernation, 30s presence TTL). Already Arc-backed, cloned into
+        // each request via `ServerState`.
+        realtime,
+        // Authoritative CRDT document engine (Phase 3). Same instance the
+        // `kind:"document"` realtime path applies/persists/rebroadcasts against.
+        collab,
+        finetune: finetune_store,
+        // Captured for the public `/api/realtime/ws` handler's in-handler node
+        // token enforcement (the public router has no `auth_token` Extension).
+        // Same env source the protected router resolves below.
+        node_token: std::env::var("RYU_TOKEN").ok(),
     };
     let auth_token = std::env::var("RYU_TOKEN").ok();
 
@@ -992,7 +1052,20 @@ async fn main() {
         // DownloadCenter (#456), so they stream to disk and show in the overlay.
         let downloads_ref = download_center.clone();
         tokio::spawn(async move {
-            setup_ref.install_local_stack(&downloads_ref).await;
+            let stack = setup_ref.install_local_stack(&downloads_ref).await;
+            // The return value used to be dropped, so a failed first-run install
+            // left Core serving with no local model and only a buried mid-install
+            // warning. Emit a loud, single summary line when the default chat
+            // stack did not come up so the failure is visible in logs (and, via
+            // the catalog/install-status the desktop polls, to the user).
+            if !(stack.llamacpp_installed && stack.gguf_installed) {
+                tracing::error!(
+                    ?stack,
+                    "local inference stack did not fully install on first run — \
+                     the default local model is unavailable; chat will hang or \
+                     error until a model/provider is configured"
+                );
+            }
             // Surface the default-installed tool apps (agentbrowser, spider,
             // shadow, ghost, llmfit) as "installed" in the catalog. The catalog's
             // install_state is read from InstallStatusStore, so onboarding's
@@ -1041,8 +1114,17 @@ async fn main() {
     // numbers ride the existing `/api/sidecar/status` poll.
     sidecars.spawn_resource_sampler();
 
-    // Serve HTTP API
-    axum::serve(listener, router).await.expect("server error");
+    // Serve HTTP API. `into_make_service_with_connect_info` threads the peer
+    // `SocketAddr` so `/api/realtime/ws` can distinguish a genuine loopback peer
+    // (the local single user) from a remote holder of the shared `RYU_TOKEN` when
+    // deciding access to unpersisted rooms. Handlers that don't extract
+    // `ConnectInfo` are unaffected — it is a superset of the plain make-service.
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .expect("server error");
 }
 
 /// Ensure the single Identity Vault health-check scheduled job exists (#524).

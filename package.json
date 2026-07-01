@@ -36,10 +36,12 @@
     "release:local": "bash scripts/release/release-local.sh",
     "publish:npm": "bash tools/publish-npm.sh",
     "publish:crates": "bash tools/publish-crates.sh",
-    "dev": "turbo dev --concurrency=20",
+    "dev": "turbo dev --concurrency=20 --continue",
     "kill-ports": "node scripts/free-ports.mjs",
     "build": "turbo build",
     "check-types": "turbo check-types",
+    "test": "turbo test",
+    "test:rust": "cargo test --manifest-path apps/core/Cargo.toml && cargo test --manifest-path apps/gateway/Cargo.toml && cargo test --manifest-path apps/cli/Cargo.toml && cargo test --manifest-path crates/ryu-sdk/Cargo.toml && cargo test --manifest-path crates/ghost-core/Cargo.toml && cargo test --manifest-path crates/shadow-core/Cargo.toml",
     "dev:native": "turbo -F native dev",
     "dev:web": "turbo -F web dev",
     "dev:server": "turbo -F server dev",
@@ -51,7 +53,7 @@
     "dev:island": "turbo -F island dev",
     "dev:storyboard": "turbo -F storyboard dev",
     "dev:fumadocs": "turbo run dev --filter=fumadocs",
-    "build:sdk": "turbo run build --filter=@ryu/sdk --filter=create-ryu-app --filter=@ryu/client",
+    "build:sdk": "turbo run build --filter=@ryuhq/sdk --filter=create-ryu-app --filter=@ryuhq/client",
     "dev:core": "turbo -F core dev",
     "dev:gateway": "turbo -F gateway dev",
     "dev:tts": "cd apps/tts-sidecar && python -m ryu_tts",
@@ -87,5 +89,10 @@
     ]
   },
   "packageManager": "bun@1.3.5",
-  "trustedDependencies": ["electron"]
+  "trustedDependencies": [
+    "electron"
+  ],
+  "patchedDependencies": {
+    "@expo/cli@55.0.16": "patches/@expo%2Fcli@55.0.16.patch"
+  }
 }

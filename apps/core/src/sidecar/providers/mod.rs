@@ -9,6 +9,7 @@ pub mod parakeet;
 pub mod ryutts;
 pub mod sdcpp;
 pub mod sglang;
+pub mod unsloth;
 pub mod vllm;
 pub mod whispercpp;
 

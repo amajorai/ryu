@@ -199,17 +199,12 @@ impl ApprovalStore {
     /// The sweep uses this to expire stale requests.
     pub async fn pending_expired(&self, now: &str) -> Result<Vec<ApprovalRequest>> {
         let conn = self.conn.lock().await;
-        let mut stmt =
-            conn.prepare("SELECT json FROM approvals WHERE status = 'pending'")?;
+        let mut stmt = conn.prepare("SELECT json FROM approvals WHERE status = 'pending'")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let mut out = Vec::new();
         for row in rows {
             if let Ok(req) = serde_json::from_str::<ApprovalRequest>(&row?) {
-                if req
-                    .expires_at
-                    .as_deref()
-                    .is_some_and(|exp| exp <= now)
-                {
+                if req.expires_at.as_deref().is_some_and(|exp| exp <= now) {
                     out.push(req);
                 }
             }

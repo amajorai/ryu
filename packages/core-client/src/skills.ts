@@ -6,7 +6,7 @@
 // lives in Core over the public no-key skills.sh endpoints — this module only
 // shapes requests and parses responses, so desktop/mobile/extension reuse it.
 
-import { type ApiTarget, buyerTokenHeader, request } from "./client";
+import { type ApiTarget, buyerTokenHeader, request } from "./client.ts";
 
 /** A Skill row in the left-hand selector. */
 export interface SkillCard {
@@ -56,8 +56,8 @@ export interface SkillDetail {
 }
 
 interface CardWire {
-	id: string;
 	downloads?: number;
+	id: string;
 	installed?: boolean;
 	installs?: number;
 	name?: string;

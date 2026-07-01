@@ -6,7 +6,8 @@
  * in one place and avoids circular imports between the four factory modules.
  */
 
-import type { ChatDelta, ChatMessage, ChatResult } from "../model/client";
+import type { ChatDelta, ChatMessage, ChatResult } from "../model/client.ts";
+
 export type { ChatDelta, ChatMessage, ChatResult };
 
 // ── GatewayClient ─────────────────────────────────────────────────────────────

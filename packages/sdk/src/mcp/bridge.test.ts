@@ -15,9 +15,9 @@
 import { describe, expect, it } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { callTool, listTools } from "./client";
-import type { SdkRunnable } from "./server";
-import { McpServer, unwrapContent } from "./server";
+import { callTool, listTools } from "./client.ts";
+import type { SdkRunnable } from "./server.ts";
+import { McpServer, unwrapContent } from "./server.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(__dirname, "fixture-server.ts");
@@ -120,7 +120,7 @@ describe("McpServer.serve()", () => {
 		]);
 
 		expect(outputs.length).toBeGreaterThan(0);
-		const resp = JSON.parse(outputs[0]);
+		const resp = JSON.parse(outputs[0] as string);
 		expect(resp.id).toBe(1);
 		expect(resp.result?.protocolVersion).toBe("2024-11-05");
 		expect(resp.result?.capabilities?.tools).toBeDefined();

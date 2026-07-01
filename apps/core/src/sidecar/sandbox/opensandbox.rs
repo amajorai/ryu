@@ -151,8 +151,12 @@ async fn create_sandbox(_caps: &SandboxCapabilities) -> Result<String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    extract_sandbox_id(&stdout)
-        .ok_or_else(|| anyhow!("osb sandbox create returned no recognisable id: {}", stdout.trim()))
+    extract_sandbox_id(&stdout).ok_or_else(|| {
+        anyhow!(
+            "osb sandbox create returned no recognisable id: {}",
+            stdout.trim()
+        )
+    })
 }
 
 /// Pull a sandbox id out of the create command's JSON, tolerating the common
@@ -320,12 +324,10 @@ mod tests {
 
     #[tokio::test]
     async fn detect_never_hangs() {
-        let result = tokio::time::timeout(
-            Duration::from_secs(DEFAULT_DETECT_SECS * 2 + 2),
-            detect(),
-        )
-        .await
-        .expect("detect() must not hang beyond 2× timeout");
+        let result =
+            tokio::time::timeout(Duration::from_secs(DEFAULT_DETECT_SECS * 2 + 2), detect())
+                .await
+                .expect("detect() must not hang beyond 2× timeout");
         match result {
             DetectResult::Available => {}
             DetectResult::Unavailable(reason) => assert!(!reason.is_empty()),

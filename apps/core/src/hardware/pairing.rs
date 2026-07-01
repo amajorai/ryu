@@ -209,7 +209,10 @@ mod tests {
             pairing_nonce: "abc".into(),
             device_type: DeviceType::Watch,
         };
-        assert_eq!(pair(&store, &short, "u").await.unwrap_err(), PairError::BadNonce);
+        assert_eq!(
+            pair(&store, &short, "u").await.unwrap_err(),
+            PairError::BadNonce
+        );
 
         let req = PairRequest {
             device_id: "rhw_y".into(),

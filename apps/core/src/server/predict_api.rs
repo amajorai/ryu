@@ -17,20 +17,27 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::{call_side_model, json_error, ServerState};
-use crate::predict::{
-    self, PredictConfig, PREDICT_CONFIG_PREF,
-};
+use crate::predict::{self, PredictConfig, PREDICT_CONFIG_PREF};
 
 /// Load the persisted config (defaults applied) for the current node.
 async fn load_config(state: &ServerState) -> PredictConfig {
-    let raw = state.preferences.get(PREDICT_CONFIG_PREF).await.ok().flatten();
+    let raw = state
+        .preferences
+        .get(PREDICT_CONFIG_PREF)
+        .await
+        .ok()
+        .flatten();
     PredictConfig::from_pref(raw.as_deref())
 }
 
 /// Resolve the model that answers predictions: an explicit `agent_id`'s bound
 /// model → `config.model` → env `RYU_PREDICT_MODEL`/`RYU_DEFAULT_LLM_MODEL` →
 /// the built-in default. Nothing hardcoded.
-async fn resolve_model(state: &ServerState, config: &PredictConfig, agent_id: Option<&str>) -> String {
+async fn resolve_model(
+    state: &ServerState,
+    config: &PredictConfig,
+    agent_id: Option<&str>,
+) -> String {
     // An explicit agent's bound chat model wins — it makes the prediction agent
     // a real, swappable card.
     if let Some(id) = agent_id.filter(|s| !s.is_empty()) {

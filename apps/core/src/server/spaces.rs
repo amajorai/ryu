@@ -505,9 +505,37 @@ impl SpaceStore {
         // (default) or a "database" (an editable data grid persisted as JSON in
         // `source`). The `kind` discriminates which editor opens it; embedding
         // treats a database's flattened text so it stays searchable like a page.
-        let _ = conn.execute_batch(
-            "ALTER TABLE documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'page';",
-        );
+        let _ = conn
+            .execute_batch("ALTER TABLE documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'page';");
+
+        // Multi-user tenancy (collaboration epic, Phase 0): the verified human
+        // owner of the document, the org it belongs to, its sharing visibility,
+        // and an optional owning team. Guarded by a PRAGMA table_info existence
+        // check (mirroring the conversations migration) so each ALTER is a no-op
+        // when the column already exists and a real error surfaces otherwise.
+        // ACL enforcement is wired in a later stage; schema-only for now.
+        let existing_doc_columns: std::collections::HashSet<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(documents)")?;
+            let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            names.filter_map(|r| r.ok()).collect()
+        };
+        for (col, ddl) in [
+            (
+                "owner_user_id",
+                "ALTER TABLE documents ADD COLUMN owner_user_id TEXT",
+            ),
+            ("org_id", "ALTER TABLE documents ADD COLUMN org_id TEXT"),
+            (
+                "visibility",
+                "ALTER TABLE documents ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'",
+            ),
+            ("team_id", "ALTER TABLE documents ADD COLUMN team_id TEXT"),
+        ] {
+            if !existing_doc_columns.contains(col) {
+                conn.execute_batch(ddl)
+                    .with_context(|| format!("adding column {col} to documents"))?;
+            }
+        }
 
         Ok(())
     }
@@ -712,6 +740,36 @@ impl SpaceStore {
     }
 
     /// Fetch a single document with its full markdown source.
+    /// Load the tenancy quartet (owner / org / visibility / team) for a document,
+    /// for the realtime WS gateway's access decision. Returns `Ok(None)` when the
+    /// document row does not exist. These columns are plaintext additive Phase 0
+    /// tenancy columns, so a raw `SELECT` compares correctly against a verified
+    /// caller's id.
+    pub async fn get_access_meta(
+        &self,
+        doc_id: &str,
+    ) -> Result<Option<crate::identity_verify::ResourceTenancy>> {
+        let conn = self.conn.lock().await;
+        let meta = conn
+            .query_row(
+                "SELECT owner_user_id, org_id, visibility, team_id
+                 FROM documents WHERE id = ?1",
+                params![doc_id],
+                |row| {
+                    Ok(crate::identity_verify::ResourceTenancy {
+                        owner_user_id: row.get(0)?,
+                        org_id: row.get(1)?,
+                        // NOT NULL DEFAULT 'private' in the schema, so always present.
+                        visibility: row.get(2)?,
+                        team_id: row.get(3)?,
+                    })
+                },
+            )
+            .optional()
+            .context("reading document access metadata")?;
+        Ok(meta)
+    }
+
     pub async fn get_document(&self, doc_id: &str) -> Result<Option<DocumentContent>> {
         let conn = self.conn.lock().await;
         let doc = conn

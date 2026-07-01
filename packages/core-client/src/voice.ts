@@ -55,17 +55,17 @@ export async function transcribeAudio(
 /** One selectable text-to-speech engine, as Core's `/api/voice/tts-engines`
  * returns it (built-in OuteTTS + whatever the Ryu TTS sidecar registry serves). */
 export interface TtsEngine {
-	id: string;
-	display_name: string;
-	description: string;
-	voices: string[];
 	default_voice: string;
-	sample_rate: number;
-	supports_cloning: boolean;
-	languages: string[];
-	size_mb: number;
+	description: string;
+	display_name: string;
+	id: string;
 	installed: boolean;
+	languages: string[];
 	loaded: boolean;
+	sample_rate: number;
+	size_mb: number;
+	supports_cloning: boolean;
+	voices: string[];
 }
 
 /** List the TTS engines available on this node (nothing hardcoded — Core mirrors
@@ -83,15 +83,15 @@ export async function listTtsEngines(target: ApiTarget): Promise<TtsEngine[]> {
 
 /** One curated, installable TTS model (voicebox-style), bound to its engine. */
 export interface TtsModel {
-	model_name: string;
+	default: boolean;
 	display_name: string;
 	engine: string;
 	engine_display_name: string;
 	hf_repo_id: string;
-	size_mb: number;
-	languages: string[];
-	default: boolean;
 	installed: boolean;
+	languages: string[];
+	model_name: string;
+	size_mb: number;
 }
 
 /** List the curated, installable TTS models (the known-good set Core can install
@@ -137,14 +137,14 @@ export async function installTtsModel(
 export interface SpeakOptions {
 	/** Engine id; omit (or `"outetts"`) for the built-in default. */
 	engine?: string;
-	/** Voice id (engine-specific); defaults to the engine's default voice. */
-	voice?: string;
-	/** Speaking-rate multiplier where supported. */
-	speed?: number;
 	/** Language hint for multilingual engines. */
 	language?: string;
 	/** Reference wav path/URL for cloning-capable engines. */
 	referenceAudio?: string;
+	/** Speaking-rate multiplier where supported. */
+	speed?: number;
+	/** Voice id (engine-specific); defaults to the engine's default voice. */
+	voice?: string;
 }
 
 /** Synthesize speech via Core's `/api/voice/speak`, returning a playable WAV blob.

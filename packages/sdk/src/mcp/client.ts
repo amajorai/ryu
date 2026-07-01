@@ -120,6 +120,9 @@ class McpConnection {
 				return;
 			}
 			const [waiter] = conn.waiters.splice(idx, 1);
+			if (!waiter) {
+				return;
+			}
 			clearTimeout(waiter.timer);
 			if (parsed.error) {
 				waiter.reject(new Error(`MCP error: ${JSON.stringify(parsed.error)}`));
@@ -213,7 +216,7 @@ export async function listTools(cmd: McpStdioCommand): Promise<McpTool[]> {
 
 	const tools = (result as { tools?: unknown[] } | null)?.tools ?? [];
 	return (tools as unknown[])
-		.map((t) => {
+		.map((t): McpTool | null => {
 			const tool = t as Record<string, unknown>;
 			const name = tool.name;
 			if (typeof name !== "string") {

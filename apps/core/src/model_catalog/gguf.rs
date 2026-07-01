@@ -42,13 +42,13 @@ pub struct GgufMetadata {
 /// Conservative by design — unknown architectures default to `false` so a
 /// chat model is never mis-classified as diffusion.
 const DIFFUSION_ARCHITECTURES: &[&str] = &[
-    "flux",   // FLUX.1 dev / schnell / pro (city96 et al.)
-    "sd",     // Stable Diffusion 1.x generic
-    "sd1",    // SD 1.x explicit variant
-    "sd2",    // SD 2.x explicit variant
-    "sdxl",   // Stable Diffusion XL
-    "sd3",    // Stable Diffusion 3.x / 3.5
-    "mmdit",  // Multimodal Diffusion Transformer (SD3 alternate)
+    "flux",  // FLUX.1 dev / schnell / pro (city96 et al.)
+    "sd",    // Stable Diffusion 1.x generic
+    "sd1",   // SD 1.x explicit variant
+    "sd2",   // SD 2.x explicit variant
+    "sdxl",  // Stable Diffusion XL
+    "sd3",   // Stable Diffusion 3.x / 3.5
+    "mmdit", // Multimodal Diffusion Transformer (SD3 alternate)
     "auraflow",
 ];
 
@@ -182,9 +182,9 @@ fn skip_array<R: Read + Seek>(r: &mut R) -> io::Result<()> {
     let elem_type = read_u32(r)?;
     let count = read_u64(r)?;
     if let Some(size) = scalar_size(elem_type) {
-        let total = size.checked_mul(count).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "array length overflow")
-        })?;
+        let total = size
+            .checked_mul(count)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "array length overflow"))?;
         r.seek(SeekFrom::Current(total as i64))?;
         return Ok(());
     }
@@ -249,7 +249,7 @@ mod tests {
         out.extend_from_slice(&GGUF_MAGIC.to_le_bytes());
         out.extend_from_slice(&3u32.to_le_bytes()); // version
         out.extend_from_slice(&0u64.to_le_bytes()); // tensor_count
-        // +1 for the scalar entry we append below.
+                                                    // +1 for the scalar entry we append below.
         out.extend_from_slice(&((strings.len() as u64) + 1).to_le_bytes());
         let push_str = |out: &mut Vec<u8>, s: &str| {
             out.extend_from_slice(&(s.len() as u64).to_le_bytes());
@@ -288,15 +288,23 @@ mod tests {
 
     #[test]
     fn is_diffusion_matches_known_architectures() {
-        for arch in ["flux", "sdxl", "sd3", "sd", "sd1", "sd2", "mmdit", "auraflow"] {
+        for arch in [
+            "flux", "sdxl", "sd3", "sd", "sd1", "sd2", "mmdit", "auraflow",
+        ] {
             let bytes = synth_gguf(&[("general.architecture", arch)]);
             let meta = parse(&bytes);
-            assert!(meta.is_diffusion(), "{arch} should be classified as diffusion");
+            assert!(
+                meta.is_diffusion(),
+                "{arch} should be classified as diffusion"
+            );
         }
         for arch in ["llama", "gemma3", "mistral", "qwen2", "phi3"] {
             let bytes = synth_gguf(&[("general.architecture", arch)]);
             let meta = parse(&bytes);
-            assert!(!meta.is_diffusion(), "{arch} must not be classified as diffusion");
+            assert!(
+                !meta.is_diffusion(),
+                "{arch} must not be classified as diffusion"
+            );
         }
         // No architecture key → not diffusion (e.g. city96 GGUF with no arch).
         let bytes = synth_gguf(&[("tokenizer.chat_template", "hi")]);

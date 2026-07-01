@@ -470,8 +470,15 @@ async fn run_process_exec(backend: SandboxBackend, arguments: Value) -> Result<V
     // ── Step 3: post-run audit report (best-effort) ──────────────────────────
     match &result {
         Ok(output) => {
-            report_exec_audit(&backend_label, &command, duration_ms, output.exit_code, None, None)
-                .await;
+            report_exec_audit(
+                &backend_label,
+                &command,
+                duration_ms,
+                output.exit_code,
+                None,
+                None,
+            )
+            .await;
         }
         Err(e) => {
             report_exec_audit(

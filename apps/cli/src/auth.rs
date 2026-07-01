@@ -143,6 +143,7 @@ fn write_secret_file(path: &std::path::Path, body: &str) -> Result<()> {
     {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::PermissionsExt;
 
         let mut file = std::fs::OpenOptions::new()
             .create(true)

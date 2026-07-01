@@ -20,6 +20,7 @@ import json
 import threading
 from typing import Any, Optional
 
+import anyio
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -101,6 +102,31 @@ def finetune(req: FinetuneRequest) -> JSONResponse:
     job = STORE.create(_flatten(req))
     threading.Thread(target=run_job, args=(job,), daemon=True).start()
     return JSONResponse({"job_id": job.id, "state": job.state})
+
+
+class MergeRequest(BaseModel):
+    adapter_name: Optional[str] = Field(None, description="Adapter dir under the output dir.")
+    adapter_path: Optional[str] = Field(None, description="Absolute path to an adapter dir.")
+    output_name: Optional[str] = Field(None, description="Stem for the merged .gguf.")
+    base_model_id: Optional[str] = Field(None, description="Provenance (recorded by Core).")
+    quantization_method: str = Field("q4_k_m", description="GGUF quant, e.g. q4_k_m / q8_0 / f16.")
+    max_seq_length: Optional[int] = None
+
+
+@app.post("/finetune/merge")
+async def merge(req: MergeRequest) -> JSONResponse:
+    if not (req.adapter_name or req.adapter_path):
+        return JSONResponse(
+            {"error": "need `adapter_name` or `adapter_path`"}, status_code=400
+        )
+    from .merge import run_merge
+
+    try:
+        # Merging loads + converts weights (heavy, blocking) — run off the loop.
+        result = await anyio.to_thread.run_sync(lambda: run_merge(req.model_dump()))
+    except Exception as exc:  # noqa: BLE001 — surface any merge error to Core
+        return JSONResponse({"error": f"merge failed: {exc}"}, status_code=502)
+    return JSONResponse(result)
 
 
 @app.get("/finetune")

@@ -1030,9 +1030,18 @@ Do something minimal.
         let registry = registry_of(vec![s1]);
         let (text, ids) = registry.progressive_block(&[]).expect("a block");
         // The full body is NOT injected — only the L1 index line is.
-        assert!(!text.contains("Long body here."), "body must not inject: {text}");
-        assert!(text.contains("- researcher — Researcher: searches the web"), "{text}");
-        assert!(text.contains("skills__load"), "must tell the model how to load");
+        assert!(
+            !text.contains("Long body here."),
+            "body must not inject: {text}"
+        );
+        assert!(
+            text.contains("- researcher — Researcher: searches the web"),
+            "{text}"
+        );
+        assert!(
+            text.contains("skills__load"),
+            "must tell the model how to load"
+        );
         // No always-on skills => nothing attributed as injected.
         assert!(ids.is_empty(), "no always-on bodies injected: {ids:?}");
     }
@@ -1052,10 +1061,23 @@ Do something minimal.
         let registry = registry_of(vec![always, lazy]);
         let (text, ids) = registry.progressive_block(&[]).expect("a block");
         // Always-on skill gets its full body; the other is only indexed.
-        assert!(text.contains("MUST do this."), "always-on body injected: {text}");
-        assert!(!text.contains("Lazy body."), "lazy body not injected: {text}");
-        assert!(text.contains("- lazy — Lazy: later"), "lazy is indexed: {text}");
-        assert_eq!(ids, vec!["critical".to_owned()], "only always-on attributed");
+        assert!(
+            text.contains("MUST do this."),
+            "always-on body injected: {text}"
+        );
+        assert!(
+            !text.contains("Lazy body."),
+            "lazy body not injected: {text}"
+        );
+        assert!(
+            text.contains("- lazy — Lazy: later"),
+            "lazy is indexed: {text}"
+        );
+        assert_eq!(
+            ids,
+            vec!["critical".to_owned()],
+            "only always-on attributed"
+        );
     }
 
     #[test]

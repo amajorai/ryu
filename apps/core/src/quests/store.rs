@@ -114,7 +114,9 @@ impl QuestStore {
             .optional()
             .context("reading quest")?;
         match json {
-            Some(j) => Ok(Some(serde_json::from_str(&j).context("deserializing quest")?)),
+            Some(j) => Ok(Some(
+                serde_json::from_str(&j).context("deserializing quest")?,
+            )),
             None => Ok(None),
         }
     }

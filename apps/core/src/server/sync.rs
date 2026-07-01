@@ -425,11 +425,25 @@ mod tests {
         let store_b = ConversationStore::open_in_memory().unwrap();
 
         store_a
-            .append_message("conv-sync-1", "user", "hello from A", Some("agent-1"))
+            .append_message(
+                "conv-sync-1",
+                "user",
+                "hello from A",
+                Some("agent-1"),
+                None,
+                None,
+            )
             .await
             .unwrap();
         store_a
-            .append_message("conv-sync-1", "assistant", "hi back", Some("agent-1"))
+            .append_message(
+                "conv-sync-1",
+                "assistant",
+                "hi back",
+                Some("agent-1"),
+                None,
+                None,
+            )
             .await
             .unwrap();
 
@@ -463,7 +477,7 @@ mod tests {
         let store_b = ConversationStore::open_in_memory().unwrap();
 
         store_a
-            .append_message("conv-idem", "user", "msg1", None)
+            .append_message("conv-idem", "user", "msg1", None, None, None)
             .await
             .unwrap();
 
@@ -547,7 +561,7 @@ mod tests {
         let store_b = ConversationStore::open_in_memory().unwrap();
 
         store_a
-            .append_message("conv-incr", "user", "first", None)
+            .append_message("conv-incr", "user", "first", None, None, None)
             .await
             .unwrap();
 
@@ -556,7 +570,7 @@ mod tests {
 
         // A second message added after the first sync.
         store_a
-            .append_message("conv-incr", "assistant", "second", None)
+            .append_message("conv-incr", "assistant", "second", None, None, None)
             .await
             .unwrap();
 

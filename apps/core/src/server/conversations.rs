@@ -34,6 +34,18 @@ pub struct StoredMessage {
     /// The agent that produced this message (None for user messages).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// The verified human author of this message (None for agent messages or
+    /// when no verified identity was present). Distinct from `agent_id`, which
+    /// names the AI agent. Populated by the JWT identity layer in a later stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_user_id: Option<String>,
+    /// Display name of the (possibly unverified) sender for group/channel chats,
+    /// e.g. a Telegram first name or Discord username. Distinct from
+    /// `author_user_id` (a *verified* Ryu identity): this is connector-supplied
+    /// and is NOT trusted for auth — it exists so a multi-participant group thread
+    /// can show and reason about who said what. None for 1:1 / anonymous turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_name: Option<String>,
     /// Unix milliseconds.
     pub created_at: i64,
 }
@@ -184,6 +196,14 @@ pub struct ConversationStore {
     /// calls [`auto_set_title`]. Best-effort: a closed/absent channel just means
     /// the conversation keeps its first-message-derived title.
     auto_title_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    /// Optional room-keyed realtime registry (Phase 1 of the multi-user epic).
+    /// When wired, [`append_message`] publishes an `Events` frame keyed by the
+    /// conversation id so other live viewers see new turns immediately. `None` in
+    /// contexts without realtime fan-out (tests, CLI). Cloned from the same
+    /// instance held by `ServerState` so publishes reach the WS handler's
+    /// subscribers (see `main.rs` wiring). Best-effort: publishing to a room with
+    /// no members is a harmless no-op.
+    realtime: Option<crate::realtime::RoomRegistry>,
 }
 
 fn now_millis() -> i64 {
@@ -215,6 +235,7 @@ impl ConversationStore {
             cipher: crate::crypto::global_cipher()?,
             message_index: None,
             auto_title_tx: None,
+            realtime: None,
         })
     }
 
@@ -229,11 +250,18 @@ impl ConversationStore {
     /// Wire the auto-rename sink: each conversation that gets its first user
     /// message is sent on `tx` so a server-side consumer can generate a concise
     /// title with the default local model. Must be called after construction.
-    pub fn with_auto_title(
-        mut self,
-        tx: tokio::sync::mpsc::UnboundedSender<String>,
-    ) -> Self {
+    pub fn with_auto_title(mut self, tx: tokio::sync::mpsc::UnboundedSender<String>) -> Self {
         self.auto_title_tx = Some(tx);
+        self
+    }
+
+    /// Wire the room-keyed realtime registry so [`append_message`] publishes a
+    /// live `Events` frame (keyed by conversation id) for every persisted turn.
+    /// Pass a clone of the same [`crate::realtime::RoomRegistry`] held by
+    /// `ServerState` so the frames reach the WS handler's subscribers. Must be
+    /// called after construction.
+    pub fn with_realtime(mut self, realtime: crate::realtime::RoomRegistry) -> Self {
+        self.realtime = Some(realtime);
         self
     }
 
@@ -248,6 +276,7 @@ impl ConversationStore {
             cipher: crate::crypto::FieldCipher::new(&[0x11; 32]),
             message_index: None,
             auto_title_tx: None,
+            realtime: None,
         })
     }
 
@@ -341,6 +370,28 @@ impl ConversationStore {
                 "title_custom",
                 "ALTER TABLE conversations ADD COLUMN title_custom  INTEGER NOT NULL DEFAULT 0",
             ),
+            // Multi-user tenancy (collaboration epic, Phase 0): the verified
+            // human owner of the conversation, the org it belongs to, its
+            // sharing visibility, and an optional owning team. All nullable
+            // except `visibility`, which defaults to 'private' so existing
+            // single-tenant conversations stay private. ACL enforcement is wired
+            // in a later stage; these are schema-only for now.
+            (
+                "owner_user_id",
+                "ALTER TABLE conversations ADD COLUMN owner_user_id TEXT",
+            ),
+            (
+                "org_id",
+                "ALTER TABLE conversations ADD COLUMN org_id        TEXT",
+            ),
+            (
+                "visibility",
+                "ALTER TABLE conversations ADD COLUMN visibility    TEXT NOT NULL DEFAULT 'private'",
+            ),
+            (
+                "team_id",
+                "ALTER TABLE conversations ADD COLUMN team_id       TEXT",
+            ),
         ] {
             if !existing_conv_columns.contains(col) {
                 conn.execute_batch(ddl)
@@ -357,6 +408,22 @@ impl ConversationStore {
         if !existing_msg_columns.contains("agent_id") {
             conn.execute_batch("ALTER TABLE messages ADD COLUMN agent_id TEXT")
                 .context("adding agent_id column to messages")?;
+        }
+
+        // Additive migration: the verified human author of a message (multi-user
+        // collaboration epic, Phase 0). Distinct from `agent_id` (the AI agent).
+        // Nullable — existing rows and agent messages carry NULL.
+        if !existing_msg_columns.contains("author_user_id") {
+            conn.execute_batch("ALTER TABLE messages ADD COLUMN author_user_id TEXT")
+                .context("adding author_user_id column to messages")?;
+        }
+
+        // Additive migration: connector-supplied display name of the sender for
+        // group/channel chats (Telegram first name, Discord username, etc.).
+        // Nullable; unverified (NOT for auth) — distinct from author_user_id.
+        if !existing_msg_columns.contains("author_name") {
+            conn.execute_batch("ALTER TABLE messages ADD COLUMN author_name TEXT")
+                .context("adding author_name column to messages")?;
         }
 
         Ok(())
@@ -509,6 +576,8 @@ impl ConversationStore {
         role: &str,
         content: &str,
         agent_id: Option<&str>,
+        author_user_id: Option<&str>,
+        author_name: Option<&str>,
     ) -> Result<String> {
         let now = now_millis();
         let message_id = uuid::Uuid::new_v4().to_string();
@@ -570,9 +639,9 @@ impl ConversationStore {
         .context("upserting conversation on append")?;
         let sealed = self.cipher.seal(content)?;
         conn.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, agent_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![message_id, conversation_id, role, sealed, agent_id, now],
+            "INSERT INTO messages (id, conversation_id, role, content, agent_id, author_user_id, author_name, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![message_id, conversation_id, role, sealed, agent_id, author_user_id, author_name, now],
         )
         .context("inserting message")?;
 
@@ -604,6 +673,37 @@ impl ConversationStore {
                     let _ = tx.send(conversation_id.to_owned());
                 }
             }
+        }
+        // Release the conversation DB lock before fanning out — the publish is a
+        // non-blocking broadcast send on a different mutex, but there is no reason
+        // to hold the conn lock across it.
+        drop(conn);
+
+        // Room-keyed realtime fan-out (Phase 1): make this turn appear live for
+        // every other viewer of the conversation. We publish the *plaintext*
+        // `content` (the same value `GET /api/conversations/:id` returns after
+        // decrypting the sealed column) — never the sealed blob — and reuse `now`
+        // (the exact `created_at` written to the row) so the live frame matches the
+        // persisted/GET shape. The gateway wraps this INNER value as
+        // `{"channel":"events","data":<value>}`; do not pre-wrap with "channel".
+        // No-op when realtime is unwired (tests/CLI) or the room has no members.
+        if let Some(realtime) = &self.realtime {
+            realtime.publish_event(
+                conversation_id,
+                serde_json::json!({
+                    "type": "message",
+                    "conversation_id": conversation_id,
+                    "message": {
+                        "id": message_id,
+                        "role": role,
+                        "content": content,
+                        "author_user_id": author_user_id,
+                        "author_name": author_name,
+                        "created_at": now,
+                        "agent_id": agent_id,
+                    }
+                }),
+            );
         }
         Ok(message_id)
     }
@@ -720,7 +820,7 @@ impl ConversationStore {
     pub async fn get_messages(&self, conversation_id: &str) -> Result<Vec<StoredMessage>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT id, role, content, agent_id, created_at
+            "SELECT id, role, content, agent_id, created_at, author_user_id, author_name
              FROM messages
              WHERE conversation_id = ?1
              ORDER BY created_at ASC, rowid ASC",
@@ -732,6 +832,8 @@ impl ConversationStore {
                 content: row.get(2)?,
                 agent_id: row.get(3)?,
                 created_at: row.get(4)?,
+                author_user_id: row.get(5)?,
+                author_name: row.get(6)?,
             })
         })?;
         let mut out = Vec::new();
@@ -840,9 +942,7 @@ impl ConversationStore {
                         }
                         Err(e) => {
                             consecutive_failures += 1;
-                            tracing::warn!(
-                                "backfill embed failed for {id} (sidecar down?): {e:#}"
-                            );
+                            tracing::warn!("backfill embed failed for {id} (sidecar down?): {e:#}");
                         }
                     }
                 }
@@ -893,7 +993,7 @@ impl ConversationStore {
         let conn = self.conn.lock().await;
         // Select the newest `limit` rows, then reverse to chronological order.
         let mut stmt = conn.prepare(
-            "SELECT id, role, content, agent_id, created_at
+            "SELECT id, role, content, agent_id, created_at, author_user_id, author_name
              FROM messages
              WHERE conversation_id = ?1
              ORDER BY created_at DESC, rowid DESC
@@ -906,6 +1006,8 @@ impl ConversationStore {
                 content: row.get(2)?,
                 agent_id: row.get(3)?,
                 created_at: row.get(4)?,
+                author_user_id: row.get(5)?,
+                author_name: row.get(6)?,
             })
         })?;
         let mut out = Vec::new();
@@ -1233,6 +1335,37 @@ impl ConversationStore {
         Ok(parse_participants_json(participants_json.as_deref()))
     }
 
+    /// Load the tenancy quartet (owner / org / visibility / team) for a
+    /// conversation, for the realtime WS gateway's access decision. Returns
+    /// `Ok(None)` when the conversation row does not exist (an as-yet-uncreated
+    /// chat — conversations are upserted lazily on the first message). These
+    /// columns are plaintext (only `title` and message `content` are sealed at
+    /// rest), so a raw `SELECT` compares correctly against a verified caller's id.
+    pub async fn get_access_meta(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Option<crate::identity_verify::ResourceTenancy>> {
+        let conn = self.conn.lock().await;
+        let meta = conn
+            .query_row(
+                "SELECT owner_user_id, org_id, visibility, team_id
+                 FROM conversations WHERE id = ?1",
+                params![conversation_id],
+                |row| {
+                    Ok(crate::identity_verify::ResourceTenancy {
+                        owner_user_id: row.get(0)?,
+                        org_id: row.get(1)?,
+                        // NOT NULL DEFAULT 'private' in the schema, so always present.
+                        visibility: row.get(2)?,
+                        team_id: row.get(3)?,
+                    })
+                },
+            )
+            .optional()
+            .context("reading conversation access metadata")?;
+        Ok(meta)
+    }
+
     /// Delete a conversation and its messages. Returns true if a row was removed.
     pub async fn delete_conversation(&self, conversation_id: &str) -> Result<bool> {
         let conn = self.conn.lock().await;
@@ -1468,11 +1601,63 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn append_message_publishes_live_event_to_room() {
+        // The make-or-break wiring: a store sharing the SAME registry instance a
+        // viewer subscribes against must deliver a `message` Events frame on every
+        // persisted turn, shaped to match the GET read path (plaintext content,
+        // role, ids, created_at). This is the only way to catch a "wrong registry
+        // instance" regression without a live WS client.
+        let registry = crate::realtime::RoomRegistry::new();
+        let store = ConversationStore::open_in_memory()
+            .unwrap()
+            .with_realtime(registry.clone());
+
+        // A subscribed viewer makes the room live (publish is a no-op otherwise).
+        let mut rx = registry.get_or_create("conv-live").subscribe();
+
+        let id = store
+            .append_message(
+                "conv-live",
+                "user",
+                "hello live",
+                None,
+                Some("user-7"),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let frame = rx.recv().await.expect("frame delivered");
+        let crate::realtime::Frame::Event(value) = frame else {
+            panic!("expected an Events frame, got {frame:?}");
+        };
+        assert_eq!(value["type"], "message");
+        assert_eq!(value["conversation_id"], "conv-live");
+        assert_eq!(value["message"]["id"], id);
+        assert_eq!(value["message"]["role"], "user");
+        assert_eq!(value["message"]["content"], "hello live");
+        assert_eq!(value["message"]["author_user_id"], "user-7");
+        assert!(value["message"]["created_at"].is_i64());
+    }
+
+    #[tokio::test]
+    async fn append_message_without_realtime_is_silent() {
+        // Unwired store (tests/CLI) must persist exactly as before — no panic, no
+        // dependency on a registry.
+        let store = ConversationStore::open_in_memory().unwrap();
+        let id = store
+            .append_message("c-silent", "user", "hi", None, None, None)
+            .await
+            .unwrap();
+        assert!(!id.is_empty());
+    }
+
+    #[tokio::test]
     async fn search_messages_none_without_index() {
         // No index wired (open_in_memory) → search returns None, never errors.
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("c1", "user", "hello world", None)
+            .append_message("c1", "user", "hello world", None, None, None)
             .await
             .unwrap();
         let res = store.search_messages("hello", 5, None).await.unwrap();
@@ -1495,11 +1680,20 @@ mod tests {
                 "user",
                 "rust ownership and lifetimes are tricky",
                 None,
+                None,
+                None,
             )
             .await
             .unwrap();
         store
-            .append_message("c1", "assistant", "favourite pizza toppings list", None)
+            .append_message(
+                "c1",
+                "assistant",
+                "favourite pizza toppings list",
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
 
@@ -1522,7 +1716,7 @@ mod tests {
     async fn message_content_is_encrypted_on_disk() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("c1", "user", "my secret diary entry", None)
+            .append_message("c1", "user", "my secret diary entry", None, None, None)
             .await
             .unwrap();
 
@@ -1575,7 +1769,14 @@ mod tests {
         let store = ConversationStore::open_in_memory().unwrap();
         // The first user message derives the title from its content.
         store
-            .append_message("c1", "user", "Plan the secret acquisition", None)
+            .append_message(
+                "c1",
+                "user",
+                "Plan the secret acquisition",
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
 
@@ -1609,7 +1810,7 @@ mod tests {
     async fn auto_set_title_overwrites_derived_but_not_custom() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("c1", "user", "how do I center a div", None)
+            .append_message("c1", "user", "how do I center a div", None, None, None)
             .await
             .unwrap();
         // Provisional title is the derived first message; not yet user-locked.
@@ -1633,22 +1834,24 @@ mod tests {
     #[tokio::test]
     async fn first_user_message_fires_auto_title_once() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let store = ConversationStore::open_in_memory().unwrap().with_auto_title(tx);
+        let store = ConversationStore::open_in_memory()
+            .unwrap()
+            .with_auto_title(tx);
 
         // First user message fires the auto-rename signal.
         store
-            .append_message("c1", "user", "first question", None)
+            .append_message("c1", "user", "first question", None, None, None)
             .await
             .unwrap();
         assert_eq!(rx.try_recv().ok(), Some("c1".to_owned()));
 
         // Assistant reply + a second user turn must NOT fire again.
         store
-            .append_message("c1", "assistant", "an answer", None)
+            .append_message("c1", "assistant", "an answer", None, None, None)
             .await
             .unwrap();
         store
-            .append_message("c1", "user", "follow-up", None)
+            .append_message("c1", "user", "follow-up", None, None, None)
             .await
             .unwrap();
         assert!(rx.try_recv().is_err(), "auto-title should fire only once");
@@ -1664,11 +1867,11 @@ mod tests {
     async fn append_and_fetch_round_trips() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("conv-1", "user", "Hello there", Some("default"))
+            .append_message("conv-1", "user", "Hello there", Some("default"), None, None)
             .await
             .unwrap();
         store
-            .append_message("conv-1", "assistant", "Hi!", Some("default"))
+            .append_message("conv-1", "assistant", "Hi!", Some("default"), None, None)
             .await
             .unwrap();
 
@@ -1683,15 +1886,15 @@ mod tests {
     async fn list_orders_by_recency_and_counts() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("conv-a", "user", "first", None)
+            .append_message("conv-a", "user", "first", None, None, None)
             .await
             .unwrap();
         store
-            .append_message("conv-b", "user", "second", None)
+            .append_message("conv-b", "user", "second", None, None, None)
             .await
             .unwrap();
         store
-            .append_message("conv-a", "assistant", "reply", None)
+            .append_message("conv-a", "assistant", "reply", None, None, None)
             .await
             .unwrap();
 
@@ -1707,7 +1910,7 @@ mod tests {
     async fn delete_removes_conversation_and_messages() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("conv-x", "user", "to delete", None)
+            .append_message("conv-x", "user", "to delete", None, None, None)
             .await
             .unwrap();
         assert!(store.delete_conversation("conv-x").await.unwrap());
@@ -1719,11 +1922,11 @@ mod tests {
     async fn clear_all_removes_every_conversation() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("conv-a", "user", "hi", None)
+            .append_message("conv-a", "user", "hi", None, None, None)
             .await
             .unwrap();
         store
-            .append_message("conv-b", "user", "yo", None)
+            .append_message("conv-b", "user", "yo", None, None, None)
             .await
             .unwrap();
         assert_eq!(store.count_conversations().await.unwrap(), 2);
@@ -1738,15 +1941,15 @@ mod tests {
     async fn fork_copies_history_up_to_message_into_new_conversation() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("src", "user", "q1", None)
+            .append_message("src", "user", "q1", None, None, None)
             .await
             .unwrap();
         let cut = store
-            .append_message("src", "assistant", "a1", Some("default"))
+            .append_message("src", "assistant", "a1", Some("default"), None, None)
             .await
             .unwrap();
         store
-            .append_message("src", "user", "q2", None)
+            .append_message("src", "user", "q2", None, None, None)
             .await
             .unwrap();
 
@@ -1769,7 +1972,7 @@ mod tests {
         // The source is untouched; continuing the fork never touches it.
         assert_eq!(store.get_messages("src").await.unwrap().len(), 3);
         store
-            .append_message(&forked.id, "user", "branch-only", None)
+            .append_message(&forked.id, "user", "branch-only", None, None, None)
             .await
             .unwrap();
         assert_eq!(store.get_messages("src").await.unwrap().len(), 3);
@@ -1785,7 +1988,7 @@ mod tests {
             .unwrap()
             .is_none());
         store
-            .append_message("src2", "user", "hi", None)
+            .append_message("src2", "user", "hi", None, None, None)
             .await
             .unwrap();
         assert!(store
@@ -1800,7 +2003,7 @@ mod tests {
         let store = ConversationStore::open_in_memory().unwrap();
         for n in 0..5 {
             store
-                .append_message("conv-r", "user", &format!("msg {n}"), None)
+                .append_message("conv-r", "user", &format!("msg {n}"), None, None, None)
                 .await
                 .unwrap();
         }
@@ -1845,6 +2048,8 @@ mod tests {
                 "user",
                 "Hello from session test",
                 Some("agent-abc"),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -1897,7 +2102,7 @@ mod tests {
 
         // Create a conversation and set run metadata.
         store
-            .append_message("conv-run", "user", "hello", Some("agent-1"))
+            .append_message("conv-run", "user", "hello", Some("agent-1"), None, None)
             .await
             .unwrap();
 
@@ -1926,7 +2131,7 @@ mod tests {
     async fn run_metadata_null_fields_preserved_when_unset() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("conv-null", "user", "hi", None)
+            .append_message("conv-null", "user", "hi", None, None, None)
             .await
             .unwrap();
 
@@ -1944,7 +2149,14 @@ mod tests {
     async fn participants_add_remove_roundtrip() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("conv-multi", "user", "hello", Some("agent-alpha"))
+            .append_message(
+                "conv-multi",
+                "user",
+                "hello",
+                Some("agent-alpha"),
+                None,
+                None,
+            )
             .await
             .unwrap();
 
@@ -1990,7 +2202,7 @@ mod tests {
 
         // Two agents in one conversation each produce a message.
         store
-            .append_message("conv-agents", "user", "question", None)
+            .append_message("conv-agents", "user", "question", None, None, None)
             .await
             .unwrap();
         store
@@ -1999,6 +2211,8 @@ mod tests {
                 "assistant",
                 "reply from alpha",
                 Some("agent-alpha"),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -2008,6 +2222,8 @@ mod tests {
                 "assistant",
                 "reply from beta",
                 Some("agent-beta"),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -2020,10 +2236,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn messages_carry_author_name() {
+        // Group/channel support: a connector-supplied sender display name is
+        // persisted on the user message and read back, while agent/1:1 messages
+        // carry no author_name. (`author_user_id` stays None — author_name is the
+        // unverified display label, distinct from a verified identity.)
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .append_message(
+                "conv-grp",
+                "user",
+                "Alice: hi team",
+                None,
+                None,
+                Some("Alice"),
+            )
+            .await
+            .unwrap();
+        store
+            .append_message(
+                "conv-grp",
+                "assistant",
+                "hello",
+                Some("agent-x"),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let msgs = store.get_messages("conv-grp").await.unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].author_name.as_deref(), Some("Alice"));
+        assert_eq!(
+            msgs[0].author_user_id, None,
+            "display name is not a verified id"
+        );
+        assert_eq!(
+            msgs[1].author_name, None,
+            "agent message has no author_name"
+        );
+    }
+
+    #[tokio::test]
     async fn get_conversation_detail_includes_participants() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("conv-detail", "user", "hi", Some("agent-x"))
+            .append_message("conv-detail", "user", "hi", Some("agent-x"), None, None)
             .await
             .unwrap();
         store

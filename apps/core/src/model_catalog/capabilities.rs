@@ -366,7 +366,10 @@ mod tests {
         assert!(report.tools);
         assert!(report.reasoning);
         assert!(!report.diffusion);
-        assert!(!report.detected.reasoning, "detected snapshot is pre-override");
+        assert!(
+            !report.detected.reasoning,
+            "detected snapshot is pre-override"
+        );
         assert_eq!(report.source, "gguf");
     }
 
@@ -377,6 +380,9 @@ mod tests {
             ..Default::default()
         };
         let report = CapabilityReport::build(detected, CapabilityOverrides::default(), "gguf");
-        assert!(report.diffusion, "diffusion surfaces directly in the report");
+        assert!(
+            report.diffusion,
+            "diffusion surfaces directly in the report"
+        );
     }
 }

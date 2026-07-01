@@ -4,7 +4,7 @@
  * Registers one test Runnable ("greet") and serves over stdin/stdout.
  * Spawn with: bun run packages/sdk/src/mcp/fixture-server.ts
  */
-import { McpServer } from "./server";
+import { McpServer } from "./server.ts";
 
 const server = new McpServer().register({
 	name: "greet",

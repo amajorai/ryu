@@ -294,7 +294,10 @@ mod tests {
             parse_directive(Some(&json!({ "kind": "explode" }))),
             HookDirective::None
         );
-        assert_eq!(parse_directive(Some(&json!("nonsense"))), HookDirective::None);
+        assert_eq!(
+            parse_directive(Some(&json!("nonsense"))),
+            HookDirective::None
+        );
     }
 
     #[test]
@@ -447,8 +450,12 @@ mod tests {
             ],
             flags: std::iter::once(("io.ryu.double-check".to_string(), true)).collect(),
         };
-        let directive =
-            run_fixture("io.ryu.double-check", ctx, serde_json::json!("Wrong: 2+2 is 4.")).await;
+        let directive = run_fixture(
+            "io.ryu.double-check",
+            ctx,
+            serde_json::json!("Wrong: 2+2 is 4."),
+        )
+        .await;
         assert_eq!(
             directive,
             HookDirective::Note {
@@ -471,8 +478,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let directive =
-            run_fixture("io.ryu.double-check", ctx, serde_json::json!("unused")).await;
+        let directive = run_fixture("io.ryu.double-check", ctx, serde_json::json!("unused")).await;
         assert_eq!(directive, HookDirective::None);
     }
 

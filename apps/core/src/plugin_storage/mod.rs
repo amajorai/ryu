@@ -183,17 +183,26 @@ mod tests {
         s.set("plugin-b", "default", "shared", "b").await.unwrap();
         // Same key, different plugin → isolated.
         assert_eq!(
-            s.get("plugin-a", "default", "shared").await.unwrap().as_deref(),
+            s.get("plugin-a", "default", "shared")
+                .await
+                .unwrap()
+                .as_deref(),
             Some("a")
         );
         assert_eq!(
-            s.get("plugin-b", "default", "shared").await.unwrap().as_deref(),
+            s.get("plugin-b", "default", "shared")
+                .await
+                .unwrap()
+                .as_deref(),
             Some("b")
         );
         // Same plugin, different namespace → isolated.
         s.set("plugin-a", "other", "shared", "a2").await.unwrap();
         assert_eq!(
-            s.get("plugin-a", "default", "shared").await.unwrap().as_deref(),
+            s.get("plugin-a", "default", "shared")
+                .await
+                .unwrap()
+                .as_deref(),
             Some("a")
         );
     }

@@ -8,11 +8,14 @@
   "files": {
     "ignoreUnknown": false,
     "includes": [
-      "**",
+      "!**/.agent",
+      "!**/.agents",
       "!**/.claude",
+      "!**/.codex",
       "!**/.ryu-worktrees",
       "!**/.next",
       "!**/dist",
+      "!**/target",
       "!**/out",
       "!**/dist-electron",
       "!**/.turbo",
@@ -31,8 +34,9 @@
       "!**/wrangler.jsonc",
       "!**/.source",
       "!**/convex/_generated",
-      "!apps/fumadocs/**",
-      "!apps/raycast/**"
+      "!apps/core/Python",
+      "!apps/fumadocs",
+      "!apps/raycast"
     ]
   },
   "formatter": {
@@ -77,6 +81,7 @@
     }
   },
   "javascript": {
+    "globals": ["Bun"],
     "formatter": {
       "quoteStyle": "double"
     }
@@ -99,7 +104,50 @@
           }
         }
       }
+    },
+    {
+      "includes": ["apps/desktop/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useFilenamingConvention": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/native/hooks/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useFilenamingConvention": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["crates/ryu-sdk-napi/index.js"],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
+      "includes": [
+        "apps/desktop/components/agent-elements/**",
+        "apps/desktop/components/loading-ui/wave.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "performance": {
+            "noBarrelFile": "off"
+          }
+        }
+      }
     }
   ],
-  "extends": ["ultracite/biome/core", "ultracite/biome/next", "ultracite/biome/react"]
+  "extends": [
+    "ultracite/biome/core",
+    "ultracite/biome/next",
+    "ultracite/biome/react"
+  ]
 }

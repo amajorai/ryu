@@ -20,12 +20,14 @@ pub mod composio;
 pub mod delegate;
 pub mod exa;
 pub mod notify_tool;
+pub mod orchestrator;
 pub mod sandbox;
 pub mod search_conversations;
 pub mod shadow;
 pub mod skills_tool;
 pub mod spider;
 pub mod threads;
+pub mod ui_tool;
 pub mod web_fetch;
 
 use std::collections::BTreeMap;
@@ -417,8 +419,10 @@ impl McpRegistry {
             || name == search_conversations::SERVER_NAME
             || name == threads::SERVER_NAME
             || name == delegate::SERVER_NAME
+            || name == orchestrator::SERVER_NAME
             || name == skills_tool::SERVER_NAME
             || name == advisor::SERVER_NAME
+            || name == ui_tool::SERVER_NAME
         {
             return true;
         }
@@ -553,6 +557,20 @@ impl McpRegistry {
                 available: Some(true),
             },
             ServerSummary {
+                name: orchestrator::SERVER_NAME.to_owned(),
+                command: "(built-in)".to_owned(),
+                args: vec![],
+                description: Some(
+                    "Built-in orchestration discovery: list the other agents available to \
+                     delegate to, with each one's id/name/description, so an orchestrator can \
+                     find the right specialist (orchestrator__discover_agents) before handing \
+                     it a subtask via delegate__fanout."
+                        .to_owned(),
+                ),
+                enabled: true,
+                available: Some(true),
+            },
+            ServerSummary {
                 name: skills_tool::SERVER_NAME.to_owned(),
                 command: "(built-in)".to_owned(),
                 args: vec![],
@@ -573,6 +591,18 @@ impl McpRegistry {
                     "Built-in advisor: consult a stronger model for a second opinion on the \
                      current task (advisor__consult) — before committing to an approach, when \
                      stuck, or before declaring done."
+                        .to_owned(),
+                ),
+                enabled: true,
+                available: Some(true),
+            },
+            ServerSummary {
+                name: ui_tool::SERVER_NAME.to_owned(),
+                command: "(built-in)".to_owned(),
+                args: vec![],
+                description: Some(
+                    "Built-in generative UI: render a rich interactive UI inline in the chat \
+                     (ui__render) from a json-render spec, using the app's own shadcn components."
                         .to_owned(),
                 ),
                 enabled: true,
@@ -681,6 +711,7 @@ impl McpRegistry {
         // Built-in delegation tool — ephemeral parallel sub-agent fan-out. Always
         // listed; per-delegate failures surface in the results envelope.
         all.extend(delegate::tools());
+        all.extend(orchestrator::tools());
         // Built-in skills tools — progressive disclosure (search + load Agent
         // Skills on demand). Always listed; dispatch reports unavailable when the
         // skill registry is not wired (test / CLI contexts).
@@ -689,6 +720,9 @@ impl McpRegistry {
         // opinion. Always listed; dispatch reports a structured error if the
         // Gateway call fails so the agent's turn continues.
         all.extend(advisor::tools());
+        // Built-in generative-UI tool — render a rich UI inline in chat from a
+        // json-render spec. Always listed; client-rendered (Core dispatch is a no-op).
+        all.extend(ui_tool::tools());
         // Include self-build tools (U57) — always listed, dispatch fails gracefully
         // if the self_build context was not wired (test / CLI contexts).
         all.extend(crate::runnable::self_build::tools());
@@ -729,6 +763,25 @@ impl McpRegistry {
             None => all,
             Some(list) => all.into_iter().filter(|t| tool_allowed(t, list)).collect(),
         }
+    }
+
+    /// Resolve an agent's orchestration capabilities from the config store.
+    ///
+    /// Falls back to the safe defaults ([`AgentCapabilities::default`]:
+    /// delegation on, creation off) when the store is unwired (test/CLI
+    /// contexts) or the id is unknown (e.g. a bare transport-id caller). Because
+    /// the default leaves delegation on, an agent never loses delegation merely
+    /// because its config row could not be loaded.
+    pub async fn agent_capabilities(&self, agent_id: &str) -> AgentCapabilities {
+        if let Some(store) = &self.agent_store {
+            if let Ok(Some(record)) = store.get(agent_id).await {
+                return AgentCapabilities {
+                    orchestrator: record.orchestrator_enabled(),
+                    can_create_agents: record.can_create_agents_enabled(),
+                };
+            }
+        }
+        AgentCapabilities::default()
     }
 
     /// Invoke a registered tool by its fully-qualified id (`<server>__<tool>`),
@@ -966,6 +1019,24 @@ impl McpRegistry {
             return notify_tool::dispatch(tool, arguments).await;
         }
 
+        // Built-in generative-UI provider: client-rendered (no-op in Core). The
+        // desktop renders the spec from the tool input; dispatch only sanity-checks.
+        if server == ui_tool::SERVER_NAME {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool {
+                    id: tool_id.to_owned(),
+                    server: server.to_owned(),
+                    name: tool.to_owned(),
+                    description: None,
+                    input_schema: None,
+                };
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            return ui_tool::dispatch(tool, arguments).await;
+        }
+
         // Built-in send-to-channel provider (#456): posts to a Slack/Discord
         // incoming-webhook URL over HTTP.
         if server == channel_tool::SERVER_NAME {
@@ -1059,6 +1130,32 @@ impl McpRegistry {
                 }
             }
             return delegate::dispatch(tool, arguments).await;
+        }
+
+        // Built-in orchestration discovery provider: list peer agents by
+        // description so an orchestrator can pick a specialist to delegate to.
+        // Allowlist-gated like the other built-ins. Reads the agent config store
+        // (wired via `with_agent_store`), so it fails clearly if that is absent.
+        if server == orchestrator::SERVER_NAME {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool {
+                    id: tool_id.to_owned(),
+                    server: server.to_owned(),
+                    name: tool.to_owned(),
+                    description: None,
+                    input_schema: None,
+                };
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            let store = self.agent_store.clone().ok_or_else(|| {
+                anyhow!(
+                    "orchestrator tool '{tool_id}' called but agent_store is not wired; \
+                     call McpRegistry::with_agent_store at startup"
+                )
+            })?;
+            return orchestrator::dispatch(tool, arguments, store, None).await;
         }
 
         // Built-in skills provider (progressive disclosure): discover + load Agent
@@ -1316,6 +1413,56 @@ fn command_availability(command: &str) -> Option<bool> {
     } else {
         None
     }
+}
+
+/// The fully-qualified id of the privileged agent-creation tool — the one tool
+/// gated by [`AgentCapabilities::can_create_agents`]. Other `agent_builder__*`
+/// tools (read/configure existing agents) are not creation and stay available.
+pub const CREATE_AGENT_TOOL_ID: &str = "agent_builder__create_agent";
+
+/// An agent's orchestration capabilities, resolved from its config record.
+#[derive(Debug, Clone, Copy)]
+pub struct AgentCapabilities {
+    /// May discover peers (`orchestrator__*`) and delegate to them (`delegate__*`).
+    pub orchestrator: bool,
+    /// May mint new agents (`agent_builder__create_agent`).
+    pub can_create_agents: bool,
+}
+
+impl Default for AgentCapabilities {
+    /// The safe defaults: delegation **on** (historical default-available
+    /// behaviour), agent-creation **off** (privileged, opt-in per agent).
+    fn default() -> Self {
+        Self {
+            orchestrator: true,
+            can_create_agents: false,
+        }
+    }
+}
+
+/// Remove capability-gated tools from an offered set per an agent's
+/// [`AgentCapabilities`]. Withholds the delegation/discovery providers when
+/// `orchestrator` is off and the agent-creation tool when `can_create_agents`
+/// is off. Tools unrelated to these capabilities pass through untouched.
+pub fn filter_capability_tools(
+    tools: Vec<RegistryTool>,
+    caps: AgentCapabilities,
+) -> Vec<RegistryTool> {
+    tools
+        .into_iter()
+        .filter(|tool| {
+            if !caps.orchestrator
+                && (tool.server == delegate::SERVER_NAME
+                    || tool.server == orchestrator::SERVER_NAME)
+            {
+                return false;
+            }
+            if !caps.can_create_agents && tool.id == CREATE_AGENT_TOOL_ID {
+                return false;
+            }
+            true
+        })
+        .collect()
 }
 
 /// Whether `tool` passes an allowlist. A list entry matches if it equals the

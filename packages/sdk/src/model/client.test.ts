@@ -10,8 +10,8 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { defineModel } from "./client";
-import { assertAllowedEgressUrl } from "./gateway";
+import { defineModel } from "./client.ts";
+import { assertAllowedEgressUrl } from "./gateway.ts";
 
 // Top-level regex constant (avoids lint/performance/useTopLevelRegex)
 const RE_EGRESS_BLOCKED = /egress is not allowed/i;

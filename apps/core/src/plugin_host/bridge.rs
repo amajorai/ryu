@@ -55,7 +55,10 @@ impl PluginHookBridge {
                 self.plugin_id
             ));
         }
-        let prompt = args.get("prompt").and_then(Value::as_str).unwrap_or_default();
+        let prompt = args
+            .get("prompt")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         if prompt.is_empty() {
             return err("host.sideModel requires a non-empty 'prompt'".to_string());
         }
@@ -97,7 +100,10 @@ impl PluginHookBridge {
                 Err(e) => err(e.to_string()),
             },
             "storage_set" => {
-                let value = args.get("value").and_then(Value::as_str).unwrap_or_default();
+                let value = args
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 if key.is_empty() {
                     return err("host.storage.set requires a non-empty key".to_string());
                 }

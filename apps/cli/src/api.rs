@@ -936,6 +936,72 @@ pub async fn install_mcp_server(
     Ok(name)
 }
 
+/// Summary of a completed OKF export: where it was written and what it contains.
+pub struct OkfExportResult {
+    pub target_dir: String,
+    pub concepts: usize,
+    pub files: Vec<String>,
+}
+
+/// Export indexed knowledge as an OKF bundle directory via Core.
+///
+/// Calls `POST {api_url}/api/okf/export` with `{ scope: "bundle", bundle_id }`
+/// (or the agent default when `bundle_id` is `None`, which Core rejects until a
+/// broader scope lands). Core reconstructs the concepts, writes the bundle to
+/// `target_dir`, and returns the file listing.
+pub async fn export_okf_bundle(
+    api_url: &str,
+    token: Option<&str>,
+    target_dir: &str,
+    bundle_id: Option<&str>,
+) -> anyhow::Result<OkfExportResult> {
+    let client = authed_client(token);
+    let mut body = serde_json::json!({
+        "target_dir": target_dir,
+        "scope": "bundle",
+    });
+    if let Some(id) = bundle_id {
+        body["bundle_id"] = serde_json::Value::String(id.to_string());
+    }
+    let resp = client
+        .post(format!("{api_url}/api/okf/export"))
+        .header("Content-Type", "application/json")
+        .body(body.to_string())
+        .send()
+        .await?;
+    let json: serde_json::Value = resp.json().await?;
+    if json.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        let err = json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("export failed");
+        anyhow::bail!("{err}");
+    }
+    let target_dir = json
+        .get("target_dir")
+        .and_then(|v| v.as_str())
+        .unwrap_or(target_dir)
+        .to_string();
+    let concepts = json
+        .get("concepts")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let files = json
+        .get("files")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(OkfExportResult {
+        target_dir,
+        concepts,
+        files,
+    })
+}
+
 /// Minimal percent-encoding for a query-string value (no extra deps). Encodes
 /// everything outside the unreserved set so spaces, slashes, etc. survive.
 fn urlencode(value: &str) -> String {

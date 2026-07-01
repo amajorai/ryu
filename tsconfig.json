@@ -3,7 +3,5 @@
   "compilerOptions": {
     "strictNullChecks": true
   },
-  "exclude": [
-    "opensrc"
-  ]
+  "exclude": ["opensrc"]
 }

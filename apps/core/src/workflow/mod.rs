@@ -147,6 +147,13 @@ pub enum NodeKind {
         /// absent the node is a one-shot branch gate (back-compat).
         #[serde(default)]
         body_workflow_id: Option<String>,
+        /// Optional per-node ceiling on loop iterations. Absent = the engine
+        /// default [`executor::MAX_WHILE_ITERATIONS`]. Always clamped to that
+        /// hard maximum so a workflow can lower the bound but never raise it past
+        /// the safety cap (a runaway-loop backstop). Ignored by the one-shot gate
+        /// form (`body_workflow_id` absent), which is reached at most once anyway.
+        #[serde(default)]
+        max_iterations: Option<u64>,
     },
     /// Routes the incoming text through the Gateway firewall (the moat owns
     /// "what is allowed", per the Core-vs-Gateway rule) and fails the run when a

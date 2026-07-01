@@ -155,7 +155,10 @@ mod tests {
 
     #[test]
     fn name_matches_engine_constant() {
-        assert_eq!(DockerModelRunnerManager::new().name(), "docker-model-runner");
+        assert_eq!(
+            DockerModelRunnerManager::new().name(),
+            "docker-model-runner"
+        );
         assert_eq!(ENGINE_NAME, "docker-model-runner");
     }
 

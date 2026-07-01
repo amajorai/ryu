@@ -4,7 +4,7 @@
 // All domain modules (agents, sessions, spaces) build on this so base-URL and
 // bearer auth live in exactly one place.
 
-import type { RyuClientOptions } from "./types";
+import type { RyuClientOptions } from "./types.ts";
 
 /** Matches one or more trailing slashes for base-URL normalization. */
 const TRAILING_SLASHES = /\/+$/;

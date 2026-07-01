@@ -275,7 +275,14 @@ impl WidgetRenderer for MetricWidget {
         };
         let fg = cell.fg();
         // The value, large and bold, vertically centred-ish.
-        cell.text(12.0, cell.h * 0.62, (cell.h * 0.34).clamp(20.0, 56.0), "700", fg, &big);
+        cell.text(
+            12.0,
+            cell.h * 0.62,
+            (cell.h * 0.34).clamp(20.0, 56.0),
+            "700",
+            fg,
+            &big,
+        );
         if let Some(label) = label {
             let muted = cell.muted();
             cell.text(12.0, cell.h - 12.0, 12.0, "500", muted, label);
@@ -296,7 +303,11 @@ impl WidgetRenderer for ListWidget {
             _ => value.as_array().cloned(),
         }
         .unwrap_or_default();
-        let top = if widget.title.trim().is_empty() { 20.0 } else { 40.0 };
+        let top = if widget.title.trim().is_empty() {
+            20.0
+        } else {
+            40.0
+        };
         let row_h = 22.0;
         let max_rows = (((cell.h - top - 8.0) / row_h).floor() as usize).max(1);
         let fg = cell.fg();
@@ -334,7 +345,11 @@ impl WidgetRenderer for TextWidget {
                 Value::Null => String::new(),
                 other => compact_json(other),
             });
-        let top = if widget.title.trim().is_empty() { 22.0 } else { 42.0 };
+        let top = if widget.title.trim().is_empty() {
+            22.0
+        } else {
+            42.0
+        };
         let fg = cell.fg();
         // Wrap the body into lines that fit the cell width.
         let cols = cell.max_chars(14.0);
@@ -439,7 +454,10 @@ pub fn render(widgets: &[Widget], profile: DeviceProfile) -> anyhow::Result<Rend
     let upright = rasterize(&svg, content_w, content_h)?;
     let pixmap = rotate_pixmap(&upright, quarter)?;
     let (bytes, content_type) = match profile.palette {
-        Palette::Mono => (pack_1bit(&pixmap, profile.w, profile.h), "application/octet-stream"),
+        Palette::Mono => (
+            pack_1bit(&pixmap, profile.w, profile.h),
+            "application/octet-stream",
+        ),
         Palette::Rgb565 => (to_rgb565(&pixmap), "application/octet-stream"),
         Palette::Rgba => (encode_png(&pixmap, profile.w, profile.h)?, "image/png"),
     };
@@ -478,9 +496,9 @@ fn rotate_pixmap(
         for x in 0..sw {
             let s = src_px[(y * sw + x) as usize];
             let (nx, ny) = match quarter {
-                1 => (dw - 1 - y, x),      // 90° CW
+                1 => (dw - 1 - y, x),          // 90° CW
                 2 => (sw - 1 - x, sh - 1 - y), // 180°
-                _ => (y, dh - 1 - x),      // 270° CW
+                _ => (y, dh - 1 - x),          // 270° CW
             };
             dst_px[(ny * dw + nx) as usize] = s;
         }
@@ -518,7 +536,11 @@ fn rasterize(svg: &str, w: u32, h: u32) -> anyhow::Result<resvg::tiny_skia::Pixm
     let mut pixmap =
         Pixmap::new(w.max(1), h.max(1)).ok_or_else(|| anyhow::anyhow!("pixmap alloc failed"))?;
     // White background already painted by the SVG; render the tree on top.
-    resvg::render(&tree, resvg::tiny_skia::Transform::identity(), &mut pixmap.as_mut());
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::identity(),
+        &mut pixmap.as_mut(),
+    );
     Ok(pixmap)
 }
 
@@ -772,7 +794,10 @@ mod tests {
         let img = render(&w, profile).expect("render");
         assert_eq!(img.content_type, "image/png");
         // PNG magic.
-        assert_eq!(&img.bytes[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+        assert_eq!(
+            &img.bytes[..8],
+            &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]
+        );
     }
 
     #[test]

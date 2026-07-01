@@ -4,8 +4,8 @@
 // (/api/conversations). A conversation is a persisted session with message
 // history and optional agent binding.
 
-import { request } from "./request";
-import type { Conversation, RyuClientOptions } from "./types";
+import { request } from "./request.ts";
+import type { Conversation, RyuClientOptions } from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Wire shapes (snake_case from Core)

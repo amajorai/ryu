@@ -53,6 +53,11 @@ export interface AgentSummary {
 /** The full persisted agent record returned by GET/POST/PUT `/api/agents/:id`. */
 export interface Agent {
 	builtIn: boolean;
+	/**
+	 * Whether this agent may mint new custom agents. `null` means "use the
+	 * default", which is **off** (agent creation is a privileged, opt-in capability).
+	 */
+	canCreateAgents: boolean | null;
 	/** Composio action names this agent may call (gateway-route only). */
 	composioActions: string[];
 	createdAt: string | null;
@@ -65,6 +70,11 @@ export interface Agent {
 	locked: boolean;
 	model: string | null;
 	name: string;
+	/**
+	 * Whether this agent may discover peers and delegate work to them. `null`
+	 * means "use the default", which is **on** (delegation is default-available).
+	 */
+	orchestrator: boolean | null;
 	/** Skill id allowlist. Empty = all enabled skills; non-empty = only these. */
 	skills: string[];
 	systemPrompt: string | null;
@@ -98,6 +108,8 @@ export interface AgentPersona {
 
 /** Fields the UI sends when creating or updating an agent. */
 export interface AgentInput {
+	/** Toggle agent-creation. Omit to leave unchanged; null clears to the default (off). */
+	canCreateAgents?: boolean | null;
 	/** Composio action names to bind to this agent (gateway-route only). */
 	composioActions?: string[];
 	description: string | null;
@@ -105,6 +117,8 @@ export interface AgentInput {
 	/** Optional per-agent sampling defaults. Serialised into the PUT body. */
 	inference?: SamplingConfig;
 	name: string;
+	/** Toggle delegation/discovery. Omit to leave unchanged; null clears to the default (on). */
+	orchestrator?: boolean | null;
 	/** Optional persona bundle. Serialised into the PUT body; Core ignores unknown fields gracefully. */
 	persona?: AgentPersona;
 	/** Skill id allowlist to bind to this agent. Empty/omitted = all enabled skills. */
@@ -149,6 +163,7 @@ interface AgentSummaryWire {
 
 interface AgentRecordWire {
 	built_in?: boolean;
+	can_create_agents?: boolean | null;
 	composio_actions?: string[];
 	created_at?: string | null;
 	description?: string | null;
@@ -158,6 +173,7 @@ interface AgentRecordWire {
 	locked?: boolean;
 	model?: string | null;
 	name: string;
+	orchestrator?: boolean | null;
 	skills?: string[];
 	system_prompt?: string | null;
 	tools?: string[];
@@ -201,6 +217,10 @@ function toAgent(a: AgentRecordWire): Agent {
 		updatedAt: a.updated_at ?? null,
 		version: a.version ?? "1.0.0",
 		locked: a.locked ?? false,
+		// `null` is meaningful: it means "use the code default" (orchestrator on,
+		// creation off). Preserve it rather than collapsing to a boolean here.
+		orchestrator: a.orchestrator ?? null,
+		canCreateAgents: a.can_create_agents ?? null,
 	};
 }
 
@@ -226,6 +246,12 @@ function toAgentBody(input: AgentInput): Record<string, unknown> {
 	}
 	if (input.inference !== undefined) {
 		body.inference = input.inference;
+	}
+	if (input.orchestrator !== undefined) {
+		body.orchestrator = input.orchestrator;
+	}
+	if (input.canCreateAgents !== undefined) {
+		body.can_create_agents = input.canCreateAgents;
 	}
 	return body;
 }

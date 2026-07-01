@@ -13,9 +13,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
+pub mod approvals_api;
 pub mod auto_title;
 pub mod conversations;
+pub mod dashboard_api;
 pub mod data_admin;
+pub mod finetune;
 pub mod git;
 pub mod hardware_api;
 pub mod hardware_ws;
@@ -23,20 +26,20 @@ pub mod identity_api;
 pub mod media;
 pub mod meetings_api;
 pub mod memory;
-pub mod approvals_api;
-pub mod dashboard_api;
 pub mod message_index;
 pub mod monitors_api;
-pub mod predict_api;
-pub mod quests_api;
 pub mod openapi;
+pub mod predict_api;
 pub mod preferences;
+pub mod quests_api;
+pub mod realtime_ws;
 pub mod recipes_api;
 pub mod retrieval;
 pub mod spaces;
 pub mod sync;
 pub mod trace;
 pub mod voice;
+pub mod voice_ws;
 pub mod worktree;
 
 use crate::agents::{AgentStore, AgentTemplate, CreateAgent, UpdateAgent};
@@ -185,6 +188,32 @@ pub struct ServerState {
     /// `/api/hardware/*` REST surface and the `/api/hardware/ws` realtime handler;
     /// the WS handler authenticates the device token against it on each connect.
     pub hardware: crate::hardware::store::DeviceStore,
+    /// Room-keyed realtime fan-out registry (Phase 1 of the multi-user epic).
+    /// Backs `GET /api/realtime/ws`: chat fan-out, presence/awareness, and
+    /// (Phase 3) CRDT doc-sync all flow through per-room broadcast actors keyed
+    /// by `conversation_id` / `document_id`. Already `Arc`-backed and `Clone`, so
+    /// it is stored directly (not wrapped in another `Arc`). See
+    /// [`crate::realtime`].
+    pub realtime: crate::realtime::RoomRegistry,
+    /// Authoritative CRDT document engine (Phase 3 of the multi-user epic). Holds a
+    /// server-side `yrs` replica per LIVE collaborative document for persistence,
+    /// late-joiner state-vector sync, and (dormant) per-quiescence materialization
+    /// for the embed/search readers. Driven by the `kind:"document"` path of
+    /// `GET /api/realtime/ws`: rehydrate + `SyncStep1` on join, write-ACL-gated
+    /// apply + rebroadcast on update, flush-and-drop on last-leave. Cheap to clone
+    /// (an `Arc` bag). See [`crate::collab`].
+    pub collab: crate::collab::DocRegistry,
+    /// Fine-tuning job store (`~/.ryu/finetune.db`) — Core's durable record of
+    /// Unsloth fine-tune jobs. The training runs in the opt-in `unsloth` sidecar;
+    /// this is the system-of-record for the job list (survives restarts). Read by
+    /// the `/api/finetune/*` surface ([`crate::server::finetune`]).
+    pub finetune: crate::finetune::FinetuneStore,
+    /// The configured node-admittance token (`RYU_TOKEN`), captured so the public
+    /// `GET /api/realtime/ws` handler can enforce it in-handler (the public router
+    /// has no `auth_token` request Extension, unlike the protected router's
+    /// `require_auth`). `None`/empty = loopback dev (no token configured), where
+    /// the upgrade is allowed without a token — mirrors [`require_auth`] semantics.
+    pub node_token: Option<String>,
 }
 
 /// Whether a bind address string (`host:port`, `host`, `[v6]:port`) resolves to a
@@ -232,21 +261,43 @@ pub(crate) fn enforce_remote_auth(
     bind_non_loopback: bool,
 ) -> Result<Option<String>, String> {
     let exposed = mesh_enabled || bind_non_loopback;
-    if exposed
-        && auth_token
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or("")
-            .is_empty()
-    {
-        return Err(
-            "refusing to start: RYU_MESH_ENABLED (or a non-loopback RYU_BIND) exposes this Core \
-             beyond loopback, but no RYU_TOKEN is set. Set RYU_TOKEN to a strong secret so \
-             protected routes are authenticated."
-                .to_owned(),
-        );
+    if exposed {
+        let token = auth_token.as_deref().map(str::trim).unwrap_or("");
+        if token.is_empty() {
+            return Err(
+                "refusing to start: RYU_MESH_ENABLED (or a non-loopback RYU_BIND) exposes this Core \
+                 beyond loopback, but no RYU_TOKEN is set. Set RYU_TOKEN to a strong secret so \
+                 protected routes are authenticated."
+                    .to_owned(),
+            );
+        }
+        if is_insecure_auth_token_placeholder(token) {
+            return Err(
+                "refusing to start: RYU_TOKEN is still a known placeholder. Generate a strong \
+                 random token before exposing Core beyond loopback."
+                    .to_owned(),
+            );
+        }
     }
     Ok(auth_token)
+}
+
+fn is_insecure_auth_token_placeholder(token: &str) -> bool {
+    const PLACEHOLDERS: &[&str] = &[
+        "CHANGE_ME",
+        "CHANGEME",
+        "REPLACE_ME",
+        "REPLACEME",
+        "YOUR_TOKEN_HERE",
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+    ];
+
+    let trimmed = token.trim();
+    PLACEHOLDERS
+        .iter()
+        .any(|placeholder| trimmed.eq_ignore_ascii_case(placeholder))
 }
 
 async fn require_auth(
@@ -318,6 +369,80 @@ async fn track_connection(
     if identity.is_trackable() {
         registry.touch(&identity);
     }
+    next.run(req).await
+}
+
+/// Header carrying the Better Auth **user** JWT (Phase 0 of the multi-user
+/// epic). This is distinct from `authorization` (the shared `RYU_TOKEN`
+/// node-admittance bearer enforced by [`require_auth`]): a remote client presents
+/// BOTH — the bearer admits the node, this JWT carries the verified human
+/// identity. Lower-case per the HTTP header-name convention.
+const USER_JWT_HEADER: &str = "x-ryu-user-jwt";
+
+/// Resolve the verified caller from the optional user JWT on the request.
+///
+/// Returns `None` (anonymous) when the header is absent OR the token fails
+/// verification — failure is NEVER an error to the request, because `RYU_TOKEN`
+/// is the gate and a missing/invalid user identity must simply be absent, never
+/// spoofable-as-privileged. The JWT is verified entirely offline
+/// (`crate::identity_verify`) and narrowed to THIS node's bound org.
+async fn verified_caller_from_headers(
+    headers: &axum::http::HeaderMap,
+) -> Option<crate::identity_verify::VerifiedCaller> {
+    let token = header_str(headers, USER_JWT_HEADER)?;
+    verified_caller_from_token(&token).await
+}
+
+/// Verify a raw user-JWT string and narrow it to THIS node's org, returning the
+/// anonymous case (`None`) on any failure — never an error. Factored out of
+/// [`verified_caller_from_headers`] so non-REST transports (the realtime WS
+/// gateway, which receives the JWT via a `?jwt=` query param because browsers
+/// cannot set custom headers on a WS upgrade) reuse the exact same Phase 0 verify
+/// + org-narrowing path.
+pub(crate) async fn verified_caller_from_token(
+    token: &str,
+) -> Option<crate::identity_verify::VerifiedCaller> {
+    match crate::identity_verify::verify_jwt(token).await {
+        Ok(claims) => {
+            // This node's org binding (managed-node registration result). When the
+            // node is unbound (local/dev), fall back to the user's sole membership
+            // if they have exactly one — a single-org user has no ambiguity. With
+            // zero or many memberships and no node binding, the caller has no org
+            // context (org_id = None), which fails closed for org-scoped checks.
+            // TODO: resolve node org binding for unmanaged nodes more precisely
+            // once a node↔org config exists for self-hosted multi-user.
+            let node_org = crate::sidecar::control_plane::registered_org()
+                .map(|o| o.id)
+                .or_else(|| match claims.orgs.as_slice() {
+                    [single] => Some(single.id.clone()),
+                    _ => None,
+                });
+            Some(crate::identity_verify::to_caller_for_org(
+                &claims,
+                node_org.as_deref(),
+            ))
+        }
+        Err(e) => {
+            tracing::debug!("user JWT verification failed (treated as anonymous): {e}");
+            None
+        }
+    }
+}
+
+/// Middleware that attaches the OPTIONAL verified user identity to the request.
+///
+/// Layered INSIDE [`require_auth`] (so only node-admitted requests do JWT work)
+/// and ALWAYS inserts an `Option<VerifiedCaller>` extension — `Some` when a valid
+/// user JWT is present, `None` otherwise. It never rejects: a missing/invalid JWT
+/// yields the anonymous (single-tenant/loopback) flow unchanged. Requests without
+/// the `x-ryu-user-jwt` header short-circuit before any verification, so this is
+/// zero-overhead on the common single-tenant path.
+async fn attach_verified_caller(
+    mut req: Request<axum::body::Body>,
+    next: middleware::Next,
+) -> axum::response::Response {
+    let caller = verified_caller_from_headers(req.headers()).await;
+    req.extensions_mut().insert(caller);
     next.run(req).await
 }
 
@@ -510,6 +635,19 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // device's QR/BLE nonce), so it is public too. Device management
         // (list/patch/delete) is protected — see the protected router below.
         .route("/api/hardware/ws", get(hardware_ws::hardware_ws))
+        // ── Realtime room gateway (Phase 1 multi-user epic) ──────────────────
+        // Room-keyed fan-out for live chat / presence / (Phase 3) doc-sync. On
+        // the PUBLIC router because the upgrade carries credentials the protected
+        // `require_auth` layer can't gate the way this handler needs: the node
+        // token + an OPTIONAL user JWT both ride query params (`?token=`/`?jwt=`)
+        // because browsers cannot set custom headers on a WS upgrade. The handler
+        // enforces `RYU_TOKEN` (if configured) at upgrade and resolves the
+        // verified caller in-handler before joining a room — mirroring the
+        // auth-in-handler pattern of `/api/hardware/ws`.
+        .route("/api/realtime/ws", get(realtime_ws::realtime_ws))
+        // Realtime voice mode (desktop/island). Public router, auth-in-handler
+        // (browser WS can't set the bearer header) — mirrors the two routes above.
+        .route("/api/voice/ws", get(voice_ws::voice_ws))
         .route("/api/hardware/pair", post(hardware_api::pair_device))
         // TRMNL display surface: the device polls these with its OWN per-device
         // Bearer token (which `require_auth`/global-RYU_TOKEN can't gate), so the
@@ -572,6 +710,17 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/composio/toolkits", get(composio_toolkits))
         .route("/api/composio/actions", get(composio_actions))
         .route("/api/composio/triggers", get(composio_triggers))
+        // Composio connections — proactively connect the user's accounts to a
+        // toolkit (Marketplace → Connections), ahead of any agent run.
+        .route("/api/composio/connections", get(composio_connections))
+        .route(
+            "/api/composio/connections/initiate",
+            post(composio_connection_initiate),
+        )
+        .route(
+            "/api/composio/connections/:id",
+            get(composio_connection_status),
+        )
         // Composio event-trigger subscriptions (fire an agent on a Composio event).
         .route(
             "/api/composio/triggers/subscribe",
@@ -693,6 +842,18 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/mcp/catalog", get(mcp_catalog_list))
         .route("/api/mcp/catalog/detail", get(mcp_catalog_detail))
         .route("/api/mcp/catalog/install", post(mcp_catalog_install))
+        // ── Knowledge catalog (browse + install OKF bundles via the okf module) ──
+        .route("/api/knowledge/catalog", get(knowledge_catalog_list))
+        .route(
+            "/api/knowledge/catalog/detail",
+            get(knowledge_catalog_detail),
+        )
+        .route(
+            "/api/knowledge/catalog/install",
+            post(knowledge_catalog_install),
+        )
+        // ── OKF export (emit Ryu's own indexed knowledge as an OKF bundle) ──
+        .route("/api/okf/export", post(okf_export))
         // ── Sandbox enable/disable toggle (M6 / issue #190) ──────────────────
         .route("/api/mcp/sandbox/enable", post(sandbox_enable))
         .route("/api/mcp/sandbox/disable", post(sandbox_disable))
@@ -839,6 +1000,13 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/engine/active",
             get(get_active_engine).post(set_active_engine),
         )
+        // Sandbox (code-execution) backend default. Unlike the engine swap, this
+        // is a *default* the agent's `sandbox_exec` tool uses when no per-call
+        // backend is given — backends coexist, they are not mutually exclusive.
+        .route(
+            "/api/sandbox/backend",
+            get(get_sandbox_backend).post(set_sandbox_backend),
+        )
         // Active *served model* (which installed GGUF the local engine loads),
         // distinct from the active engine runtime above. Backs the deep-link
         // "switch" / "Use this model" flow.
@@ -860,6 +1028,18 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/voice/tts-models/install",
             post(voice::tts_models_install),
         )
+        // ── Fine-tuning data path (Unsloth) — proxies job control to the
+        //    `unsloth` Python sidecar; gates local training on the node's GPU ──
+        .route("/api/finetune/capability", get(finetune::capability))
+        .route("/api/finetune/start", post(finetune::start))
+        .route("/api/finetune/list", get(finetune::list))
+        .route("/api/finetune/adapters", get(finetune::list_adapters))
+        .route("/api/finetune/merge", post(finetune::merge))
+        .route(
+            "/api/finetune/:id",
+            get(finetune::get).delete(finetune::cancel),
+        )
+        .route("/api/finetune/:id/stream", get(finetune::stream))
         // ── Generative-media data path (image/video) — proxies to sd-server ──
         .route("/api/images/generate", post(media::generate_image))
         .route("/api/video/generate", post(media::generate_video))
@@ -990,7 +1170,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         )
         // ── Home dashboards (customizable live widget grid) ─────────────────
         // Static segments (`events`, `catalog`) before `:id` so they match first.
-        .route("/api/dashboards/events", get(dashboard_api::dashboard_events))
+        .route(
+            "/api/dashboards/events",
+            get(dashboard_api::dashboard_events),
+        )
         .route("/api/dashboards/catalog", get(dashboard_api::catalog))
         .route(
             "/api/dashboards",
@@ -1008,8 +1191,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         )
         .route(
             "/api/dashboards/:id/widgets/:wid",
-            axum::routing::put(dashboard_api::update_widget)
-                .delete(dashboard_api::delete_widget),
+            axum::routing::put(dashboard_api::update_widget).delete(dashboard_api::delete_widget),
         )
         .route(
             "/api/dashboards/:id/widgets/:wid/layout",
@@ -1036,7 +1218,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/meetings/:id",
             get(meetings_api::get_meeting).delete(meetings_api::delete_meeting),
         )
-        .route("/api/meetings/:id/title", post(meetings_api::rename_meeting))
+        .route(
+            "/api/meetings/:id/title",
+            post(meetings_api::rename_meeting),
+        )
         .route("/api/meetings/:id/chunk", post(meetings_api::ingest_chunk))
         .route(
             "/api/meetings/:id/finalize",
@@ -1053,8 +1238,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/hardware/devices", get(hardware_api::list_devices))
         .route(
             "/api/hardware/devices/:id",
-            axum::routing::patch(hardware_api::update_device)
-                .delete(hardware_api::delete_device),
+            axum::routing::patch(hardware_api::update_device).delete(hardware_api::delete_device),
         )
         // Per-device dashboard config (layout/widgets/refresh_rate). Management
         // routes (the desktop + the `dashboard_builder` chat target these), so they
@@ -1107,6 +1291,11 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/data-path/switch", post(switch_data_path))
         .route("/api/data-path/reset", post(reset_data_path))
         .route("/api/data-path/export", post(export_data_path))
+        // Verified user identity (Phase 0): the innermost layer, so it runs AFTER
+        // require_auth admits the node and just before the handler. It attaches an
+        // `Option<VerifiedCaller>` extension (anonymous when no/invalid user JWT),
+        // never rejecting — RYU_TOKEN remains the gate.
+        .layer(middleware::from_fn(attach_verified_caller))
         // Presence tracking runs INSIDE require_auth (added before it here, so it
         // is the inner layer): only authenticated requests are recorded.
         .layer(middleware::from_fn_with_state(
@@ -1460,9 +1649,11 @@ async fn all_events_stream(
     };
     let downloads_snap_data = serde_json::to_string(&downloads_snapshot).unwrap_or_default();
     let downloads: TaggedStream = Box::pin(
-        stream::once(
-            async move { Ok(Event::default().event("downloads").data(downloads_snap_data)) },
-        )
+        stream::once(async move {
+            Ok(Event::default()
+                .event("downloads")
+                .data(downloads_snap_data))
+        })
         .chain(tagged("downloads", downloads_rx)),
     );
 
@@ -1707,6 +1898,11 @@ async fn auth_status(State(state): State<ServerState>) -> Json<serde_json::Value
     Json(json!({
         "authenticated": authenticated,
         "pending": pending,
+        // The desktop poll (apps/desktop/lib/oauth.ts) completes login only when
+        // BOTH `authenticated` and `token` are present, then stores the bearer
+        // token client-side. Dropping this field (regressed in 9b3ac61c) left the
+        // app polling forever on the auth-code page despite Core being authed.
+        "token": s.token,
         "userCode": s.user_code,
         "verificationUri": s.verification_uri,
     }))
@@ -1741,8 +1937,17 @@ async fn auth_logout(State(state): State<ServerState>) -> Json<serde_json::Value
 )]
 async fn chat_stream(
     State(state): State<ServerState>,
-    Json(req): Json<ChatStreamRequest>,
+    // Verified human author (Phase 0), attached by `attach_verified_caller`.
+    // `None` in the anonymous single-tenant / loopback flow. Always present as an
+    // extension (the middleware inserts it on every protected route), so the
+    // direct `Extension` extractor is safe here.
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Json(mut req): Json<ChatStreamRequest>,
 ) -> axum::response::Response {
+    // Stamp the verified author onto this turn unconditionally (None when
+    // anonymous). `author_user_id` is `#[serde(skip)]`, so this server-side write
+    // is the ONLY source — a client request body can neither set nor spoof it.
+    req.author_user_id = caller.as_ref().map(|c| c.user_id.clone());
     // Team turn: fan out to the team's members per its coordination strategy.
     if let Some(team_id) = req.team_id.clone() {
         let team = match state.teams.get(&team_id).await {
@@ -2185,6 +2390,12 @@ struct ChannelRunRequest {
     team_id: Option<String>,
     /// The user's message text.
     text: String,
+    /// Optional sender display name for group/channel chats (Telegram first
+    /// name, Discord username, …). Connector-supplied and UNVERIFIED — recorded
+    /// on the user message so a multi-participant thread knows who spoke; never
+    /// used for auth. Absent for 1:1 chats.
+    #[serde(default)]
+    author_name: Option<String>,
 }
 
 /// `POST /api/channels/run` — non-streaming channel bot entry point (M11 / #226).
@@ -2215,6 +2426,7 @@ async fn channel_run(
                     req.conversation_id,
                     team,
                     req.text,
+                    req.author_name,
                     Arc::clone(&state.agents),
                     state.conversations.clone(),
                     state.agent_store.clone(),
@@ -2235,6 +2447,7 @@ async fn channel_run(
             req.conversation_id,
             req.agent_id,
             req.text,
+            req.author_name,
             Arc::clone(&state.agents),
             state.conversations.clone(),
             state.agent_store.clone(),
@@ -3534,9 +3747,11 @@ async fn plugin_contributions(State(state): State<ServerState>) -> axum::respons
         composer_controls.extend(c.composer_controls.iter().cloned().map(tag));
         settings_tabs.extend(c.settings_tabs.iter().cloned().map(tag));
         slash_commands.extend(c.slash_commands.iter().cloned().map(tag));
-        turn_hooks.extend(c.turn_hooks.iter().map(|h| {
-            serde_json::json!({ "plugin": manifest.id, "id": h.id, "on": h.on })
-        }));
+        turn_hooks.extend(
+            c.turn_hooks
+                .iter()
+                .map(|h| serde_json::json!({ "plugin": manifest.id, "id": h.id, "on": h.on })),
+        );
     }
     Json(json!({
         "composer_controls": composer_controls,
@@ -3994,9 +4209,105 @@ struct AgentCatalogAction {
     id: String,
 }
 
-/// Add a built-in agent to the installed set so it appears in the picker. The
-/// ACP adapters fetch on demand via npx, so "install" is just set-membership;
-/// no global binary install is run here.
+/// Extract the npm package from an `npx -y [--] <pkg> [args]` spawn command,
+/// skipping env-var prefixes (`FOO=bar`), `npx` flags, and the `--` separator.
+/// Returns `None` for non-npx commands (uvx self-fetch, managed binaries).
+fn npx_package_of(spawn_cmd: &str) -> Option<String> {
+    let tokens: Vec<&str> = spawn_cmd.split_whitespace().collect();
+    let npx_idx = tokens.iter().position(|t| *t == "npx")?;
+    tokens.iter().skip(npx_idx + 1).find_map(|t| {
+        if *t == "-y" || *t == "--yes" || *t == "--" || t.starts_with('-') {
+            None
+        } else {
+            Some((*t).to_string())
+        }
+    })
+}
+
+/// Warm npx's cache for `pkg` so the package is downloaded and ready before the
+/// first chat, mirroring Zed's `npm exec --yes`. We run a cheap `--version` so
+/// npx fetches + caches the package without launching the long-lived ACP server;
+/// a timeout bounds agents that ignore `--version` (the package is already
+/// fetched by the time npx executes it, so the cache stays warm regardless).
+async fn warm_npx_package(pkg: &str) {
+    #[cfg(target_os = "windows")]
+    let (prog, args): (&str, Vec<&str>) = ("cmd", vec!["/c", "npx", "-y", pkg, "--version"]);
+    #[cfg(not(target_os = "windows"))]
+    let (prog, args): (&str, Vec<&str>) = ("npx", vec!["-y", pkg, "--version"]);
+
+    let mut cmd = tokio::process::Command::new(prog);
+    cmd.args(&args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(180), cmd.status()).await;
+}
+
+/// Actually fetch an agent's runtime (Zed-style), dispatched by how the agent is
+/// distributed. Best-effort and non-fatal: every npx/uvx agent also self-fetches
+/// on first spawn, so a failure here only costs a one-time first-run delay.
+async fn install_agent_runtime(
+    entry: crate::sidecar::adapters::acp::AcpAgentEntry,
+    downloads: crate::downloads::DownloadCenter,
+) {
+    use crate::sidecar::adapters::acp::{binary_in_path, AgentTransport};
+    use crate::sidecar::agents;
+
+    // Already resolvable on PATH — nothing to fetch.
+    if let Some(bin) = entry.detect_binary {
+        if binary_in_path(bin) {
+            return;
+        }
+    }
+
+    let id = entry.id.clone();
+    let result: anyhow::Result<()> = async {
+        // Per-platform GitHub-release binary agents (e.g. goose).
+        if let Some(spec) = entry.archive_spec.as_ref() {
+            agents::archive_agent::ensure_installed(spec, &downloads).await?;
+            return Ok(());
+        }
+        // Native managed agents with dedicated npm-prefix installers.
+        match id.as_str() {
+            "openclaw" => {
+                agents::openclaw::installer::ensure_installed().await?;
+                return Ok(());
+            }
+            "nanoclaw" => {
+                agents::nanoclaw::installer::ensure_installed().await?;
+                return Ok(());
+            }
+            "nemoclaw" => {
+                agents::nemoclaw::installer::ensure_installed().await?;
+                return Ok(());
+            }
+            _ => {}
+        }
+        // npx self-fetching agents (claude/codex/gemini/pi, …): warm the cache.
+        // uvx agents and OpenAI-compat servers self-fetch on first use.
+        if let AgentTransport::Acp { spawn_cmd } = &entry.transport {
+            if let Some(pkg) = npx_package_of(spawn_cmd) {
+                warm_npx_package(&pkg).await;
+            }
+        }
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => tracing::info!(agent = %id, "agent runtime install complete"),
+        Err(e) => tracing::warn!(
+            agent = %id,
+            error = %e,
+            "agent runtime install failed; agent will self-fetch on first use"
+        ),
+    }
+}
+
+/// Add a built-in agent to the installed set so it appears in the picker, and
+/// kick off a background fetch of its runtime so it's ready before first chat.
+/// The fetch is best-effort and non-blocking: registration succeeds immediately
+/// and the npx/binary download continues after the response (npx agents also
+/// self-fetch on first spawn, so a failure only costs a one-time first-run delay).
 #[utoipa::path(
     post,
     path = "/api/agents/catalog/install",
@@ -4009,17 +4320,27 @@ async fn install_agent_handler(
     State(state): State<ServerState>,
     Json(body): Json<AgentCatalogAction>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if !state.agents.entries.iter().any(|e| e.id == body.id) {
+    let Some(entry) = state
+        .agents
+        .entries
+        .iter()
+        .find(|e| e.id == body.id)
+        .cloned()
+    else {
         return (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": format!("unknown agent id: {}", body.id) })),
         );
-    }
+    };
     match state.agent_store.set_installed(&body.id, true).await {
-        Ok(_) => (
-            StatusCode::OK,
-            Json(json!({ "ok": true, "id": body.id, "installed": true })),
-        ),
+        Ok(_) => {
+            let downloads = state.downloads.clone();
+            tokio::spawn(install_agent_runtime(entry, downloads));
+            (
+                StatusCode::OK,
+                Json(json!({ "ok": true, "id": body.id, "installed": true })),
+            )
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),
@@ -4726,6 +5047,11 @@ async fn get_conversation(
     State(state): State<ServerState>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
+    // TODO (Phase 1 realtime join): enforce read ACL here. Extract
+    // `Extension<Option<VerifiedCaller>>`, load the conversation's
+    // owner_user_id/org_id/visibility/team_id, and gate on
+    // `crate::identity_verify::can_access(...) != Access::None`. Not enforced in
+    // Phase 0 so the single-tenant flow is unchanged.
     match state.conversations.get_conversation_detail(&id).await {
         Ok(Some(detail)) => Json(detail).into_response(),
         Ok(None) => json_error(
@@ -5052,10 +5378,7 @@ async fn resolve_context_window(
 
     // The chat model for this turn (mirrors route_chat_stream's effective-agent
     // resolution): used to size an `auto` budget and as the default summarizer.
-    let effective_agent = req
-        .target_agent_id
-        .clone()
-        .or_else(|| req.agent_id.clone());
+    let effective_agent = req.target_agent_id.clone().or_else(|| req.agent_id.clone());
     let model = match effective_agent {
         Some(id) => crate::sidecar::adapters::resolve_agent_model(&id, &state.agent_store).await,
         None => None,
@@ -5100,20 +5423,21 @@ async fn resolve_context_window(
         _ => String::new(),
     };
 
-    Some(crate::sidecar::adapters::context_window::ContextWindowConfig {
-        max_tokens,
-        reserve_output,
-        auto_compact,
-        compact_model,
-        compact_effort,
-    })
+    Some(
+        crate::sidecar::adapters::context_window::ContextWindowConfig {
+            max_tokens,
+            reserve_output,
+            auto_compact,
+            compact_model,
+            compact_effort,
+        },
+    )
 }
 
 /// Recent-message window a `/btw` side question sees when it loads the transcript
 /// from a stored conversation (clients that pass their own `messages` aren't
 /// bounded here). Matches the goal judge's window.
 const BTW_TRANSCRIPT_LIMIT: usize = 30;
-
 
 /// Resolve a "side model" effort/thinking level from a preference key, falling
 /// back to an env var then empty (= provider default). Shared by the goal judge
@@ -5187,7 +5511,6 @@ pub(crate) async fn call_side_model(
         .unwrap_or_default();
     Ok(text.to_string())
 }
-
 
 // ── Side questions (`/btw`) ───────────────────────────────────────────────────
 //
@@ -6898,6 +7221,11 @@ async fn get_document(
     State(state): State<ServerState>,
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
+    // TODO (Phase 1 realtime join): enforce read ACL here. Extract
+    // `Extension<Option<VerifiedCaller>>`, load the document's
+    // owner_user_id/org_id/visibility/team_id, and gate on
+    // `crate::identity_verify::can_access(...) != Access::None`. Not enforced in
+    // Phase 0 so the single-tenant flow is unchanged.
     match state.spaces.get_document(&doc_id).await {
         Ok(Some(doc)) => Json(doc).into_response(),
         Ok(None) => json_error(StatusCode::NOT_FOUND, "document not found".to_owned()),
@@ -7290,6 +7618,82 @@ async fn composio_triggers(
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             Json(json!({ "error": e.to_string(), "data": [] })),
+        ),
+    }
+}
+
+/// `GET /api/composio/connections?toolkit=` — list the user's connected accounts,
+/// optionally filtered to one toolkit (for the Connections tab's connected state).
+#[utoipa::path(
+    get,
+    path = "/api/composio/connections",
+    tag = "Composio",
+    summary = "List the user's Composio connected accounts",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn composio_connections(
+    State(state): State<ServerState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let toolkit = params.get("toolkit").map(String::as_str).unwrap_or("");
+    match crate::composio_connect::list_connections(&state.client, toolkit).await {
+        Ok(value) => (StatusCode::OK, Json(value)),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": e.to_string(), "data": [] })),
+        ),
+    }
+}
+
+/// Body for `POST /api/composio/connections/initiate`.
+#[derive(serde::Deserialize)]
+struct ComposioConnectBody {
+    toolkit: String,
+}
+
+/// `POST /api/composio/connections/initiate` — start an OAuth connection for a
+/// toolkit. Returns `{ connection_id, redirect_url, status }`; the client opens
+/// `redirect_url` then polls `GET /api/composio/connections/:id`.
+#[utoipa::path(
+    post,
+    path = "/api/composio/connections/initiate",
+    tag = "Composio",
+    summary = "Initiate a Composio account connection for a toolkit",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn composio_connection_initiate(
+    State(state): State<ServerState>,
+    Json(body): Json<ComposioConnectBody>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::composio_connect::initiate(&state.client, &body.toolkit).await {
+        Ok(value) => (StatusCode::OK, Json(value)),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+/// `GET /api/composio/connections/:id` — poll one connection's status (the client
+/// calls this after the user returns from the Composio OAuth redirect).
+#[utoipa::path(
+    get,
+    path = "/api/composio/connections/{id}",
+    tag = "Composio",
+    summary = "Poll a Composio connection's status",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn composio_connection_status(
+    State(state): State<ServerState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::composio_connect::connection_status(&state.client, &id).await {
+        Ok(value) => (StatusCode::OK, Json(value)),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": e.to_string() })),
         ),
     }
 }
@@ -7917,7 +8321,9 @@ async fn catalog_sources_list(
         Err(_) => {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "missing or unknown `kind` (model|skill|mcp|plugin)" })),
+                Json(
+                    json!({ "error": "missing or unknown `kind` (model|skill|mcp|plugin|knowledge)" }),
+                ),
             );
         }
     };
@@ -8270,6 +8676,425 @@ async fn catalog_sources_select(
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(json!({ "ok": false, "error": e.to_string() })),
+        ),
+    }
+}
+
+// ── Knowledge catalog (browse + install OKF bundles) ─────────────────────────
+//
+// Source-aware like the model/skill/mcp catalogs: the active Knowledge source
+// (the Ryu Marketplace federated source by default, or a custom OKF git bundle)
+// owns search/detail. Install is the privileged path: clone/parse the bundle via
+// the `okf` module, then index it through the retrieval layer
+// (`ingest_okf_bundle`). The seam returns descriptors only; the download/ingest
+// happens here in Core.
+
+/// The active Knowledge catalog [`Source`] (defaults to the built-in primary).
+async fn active_knowledge_source(state: &ServerState) -> Option<crate::catalog_source::Source> {
+    state
+        .catalog_sources
+        .get_active(
+            crate::catalog_source::CatalogKind::Knowledge,
+            &state.preferences,
+        )
+        .await
+}
+
+/// Load an OKF bundle from a descriptor's `source_url`: a local directory via
+/// [`crate::okf::Bundle::from_dir`] (off-thread, sync), else a git clone via
+/// [`crate::okf::Bundle::from_git`]. Mirrors `OkfBundleSource::load_bundle` for
+/// the install path, which works off the resolved descriptor rather than the
+/// source struct (a marketplace source carries the same `{ source_url, ref? }`).
+async fn load_okf_bundle(
+    source_url: &str,
+    git_ref: Option<&str>,
+) -> anyhow::Result<crate::okf::Bundle> {
+    let url = source_url.trim().to_string();
+    let path = std::path::Path::new(&url);
+    if path.is_dir() {
+        let p = path.to_path_buf();
+        tokio::task::spawn_blocking(move || crate::okf::Bundle::from_dir(p))
+            .await
+            .map_err(|e| anyhow::anyhow!("loading OKF bundle task panicked: {e}"))?
+    } else {
+        crate::okf::Bundle::from_git(&url, git_ref).await
+    }
+}
+
+/// `GET /api/knowledge/catalog?query=&limit=&cursor=` — browse the active
+/// Knowledge source's concepts. Mirrors the model/skill/mcp list handlers.
+#[utoipa::path(
+    get,
+    path = "/api/knowledge/catalog",
+    tag = "Knowledge",
+    summary = "Browse the knowledge (OKF) catalog",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn knowledge_catalog_list(
+    State(state): State<ServerState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let query = params.get("query").map(String::as_str).unwrap_or("");
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(40);
+    let cursor = params
+        .get("cursor")
+        .map(String::as_str)
+        .filter(|s| !s.is_empty());
+    let q = crate::catalog_source::CatalogQuery {
+        query: query.to_string(),
+        limit,
+        cursor: cursor.map(str::to_string),
+        ..Default::default()
+    };
+    match active_knowledge_source(&state).await {
+        Some(source) => match source.search(&state.client, &q).await {
+            Ok(value) => (StatusCode::OK, Json(value)),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": e.to_string(), "concepts": [] })),
+            ),
+        },
+        None => (
+            StatusCode::OK,
+            Json(json!({ "concepts": [], "next_cursor": serde_json::Value::Null })),
+        ),
+    }
+}
+
+/// `GET /api/knowledge/catalog/detail?id=<concept-path>` — one concept's parsed
+/// frontmatter + body, so a client can preview it before installing the bundle.
+#[utoipa::path(
+    get,
+    path = "/api/knowledge/catalog/detail",
+    tag = "Knowledge",
+    summary = "Knowledge concept detail",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn knowledge_catalog_detail(
+    State(state): State<ServerState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(id) = params.get("id").filter(|s| !s.is_empty()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "missing required `id` query parameter" })),
+        );
+    };
+    match active_knowledge_source(&state).await {
+        Some(source) => match source.detail(&state.client, id).await {
+            Ok(value) => (StatusCode::OK, Json(value)),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": e.to_string() })),
+            ),
+        },
+        None => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": "no active knowledge source" })),
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct KnowledgeCatalogInstallBody {
+    /// The bundle/source id to install. Optional for a single-bundle OKF source
+    /// (it installs its configured bundle); a marketplace source uses it to pick
+    /// the catalog item.
+    #[serde(default)]
+    id: String,
+}
+
+/// `POST /api/knowledge/catalog/install { id }` — the privileged install path:
+/// resolve the active source's descriptor (`{ source_url, ref?, bundle_id }`),
+/// clone/parse the OKF bundle via the `okf` module, and index it into the
+/// retrieval layer via [`RetrievalStore::ingest_okf_bundle`]. Returns the ingest
+/// summary (concepts + chunks). Source returns a descriptor only; Core downloads.
+#[utoipa::path(
+    post,
+    path = "/api/knowledge/catalog/install",
+    tag = "Knowledge",
+    summary = "Install (clone + ingest) a knowledge bundle from the catalog",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn knowledge_catalog_install(
+    State(state): State<ServerState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<KnowledgeCatalogInstallBody>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let id = body.id.trim().to_string();
+    // Forward the caller's bearer to the marketplace install handoff (#491) so a
+    // PAID Ryu-Marketplace bundle is denied unless the buyer org holds a license.
+    let buyer_token = buyer_bearer_from_headers(&headers);
+
+    let Some(source) = active_knowledge_source(&state).await else {
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "success": false, "error": "no active knowledge source" })),
+        );
+    };
+
+    // Resolve the descriptor (never downloads). The raw payload carries the OKF
+    // bundle git source the install path needs.
+    let descriptor = match crate::catalog_source::with_buyer_token(
+        buyer_token,
+        source.install_descriptor(&state.client, &id),
+    )
+    .await
+    {
+        Ok(d) => d,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "success": false, "error": e.to_string() })),
+            );
+        }
+    };
+
+    // Extract the bundle source from the descriptor's opaque `raw` payload.
+    let raw = &descriptor.raw;
+    let source_url = raw
+        .get("source_url")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        // Fall back to the descriptor repo_id (OkfBundleSource sets it to the URL).
+        .unwrap_or(descriptor.repo_id.as_str())
+        .to_string();
+    if source_url.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "success": false,
+                "error": "knowledge descriptor has no `source_url` to ingest",
+            })),
+        );
+    }
+    let git_ref = raw
+        .get("ref")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string);
+    // The bundle id the concepts are indexed under (idempotent re-ingest key):
+    // the descriptor's `bundle_id` when present, else the source id, else the URL.
+    let bundle_id = raw
+        .get("bundle_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            if descriptor.source_id.trim().is_empty() {
+                source_url.clone()
+            } else {
+                descriptor.source_id.clone()
+            }
+        });
+
+    // Clone + parse the bundle (the download), then index it.
+    let bundle = match load_okf_bundle(&source_url, git_ref.as_deref()).await {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "success": false, "error": e.to_string() })),
+            );
+        }
+    };
+    let warnings = bundle.warnings.clone();
+    match state.retrieval.ingest_okf_bundle(&bundle_id, &bundle).await {
+        Ok(summary) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "bundle_id": summary.bundle_id,
+                "concepts": summary.concepts,
+                "chunks": summary.chunks,
+                "warnings": warnings,
+            })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "success": false, "error": e.to_string() })),
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct OkfExportBody {
+    /// Filesystem directory the bundle is written to (created if absent).
+    target_dir: String,
+    /// What to export. Only `"bundle"` (the default) is implemented today;
+    /// `"memory"` is reserved for a future broader memory export.
+    #[serde(default)]
+    scope: Option<String>,
+    /// For scope `"bundle"`: the ingested bundle id to re-emit.
+    #[serde(default)]
+    bundle_id: Option<String>,
+}
+
+/// Assemble an exportable [`crate::okf::Bundle`] from reconstructed concepts,
+/// generating a progressive-disclosure `index.md` and a dated `log.md`.
+fn build_okf_export_bundle(
+    bundle_id: &str,
+    concepts: Vec<crate::okf::Concept>,
+) -> crate::okf::Bundle {
+    use crate::okf::{Bundle, IndexDoc, LogDoc, LogEntry, OKF_VERSION};
+
+    // index.md: one bullet per concept, bundle-absolute link + type + description.
+    let mut index_body = String::from("# Concepts\n\n");
+    for c in &concepts {
+        let title = c.title.clone().unwrap_or_else(|| c.file_path.clone());
+        let desc = c
+            .description
+            .as_deref()
+            .map(|d| format!(" — {d}"))
+            .unwrap_or_default();
+        index_body.push_str(&format!(
+            "- [{title}](/{path}) `{kind}`{desc}\n",
+            path = c.file_path,
+            kind = c.type_,
+        ));
+    }
+    let index = IndexDoc {
+        okf_version: Some(OKF_VERSION.to_owned()),
+        title: Some(format!("{bundle_id} (exported)")),
+        description: Some(format!(
+            "OKF bundle exported from Ryu Core, reconstructed from the retrieval index for bundle `{bundle_id}`."
+        )),
+        extra: std::collections::BTreeMap::new(),
+        body: index_body,
+    };
+
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let entry = format!(
+        "Exported {n} concept(s) from Ryu Core (bundle `{bundle_id}`).",
+        n = concepts.len(),
+    );
+    let log = LogDoc {
+        entries: vec![LogEntry {
+            date: today.clone(),
+            content: entry.clone(),
+        }],
+        body: format!("# Changelog\n\n## {today}\n\n{entry}\n"),
+    };
+
+    Bundle {
+        root: std::path::PathBuf::new(),
+        concepts,
+        index: Some(index),
+        log: Some(log),
+        okf_version: Some(OKF_VERSION.to_owned()),
+        warnings: Vec::new(),
+    }
+}
+
+/// `POST /api/okf/export { target_dir, scope?, bundle_id? }` — emit Ryu's own
+/// indexed knowledge as an OKF bundle on disk.
+///
+/// The concrete path is scope `"bundle"`: reconstruct the concepts previously
+/// ingested under `bundle_id` from the retrieval index (via
+/// [`RetrievalStore::reconstruct_okf_concepts`]), map each to an [`crate::okf::Concept`],
+/// generate `index.md` + `log.md`, and write the bundle to `target_dir`. Broader
+/// memory export is a follow-up.
+#[utoipa::path(
+    post,
+    path = "/api/okf/export",
+    tag = "Knowledge",
+    summary = "Export indexed knowledge as an OKF bundle directory",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn okf_export(
+    State(state): State<ServerState>,
+    Json(body): Json<OkfExportBody>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let target_dir = body.target_dir.trim().to_string();
+    if target_dir.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "error": "`target_dir` is required" })),
+        );
+    }
+
+    let scope = body.scope.as_deref().map(str::trim).unwrap_or("bundle");
+    if scope != "bundle" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "success": false,
+                "error": format!("unsupported scope '{scope}'; only 'bundle' is implemented (broader memory export is a follow-up)"),
+            })),
+        );
+    }
+
+    let Some(bundle_id) = body
+        .bundle_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({ "success": false, "error": "`bundle_id` is required for scope 'bundle'" }),
+            ),
+        );
+    };
+
+    let concepts = match state.retrieval.reconstruct_okf_concepts(bundle_id).await {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": e.to_string() })),
+            );
+        }
+    };
+    if concepts.is_empty() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "success": false,
+                "error": format!("no indexed knowledge found for bundle '{bundle_id}'"),
+            })),
+        );
+    }
+
+    let bundle = build_okf_export_bundle(bundle_id, concepts);
+    let files: Vec<String> = bundle
+        .concepts
+        .iter()
+        .map(|c| c.file_path.clone())
+        .collect();
+    let concept_count = bundle.concepts.len();
+
+    let dir = std::path::PathBuf::from(&target_dir);
+    let write = {
+        let bundle = bundle.clone();
+        tokio::task::spawn_blocking(move || bundle.write(&dir)).await
+    };
+    match write {
+        Ok(Ok(())) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "target_dir": target_dir,
+                "bundle_id": bundle_id,
+                "concepts": concept_count,
+                "files": files,
+                "index": crate::okf::RESERVED_INDEX,
+                "log": crate::okf::RESERVED_LOG,
+            })),
+        ),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "success": false, "error": e.to_string() })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "success": false, "error": format!("export task panicked: {e}") })),
         ),
     }
 }
@@ -9156,10 +9981,7 @@ async fn support_bundle_dlp_check(
         if allow_fallback {
             return Ok(());
         }
-        return Err(format!(
-            "gateway firewall returned HTTP {}",
-            resp.status()
-        ));
+        return Err(format!("gateway firewall returned HTTP {}", resp.status()));
     }
 
     let body: serde_json::Value = resp
@@ -9434,6 +10256,76 @@ async fn set_active_engine(
     }
 }
 
+/// Report the default sandbox backend, plus every known backend with its live
+/// availability (detected on this node) and platform support. Mirrors
+/// `GET /api/engine/active`, but a sandbox backend is a *default* (per-call
+/// overridable), not an exclusive resident slot, so there is no "running" field.
+#[utoipa::path(
+    get,
+    path = "/api/sandbox/backend",
+    tag = "Sandboxes",
+    summary = "Get the default sandbox backend and available backends",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_sandbox_backend(State(_state): State<ServerState>) -> Json<serde_json::Value> {
+    use crate::sidecar::sandbox;
+
+    let active = sandbox::configured_backend().as_str().to_owned();
+    let mut available = Vec::new();
+    for name in sandbox::KNOWN_BACKENDS {
+        available.push(json!({
+            "name": name,
+            "display_name": sandbox::backend_display_name(name),
+            "detected": sandbox::detect_backend(name).await,
+            "supported": crate::catalog::registry::supported_on_node(name),
+        }));
+    }
+    Json(json!({
+        "active": active,
+        "available": available,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct SetSandboxBackendBody {
+    name: String,
+}
+
+/// Set the default sandbox backend. Persists to `~/.ryu/sandbox-backend.json`
+/// (read by `configured_backend()`); the change takes effect on the next
+/// `sandbox_exec` call that omits an explicit `backend`. An unknown/empty name
+/// is rejected.
+#[utoipa::path(
+    post,
+    path = "/api/sandbox/backend",
+    tag = "Sandboxes",
+    summary = "Set the default sandbox backend",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn set_sandbox_backend(
+    State(_state): State<ServerState>,
+    Json(body): Json<SetSandboxBackendBody>,
+) -> Json<serde_json::Value> {
+    use crate::sidecar::sandbox::{self, SandboxBackend, SandboxBackendStore};
+
+    let name = body.name.trim();
+    // Validate it parses to a backend we can actually build/run.
+    match SandboxBackend::from_name(name) {
+        Ok(_) if sandbox::KNOWN_BACKENDS.contains(&name) => {}
+        _ => {
+            return Json(json!({
+                "success": false,
+                "error": format!("unknown sandbox backend '{name}'"),
+            }));
+        }
+    }
+    match SandboxBackendStore::save(Some(name)) {
+        Ok(()) => Json(json!({ "success": true, "active": name })),
+        Err(e) => Json(json!({ "success": false, "error": e.to_string() })),
+    }
+}
+
 /// `GET /api/models/active` — the GGUF the local chat engine is serving.
 ///
 /// Reports the user-selected active model override (the local stem persisted in
@@ -9539,10 +10431,7 @@ async fn set_active_model(
     {
         if let Err(e) = state
             .preferences
-            .set(
-                installed::ACTIVE_DIFFUSION_MODEL_PREF,
-                &selection.r#ref,
-            )
+            .set(installed::ACTIVE_DIFFUSION_MODEL_PREF, &selection.r#ref)
             .await
         {
             return (
@@ -11127,6 +12016,240 @@ async fn get_install_status_by_name(
     Json(json!({ "name": name, "status": status }))
 }
 
+fn command_exists(program: &str) -> bool {
+    Command::new(program)
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn dependency_status() -> (serde_json::Map<String, serde_json::Value>, bool) {
+    let git_installed = command_exists("git");
+    let rust_installed = command_exists("rustc");
+    let npm_installed = command_exists("npm") || command_exists("bun");
+    let python_installed = command_exists("python3") || command_exists("python");
+    let all_installed = git_installed && rust_installed && npm_installed && python_installed;
+
+    let mut dependencies = serde_json::Map::new();
+    dependencies.insert("git".to_string(), json!(git_installed));
+    dependencies.insert("rust".to_string(), json!(rust_installed));
+    dependencies.insert("npm".to_string(), json!(npm_installed));
+    dependencies.insert("python".to_string(), json!(python_installed));
+
+    (dependencies, all_installed)
+}
+
+fn run_install_command(program: &str, args: &[&str]) -> Result<(), String> {
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .map_err(|error| format!("{program} failed to start: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let status = output.status.code().map_or_else(
+        || "terminated by signal".to_string(),
+        |code| code.to_string(),
+    );
+
+    if stderr.is_empty() {
+        Err(format!("{program} exited with status {status}"))
+    } else {
+        Err(format!("{program} exited with status {status}: {stderr}"))
+    }
+}
+
+fn run_first_success(commands: &[(&str, &[&str])]) -> Result<(), String> {
+    let mut errors = Vec::new();
+    for (program, args) in commands {
+        match run_install_command(program, args) {
+            Ok(()) => return Ok(()),
+            Err(error) => errors.push(error),
+        }
+    }
+    Err(errors.join("; "))
+}
+
+fn install_git() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        run_install_command(
+            "winget",
+            &[
+                "install",
+                "--id",
+                "Git.Git",
+                "-e",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ],
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        run_install_command("brew", &["install", "git"])
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        run_first_success(&[
+            ("sudo", &["apt-get", "install", "-y", "git"][..]),
+            ("sudo", &["dnf", "install", "-y", "git"][..]),
+            ("sudo", &["yum", "install", "-y", "git"][..]),
+        ])
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("automatic git install is unsupported on this platform".to_string())
+    }
+}
+
+fn install_rust() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        run_install_command(
+            "winget",
+            &[
+                "install",
+                "--id",
+                "Rustlang.Rustup",
+                "-e",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ],
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        run_install_command("brew", &["install", "rust"])
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        run_first_success(&[
+            ("sudo", &["apt-get", "install", "-y", "rustc", "cargo"][..]),
+            ("sudo", &["dnf", "install", "-y", "rust", "cargo"][..]),
+            ("sudo", &["yum", "install", "-y", "rust", "cargo"][..]),
+        ])
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("automatic Rust install is unsupported on this platform".to_string())
+    }
+}
+
+fn install_node_runtime() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        run_install_command(
+            "winget",
+            &[
+                "install",
+                "--id",
+                "OpenJS.NodeJS.LTS",
+                "-e",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ],
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        run_install_command("brew", &["install", "node"])
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        run_first_success(&[
+            ("sudo", &["apt-get", "install", "-y", "nodejs", "npm"][..]),
+            ("sudo", &["dnf", "install", "-y", "nodejs", "npm"][..]),
+            ("sudo", &["yum", "install", "-y", "nodejs", "npm"][..]),
+        ])
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("automatic Node.js install is unsupported on this platform".to_string())
+    }
+}
+
+fn install_python() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        run_install_command(
+            "winget",
+            &[
+                "install",
+                "--id",
+                "Python.Python.3",
+                "-e",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ],
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        run_install_command("brew", &["install", "python3"])
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        run_first_success(&[
+            (
+                "sudo",
+                &["apt-get", "install", "-y", "python3", "python3-pip"][..],
+            ),
+            (
+                "sudo",
+                &["dnf", "install", "-y", "python3", "python3-pip"][..],
+            ),
+            (
+                "sudo",
+                &["yum", "install", "-y", "python3", "python3-pip"][..],
+            ),
+        ])
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("automatic Python install is unsupported on this platform".to_string())
+    }
+}
+
+fn install_dependency(
+    is_installed: impl Fn() -> bool,
+    install: impl FnOnce() -> Result<(), String>,
+) -> serde_json::Value {
+    if is_installed() {
+        return json!({ "status": "already_installed", "success": true });
+    }
+
+    match install() {
+        Ok(()) if is_installed() => json!({ "status": "installed", "success": true }),
+        Ok(()) => json!({
+            "status": "failed",
+            "success": false,
+            "error": "installer completed, but the dependency is still unavailable"
+        }),
+        Err(error) => json!({
+            "status": "failed",
+            "success": false,
+            "error": error
+        }),
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/api/dependencies/check",
@@ -11140,51 +12263,15 @@ async fn check_dependencies() -> Json<serde_json::Value> {
     let result = tokio::time::timeout(
         Duration::from_secs(30),
         tokio::task::spawn_blocking(|| {
-            let git_installed = Command::new("git")
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-
-            let rust_installed = Command::new("rustc")
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-
-            let npm_installed = Command::new("npm")
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-                || Command::new("bun")
-                    .arg("--version")
-                    .output()
-                    .map(|o| o.status.success())
-                    .unwrap_or(false);
-
-            let python_installed = Command::new("python3")
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-                || Command::new("python")
-                    .arg("--version")
-                    .output()
-                    .map(|o| o.status.success())
-                    .unwrap_or(false);
+            let (dependencies, all_installed) = dependency_status();
 
             json!({
-                "dependencies": {
-                    "git": git_installed,
-                    "rust": rust_installed,
-                    "npm": npm_installed,
-                    "python": python_installed
-                },
-                "all_installed": git_installed && rust_installed && npm_installed && python_installed
+                "dependencies": dependencies,
+                "all_installed": all_installed
             })
-        })
-    ).await;
+        }),
+    )
+    .await;
 
     match result {
         Ok(Ok(json)) => Json(json),
@@ -11208,93 +12295,46 @@ async fn install_dependencies() -> Json<serde_json::Value> {
         tokio::task::spawn_blocking(|| {
             let mut results = serde_json::Map::new();
 
-            // Install git if needed
-            if !Command::new("git").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
-                #[cfg(target_os = "windows")]
-                let _ = Command::new("winget")
-                    .args(["install", "--id", "Git.Git", "-e", "--accept-source-agreements", "--accept-package-agreements"])
-                    .status();
+            results.insert(
+                "git".to_string(),
+                install_dependency(|| command_exists("git"), install_git),
+            );
+            results.insert(
+                "rust".to_string(),
+                install_dependency(|| command_exists("rustc"), install_rust),
+            );
+            results.insert(
+                "npm".to_string(),
+                install_dependency(
+                    || command_exists("npm") || command_exists("bun"),
+                    install_node_runtime,
+                ),
+            );
+            results.insert(
+                "python".to_string(),
+                install_dependency(
+                    || command_exists("python3") || command_exists("python"),
+                    install_python,
+                ),
+            );
 
-                #[cfg(target_os = "macos")]
-                let _ = Command::new("brew").args(["install", "git"]).status();
+            let (dependencies, all_installed) = dependency_status();
+            let install_steps_succeeded = results.values().all(|result| {
+                result
+                    .get("success")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false)
+            });
 
-                #[cfg(target_os = "linux")]
-                let _ = Command::new("sh")
-                    .args(["-c", "sudo apt-get install -y git || sudo yum install -y git"])
-                    .status();
-
-                results.insert("git".to_string(), json!("installed"));
-            } else {
-                results.insert("git".to_string(), json!("already_installed"));
-            }
-
-            // Install rust if needed
-            if !Command::new("rustc").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
-                #[cfg(target_os = "windows")]
-                let _ = Command::new("winget")
-                    .args(["install", "--id", "Rustlang.Rustup", "-e", "--accept-source-agreements", "--accept-package-agreements"])
-                    .status();
-
-                #[cfg(not(target_os = "windows"))]
-                let _ = Command::new("sh")
-                    .args(["-c", "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"])
-                    .status();
-
-                results.insert("rust".to_string(), json!("installed"));
-            } else {
-                results.insert("rust".to_string(), json!("already_installed"));
-            }
-
-            // Install npm/bun if needed
-            if !Command::new("npm").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
-                && !Command::new("bun").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
-            {
-                #[cfg(target_os = "windows")]
-                let _ = Command::new("winget")
-                    .args(["install", "--id", "OpenJS.NodeJS.LTS", "-e", "--accept-source-agreements", "--accept-package-agreements"])
-                    .status();
-
-                #[cfg(target_os = "macos")]
-                let _ = Command::new("brew").args(["install", "node"]).status();
-
-                #[cfg(target_os = "linux")]
-                let _ = Command::new("sh")
-                    .args(["-c", "curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs"])
-                    .status();
-
-                results.insert("npm".to_string(), json!("installed"));
-            } else {
-                results.insert("npm".to_string(), json!("already_installed"));
-            }
-
-            // Install python if needed
-            let python_present = Command::new("python3").arg("--version").output()
-                .map(|o| o.status.success()).unwrap_or(false)
-                || Command::new("python").arg("--version").output()
-                .map(|o| o.status.success()).unwrap_or(false);
-
-            if !python_present {
-                #[cfg(target_os = "windows")]
-                let _ = Command::new("winget")
-                    .args(["install", "--id", "Python.Python.3", "-e", "--accept-source-agreements", "--accept-package-agreements"])
-                    .status();
-
-                #[cfg(target_os = "macos")]
-                let _ = Command::new("brew").args(["install", "python3"]).status();
-
-                #[cfg(target_os = "linux")]
-                let _ = Command::new("sh")
-                    .args(["-c", "sudo apt-get install -y python3 python3-pip || sudo dnf install -y python3 python3-pip"])
-                    .status();
-
-                results.insert("python".to_string(), json!("installed"));
-            } else {
-                results.insert("python".to_string(), json!("already_installed"));
-            }
-
-            json!({ "success": true, "results": results })
-        })
-    ).await;
+            json!({
+                "success": install_steps_succeeded && all_installed,
+                "results": results,
+                "dependencies": dependencies,
+                "all_installed": all_installed
+            })
+        }),
+    )
+    .await;
 
     match result {
         Ok(Ok(json)) => Json(json),
@@ -11309,6 +12349,32 @@ async fn install_dependencies() -> Json<serde_json::Value> {
 // test binary; it is gone with the function it covered.
 
 // ── Connection-identity header parsing tests ─────────────────────────────────
+
+#[cfg(test)]
+mod remote_auth_tests {
+    use super::{enforce_remote_auth, host_is_non_loopback};
+
+    #[test]
+    fn loopback_allows_tokenless_local_core() {
+        let token = enforce_remote_auth(None, false, host_is_non_loopback("127.0.0.1:7980"))
+            .expect("loopback-only Core may be tokenless");
+
+        assert_eq!(token, None);
+    }
+
+    #[test]
+    fn exposed_core_requires_a_real_token() {
+        assert!(enforce_remote_auth(None, false, true).is_err());
+        assert!(enforce_remote_auth(Some("   ".to_string()), false, true).is_err());
+        assert!(enforce_remote_auth(Some("CHANGE_ME".to_string()), false, true).is_err());
+        assert!(enforce_remote_auth(Some("replace_me".to_string()), true, false).is_err());
+
+        let token = enforce_remote_auth(Some("strong-random-token".to_string()), false, true)
+            .expect("non-placeholder tokens are accepted");
+
+        assert_eq!(token.as_deref(), Some("strong-random-token"));
+    }
+}
 
 #[cfg(test)]
 mod context_budget_tests {

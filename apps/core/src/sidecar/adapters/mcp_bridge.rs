@@ -89,6 +89,13 @@ pub async fn build_ryu_mcp_server(
 ) -> Option<McpServer<Agent, NullRun>> {
     let tools = mcp.tools_for_agent(allowlist.as_deref()).await;
 
+    // Withhold capability-gated tools this agent is not permitted: the
+    // delegation/discovery providers when its `orchestrator` capability is off,
+    // and the agent-creation tool when `can_create_agents` is off. Resolved from
+    // the agent's config record (defaults: delegation on, creation off).
+    let caps = mcp.agent_capabilities(&agent_id).await;
+    let tools = crate::sidecar::mcp::filter_capability_tools(tools, caps);
+
     // Effective allowlist used by `call_tool`: when restricted, the agent's
     // selected Composio ids must be callable, so merge `composio__<slug>` in.
     // When unrestricted (`None`) everything is already permitted.
@@ -109,6 +116,7 @@ pub async fn build_ryu_mcp_server(
         agent_id,
         identity_profile_ids,
         tools,
+        caps,
     };
     Some(McpServer::new(server, NullRun))
 }
@@ -129,6 +137,9 @@ struct RyuMcpServer {
     identity_profile_ids: Vec<String>,
     /// Pre-fetched list of allowed registry tools (avoids async in `connect`).
     tools: Vec<crate::sidecar::mcp::RegistryTool>,
+    /// This agent's orchestration capabilities, enforced again at dispatch time
+    /// (defense in depth) so a model cannot call a gated tool it was not offered.
+    caps: crate::sidecar::mcp::AgentCapabilities,
 }
 
 impl McpServerConnect<Agent> for RyuMcpServer {
@@ -147,6 +158,7 @@ impl McpServerConnect<Agent> for RyuMcpServer {
             agent_id: self.agent_id.clone(),
             identity_profile_ids: self.identity_profile_ids.clone(),
             tools: self.tools.clone(),
+            caps: self.caps,
         };
         DynConnectTo::new(RyuMcpComponent { handler })
     }
@@ -305,6 +317,9 @@ struct RyuMcpHandler {
     /// Bound Identity Vault profiles (epic #517); see [`RyuMcpServer`].
     identity_profile_ids: Vec<String>,
     tools: Vec<crate::sidecar::mcp::RegistryTool>,
+    /// This agent's orchestration capabilities; gated tools are refused here even
+    /// if a model emits a call to one that was never advertised (defense in depth).
+    caps: crate::sidecar::mcp::AgentCapabilities,
 }
 
 impl RyuMcpHandler {
@@ -416,6 +431,27 @@ impl rmcp::ServerHandler for RyuMcpHandler {
             .map(Value::Object)
             .unwrap_or(Value::Null);
 
+        // Capability gate (defense in depth): these tools are filtered out of the
+        // advertised set for an agent that lacks the capability, but a model can
+        // still emit a call to a tool it was never offered — refuse it here too.
+        let server_prefix = tool_id.split("__").next().unwrap_or_default();
+        let orchestration_tool = server_prefix == crate::sidecar::mcp::delegate::SERVER_NAME
+            || server_prefix == crate::sidecar::mcp::orchestrator::SERVER_NAME;
+        if orchestration_tool && !self.caps.orchestrator {
+            return Err(McpError::new(
+                rmcp::model::ErrorCode::INVALID_REQUEST,
+                format!("tool '{tool_id}' requires the orchestrator capability, which is disabled for this agent"),
+                None,
+            ));
+        }
+        if tool_id == crate::sidecar::mcp::CREATE_AGENT_TOOL_ID && !self.caps.can_create_agents {
+            return Err(McpError::new(
+                rmcp::model::ErrorCode::INVALID_REQUEST,
+                format!("tool '{tool_id}' requires the agent-creation capability, which is disabled for this agent"),
+                None,
+            ));
+        }
+
         // ── Meta-tool dispatch arms (BEFORE the registry fallthrough) ──────────
         let result: Value = match tool_id {
             "tool_search" => self.dispatch_tool_search(&args).await?,
@@ -520,6 +556,7 @@ mod tests {
             agent_id: "ryu".to_owned(),
             identity_profile_ids: Vec::new(),
             tools,
+            caps: crate::sidecar::mcp::AgentCapabilities::default(),
         }
     }
 

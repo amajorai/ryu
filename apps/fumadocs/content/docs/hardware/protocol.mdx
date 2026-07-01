@@ -1,0 +1,133 @@
+---
+title: "Protocol (RHP v1)"
+description: "The Ryu Hardware Protocol: the WebSocket endpoint, auth, frame types, the full client and server message tables, and the chat and ambient flows."
+---
+
+The Ryu Hardware Protocol (RHP) v1 is the canonical wire contract between a Ryu hardware device and a node. It is one WebSocket protocol that runs identically over both transport modes (direct WiFi and the BLE relay). The repository file `apps/hardware/PROTOCOL.md` is the normative source of truth; this page is the reference companion to it.
+
+<Callout type="info">
+  RHP is implemented three times and kept in lockstep: in **C** for the firmware (`apps/hardware/firmware/shared/protocol/`), in **Rust** for the node (`apps/core/src/server/hardware_ws.rs` plus `apps/core/src/hardware/`), and in **TypeScript** for the mobile relay (`packages/protocol/src/hardware.ts`). The message `type` strings and field names are normative across all three.
+</Callout>
+
+## Endpoint and auth
+
+- URL - `wss://<node-host>/api/hardware/ws`, or `ws://127.0.0.1:7980/api/hardware/ws` on loopback.
+- Auth - an HTTP header `Authorization: Bearer <device_token>` on the WebSocket upgrade request.
+  - In Mode B (direct WiFi) the device adds the header.
+  - In Mode A (BLE relay) the phone adds the header, because the phone holds the `device_token`.
+- Loopback skips auth, matching existing Core behavior. Any non-loopback bind **requires** the token, and the upgrade rejects unregistered or mismatched device tokens on every bind.
+
+## Frame types
+
+RHP multiplexes two kinds of frame over the single socket.
+
+| Frame | Meaning | Encoding |
+|---|---|---|
+| TEXT | One JSON control message, dispatched on its `type` field. | UTF-8 JSON |
+| BINARY | One Opus audio packet. Direction is implied by stream state. | Opus, mono, 60 ms frames |
+
+Audio is directional by sample rate: the **mic uplink** is Opus mono at 16 kHz, and the **TTS downlink** is Opus mono at 24 kHz, both in 60 ms frames.
+
+## Control messages
+
+There are 20 control message types: 8 from the client (device or relay) to the node, and 12 from the node back to the client.
+
+### Client to server
+
+| `type` | Fields | Purpose |
+|---|---|---|
+| `hello` | `device_id`, `device_type`, `fw_version`, `relay`, `audio`, `caps` | First message after connect. Identifies the device, declares `relay: true` if tunneled via a phone (Mode A), and advertises the audio format and capability flags (`display`, `camera`, `speaker`, `mic`). |
+| `mode` | `value` - one of `idle`, `chat`, `ambient` | Sets the device operating mode. |
+| `listen` | `state` - `start` or `stop` | Marks a chat turn boundary (push-to-talk, wake word, or VAD). |
+| `text` | `content` | Typed or derived text input, the fallback path when audio is not used. |
+| `abort` | none | Barge-in. Stops the current TTS playback and generation. |
+| `camera_meta` | `w`, `h`, `fmt`, `bytes` | Announces that the next BINARY frame is a JPEG of the given dimensions and size. |
+| `telemetry` | `battery_pct`, `rssi`, `charging` | Periodic device health for the registry. |
+| `ping` | none | Keepalive. |
+
+### Server to client
+
+| `type` | Fields | Purpose |
+|---|---|---|
+| `hello_ack` | `session_id`, `ambient_session_id`, `tts` | Acknowledges `hello`. `ambient_session_id` is the long-running meeting id, present when the device is ambient-capable. `tts` declares the downlink format. |
+| `stt` | `text`, `final` | Live transcript to display. |
+| `chat_delta` | `text` | One streamed chunk of assistant tokens. |
+| `chat_end` | `conversation_id` | The chat turn finished. |
+| `emotion` | `value` | Drives the face: one of `neutral`, `listening`, `thinking`, `happy`, `sad`, `surprised`, `speaking`. |
+| `tts_start` | none | BINARY Opus frames follow until `tts_end`. |
+| `tts_end` | none | End of the TTS stream. |
+| `ambient_ack` | `segment_id` | An ambient chunk was transcribed and indexed. |
+| `ambient_skip` | `reason` | An ambient chunk was dropped, for example `silence`. |
+| `display` | `surface`, `widget`, `payload` | A desk ambient update, or a nudge to re-poll the dashboard. `surface` is `eink` or `lcd`. |
+| `error` | `code`, `message` | A protocol or runtime error. |
+| `pong` | none | Reply to `ping`. |
+
+## Flows
+
+### Interactive chat (mode chat)
+
+<Steps>
+  <Step>
+    The device sets `mode: chat`. On wake word, button, or VAD onset it sends `listen: start` and streams mic Opus BINARY frames.
+  </Step>
+  <Step>
+    On end of speech (VAD or button) the device sends `listen: stop`.
+  </Step>
+  <Step>
+    The node decodes Opus, transcribes it in-process with whisper.cpp, and emits `stt`.
+  </Step>
+  <Step>
+    The node runs the chat turn on the existing `/api/chat/stream` path, in-process, streaming `chat_delta` and `emotion` messages, then `chat_end`.
+  </Step>
+  <Step>
+    The node synthesizes TTS with OuteTTS, Opus-encodes it, and sends `tts_start`, the BINARY frames, then `tts_end`. An `abort` from the device cancels mid-stream for barge-in.
+  </Step>
+</Steps>
+
+### Ambient 24/7 capture (mode ambient)
+
+<Steps>
+  <Step>
+    On `hello`, if the device is ambient-capable, the node opens or resumes a long-running meeting (the ambient session) and returns its id as `ambient_session_id`.
+  </Step>
+  <Step>
+    The device runs on-device VAD and only streams Opus when speech is detected, keeping a roughly 0.8 s pre-roll ring buffer. Silence is never transmitted, which saves battery and ASR cost.
+  </Step>
+  <Step>
+    The node buffers about 1 s of decoded audio and feeds it to the meetings chunk pipeline in-process, the same path as `POST /api/meetings/:id/chunk`. It transcribes, segments, indexes for recall, and replies with `ambient_ack`.
+  </Step>
+  <Step>
+    Rolling summarization feeds long-term memory and context. Desk devices receive `display` updates carrying the rolling summary for the e-ink panel.
+  </Step>
+</Steps>
+
+### Camera (necklace, optional)
+
+A `camera_meta` message followed by a BINARY JPEG hands the image to a vision-capable agent, which captions it into recall or answers an attached chat turn.
+
+## REST surface
+
+The non-realtime device endpoints live alongside the WebSocket.
+
+```
+POST   /api/hardware/pair        { device_id, pairing_nonce, device_type } -> { device_token, node_url }
+GET    /api/hardware/devices     -> [{ device_id, type, name, last_seen, online, battery_pct }]
+PATCH  /api/hardware/devices/:id { name?, prefs? }
+DELETE /api/hardware/devices/:id   (revoke token)
+```
+
+The device registry persists in Core (SQLite) and extends the existing connections and presence model. The dashboard adds further REST endpoints under `/api/hardware/display/*`, covered in [Dashboard](/docs/hardware/dashboard).
+
+## Non-goals for v1
+
+- No on-device LLM. The node infers. Desk-local inference on a Pi is a later variant.
+- No MQTT or UDP transport. RHP is WebSocket only in v1.
+- No application-layer encryption of the BLE relay tunnel beyond BLE's own pairing. App-layer crypto is a v2 item.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/hardware/architecture" />
+  <DocCard href="/docs/hardware/pairing" />
+  <DocCard href="/docs/hardware/dashboard" />
+</Cards>

@@ -512,7 +512,9 @@ impl LaunchConfig {
     pub fn apply_llamacpp_batching_defaults(&mut self) {
         if self.parallel.is_none() {
             let device = crate::model_catalog::device::DeviceInfo::detect();
-            self.parallel = Some(crate::model_catalog::device::default_parallel_slots(&device));
+            self.parallel = Some(crate::model_catalog::device::default_parallel_slots(
+                &device,
+            ));
         }
         if self.parallel.unwrap_or(1) > 1 && self.kv_unified.is_none() {
             self.kv_unified = Some(true);
@@ -884,16 +886,18 @@ mod tests {
             cont_batching: Some(true),
             ..Default::default()
         };
-        assert!(!on.to_args(Engine::LlamaCpp).join(" ").contains("cont-batching"));
+        assert!(!on
+            .to_args(Engine::LlamaCpp)
+            .join(" ")
+            .contains("cont-batching"));
         let off = LaunchConfig {
             cont_batching: Some(false),
             ..Default::default()
         };
-        assert!(
-            off.to_args(Engine::LlamaCpp)
-                .join(" ")
-                .contains("--no-cont-batching")
-        );
+        assert!(off
+            .to_args(Engine::LlamaCpp)
+            .join(" ")
+            .contains("--no-cont-batching"));
     }
 
     #[test]
@@ -917,7 +921,10 @@ mod tests {
         pinned.apply_llamacpp_batching_defaults();
         assert_eq!(pinned.parallel, Some(1), "user slot count preserved");
         assert_eq!(pinned.cache_reuse, Some(0), "user cache-reuse preserved");
-        assert_eq!(pinned.kv_unified, None, "single slot ⇒ no unified-KV forced");
+        assert_eq!(
+            pinned.kv_unified, None,
+            "single slot ⇒ no unified-KV forced"
+        );
     }
 
     #[test]

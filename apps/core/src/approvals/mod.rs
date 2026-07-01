@@ -199,11 +199,9 @@ impl ApprovalRequest {
 
     /// Build a request for a workflow suspended at an `Awakeable` gate.
     pub fn for_workflow_gate(run_id: &str, workflow_name: &str, prompt: Option<&str>) -> Self {
-        let summary = prompt
-            .map(|p| p.to_owned())
-            .unwrap_or_else(|| {
-                format!("Workflow \"{workflow_name}\" is paused, awaiting your approval to continue.")
-            });
+        let summary = prompt.map(|p| p.to_owned()).unwrap_or_else(|| {
+            format!("Workflow \"{workflow_name}\" is paused, awaiting your approval to continue.")
+        });
         let mut req = Self::new(
             ApprovalKind::WorkflowGate,
             format!("Workflow gate: {workflow_name}"),
@@ -504,11 +502,7 @@ mod tests {
         assert_eq!(r1.note.as_deref(), Some("no"));
 
         // Second decide (approve) must NOT flip it — already decided.
-        let r2 = engine
-            .decide(&req.id, true, None)
-            .await
-            .unwrap()
-            .unwrap();
+        let r2 = engine.decide(&req.id, true, None).await.unwrap().unwrap();
         assert_eq!(
             r2.status,
             ApprovalStatus::Rejected,

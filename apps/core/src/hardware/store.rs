@@ -246,7 +246,10 @@ impl DeviceStore {
     /// a row was removed.
     pub async fn revoke(&self, device_id: &str) -> Result<bool> {
         let conn = self.conn.lock().await;
-        let n = conn.execute("DELETE FROM devices WHERE device_id = ?1", params![device_id])?;
+        let n = conn.execute(
+            "DELETE FROM devices WHERE device_id = ?1",
+            params![device_id],
+        )?;
         Ok(n > 0)
     }
 }

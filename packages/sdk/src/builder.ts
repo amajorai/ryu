@@ -14,8 +14,8 @@ import type {
 	CompanionSurface,
 	PluginManifest,
 	RunnableMeta,
-} from "./manifest";
-import { PluginManifestSchema, RunnableMetaSchema } from "./manifest";
+} from "./manifest.ts";
+import { PluginManifestSchema, RunnableMetaSchema } from "./manifest.ts";
 
 // ── RunnableMeta builders ─────────────────────────────────────────────────────
 
@@ -143,8 +143,8 @@ export class PluginBuilder {
 	private _id = "";
 	private _name = "";
 	private _version = "";
-	private _runnables: RunnableMeta[] = [];
-	private _grants: string[] = [];
+	private readonly _runnables: RunnableMeta[] = [];
+	private readonly _grants: string[] = [];
 	private _companion: CompanionSurface | undefined = undefined;
 
 	/** Set the reverse-domain app id (e.g. `"com.example.my-app"`). */

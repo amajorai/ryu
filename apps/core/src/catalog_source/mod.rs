@@ -19,8 +19,8 @@ mod sources;
 pub use registry::{CatalogSourceRegistry, CustomSourceSpec, SourceMeta};
 pub use sources::{
     with_buyer_token, HfSource, MarketplaceSource, ModelIndexSource, OfficialMcpSource,
-    RyuHostedMcpSource, RyuMarketplaceSource, SkillsShSource, SmitherySource, Source, StubSource,
-    RYU_MARKETPLACE_API_ENV, SMITHERY_API_KEY_PREF,
+    OkfBundleSource, RyuHostedMcpSource, RyuMarketplaceSource, SkillsShSource, SmitherySource,
+    Source, StubSource, RYU_MARKETPLACE_API_ENV, SMITHERY_API_KEY_PREF,
 };
 
 use anyhow::{bail, Result};
@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-/// The four catalogs that share the seam. Serializes lowercase so
+/// The five catalogs that share the seam. Serializes lowercase so
 /// `?kind=model` round-trips through query params and the persistence key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -37,15 +37,19 @@ pub enum CatalogKind {
     Skill,
     Mcp,
     Plugin,
+    /// Open Knowledge Format (OKF) bundles — git-shippable directories of
+    /// markdown concepts, ingested into the retrieval layer on install.
+    Knowledge,
 }
 
 impl CatalogKind {
     /// Every kind, for registry iteration and the per-kind AC.
-    pub const ALL: [CatalogKind; 4] = [
+    pub const ALL: [CatalogKind; 5] = [
         CatalogKind::Model,
         CatalogKind::Skill,
         CatalogKind::Mcp,
         CatalogKind::Plugin,
+        CatalogKind::Knowledge,
     ];
 
     /// Lowercase wire form (also the persistence-key suffix).
@@ -55,6 +59,7 @@ impl CatalogKind {
             CatalogKind::Skill => "skill",
             CatalogKind::Mcp => "mcp",
             CatalogKind::Plugin => "plugin",
+            CatalogKind::Knowledge => "knowledge",
         }
     }
 }
@@ -73,6 +78,7 @@ impl FromStr for CatalogKind {
             "skill" => Ok(CatalogKind::Skill),
             "mcp" => Ok(CatalogKind::Mcp),
             "plugin" => Ok(CatalogKind::Plugin),
+            "knowledge" => Ok(CatalogKind::Knowledge),
             other => bail!("unknown catalog kind `{other}`"),
         }
     }
