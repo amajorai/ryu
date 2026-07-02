@@ -430,7 +430,12 @@ async fn synthesize_sentence(
     cfg: &VoiceConfig,
     text: &str,
 ) -> anyhow::Result<Vec<u8>> {
-    let engine = cfg.tts_engine.as_deref().unwrap_or("outetts");
+    // Default engine is the swappable cross-surface default (Kokoro 82M), not a
+    // hardcoded literal. OuteTTS is the built-in fallback.
+    let engine = cfg
+        .tts_engine
+        .clone()
+        .unwrap_or_else(crate::sidecar::providers::ryutts::default_tts_engine);
     if engine == "outetts" {
         return crate::sidecar::providers::outetts::synthesize(text).await;
     }
@@ -443,19 +448,35 @@ async fn synthesize_sentence(
     if let Some(v) = &cfg.tts_voice {
         body["voice"] = serde_json::json!(v);
     }
-    let resp = deps
-        .client
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("RyuTTS not reachable at {url}: {e}"))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let detail = resp.text().await.unwrap_or_default();
-        anyhow::bail!("RyuTTS engine '{engine}' returned {status}: {detail}");
+    // Degrade to OuteTTS if the sidecar is unreachable or the engine can't render,
+    // so a voice turn never goes silent (mirrors `server::voice::speak`).
+    let sidecar_result = async {
+        let resp = deps
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("RyuTTS not reachable at {url}: {e}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let detail = resp.text().await.unwrap_or_default();
+            anyhow::bail!("RyuTTS engine '{engine}' returned {status}: {detail}");
+        }
+        Ok::<Vec<u8>, anyhow::Error>(resp.bytes().await?.to_vec())
     }
-    Ok(resp.bytes().await?.to_vec())
+    .await;
+
+    match sidecar_result {
+        Ok(wav) => Ok(wav),
+        Err(e) => {
+            tracing::warn!(
+                engine = %engine,
+                "voice-session TTS failed ({e:#}); falling back to OuteTTS"
+            );
+            crate::sidecar::providers::outetts::synthesize(text).await
+        }
+    }
 }
 
 /// Build the streaming chat request for a voice turn — an interactive, persisted,

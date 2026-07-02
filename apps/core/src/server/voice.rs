@@ -73,9 +73,14 @@ pub async fn speak(
             .into_response();
     }
 
-    let engine = req.engine.as_deref().unwrap_or("outetts");
+    // The cross-surface default engine (Kokoro 82M) is a swappable registry default,
+    // not a hardcoded literal — resolved here so one env var re-points every surface.
+    let engine = req
+        .engine
+        .clone()
+        .unwrap_or_else(crate::sidecar::providers::ryutts::default_tts_engine);
 
-    // Built-in default: OuteTTS via the shared llama-tts binary (no sidecar).
+    // Built-in fallback engine: OuteTTS via the shared llama-tts binary (no sidecar).
     if engine == "outetts" {
         return match crate::sidecar::providers::outetts::synthesize(text).await {
             Ok(wav) => (StatusCode::OK, [(header::CONTENT_TYPE, "audio/wav")], wav).into_response(),
@@ -87,7 +92,45 @@ pub async fn speak(
         };
     }
 
-    // Everything else: proxy to the Ryu TTS sidecar's normalized /generate.
+    // Everything else (incl. the Kokoro default): proxy to the Ryu TTS sidecar's
+    // normalized /generate. If the sidecar is down or the engine can't render (e.g.
+    // the sidecar runtime isn't provisioned yet on this node), degrade gracefully to
+    // the always-available OuteTTS fallback so spoken output never hard-fails.
+    match synth_via_sidecar(&state, &engine, &req, text).await {
+        Ok(wav) => (StatusCode::OK, [(header::CONTENT_TYPE, "audio/wav")], wav).into_response(),
+        Err(sidecar_err) => {
+            tracing::warn!(
+                engine = %engine,
+                "TTS sidecar synthesis failed ({sidecar_err}); falling back to OuteTTS"
+            );
+            match crate::sidecar::providers::outetts::synthesize(text).await {
+                Ok(wav) => {
+                    (StatusCode::OK, [(header::CONTENT_TYPE, "audio/wav")], wav).into_response()
+                }
+                Err(fallback_err) => (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "error": format!(
+                            "TTS engine '{engine}' failed ({sidecar_err}) and the OuteTTS \
+                             fallback also failed ({fallback_err:#})."
+                        )
+                    })),
+                )
+                    .into_response(),
+            }
+        }
+    }
+}
+
+/// Proxy one synthesis request to the Ryu TTS sidecar's `/generate`, returning the
+/// `audio/wav` bytes or a human-readable error. Factored out so [`speak`] can wrap it
+/// in an OuteTTS fallback (and so the low-latency voice-session path can reuse it).
+async fn synth_via_sidecar(
+    state: &ServerState,
+    engine: &str,
+    req: &SpeakRequest,
+    text: &str,
+) -> Result<Vec<u8>, String> {
     let url = format!(
         "{}/generate",
         crate::sidecar::providers::ryutts::tts_base_url()
@@ -106,47 +149,24 @@ pub async fn speak(
         body["reference_audio"] = json!(r);
     }
 
-    let resp = match state.client.post(&url).json(&body).send().await {
-        Ok(r) => r,
-        Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": format!(
-                        "Ryu TTS sidecar not reachable at {url}: {e}. Install + start the \
-                         \"Ryu TTS\" voice engine from the Store (or run `bun run dev:tts`)."
-                    )
-                })),
-            )
-                .into_response();
-        }
-    };
+    let resp = state
+        .client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Ryu TTS sidecar not reachable at {url}: {e}"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let detail = resp.text().await.unwrap_or_default();
-        return (
-            StatusCode::BAD_GATEWAY,
-            Json(
-                json!({ "error": format!("ryu-tts engine '{engine}' returned {status}: {detail}") }),
-            ),
-        )
-            .into_response();
+        return Err(format!("ryu-tts engine '{engine}' returned {status}: {detail}"));
     }
 
-    match resp.bytes().await {
-        Ok(wav) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "audio/wav")],
-            wav.to_vec(),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": format!("reading ryu-tts audio failed: {e}") })),
-        )
-            .into_response(),
-    }
+    resp.bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("reading ryu-tts audio failed: {e}"))
 }
 
 /// `GET /api/voice/tts-engines` — list available TTS engines for the desktop

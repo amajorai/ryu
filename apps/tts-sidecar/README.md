@@ -14,7 +14,7 @@ A thin, universal HTTP runtime that fronts many TTS engines behind one contract,
 ```bash
 cd apps/tts-sidecar
 python -m venv .venv && . .venv/bin/activate    # Windows: .venv\Scripts\activate
-pip install -e ".[kitten]"                       # base server + KittenTTS
+pip install -e ".[kokoro]"                       # base server + Kokoro 82M (the Ryu default)
 python -m ryu_tts                                 # serves 127.0.0.1:8085 (RYU_TTS_PORT to override)
 ```
 
@@ -24,7 +24,7 @@ Or from the repo root: `bun run dev:tts`.
 
 - **The universal contract:** `GET /health`, `GET /engines`, `POST /generate` (→ `audio/wav`), `POST /unload`. The HTTP layer never grows a per-engine branch.
 - **Swappable engine registry** (`ryu_tts/registry.py`): adding an engine is one `EngineConfig` row plus one `ryu_tts/backends/<module>.py` implementing the `TtsBackend` protocol (`load`/`generate`/`unload`/`is_loaded`).
-- **Seeded engines:** `kitten` (KittenTTS, CPU-only ONNX) and `pocket` (Kyutai Pocket TTS, ~6x realtime CPU, voice cloning via `reference_audio`).
+- **Seeded engines:** `kokoro` (Kokoro 82M — the Ryu **default**, an 82M open-weight model served CPU-only via `kokoro-onnx`; Core auto-downloads its ONNX weights + voice pack during onboarding and injects them via `RYU_KOKORO_MODEL`/`RYU_KOKORO_VOICES`), `kitten` (KittenTTS, CPU-only ONNX), and `pocket` (Kyutai Pocket TTS, ~6x realtime CPU, voice cloning via `reference_audio`).
 - **Lazy heavy deps:** inference libraries are imported inside backend methods, so a missing dep degrades only that one engine. Tier-B engines (dia, IndexTTS2, MisoTTS, …) plug in via the same path as opt-in extras.
 
 ## License

@@ -15,10 +15,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# `pip install -e ".[kitten]"` etc. — install just the engines you want.
+# `pip install -e ".[kokoro]"` etc. — install just the engines you want.
+# kokoro is the Ryu default engine (CPU-friendly ONNX runtime, no torch).
+kokoro = ["kokoro-onnx>=0.4", "onnxruntime>=1.17", "soundfile>=0.12"]
 kitten = ["kittentts"]
 pocket = ["pocket-tts"]
-all = ["kittentts", "pocket-tts"]
+all = ["kokoro-onnx>=0.4", "onnxruntime>=1.17", "soundfile>=0.12", "kittentts", "pocket-tts"]
 
 [project.scripts]
 ryu-tts = "ryu_tts.__main__:main"

@@ -105,6 +105,48 @@ class TtsBackend(Protocol):
 # ---------------------------------------------------------------------------
 
 ENGINES: list[EngineConfig] = [
+    # Kokoro 82M — the Ryu default TTS engine. An 82M open-weight model (Apache-2.0)
+    # served via the CPU-friendly `kokoro-onnx` runtime (ONNX Runtime, no torch), so
+    # it runs on most machines with no GPU — the "runs on most machines" ethos of the
+    # bundled Gemma 4 chat default. Multi-voice + multi-lingual. Listed FIRST so it is
+    # the natural head of the catalog; Core also pins it as the cross-surface default
+    # engine id (`DEFAULT_TTS_ENGINE`). The model + voices files are auto-downloaded
+    # by Core during onboarding (like the Gemma/nomic GGUFs) and their local paths are
+    # injected via `RYU_KOKORO_MODEL` / `RYU_KOKORO_VOICES` at spawn.
+    EngineConfig(
+        id="kokoro",
+        display_name="Kokoro 82M",
+        description="82M open-weight TTS · ONNX · CPU-friendly · multi-voice, multilingual · Apache-2.0",
+        backend_module="kokoro",
+        backend_class="KokoroBackend",
+        import_name="kokoro_onnx",
+        default_voice="af_heart",
+        voices=[
+            # American English
+            "af_heart", "af_alloy", "af_aoede", "af_bella", "af_jessica",
+            "af_kore", "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
+            "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam", "am_michael",
+            "am_onyx", "am_puck", "am_santa",
+            # British English
+            "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+            "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
+        ],
+        sample_rate=24000,
+        supports_cloning=False,
+        languages=["en", "es", "fr", "hi", "it", "ja", "pt", "zh"],
+        size_mb=310,
+        pip_packages=["kokoro-onnx", "onnxruntime"],
+        models=[
+            ModelVariant(
+                model_name="kokoro-82m-v1.0",
+                display_name="Kokoro 82M (v1.0)",
+                hf_repo_id="onnx-community/Kokoro-82M-v1.0-ONNX",
+                size_mb=310,
+                languages=["en", "es", "fr", "hi", "it", "ja", "pt", "zh"],
+                default=True,
+            ),
+        ],
+    ),
     EngineConfig(
         id="kitten",
         display_name="KittenTTS",

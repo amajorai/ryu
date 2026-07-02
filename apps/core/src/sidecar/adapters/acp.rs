@@ -246,6 +246,32 @@ fn register_permission(request_id: String) -> tokio::sync::oneshot::Receiver<Opt
     rx
 }
 
+/// Ask the connected desktop user to approve a synthetic tool action and wait
+/// for their response. Used by Core-owned tools that run inside the ACP MCP
+/// bridge; ACP-native permission requests use the same waiter map directly.
+pub async fn request_user_permission(
+    tx: &mpsc::UnboundedSender<AcpEvent>,
+    tool_call: serde_json::Value,
+    options: serde_json::Value,
+) -> Option<String> {
+    let request_id = next_permission_id();
+    let rx = register_permission(request_id.clone());
+    let _ = tx.send(AcpEvent::PermissionRequest {
+        request_id: request_id.clone(),
+        tool_call,
+        options,
+    });
+    let chosen = tokio::time::timeout(std::time::Duration::from_secs(600), rx)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten();
+    if chosen.is_none() {
+        let _ = resolve_permission(&request_id, None);
+    }
+    chosen
+}
+
 /// Deliver the user's decision to the awaiting permission handler.
 /// `option_id = None` cancels (reject). Returns `true` if a waiter was found.
 pub fn resolve_permission(request_id: &str, option_id: Option<String>) -> bool {
@@ -405,6 +431,8 @@ pub fn spawn_acp_task(
     // model) applied to this turn's session. All agent-reported; see
     // [`AcpTurnConfig`].
     turn: AcpTurnConfig,
+    // Stable chat-session key for Core-owned interactive MCP permissions.
+    permission_scope_id: Option<String>,
 ) -> mpsc::UnboundedReceiver<AcpEvent> {
     let (tx, rx) = mpsc::unbounded_channel();
     let err_tx = tx.clone();
@@ -420,6 +448,7 @@ pub fn spawn_acp_task(
             agent_id,
             identity_profile_ids,
             turn,
+            permission_scope_id,
             tx,
         )
         .await
@@ -470,6 +499,7 @@ impl AgentAdapter for AcpAdapter {
                 agent_id.clone(),
                 vec![],
                 AcpTurnConfig::default(),
+                None,
             );
             let mut chunks = Vec::new();
             while let Some(event) = rx.recv().await {
@@ -634,6 +664,8 @@ pub async fn run_acp_prompt(
     // User-chosen permission mode / reasoning effort / model + interactivity for
     // this turn's session (all agent-reported via session/new).
     turn: AcpTurnConfig,
+    // Stable chat-session key for Core-owned interactive MCP permissions.
+    permission_scope_id: Option<String>,
     tx: mpsc::UnboundedSender<AcpEvent>,
 ) -> anyhow::Result<()> {
     // Pre-build the in-process MCP server before entering the async connection
@@ -664,6 +696,8 @@ pub async fn run_acp_prompt(
                 composio_actions,
                 agent_id,
                 identity_profile_ids,
+                Some(tx.clone()),
+                permission_scope_id,
             )
             .await
         }

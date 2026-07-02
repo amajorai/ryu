@@ -37,7 +37,8 @@
 //! here before the result is returned to the agent.
 
 use std::borrow::Cow;
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use agent_client_protocol::{
     mcp_server::{McpConnectionTo, McpServer, McpServerConnect},
@@ -53,6 +54,7 @@ use rmcp::{
 use serde_json::{json, Map, Value};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
+use crate::sidecar::adapters::acp::AcpEvent;
 use crate::sidecar::mcp::catalog::ToolKind;
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::untrusted;
@@ -61,6 +63,8 @@ use crate::tool_exec;
 /// Default `tool_search` result cap (Contract 3).
 const TOOL_SEARCH_DEFAULT_LIMIT: usize = 8;
 const TOOL_SEARCH_MAX_LIMIT: usize = 25;
+static AGENT_BUILDER_CONFIGURE_APPROVALS: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 /// Build an in-process MCP server for `agent_id` offering the Ryu meta-tools plus
 /// the registry + Composio tools it is allowed to use.
@@ -87,6 +91,8 @@ pub async fn build_ryu_mcp_server(
     composio_actions: Vec<String>,
     agent_id: String,
     identity_profile_ids: Vec<String>,
+    permission_tx: Option<tokio::sync::mpsc::UnboundedSender<AcpEvent>>,
+    permission_scope_id: Option<String>,
 ) -> Option<McpServer<Agent, NullRun>> {
     let tools = mcp.tools_for_agent(allowlist.as_deref()).await;
 
@@ -118,6 +124,8 @@ pub async fn build_ryu_mcp_server(
         identity_profile_ids,
         tools,
         caps,
+        permission_tx,
+        permission_scope_id,
     };
     Some(McpServer::new(server, NullRun))
 }
@@ -141,6 +149,10 @@ struct RyuMcpServer {
     /// This agent's orchestration capabilities, enforced again at dispatch time
     /// (defense in depth) so a model cannot call a gated tool it was not offered.
     caps: crate::sidecar::mcp::AgentCapabilities,
+    /// Optional stream back-channel for interactive permission prompts.
+    permission_tx: Option<tokio::sync::mpsc::UnboundedSender<AcpEvent>>,
+    /// Stable chat-session key for one-time interactive approvals.
+    permission_scope_id: Option<String>,
 }
 
 impl McpServerConnect<Agent> for RyuMcpServer {
@@ -160,6 +172,8 @@ impl McpServerConnect<Agent> for RyuMcpServer {
             identity_profile_ids: self.identity_profile_ids.clone(),
             tools: self.tools.clone(),
             caps: self.caps,
+            permission_tx: self.permission_tx.clone(),
+            permission_scope_id: self.permission_scope_id.clone(),
         };
         DynConnectTo::new(RyuMcpComponent { handler })
     }
@@ -321,6 +335,10 @@ struct RyuMcpHandler {
     /// This agent's orchestration capabilities; gated tools are refused here even
     /// if a model emits a call to one that was never advertised (defense in depth).
     caps: crate::sidecar::mcp::AgentCapabilities,
+    /// Optional stream back-channel for interactive permission prompts.
+    permission_tx: Option<tokio::sync::mpsc::UnboundedSender<AcpEvent>>,
+    /// Stable chat-session key for one-time interactive approvals.
+    permission_scope_id: Option<String>,
 }
 
 impl RyuMcpHandler {
@@ -405,6 +423,68 @@ impl RyuMcpHandler {
     }
 }
 
+async fn require_agent_builder_configure_permission(
+    permission_tx: &Option<tokio::sync::mpsc::UnboundedSender<AcpEvent>>,
+    permission_scope_id: Option<&str>,
+    args: &Value,
+) -> Result<(), McpError> {
+    if let Some(scope_id) = permission_scope_id {
+        if AGENT_BUILDER_CONFIGURE_APPROVALS
+            .lock()
+            .map(|approvals| approvals.contains(scope_id))
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+    }
+    let Some(tx) = permission_tx else {
+        return Ok(());
+    };
+    let agent_id = args
+        .get("agent_id")
+        .and_then(Value::as_str)
+        .unwrap_or("this agent");
+    let chosen = crate::sidecar::adapters::acp::request_user_permission(
+        tx,
+        json!({
+            "title": "configure itself",
+            "kind": "agent_builder.configure",
+            "agent_id": agent_id,
+            "fields": {
+                "title": "configure itself"
+            }
+        }),
+        json!([
+            {
+                "optionId": "allow_session",
+                "name": "Allow",
+                "kind": "allow_once"
+            },
+            {
+                "optionId": "reject_once",
+                "name": "Deny",
+                "kind": "reject_once"
+            }
+        ]),
+    )
+    .await;
+    match chosen.as_deref() {
+        Some("allow_session" | "allow_once") => {
+            if let Some(scope_id) = permission_scope_id {
+                if let Ok(mut approvals) = AGENT_BUILDER_CONFIGURE_APPROVALS.lock() {
+                    approvals.insert(scope_id.to_owned());
+                }
+            }
+            Ok(())
+        }
+        _ => Err(McpError::new(
+            rmcp::model::ErrorCode::INVALID_REQUEST,
+            "user denied permission to configure the agent".to_owned(),
+            None,
+        )),
+    }
+}
+
 impl rmcp::ServerHandler for RyuMcpHandler {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::default()
@@ -451,6 +531,14 @@ impl rmcp::ServerHandler for RyuMcpHandler {
                 format!("tool '{tool_id}' requires the agent-creation capability, which is disabled for this agent"),
                 None,
             ));
+        }
+        if tool_id == "agent_builder__configure_agent" {
+            require_agent_builder_configure_permission(
+                &self.permission_tx,
+                self.permission_scope_id.as_deref(),
+                &args,
+            )
+            .await?;
         }
 
         // ── Meta-tool dispatch arms (BEFORE the registry fallthrough) ──────────
@@ -579,6 +667,8 @@ mod tests {
             identity_profile_ids: Vec::new(),
             tools,
             caps: crate::sidecar::mcp::AgentCapabilities::default(),
+            permission_tx: None,
+            permission_scope_id: None,
         }
     }
 
@@ -592,8 +682,16 @@ mod tests {
         // meta-tools — discovery is open; execution stays allowlist-gated in
         // `call_tool`. So `build_ryu_mcp_server` is always `Some`.
         let mcp = empty_registry();
-        let result =
-            build_ryu_mcp_server(mcp, Some(vec![]), vec![], "ryu".to_owned(), vec![]).await;
+        let result = build_ryu_mcp_server(
+            mcp,
+            Some(vec![]),
+            vec![],
+            "ryu".to_owned(),
+            vec![],
+            None,
+            None,
+        )
+        .await;
         assert!(
             result.is_some(),
             "empty allowlist must still offer the always-on meta-tools"
@@ -655,6 +753,8 @@ mod tests {
             vec![],
             "ryu".to_owned(),
             vec![],
+            None,
+            None,
         )
         .await;
         assert!(result.is_some(), "meta-tools are always offered");
@@ -666,6 +766,8 @@ mod tests {
             vec![],
             "ryu".to_owned(),
             vec![],
+            None,
+            None,
         )
         .await;
         assert!(
@@ -680,7 +782,8 @@ mod tests {
         // available (built-in HTTP provider, no binary required), and the
         // meta-tools are offered on top.
         let mcp = empty_registry();
-        let result = build_ryu_mcp_server(mcp, None, vec![], "ryu".to_owned(), vec![]).await;
+        let result =
+            build_ryu_mcp_server(mcp, None, vec![], "ryu".to_owned(), vec![], None, None).await;
         assert!(
             result.is_some(),
             "None allowlist should offer Shadow built-in tools + meta-tools"

@@ -75,6 +75,26 @@ struct GitState {
     behind: u32,
     dirty: bool,
     changed_files_count: usize,
+    insertions: u32,
+    deletions: u32,
+}
+
+/// Total added/removed lines for the working tree vs HEAD (staged + unstaged),
+/// summed from `git diff HEAD --numstat`. Binary files (numstat "-") are skipped.
+fn query_diff_totals(cwd: &str) -> (u32, u32) {
+    let numstat = run_git(cwd, &["diff", "HEAD", "--numstat"]).unwrap_or_default();
+    let mut insertions = 0u32;
+    let mut deletions = 0u32;
+    for line in numstat.lines() {
+        let mut cols = line.split('\t');
+        let adds = cols.next().and_then(|c| c.parse::<u32>().ok());
+        let dels = cols.next().and_then(|c| c.parse::<u32>().ok());
+        if let (Some(a), Some(d)) = (adds, dels) {
+            insertions += a;
+            deletions += d;
+        }
+    }
+    (insertions, deletions)
 }
 
 fn run_git(cwd: &str, args: &[&str]) -> Option<String> {
@@ -103,6 +123,8 @@ fn query_git_state(cwd: &str) -> GitState {
             behind: 0,
             dirty: false,
             changed_files_count: 0,
+            insertions: 0,
+            deletions: 0,
         };
     }
 
@@ -116,6 +138,8 @@ fn query_git_state(cwd: &str) -> GitState {
     let ahead_behind = run_git(cwd, &["rev-list", "--count", "--left-right", "@{u}...HEAD"]);
     let (behind, ahead) = parse_ahead_behind(ahead_behind.as_deref());
 
+    let (insertions, deletions) = query_diff_totals(cwd);
+
     GitState {
         is_repo: true,
         branch,
@@ -123,6 +147,8 @@ fn query_git_state(cwd: &str) -> GitState {
         behind,
         dirty,
         changed_files_count: changed.len(),
+        insertions,
+        deletions,
     }
 }
 

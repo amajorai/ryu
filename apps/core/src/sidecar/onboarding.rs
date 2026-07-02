@@ -48,8 +48,13 @@ pub struct LocalStackStatus {
     /// True if the OuteTTS (text-to-speech) binary + GGUF models are present.
     /// Downloaded here by default so spoken replies (e.g. the island companion's
     /// speak-aloud) work with no setup; the engine only renders, it never
-    /// downloads. Opt-in to *run* (not in `startup_order`).
+    /// downloads. Opt-in to *run* (not in `startup_order`). OuteTTS is now the
+    /// *fallback* TTS engine — the cross-surface default is Kokoro (below).
     pub outetts_installed: bool,
+    /// True if the Kokoro 82M (default TTS) model artifacts are present. Downloaded
+    /// here by default — like the Gemma chat GGUF — so the default voice works with
+    /// no setup; the Python TTS sidecar's `kokoro-onnx` backend only serves them.
+    pub kokoro_installed: bool,
     /// Non-fatal warning messages surfaced to the UI (e.g. download failed).
     pub warnings: Vec<String>,
 }
@@ -603,6 +608,63 @@ impl SetupManager {
             }
         };
 
+        // Step 7 — Kokoro 82M (the cross-surface default TTS engine) model artifacts.
+        //
+        // Kokoro is the default TTS engine id everywhere (`DEFAULT_TTS_ENGINE`). Its
+        // ONNX weights + voice pack are downloaded here, exactly like the Gemma chat
+        // GGUF (Step 2) and the OuteTTS GGUFs (Step 6), so the default voice works
+        // with zero setup. The Python TTS sidecar's `kokoro-onnx` backend only
+        // *serves* these files. When the sidecar runtime can be provisioned (its code
+        // is installed), we also create its venv + mark `ryutts` installed so it
+        // auto-starts and Kokoro is live by default. Non-fatal throughout: any failure
+        // (or an un-provisioned sidecar) degrades to the OuteTTS fallback at runtime.
+        let kokoro_installed = match crate::sidecar::providers::ryutts::kokoro::KokoroDownloader::new()
+            .ensure_installed(downloads)
+            .await
+        {
+            Ok(_) => {
+                match crate::sidecar::providers::ryutts::ensure_kokoro_runtime().await {
+                    Ok(true) => {
+                        self.mark_installed("ryutts").await;
+                        // Persist so a restart re-seeds `ryutts` as installed and
+                        // `start_all` brings the default TTS engine up automatically.
+                        if let Err(e) = crate::sidecar::download_manager::VersionStore::record_persisted(
+                            "ryutts",
+                            "kokoro-82m-v1.0",
+                            "installed",
+                        ) {
+                            tracing::warn!("recording ryutts install failed: {e:#}");
+                        }
+                        tracing::info!(
+                            "onboarding: Kokoro 82M default TTS installed + sidecar provisioned"
+                        );
+                    }
+                    Ok(false) => {
+                        tracing::info!(
+                            "onboarding: Kokoro 82M model downloaded; TTS sidecar code not \
+                             installed yet — run `bun run dev:tts` (or install it) to serve Kokoro. \
+                             OuteTTS is the runtime fallback until then."
+                        );
+                    }
+                    Err(e) => {
+                        let msg = format!(
+                            "Kokoro TTS runtime provisioning failed (TTS falls back to OuteTTS): {e:#}"
+                        );
+                        tracing::warn!("{}", msg);
+                        warnings.push(msg);
+                    }
+                }
+                true
+            }
+            Err(e) => {
+                let msg =
+                    format!("Kokoro 82M model download failed (TTS falls back to OuteTTS): {e:#}");
+                tracing::warn!("{}", msg);
+                warnings.push(msg);
+                false
+            }
+        };
+
         let status = LocalStackStatus {
             llamacpp_installed,
             gguf_installed,
@@ -610,6 +672,7 @@ impl SetupManager {
             whisper_installed,
             parakeet_installed,
             outetts_installed,
+            kokoro_installed,
             warnings,
         };
 

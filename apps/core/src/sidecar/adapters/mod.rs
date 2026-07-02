@@ -3763,6 +3763,7 @@ where
         bridge_agent_id,
         identity_profile_ids,
         turn,
+        conversation_id.clone(),
     );
 
     // UI frame channel — the SSE generator is the sole consumer.  The

@@ -26,6 +26,24 @@ use serde_json::Value;
 
 use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
 
+pub mod kokoro;
+
+/// The default TTS engine id used across every surface when a caller does not
+/// specify one. Kokoro 82M — an open-weight (Apache-2.0), CPU-friendly ONNX model
+/// served by this sidecar's `kokoro` backend. A swappable default, never a lock:
+/// override via `RYU_TTS_ENGINE`. Everything else (voice input STT, OuteTTS, the
+/// other sidecar engines) stays reachable via explicit selection.
+pub const DEFAULT_TTS_ENGINE: &str = "kokoro";
+
+/// Resolve the default TTS engine id (env-overridable). Callers use this instead of
+/// hardcoding an engine so the cross-surface default stays swappable in one place.
+pub fn default_tts_engine() -> String {
+    std::env::var("RYU_TTS_ENGINE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_TTS_ENGINE.to_string())
+}
+
 /// Loopback port the TTS sidecar binds to. Distinct from llama.cpp (8080),
 /// embeddings (8081), mlx (8082), sd (8083), mlx-vlm (8084), and whisper (8090).
 pub const TTS_PORT: u16 = 8085;
@@ -50,11 +68,44 @@ pub fn hf_home_dir() -> std::path::PathBuf {
 
 /// Directory holding the `ryu_tts` package. Overridable via `RYU_TTS_DIR`;
 /// defaults to the install location `~/.ryu/tts-sidecar`.
-fn sidecar_dir() -> std::path::PathBuf {
+pub fn sidecar_dir() -> std::path::PathBuf {
     if let Ok(dir) = std::env::var("RYU_TTS_DIR") {
         return std::path::PathBuf::from(dir);
     }
     crate::paths::ryu_dir().join("tts-sidecar")
+}
+
+/// Best-effort: ensure the sidecar's Python venv exists with the `kokoro` extra
+/// installed, so the default Kokoro engine can actually run.
+///
+/// Returns `Ok(true)` when the sidecar is provisioned (a venv is present after the
+/// call), `Ok(false)` when the sidecar *code* isn't installed yet — there is nothing
+/// to provision, and dev instead adopts a `bun run dev:tts` process. Errors surface a
+/// real provisioning failure (venv/pip). Idempotent: an existing venv is reused.
+///
+/// This mirrors the OuteTTS/whisper "download the runtime during onboarding" posture,
+/// scoped to the first-party bundled sidecar (so no plugin tier/grant gate applies).
+pub async fn ensure_kokoro_runtime() -> anyhow::Result<bool> {
+    use crate::sidecar::external_runtime::{self, ExternalRuntimeConfig};
+
+    let dir = sidecar_dir();
+    if !dir.exists() {
+        return Ok(false);
+    }
+    if external_runtime::venv_exists(&dir) {
+        return Ok(true);
+    }
+
+    let cfg = ExternalRuntimeConfig {
+        kind: external_runtime::RUNTIME_PYTHON.to_owned(),
+        entry: "ryu_tts".to_owned(),
+        pyproject_extra: Some("kokoro".to_owned()),
+        ..Default::default()
+    };
+    external_runtime::provision(&cfg, &dir)
+        .await
+        .map(|_| true)
+        .map_err(|e| anyhow::anyhow!("provisioning the Kokoro TTS runtime failed: {e}"))
 }
 
 /// Resolve the Python interpreter to run the sidecar with. Prefers an explicit
@@ -177,6 +228,16 @@ impl Sidecar for RyuTtsManager {
                 ("RYU_TTS_HOST".into(), "127.0.0.1".into()),
                 ("RYU_TTS_PORT".into(), TTS_PORT.to_string()),
                 ("HF_HOME".into(), hf_home.to_string_lossy().to_string()),
+                // Point the default `kokoro` backend at the model artifacts Core
+                // downloads during onboarding (the engine only serves them).
+                (
+                    "RYU_KOKORO_MODEL".into(),
+                    kokoro::model_path().to_string_lossy().to_string(),
+                ),
+                (
+                    "RYU_KOKORO_VOICES".into(),
+                    kokoro::voices_path().to_string_lossy().to_string(),
+                ),
             ];
             let args: Vec<String> = vec!["-m".into(), "ryu_tts".into()];
             process

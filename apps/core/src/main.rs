@@ -279,6 +279,11 @@ async fn main() {
         "llamacpp".into(),
         // Embeddings server auto-starts so RAG has real embeddings on launch.
         "llamacpp-embed".into(),
+        // Ryu TTS sidecar auto-starts when installed so the default TTS engine
+        // (Kokoro 82M) is live out of the box. `start_all` skips it when it was
+        // never provisioned (no venv / model), so this has no cost on nodes that
+        // don't have the sidecar — TTS falls back to on-demand OuteTTS there.
+        "ryutts".into(),
         "ollama".into(),
         "vllm".into(),
         "sglang".into(),
