@@ -6,7 +6,7 @@
 // verbatim. It speaks the gateway's wire protocol exactly:
 //
 //   Client -> server (the FIRST frame MUST be `join`):
-//     - join:     text `{ room_id, kind }`            (kind: conversation|document)
+//     - join:     text `{ type: "join", room_id, kind }` (kind: conversation|document)
 //     - presence: text `{ type: "presence", data }`   (the server stamps member_id)
 //     - ping:     text `{ type: "ping" }`             (server replies `{type:"pong"}`)
 //     - leave:    text `{ type: "leave" }`
@@ -174,8 +174,14 @@ export class RealtimeConnection {
 		const { handlers } = this.options;
 
 		socket.onopen = () => {
-			// The gateway REQUIRES the join frame first; anything else closes the socket.
-			this.sendText({ room_id: this.options.roomId, kind: this.options.kind });
+			// The gateway REQUIRES the join frame first, and it must carry
+			// `type: "join"` (the handshake in `realtime_ws.rs` gates on it, like
+			// every other control frame). Anything else closes the socket (1003).
+			this.sendText({
+				type: "join",
+				room_id: this.options.roomId,
+				kind: this.options.kind,
+			});
 			handlers?.onOpen?.();
 		};
 		socket.onmessage = (event) => this.dispatch(event);
