@@ -81,7 +81,15 @@ png = "0.17"
 # so the desktop can read+switch an ACP agent's models (Zed-style, but Zed does
 # not ship this for external agents). Stable session modes + config options
 # (effort) need no feature flag.
-agent-client-protocol = { version = "=0.11.1", features = ["unstable_session_model"] }
+# `unstable_session_usage` exposes `SessionUpdate::UsageUpdate { used, size }`
+# (live context-window meter) and `PromptResponse.usage` (per-turn token totals),
+# which Core surfaces to the desktop as a `data-acp-usage` stats frame. The tokio
+# wrapper carries no features of its own; feature unification through the shared
+# `agent-client-protocol` dependency gates the schema types in for both.
+agent-client-protocol = { version = "=0.11.1", features = [
+    "unstable_session_model",
+    "unstable_session_usage",
+] }
 agent-client-protocol-tokio = "=0.11.1"
 rmcp = { version = "1", features = ["server", "transport-io"] }
 schemars = "1"

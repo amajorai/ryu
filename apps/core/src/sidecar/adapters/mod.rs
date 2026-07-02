@@ -755,6 +755,12 @@ fn ryu_agent_route(acp_registry: &AcpAgentRegistry, provider_reg: &ProviderRegis
     // mode (the default), matching `acp::ryu_pi_acp_cmd`.
     if let Some(pi_entry) = acp_registry.find_by_prefix("acp:pi") {
         if let acp::AgentTransport::Acp { ref spawn_cmd } = pi_entry.transport {
+            // Same config invariants the managed-binary path enforces (valid
+            // zero-key defaultModel + Pi-side skills off + gateway models.json
+            // pin) — this fallback Pi reads the same isolated config dir.
+            if let Err(e) = crate::pi_config::ensure_managed_defaults() {
+                tracing::warn!(error = %e, "ryu fallback: could not write managed Pi defaults");
+            }
             let config_dir = crate::pi_config::config_dir_str();
             let gateway = crate::pi_config::is_gateway_routing();
             let gateway_base = crate::sidecar::gateway::gateway_url();
@@ -3735,6 +3741,27 @@ where
     let prompt = build_acp_prompt(long_term_system, short_term, &user_message);
     let images = last_user_images(&req.messages);
 
+    // [QA B2] Make the composer's model pick actually reach the flagship `ryu`
+    // agent (Pi). pi-acp implements no `session/set_model`, so beyond the live
+    // config-option fallback (acp::apply_turn_config) the pick is persisted into
+    // the managed Pi's isolated settings.json/models.json BEFORE the turn's
+    // session is built — pi-acp spawns a fresh Pi process per session/new (one
+    // per turn), so the persisted model applies to this very turn and becomes
+    // Pi's defaultModel for later chats. Only the `ryu` agent reads that config
+    // dir; other ACP agents are untouched.
+    if agent_id == "ryu" {
+        if let Some(model) = req
+            .acp_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+        {
+            if let Err(e) = crate::pi_config::persist_turn_model(model) {
+                tracing::warn!(error = %e, model, "could not persist ryu model pick into Pi config");
+            }
+        }
+    }
+
     // User-chosen ACP session controls for this turn (permission mode /
     // reasoning effort / model), all agent-reported via session/new. The desktop
     // streaming path is interactive: tool-permission requests are surfaced to the
@@ -3755,6 +3782,9 @@ where
     let mut acp_rx = acp::spawn_acp_task(
         spawn_cmd,
         prompt,
+        // Raw new user message (no preamble/history) — sent as the turn delta on
+        // every turn after a reused session's first, so history is not re-sent.
+        user_message.clone(),
         images,
         cwd,
         Some(mcp),
@@ -3806,6 +3836,19 @@ where
         // Maps ACP tool call id -> trace span id so we can close the span on ToolResult.
         let mut open_spans: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
+
+        // Turn stopwatch + running usage accumulator for the `data-acp-usage` stats
+        // frame. `turn_start` measures wall-clock so the desktop's duration/speed UI
+        // works even when the ACP agent reports no token usage. The `usage_*` fields
+        // hold the latest values Core has seen (from streamed `UsageUpdate` frames
+        // and/or the turn-end `PromptResponse.usage`), re-emitted under the stable
+        // `acp-usage` id so the AI SDK reconciles repeated frames into one live meter.
+        let turn_start = std::time::Instant::now();
+        let mut usage_used: Option<u64> = None;
+        let mut usage_total: Option<u64> = None;
+        let mut usage_prompt: Option<u64> = None;
+        let mut usage_completion: Option<u64> = None;
+        let mut usage_total_tokens: Option<u64> = None;
 
         let _ = ui_tx_clone.send(ui_start());
 
@@ -3937,6 +3980,24 @@ where
                         &serde_json::json!({ "currentModeId": mode_id }),
                     ));
                 }
+                acp::AcpEvent::ConfigWarning {
+                    field,
+                    requested,
+                    message,
+                } => {
+                    // Non-fatal: a session control the user chose (e.g. the model
+                    // pick) was not accepted by the agent. Forward as a data part
+                    // so the UI can react — e.g. clear a model pick the agent never
+                    // applied — instead of silently misleading the user (QA B2).
+                    let _ = ui_tx_clone.send(ui_data(
+                        "ryu-acp-config-warning",
+                        &serde_json::json!({
+                            "field": field,
+                            "requested": requested,
+                            "message": message,
+                        }),
+                    ));
+                }
                 acp::AcpEvent::AvailableCommands(commands) => {
                     // Agent published its slash commands; forward the full list so
                     // the desktop replaces its cached set and renders the `/` popover.
@@ -3944,6 +4005,59 @@ where
                         "ryu-acp-commands",
                         &serde_json::json!({ "commands": commands }),
                     ));
+                }
+                acp::AcpEvent::Usage(u) => {
+                    // Merge whatever this frame carries into the running accumulator,
+                    // then re-emit the FULL stats object under the stable `acp-usage`
+                    // id so the AI SDK reconciles it in place (a live meter). The
+                    // final frame (`done: true`) carries Core-computed wall-clock
+                    // duration + tokens/sec, so the desktop UI works even when the
+                    // agent reported no token usage at all.
+                    if let Some(v) = u.get("used").and_then(Value::as_u64) {
+                        usage_used = Some(v);
+                    }
+                    if let Some(v) = u.get("total").and_then(Value::as_u64) {
+                        usage_total = Some(v);
+                    }
+                    if let Some(v) = u.get("promptTokens").and_then(Value::as_u64) {
+                        usage_prompt = Some(v);
+                    }
+                    if let Some(v) = u.get("completionTokens").and_then(Value::as_u64) {
+                        usage_completion = Some(v);
+                    }
+                    if let Some(v) = u.get("totalTokens").and_then(Value::as_u64) {
+                        usage_total_tokens = Some(v);
+                    }
+                    let done = u.get("done").and_then(Value::as_bool).unwrap_or(false);
+                    let duration_ms = turn_start.elapsed().as_millis() as u64;
+                    let round2 = |x: f64| (x * 100.0).round() / 100.0;
+                    let tokens_per_second = match usage_completion {
+                        Some(c) if c > 0 && duration_ms > 0 => {
+                            round2(c as f64 / (duration_ms as f64 / 1000.0))
+                        }
+                        _ => 0.0,
+                    };
+                    let mut stats = serde_json::Map::new();
+                    stats.insert("id".into(), serde_json::json!("acp-usage"));
+                    if let Some(v) = usage_used {
+                        stats.insert("used".into(), serde_json::json!(v));
+                    }
+                    if let Some(v) = usage_total {
+                        stats.insert("total".into(), serde_json::json!(v));
+                    }
+                    if let Some(v) = usage_prompt {
+                        stats.insert("promptTokens".into(), serde_json::json!(v));
+                    }
+                    if let Some(v) = usage_completion {
+                        stats.insert("completionTokens".into(), serde_json::json!(v));
+                    }
+                    if let Some(v) = usage_total_tokens {
+                        stats.insert("totalTokens".into(), serde_json::json!(v));
+                    }
+                    stats.insert("tokensPerSecond".into(), serde_json::json!(tokens_per_second));
+                    stats.insert("durationMs".into(), serde_json::json!(duration_ms));
+                    stats.insert("done".into(), serde_json::json!(done));
+                    let _ = ui_tx_clone.send(ui_data("acp-usage", &Value::Object(stats)));
                 }
                 acp::AcpEvent::PermissionRequest {
                     request_id,

@@ -61,6 +61,19 @@ pub enum AcpEvent {
     /// leaving "plan" after presenting a plan). Carries the new mode id so the
     /// desktop's mode picker stays in sync. Agent-initiated, not user-driven.
     ModeChanged(String),
+    /// A user-chosen session control could not be applied to the agent (e.g. it
+    /// implements neither `session/set_model` nor a `model` config option).
+    /// Non-fatal — the turn proceeds on the agent's defaults — but surfaced so
+    /// clients can react (e.g. reset a model picker that shows a model the agent
+    /// never applied) instead of silently misleading the user (QA finding B2).
+    ConfigWarning {
+        /// The control that failed ("model", "mode", …).
+        field: String,
+        /// The value the user requested.
+        requested: String,
+        /// The agent's error, human-readable.
+        message: String,
+    },
     /// The agent advertised (or updated) the slash commands it can execute
     /// (ACP `available_commands_update`). Carries a normalized
     /// `[{ name, description, hint }, …]` array; each update REPLACES the
@@ -78,14 +91,24 @@ pub enum AcpEvent {
         /// Serialized `Vec<PermissionOption>` ({ optionId, name, kind }).
         options: serde_json::Value,
     },
+    /// Token / context-window usage for the turn (ACP `unstable_session_usage`).
+    /// Carries whatever the agent reported as a loosely-typed object — a live
+    /// `SessionUpdate::UsageUpdate` snapshot (`{ used, total }`), the final
+    /// `PromptResponse.usage` totals (`{ promptTokens, completionTokens,
+    /// totalTokens }`), and a `done` flag on the last frame of the turn. The
+    /// desktop reconciles repeated frames (same `acp-usage` id) into one live
+    /// meter; Core enriches each with wall-clock `durationMs` + `tokensPerSecond`
+    /// on the mod.rs side. Emitted at least once per turn (a final `done:true`
+    /// frame) even when the agent reports no usage, so the duration/speed UI works.
+    Usage(serde_json::Value),
     /// A fatal error from the session; the stream ends after this.
     Error(String),
 }
 
 /// User-chosen ACP session controls applied to a single turn, all read from the
-/// agent's own `session/new` advertisement (Ryu hardcodes none). Because Core
-/// runs one ACP session per turn, these are re-applied each turn (sticky on the
-/// client). Empty fields mean "leave the agent's default".
+/// agent's own `session/new` advertisement (Ryu hardcodes none). The ACP session
+/// is reused across a chat's turns, but these controls are re-applied every turn
+/// (sticky on the client). Empty fields mean "leave the agent's default".
 #[derive(Debug, Clone, Default)]
 pub struct AcpTurnConfig {
     /// `SessionModeId` to switch into (e.g. `plan`, `bypassPermissions`).
@@ -345,14 +368,26 @@ pub async fn probe_acp_config(
     Ok(value)
 }
 
+/// The conventional ACP session-config-option id for model selection. Agents
+/// that predate the (unstable) `session/set_model` capability — pi-acp among
+/// them — expose the model as a `select` config option under this id instead.
+const MODEL_CONFIG_OPTION_ID: &str = "model";
+
 /// Apply a turn's chosen session controls (mode / config options / model) to a
 /// live ACP session over its connection. Each is best-effort: a failure
 /// (unsupported capability or unknown id) is logged and skipped so the turn
 /// still proceeds with the agent's defaults.
+///
+/// The model pick has a two-step application: `session/set_model` first, then —
+/// when that is rejected (pi-acp returns JSON-RPC -32601 "Method not found"; QA
+/// finding B2) — the `model` session config option, which pi-acp DOES implement.
+/// If both fail, a non-fatal [`AcpEvent::ConfigWarning`] is emitted on `events`
+/// so the client can stop displaying a model the agent never applied.
 async fn apply_turn_config(
     connection: ConnectionTo<Agent>,
     session_id: SessionId,
     turn: &AcpTurnConfig,
+    events: &mpsc::UnboundedSender<AcpEvent>,
 ) {
     if let Some(mode) = turn.session_mode.as_ref().filter(|m| !m.is_empty()) {
         match connection
@@ -387,15 +422,52 @@ async fn apply_turn_config(
         }
     }
     if let Some(model) = turn.model_id.as_ref().filter(|m| !m.is_empty()) {
-        if let Err(e) = connection
+        let set_model_result = connection
             .send_request_to(
                 Agent,
                 SetSessionModelRequest::new(session_id.clone(), model.clone()),
             )
             .block_task()
+            .await;
+        let Err(e) = set_model_result else {
+            return;
+        };
+        // Already sent as an explicit config option above? Then the fallback
+        // would just repeat it — log and stop.
+        let already_via_config = turn
+            .config_options
+            .iter()
+            .any(|(id, _)| id == MODEL_CONFIG_OPTION_ID);
+        if already_via_config {
+            tracing::warn!("ACP set_model '{model}' failed: {e}");
+            return;
+        }
+        tracing::info!(
+            "ACP set_model '{model}' failed ({e}); retrying as config option '{MODEL_CONFIG_OPTION_ID}'"
+        );
+        match connection
+            .send_request_to(
+                Agent,
+                SetSessionConfigOptionRequest::new(
+                    session_id.clone(),
+                    MODEL_CONFIG_OPTION_ID.to_owned(),
+                    model.clone(),
+                ),
+            )
+            .block_task()
             .await
         {
-            tracing::warn!("ACP set_model '{model}' failed: {e}");
+            Ok(_) => tracing::info!("ACP applied model '{model}' via config option"),
+            Err(e2) => {
+                tracing::warn!(
+                    "ACP set_model '{model}' failed: {e}; config-option fallback failed: {e2}"
+                );
+                let _ = events.send(AcpEvent::ConfigWarning {
+                    field: MODEL_CONFIG_OPTION_ID.to_owned(),
+                    requested: model.clone(),
+                    message: format!("agent did not accept the model selection: {e2}"),
+                });
+            }
         }
     }
 }
@@ -416,6 +488,9 @@ async fn apply_turn_config(
 pub fn spawn_acp_task(
     spawn_cmd: String,
     prompt: String,
+    // Raw new user message (no history). Sent instead of `prompt` on every turn
+    // after a live ACP session's first, so history is not double-counted.
+    delta_prompt: String,
     images: Vec<ImagePart>,
     cwd: PathBuf,
     mcp: Option<Arc<McpRegistry>>,
@@ -437,6 +512,7 @@ pub fn spawn_acp_task(
     let (events_tx, events_rx) = mpsc::unbounded_channel();
     let acp_turn = AcpTurn {
         prompt,
+        delta_prompt,
         images,
         turn,
         mcp,
@@ -531,6 +607,9 @@ impl AgentAdapter for AcpAdapter {
             // route_acp_stream in adapters/mod.rs which passes the full registry.
             let mut rx = spawn_acp_task(
                 spawn_cmd,
+                prompt.clone(),
+                // Legacy one-shot path: an ephemeral, un-pooled instance whose
+                // only turn is the first, so `delta_prompt` is never consulted.
                 prompt,
                 vec![],
                 cwd,
@@ -583,15 +662,17 @@ impl AgentAdapter for AcpAdapter {
                             metadata: Some(serde_json::json!({ "error": true })),
                         });
                     }
-                    // Reasoning, plan snapshots, mode changes, permission
-                    // prompts and command advertisements are surfaced only on the
+                    // Reasoning, plan snapshots, mode changes, permission prompts,
+                    // command advertisements and usage stats are surfaced only on the
                     // streaming path (route_acp_stream); this legacy collect path
                     // returns final text + tool metadata and runs non-interactively.
                     AcpEvent::Text(_)
                     | AcpEvent::Thought(_)
                     | AcpEvent::Plan(_)
                     | AcpEvent::ModeChanged(_)
+                    | AcpEvent::ConfigWarning { .. }
                     | AcpEvent::AvailableCommands(_)
+                    | AcpEvent::Usage(_)
                     | AcpEvent::PermissionRequest { .. } => {}
                 }
             }
@@ -692,7 +773,14 @@ impl AgentAdapter for AcpAdapter {
 /// travels in here so one long-lived subprocess/connection can serve all of a
 /// chat's turns.
 struct AcpTurn {
+    /// The full prompt for this turn: long-term system preamble + short-term
+    /// history + the new user message. Sent verbatim ONLY on a session's FIRST
+    /// turn (the live ACP session holds no history yet).
     prompt: String,
+    /// The raw new user message alone (no history). Sent on every SUBSEQUENT
+    /// turn — the live session already retains the transcript, so re-sending the
+    /// full `prompt` would double-count history. See `run_acp_instance`.
+    delta_prompt: String,
     images: Vec<ImagePart>,
     turn: AcpTurnConfig,
     mcp: Option<Arc<McpRegistry>>,
@@ -708,11 +796,14 @@ struct AcpTurn {
 /// the subprocess is torn down; the chat's next message lazily respawns it.
 const ACP_IDLE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// Run one chat's ACP instance: spawn the subprocess ONCE, `initialize` ONCE, then
-/// serve every queued turn on the same connection until the chat goes idle
-/// (`ACP_IDLE_TTL`) or the pool drops the queue. Each turn rebuilds a fresh session
-/// so conversation semantics are unchanged — only the costly subprocess spawn +
-/// `initialize` are amortized across a chat's turns.
+/// Run one chat's ACP instance: spawn the subprocess ONCE, `initialize` ONCE,
+/// build the Ryu MCP bridge ONCE and the ACP session ONCE, then serve every queued
+/// turn on that same session until the chat goes idle (`ACP_IDLE_TTL`) or the pool
+/// drops the queue. Because the live session retains the conversation, the FIRST
+/// turn sends the full prompt (with history) and every subsequent turn sends only
+/// its delta message — re-sending the full prompt would double-count the transcript.
+/// The subprocess spawn, `initialize`, user-MCP load, and session build are all
+/// amortized across a chat's turns.
 pub async fn run_acp_instance(
     spawn_cmd: String,
     cwd: PathBuf,
@@ -755,62 +846,91 @@ pub async fn run_acp_instance(
                     .block_task()
                     .await?;
 
-                // Serve every turn for this chat on the one connection. Idle past
-                // `ACP_IDLE_TTL`, or the pool dropping the queue, tears the instance
-                // down; the chat's next message respawns it (see `spawn_acp_task`).
-                loop {
-                    let AcpTurn {
-                        prompt,
-                        images,
-                        turn,
-                        mcp,
-                        allowlist,
-                        composio_actions,
-                        agent_id,
-                        identity_profile_ids,
-                        permission_scope_id,
-                        events: tx,
-                    } = match tokio::time::timeout(ACP_IDLE_TTL, turns_rx.recv()).await {
-                        Ok(Some(t)) => t,
-                        _ => break,
-                    };
-                    // Cloned before the bridge consumes `agent_id`, so the ACP
-                    // permission seam can label its command-approval scans.
-                    let scan_agent = agent_id.clone();
-                    // Fresh per-turn bridge whose events sink is THIS turn's stream.
-                    let ryu_server = match (&mcp, bridge_supported) {
-                        (Some(registry), true) => {
+                // Peek the FIRST turn (it carries the params the bridge + session
+                // are built from). If none arrives within the idle TTL, this chat
+                // never sent anything — tear the instance down.
+                let first_turn = match tokio::time::timeout(ACP_IDLE_TTL, turns_rx.recv()).await
+                {
+                    Ok(Some(t)) => t,
+                    _ => return Ok(()),
+                };
+
+                // The ACP permission seam labels its command-approval scans with the
+                // agent id; stable for the whole chat, so take it from the first turn.
+                let scan_agent = first_turn.agent_id.clone();
+
+                // Persistent per-instance permission channel + a swappable sink. The
+                // Ryu MCP bridge is built ONCE (below) with `instance_tx` as its
+                // `permission_tx`, but each turn streams to a DIFFERENT consumer. A
+                // relay task forwards every bridge-emitted event to whatever sink is
+                // currently set; at each turn's start we point the sink at that turn's
+                // events sender, so interactive tool-permission prompts raised by a
+                // Ryu tool reach the live turn.
+                let (instance_tx, mut instance_rx) = mpsc::unbounded_channel::<AcpEvent>();
+                let sink: Arc<Mutex<Option<mpsc::UnboundedSender<AcpEvent>>>> =
+                    Arc::new(Mutex::new(None));
+                let relay_sink = Arc::clone(&sink);
+                tokio::spawn(async move {
+                    while let Some(ev) = instance_rx.recv().await {
+                        let target = relay_sink.lock().ok().and_then(|g| g.clone());
+                        if let Some(s) = target {
+                            let _ = s.send(ev);
+                        }
+                    }
+                });
+
+                // Build the Ryu MCP bridge ONCE for this chat, gated on the agent's
+                // gateway-routing toggle: gateway-OFF runs the agent VANILLA / un-
+                // governed (its own MCP only, `ryu_server = None`); gateway-ON injects
+                // Ryu's universal governed bridge (Ghost/Shadow/Composio/registry tools
+                // through the allowlist-gated `call_tool` path — AC3 governance). The
+                // `bridge_supported` guard still skips pi-acp, which advertises no
+                // MCP-server support. Loading user-level MCP happens here ONCE — the
+                // whole point of building the session a single time (see below).
+                let gateway_on = crate::agent_routing::is_gateway_routing(&first_turn.agent_id);
+                let ryu_server = if bridge_supported && gateway_on {
+                    match &first_turn.mcp {
+                        Some(registry) => {
                             super::mcp_bridge::build_ryu_mcp_server(
                                 Arc::clone(registry),
-                                allowlist,
-                                composio_actions,
-                                agent_id,
-                                identity_profile_ids,
-                                Some(tx.clone()),
-                                permission_scope_id,
+                                first_turn.allowlist.clone(),
+                                first_turn.composio_actions.clone(),
+                                first_turn.agent_id.clone(),
+                                first_turn.identity_profile_ids.clone(),
+                                Some(instance_tx.clone()),
+                                first_turn.permission_scope_id.clone(),
                             )
                             .await
                         }
-                        _ => None,
-                    };
-                    let session_cwd = cwd.clone();
+                        None => None,
+                    }
+                } else {
+                    None
+                };
+                // Keep `instance_tx` alive for the whole instance so the relay task
+                // survives idle gaps even when the bridge is absent (gateway-off).
+                let _instance_tx_keepalive = instance_tx;
 
+                let session_cwd = cwd.clone();
                 tracing::info!(cwd = %session_cwd.display(), "ACP build_session");
 
-                // Inject Ryu's registered tools into the session via the ACP
-                // SDK's `with_mcp_server` mechanism. The bridge registers an
-                // in-process MCP server so the agent's own MCP client connects
-                // back to it during the turn, calling Ryu tools through the
-                // registry's allowlist-gated `call_tool` path (AC3 governance).
+                // Build the ACP session ONCE for the whole chat, injecting Ryu's
+                // registered tools via the SDK's `with_mcp_server` mechanism. The
+                // bridge registers an in-process MCP server so the agent's own MCP
+                // client connects back to it, calling Ryu tools through the registry's
+                // allowlist-gated `call_tool` path. Building the session (and thus
+                // loading user MCP) ONCE — then reusing it across every turn — is the
+                // win: the live session already holds the conversation, so subsequent
+                // turns send only the delta message (no history re-send).
                 //
-                // `ryu_server` is `None` for agents that don't support the
-                // in-process MCP transport (see the bridge-build site above), so
-                // those sessions are created without it.
+                // `ryu_server` is `None` for pi-acp / gateway-off agents, so those
+                // sessions are created without it.
                 let mut new_session = NewSessionRequest::new(session_cwd);
                 if is_claude_code {
-                    // See `is_claude_code` above: constrain the Claude Agent
-                    // SDK's settingSources to "user" so it does not enumerate the
-                    // folder's project/local MCP servers on session start.
+                    // See `is_claude_code` above: constrain the Claude Agent SDK's
+                    // settingSources to "user" so it does not enumerate the folder's
+                    // project/local MCP servers on session start. This now runs ONCE
+                    // per chat (not per turn) — the whole win of the session reuse.
                     let mut meta = serde_json::Map::new();
                     meta.insert(
                         "claudeCode".to_owned(),
@@ -830,36 +950,75 @@ pub async fn run_acp_instance(
                     session_builder.start_session().await?
                 };
 
-                // Apply the user's chosen session controls before prompting.
-                // Sessions are per-turn, so these are re-applied every turn
-                // (sticky on the client). Each is agent-reported via session/new;
-                // failures are logged and ignored (optimistic — an agent may not
-                // support a given capability or id).
-                apply_turn_config(session.connection(), session.session_id().clone(), &turn).await;
+                // Serve every turn for this chat on the ONE session. The first turn
+                // is already in hand (peeked above); subsequent turns block on the
+                // queue until the idle TTL or the pool dropping the queue tears the
+                // instance down (the chat's next message respawns it — see
+                // `spawn_acp_task`).
+                let mut pending_first = Some(first_turn);
+                // A session's FIRST turn sends the full `prompt` (history via
+                // short_term); every SUBSEQUENT turn sends ONLY `delta_prompt` (the
+                // raw new user message) because the live session already holds the
+                // transcript — re-sending the full prompt would DOUBLE-COUNT it.
+                let mut is_first_turn = true;
+                loop {
+                    let AcpTurn {
+                        prompt,
+                        delta_prompt,
+                        images,
+                        turn,
+                        events: tx,
+                        // `mcp`/`allowlist`/`composio_actions`/`agent_id`/
+                        // `identity_profile_ids`/`permission_scope_id` are consumed
+                        // once from the first turn to build the fixed bridge above;
+                        // per-turn copies are ignored (the session is immutable).
+                        ..
+                    } = match pending_first.take() {
+                        Some(t) => t,
+                        None => match tokio::time::timeout(ACP_IDLE_TTL, turns_rx.recv()).await {
+                            Ok(Some(t)) => t,
+                            _ => break,
+                        },
+                    };
 
-                // Send the user's turn. A text-only turn uses the SDK's
-                // `send_prompt` helper, which injects the turn's `StopReason` into
-                // the update stream the loop below reads. A multimodal turn (text +
-                // images) needs a `Vec<ContentBlock>`, which `send_prompt` cannot
-                // express, so we send the `PromptRequest` through the connection's
-                // public low-level API and signal end-of-turn over a oneshot. This
-                // is byte-for-byte what `send_prompt` does internally (see
-                // agent-client-protocol's `ActiveSession::send_prompt`), so no fork
-                // of the crate is required.
-                let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
-                let _stop_keepalive = if images.is_empty() {
-                    session.send_prompt(&prompt)?;
-                    // Hold the sender so `stop_rx` stays pending forever; the text
-                    // turn terminates via the `StopReason` message instead.
-                    Some(stop_tx)
-                } else {
-                    let mut blocks: Vec<ContentBlock> = vec![prompt.clone().into()];
+                    // Point the bridge's permission sink at THIS turn's stream so a
+                    // Ryu-tool permission prompt reaches the live turn's consumer.
+                    if let Ok(mut g) = sink.lock() {
+                        *g = Some(tx.clone());
+                    }
+
+                    // Apply the user's chosen session controls before prompting.
+                    // Re-applied each turn (sticky on the client); each is agent-
+                    // reported via session/new, failures logged and ignored.
+                    apply_turn_config(
+                        session.connection(),
+                        session.session_id().clone(),
+                        &turn,
+                        &tx,
+                    )
+                    .await;
+
+                    // First turn: full prompt (carries history). Later turns: delta
+                    // only — the live session retains everything before it.
+                    let turn_text = if is_first_turn { prompt } else { delta_prompt };
+                    is_first_turn = false;
+
+                    // Send the turn over the connection's low-level `PromptRequest`
+                    // path (both text-only and multimodal) so we can read the turn's
+                    // final `PromptResponse.usage` — the SDK's `send_prompt` helper
+                    // discards it. End-of-turn is signalled over a oneshot. This is
+                    // byte-for-byte what `send_prompt` does internally.
+                    let turn_usage: Arc<Mutex<Option<serde_json::Value>>> =
+                        Arc::new(Mutex::new(None));
+                    let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+                    let mut blocks: Vec<ContentBlock> = vec![turn_text.into()];
                     for img in &images {
                         blocks.push(ContentBlock::Image(ImageContent::new(
                             img.data.clone(),
                             img.mime_type.clone(),
                         )));
                     }
+                    let usage_capture = Arc::clone(&turn_usage);
                     session
                         .connection()
                         .send_request_to(
@@ -867,13 +1026,20 @@ pub async fn run_acp_instance(
                             PromptRequest::new(session.session_id().clone(), blocks),
                         )
                         .on_receiving_result(move |result| async move {
-                            let PromptResponse { stop_reason, .. } = result?;
+                            let resp: PromptResponse = result?;
+                            // Capture the turn's final token totals (ACP unstable
+                            // usage). `None` when the agent reports no usage.
+                            if let Some(usage) = resp.usage.as_ref() {
+                                if let Ok(v) = serde_json::to_value(usage) {
+                                    if let Ok(mut g) = usage_capture.lock() {
+                                        *g = Some(v);
+                                    }
+                                }
+                            }
                             // The loop may have already exited; ignore a closed rx.
-                            let _ = stop_tx.send(stop_reason);
+                            let _ = stop_tx.send(());
                             Ok(())
                         })?;
-                    None
-                };
 
                 loop {
                     // `biased` + the `stop_rx` branch coming second guarantees every
@@ -955,6 +1121,19 @@ pub async fn run_acp_instance(
                                                 .collect();
                                             let _ = tx_chunk.send(AcpEvent::AvailableCommands(
                                                 serde_json::Value::Array(commands),
+                                            ));
+                                        }
+                                        SessionUpdate::UsageUpdate(u) => {
+                                            // Live context-window meter (ACP unstable
+                                            // usage): tokens-in-context / window size.
+                                            // A non-final frame; mod.rs reconciles it
+                                            // in place and adds wall-clock timing.
+                                            let _ = tx_chunk.send(AcpEvent::Usage(
+                                                serde_json::json!({
+                                                    "used": u.used,
+                                                    "total": u.size,
+                                                    "done": false,
+                                                }),
                                             ));
                                         }
                                         _ => {}
@@ -1050,8 +1229,40 @@ pub async fn run_acp_instance(
                         _ => {}
                     }
                 }
-                // turn done: `tx` drops here, closing the caller's event stream;
-                // loop back for this chat's next turn on the same connection.
+
+                    // Final usage frame for the turn (`done: true`). Carries the
+                    // turn's token totals when the agent reported them
+                    // (`PromptResponse.usage`, camelCase: input/output/total); the
+                    // frame is emitted even when it did not, so the desktop's
+                    // duration/speed UI (computed from mod.rs's own timer) still
+                    // works. Note: claude-code-acp does not currently emit ACP
+                    // usage, so in practice this frame carries only `done: true`
+                    // and Core-side timing.
+                    let mut usage_payload = serde_json::Map::new();
+                    usage_payload.insert("done".to_owned(), serde_json::Value::Bool(true));
+                    if let Some(u) = turn_usage.lock().ok().and_then(|g| g.clone()) {
+                        if let Some(v) = u.get("inputTokens").and_then(serde_json::Value::as_u64)
+                        {
+                            usage_payload.insert("promptTokens".to_owned(), v.into());
+                        }
+                        if let Some(v) =
+                            u.get("outputTokens").and_then(serde_json::Value::as_u64)
+                        {
+                            usage_payload.insert("completionTokens".to_owned(), v.into());
+                        }
+                        if let Some(v) = u.get("totalTokens").and_then(serde_json::Value::as_u64)
+                        {
+                            usage_payload.insert("totalTokens".to_owned(), v.into());
+                        }
+                    }
+                    let _ = tx.send(AcpEvent::Usage(serde_json::Value::Object(usage_payload)));
+
+                    // Turn done: clear the permission sink (drop the held clone) and
+                    // let `tx` drop, closing the caller's event stream; loop back for
+                    // this chat's next turn on the same reused session.
+                    if let Ok(mut g) = sink.lock() {
+                        *g = None;
+                    }
                 }
 
                 Ok(())
@@ -1314,14 +1525,16 @@ pub fn ryu_pi_acp_cmd() -> Option<String> {
     let pi_path = bin.to_string_lossy().into_owned();
     let config_dir = crate::pi_config::config_dir_str();
     let gateway = crate::pi_config::is_gateway_routing();
-    if gateway {
-        // Pin Pi's `openai` provider at the Gateway in models.json before spawn.
-        // Pi ignores `OPENAI_BASE_URL`, so the env injection below is not enough on
-        // its own; this is what actually routes Pi through the Gateway. Best-effort
-        // — a write failure is logged, and Pi still launches (it just won't route).
-        if let Err(e) = crate::pi_config::ensure_gateway_models_json() {
-            tracing::warn!(error = %e, "ryu_pi_acp_cmd: could not write gateway models.json");
-        }
+    // Enforce the managed-Pi config invariants before spawn: Pi-side skill
+    // auto-injection off (Core injects the governed skill block itself; QA B1),
+    // a valid zero-key defaultModel in Gateway mode (Pi with no model parrots
+    // its skill manifest instead of answering; QA B1), and the models.json pin
+    // that routes Pi's `openai` provider through the Gateway (Pi ignores
+    // `OPENAI_BASE_URL`, so the env injection below is not enough on its own).
+    // Best-effort — a write failure is logged, and Pi still launches (it just
+    // won't route / keeps its previous defaults).
+    if let Err(e) = crate::pi_config::ensure_managed_defaults() {
+        tracing::warn!(error = %e, "ryu_pi_acp_cmd: could not write managed Pi defaults");
     }
     let gateway_base = crate::sidecar::gateway::gateway_url();
     let gateway_v1 = format!("{}/v1", gateway_base.trim_end_matches('/'));
