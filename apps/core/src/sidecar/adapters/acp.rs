@@ -434,30 +434,71 @@ pub fn spawn_acp_task(
     // Stable chat-session key for Core-owned interactive MCP permissions.
     permission_scope_id: Option<String>,
 ) -> mpsc::UnboundedReceiver<AcpEvent> {
-    let (tx, rx) = mpsc::unbounded_channel();
-    let err_tx = tx.clone();
+    let (events_tx, events_rx) = mpsc::unbounded_channel();
+    let acp_turn = AcpTurn {
+        prompt,
+        images,
+        turn,
+        mcp,
+        allowlist,
+        composio_actions,
+        agent_id,
+        identity_profile_ids,
+        permission_scope_id: permission_scope_id.clone(),
+        events: events_tx,
+    };
+
+    // One live subprocess/connection per CHAT, keyed by the conversation id (Ryu's
+    // interactive-permission scope) — chats never share an instance. A message with
+    // no conversation id runs an ephemeral, un-pooled instance that dies after the
+    // turn. `is_closed()` detects an instance that hit its idle TTL or crashed, so
+    // the chat's next message transparently respawns it (auto-restore).
+    let conversation = permission_scope_id.unwrap_or_default();
+    if conversation.is_empty() {
+        let (turns_tx, turns_rx) = mpsc::unbounded_channel();
+        let _ = turns_tx.send(acp_turn); // drop tx → instance ends after this turn
+        tokio::spawn(async move {
+            if let Err(e) = run_acp_instance(spawn_cmd, cwd, turns_rx).await {
+                tracing::error!("ACP instance error: {e}");
+            }
+        });
+        return events_rx;
+    }
+
+    let key = format!("{conversation}\u{1}{spawn_cmd}\u{1}{}", cwd.display());
+    let mut pool = acp_pool().lock().expect("acp pool mutex poisoned");
+    // Drop dead instances (idle-TTL expired or crashed) so the map can't grow.
+    pool.retain(|_, turns| !turns.is_closed());
+
+    let mut pending = Some(acp_turn);
+    if let Some(turns) = pool.get(&key) {
+        match turns.send(pending.take().expect("turn present")) {
+            Ok(()) => return events_rx, // reused this chat's live instance
+            Err(err) => pending = Some(err.0), // raced with teardown; respawn below
+        }
+    }
+
+    // No live instance for this chat: spawn one and enqueue the turn.
+    let (turns_tx, turns_rx) = mpsc::unbounded_channel();
+    let _ = turns_tx.send(pending.expect("turn present"));
+    let spawn_cmd_task = spawn_cmd.clone();
+    let cwd_task = cwd.clone();
     tokio::spawn(async move {
-        if let Err(e) = run_acp_prompt(
-            spawn_cmd,
-            prompt,
-            images,
-            cwd,
-            mcp,
-            allowlist,
-            composio_actions,
-            agent_id,
-            identity_profile_ids,
-            turn,
-            permission_scope_id,
-            tx,
-        )
-        .await
-        {
-            tracing::error!("ACP streaming error: {e}");
-            let _ = err_tx.send(AcpEvent::Error(format!("Agent error: {e}")));
+        if let Err(e) = run_acp_instance(spawn_cmd_task, cwd_task, turns_rx).await {
+            tracing::error!("ACP instance error: {e}");
         }
     });
-    rx
+    pool.insert(key, turns_tx);
+    events_rx
+}
+
+/// Per-chat pool of live ACP instances: conversation id -> that chat's turn queue.
+/// See [`spawn_acp_task`] for the reuse / auto-restore / idle-TTL lifecycle.
+#[allow(clippy::type_complexity)]
+fn acp_pool() -> &'static Mutex<std::collections::HashMap<String, mpsc::UnboundedSender<AcpTurn>>> {
+    static POOL: OnceLock<Mutex<std::collections::HashMap<String, mpsc::UnboundedSender<AcpTurn>>>> =
+        OnceLock::new();
+    POOL.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
 pub struct AcpAdapter {
@@ -647,62 +688,48 @@ impl AgentAdapter for AcpAdapter {
 /// available after allowlist filtering, the session runs without Ryu tools (the
 /// agent only sees its own built-ins). Every bridged call routes through
 /// `McpRegistry::call_tool` which enforces the allowlist (no direct-egress path).
-pub async fn run_acp_prompt(
-    spawn_cmd: String,
+/// One queued turn for a pooled per-chat ACP instance. Every per-turn input
+/// travels in here so one long-lived subprocess/connection can serve all of a
+/// chat's turns.
+struct AcpTurn {
     prompt: String,
     images: Vec<ImagePart>,
-    cwd: PathBuf,
+    turn: AcpTurnConfig,
     mcp: Option<Arc<McpRegistry>>,
     allowlist: Option<Vec<String>>,
-    // Per-agent Composio action slugs + effective agent id, threaded into the
-    // MCP bridge (#477 ACP parity).
     composio_actions: Vec<String>,
     agent_id: String,
-    // Per-agent bound Identity Vault profiles (epic #517), threaded into the MCP
-    // bridge so the tool-call-time vault consult runs. Empty = no consult.
     identity_profile_ids: Vec<String>,
-    // User-chosen permission mode / reasoning effort / model + interactivity for
-    // this turn's session (all agent-reported via session/new).
-    turn: AcpTurnConfig,
-    // Stable chat-session key for Core-owned interactive MCP permissions.
     permission_scope_id: Option<String>,
-    tx: mpsc::UnboundedSender<AcpEvent>,
+    events: mpsc::UnboundedSender<AcpEvent>,
+}
+
+/// Idle TTL for a pooled per-chat ACP instance: after this long with no new turn,
+/// the subprocess is torn down; the chat's next message lazily respawns it.
+const ACP_IDLE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Run one chat's ACP instance: spawn the subprocess ONCE, `initialize` ONCE, then
+/// serve every queued turn on the same connection until the chat goes idle
+/// (`ACP_IDLE_TTL`) or the pool drops the queue. Each turn rebuilds a fresh session
+/// so conversation semantics are unchanged — only the costly subprocess spawn +
+/// `initialize` are amortized across a chat's turns.
+pub async fn run_acp_instance(
+    spawn_cmd: String,
+    cwd: PathBuf,
+    turns_rx: mpsc::UnboundedReceiver<AcpTurn>,
 ) -> anyhow::Result<()> {
-    // Pre-build the in-process MCP server before entering the async connection
-    // closure so that the `Arc<McpRegistry>` doesn't have to be `Send + 'static`
-    // inside the closure (the bridge holds its own Arc).
-    //
-    // INCOMPATIBLE AGENTS: the bridge is injected via the ACP SDK's
-    // `with_mcp_server` — an in-process MCP server the agent connects back to over
-    // the ACP connection. pi-acp advertises NO MCP-server support in its
-    // `initialize` response (`agentCapabilities.mcpCapabilities { http: false,
-    // sse: false }`), so injecting a server into its `session/new` is not honored.
-    // Skip the bridge for pi-acp (the flagship `ryu` engine + `acp:pi`): basic chat
-    // works and pi keeps its own built-in tools, but Ryu-registry tool injection
-    // is unavailable for it until pi-acp gains a compatible MCP transport
-    // (re-enabling is a one-line flip + a live turn to verify). NOTE: this skip is
-    // independent of the earlier `session/new` crash — that was the backslash-
-    // stripping bug in `ryu_pi_acp_cmd`, now fixed; it happened with `mcpServers: []`
-    // too, so the bridge was never its cause.
-    // Effective agent id, cloned before the bridge consumes `agent_id` below, so
-    // the ACP permission seam can label its command-approval scans.
-    let scan_agent = agent_id.clone();
+    // pi-acp advertises NO MCP-server support in its `initialize` response, so
+    // injecting Ryu's bridge into its `session/new` is not honored — skip it for
+    // pi (the flagship `ryu` engine + `acp:pi`). Every other ACP agent gets it.
     let bridge_supported = !spawn_cmd.contains("pi-acp");
-    let ryu_mcp_server = match (&mcp, bridge_supported) {
-        (Some(registry), true) => {
-            super::mcp_bridge::build_ryu_mcp_server(
-                Arc::clone(registry),
-                allowlist,
-                composio_actions,
-                agent_id,
-                identity_profile_ids,
-                Some(tx.clone()),
-                permission_scope_id,
-            )
-            .await
-        }
-        _ => None,
-    };
+    // Claude Code (via `claude-code-acp`) otherwise loads the session cwd's project
+    // `.mcp.json` + local settings on every `session/new`, spawning that folder's
+    // MCP servers before the first token (measured: 62s -> 8s once constrained) and
+    // on the ungoverned path. Restrict the Claude Agent SDK to user-level settings
+    // via claude-code-acp's `_meta.claudeCode.options` passthrough (applied at
+    // `build_session_from`, per turn below).
+    let is_claude_code =
+        spawn_cmd.contains("claude-code-acp") || spawn_cmd.contains("claude-agent-acp");
 
     let agent = AcpAgent::from_str(&spawn_cmd)
         .map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?
@@ -722,16 +749,51 @@ pub async fn run_acp_prompt(
     Client
         .builder()
         .connect_with(agent, move |cx: ConnectionTo<Agent>| {
-            let tx = tx.clone();
-            let prompt = prompt.clone();
-            let images = images.clone();
-            let session_cwd = cwd.clone();
-            let ryu_server = ryu_mcp_server;
-            let turn = turn.clone();
             async move {
+                let mut turns_rx = turns_rx;
                 cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
                     .block_task()
                     .await?;
+
+                // Serve every turn for this chat on the one connection. Idle past
+                // `ACP_IDLE_TTL`, or the pool dropping the queue, tears the instance
+                // down; the chat's next message respawns it (see `spawn_acp_task`).
+                loop {
+                    let AcpTurn {
+                        prompt,
+                        images,
+                        turn,
+                        mcp,
+                        allowlist,
+                        composio_actions,
+                        agent_id,
+                        identity_profile_ids,
+                        permission_scope_id,
+                        events: tx,
+                    } = match tokio::time::timeout(ACP_IDLE_TTL, turns_rx.recv()).await {
+                        Ok(Some(t)) => t,
+                        _ => break,
+                    };
+                    // Cloned before the bridge consumes `agent_id`, so the ACP
+                    // permission seam can label its command-approval scans.
+                    let scan_agent = agent_id.clone();
+                    // Fresh per-turn bridge whose events sink is THIS turn's stream.
+                    let ryu_server = match (&mcp, bridge_supported) {
+                        (Some(registry), true) => {
+                            super::mcp_bridge::build_ryu_mcp_server(
+                                Arc::clone(registry),
+                                allowlist,
+                                composio_actions,
+                                agent_id,
+                                identity_profile_ids,
+                                Some(tx.clone()),
+                                permission_scope_id,
+                            )
+                            .await
+                        }
+                        _ => None,
+                    };
+                    let session_cwd = cwd.clone();
 
                 tracing::info!(cwd = %session_cwd.display(), "ACP build_session");
 
@@ -744,7 +806,19 @@ pub async fn run_acp_prompt(
                 // `ryu_server` is `None` for agents that don't support the
                 // in-process MCP transport (see the bridge-build site above), so
                 // those sessions are created without it.
-                let session_builder = cx.build_session(session_cwd).block_task();
+                let mut new_session = NewSessionRequest::new(session_cwd);
+                if is_claude_code {
+                    // See `is_claude_code` above: constrain the Claude Agent
+                    // SDK's settingSources to "user" so it does not enumerate the
+                    // folder's project/local MCP servers on session start.
+                    let mut meta = serde_json::Map::new();
+                    meta.insert(
+                        "claudeCode".to_owned(),
+                        serde_json::json!({ "options": { "settingSources": ["user"] } }),
+                    );
+                    new_session.meta = Some(meta);
+                }
+                let session_builder = cx.build_session_from(new_session).block_task();
                 let mut session = if let Some(server) = ryu_server {
                     tracing::info!("ACP: injecting Ryu MCP bridge into session");
                     session_builder
@@ -975,6 +1049,9 @@ pub async fn run_acp_prompt(
                         SessionMessage::StopReason(_) => break,
                         _ => {}
                     }
+                }
+                // turn done: `tx` drops here, closing the caller's event stream;
+                // loop back for this chat's next turn on the same connection.
                 }
 
                 Ok(())
