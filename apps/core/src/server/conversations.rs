@@ -17,6 +17,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -229,6 +230,29 @@ pub struct ConversationStore {
     /// subscribers (see `main.rs` wiring). Best-effort: publishing to a room with
     /// no members is a harmless no-op.
     realtime: Option<crate::realtime::RoomRegistry>,
+}
+
+/// A run's lifecycle status changed. Carries the FULL run summary (not just id +
+/// status) so a snapshot-first `/api/runs/stream` subscriber can render completion
+/// notifications (title/folder/branch) with no follow-up fetch, and so runs that
+/// start *after* a client connects still arrive with complete metadata.
+#[derive(Clone, Debug, Serialize)]
+pub struct RunStatusEvent {
+    pub run: ConversationSummary,
+}
+
+/// Process-global run-status broadcast. Self-initialises on first use (nothing to
+/// wire at startup), mirroring [`crate::events`]. [`ConversationStore::set_run_status`]
+/// publishes here; the `/api/runs/stream` SSE endpoint subscribes.
+fn run_events_sender() -> &'static tokio::sync::broadcast::Sender<RunStatusEvent> {
+    static RUN_EVENTS: OnceLock<tokio::sync::broadcast::Sender<RunStatusEvent>> = OnceLock::new();
+    RUN_EVENTS.get_or_init(|| tokio::sync::broadcast::channel(128).0)
+}
+
+/// Subscribe to run lifecycle status changes (used by the `/api/runs/stream` SSE
+/// endpoint). A missed delta self-heals from the stream's opening snapshot.
+pub fn subscribe_run_events() -> tokio::sync::broadcast::Receiver<RunStatusEvent> {
+    run_events_sender().subscribe()
 }
 
 fn now_millis() -> i64 {
@@ -525,13 +549,64 @@ impl ConversationStore {
     /// Update the run_status column of a conversation.
     pub async fn set_run_status(&self, conversation_id: &str, status: &str) -> Result<()> {
         let now = now_millis();
-        let conn = self.conn.lock().await;
-        conn.execute(
-            "UPDATE conversations SET run_status = ?1, updated_at = ?2 WHERE id = ?3",
-            params![status, now, conversation_id],
-        )
-        .context("setting run status")?;
+        {
+            let conn = self.conn.lock().await;
+            conn.execute(
+                "UPDATE conversations SET run_status = ?1, updated_at = ?2 WHERE id = ?3",
+                params![status, now, conversation_id],
+            )
+            .context("setting run status")?;
+        }
+        // Fan out the lifecycle change to live `/api/runs/stream` subscribers so
+        // the desktop can replace its 3s poll. A publish with no listeners is a
+        // harmless no-op, and a summary-load failure must never fail the caller —
+        // the status write already succeeded.
+        if let Ok(Some(run)) = self.run_summary(conversation_id).await {
+            let _ = run_events_sender().send(RunStatusEvent { run });
+        }
         Ok(())
+    }
+
+    /// Load a single conversation's run summary by id. Used to publish a complete
+    /// [`RunStatusEvent`] on every status change. Returns `None` if the row is gone.
+    async fn run_summary(&self, conversation_id: &str) -> Result<Option<ConversationSummary>> {
+        let summary = {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn.prepare(
+                "SELECT c.id, c.title, c.agent_id, c.created_at, c.updated_at,
+                        (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id),
+                        c.folder_path, c.branch, c.worktree_path, c.run_status,
+                        c.participants, c.pinned, c.archived
+                 FROM conversations c
+                 WHERE c.id = ?1",
+            )?;
+            stmt.query_row(params![conversation_id], |row| {
+                let participants_json: Option<String> = row.get(10)?;
+                let participants = parse_participants_json(participants_json.as_deref());
+                Ok(ConversationSummary {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    agent_id: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                    message_count: row.get(5)?,
+                    folder_path: row.get(6)?,
+                    branch: row.get(7)?,
+                    worktree_path: row.get(8)?,
+                    run_status: row.get(9)?,
+                    participants,
+                    pinned: row.get::<_, i64>(11)? != 0,
+                    archived: row.get::<_, i64>(12)? != 0,
+                })
+            })
+            .optional()?
+        };
+        // Decrypt the title after the connection lock is released (uses the cipher,
+        // not the db), matching the pattern in `list_runs`.
+        Ok(summary.map(|mut s| {
+            s.title = self.open_opt(s.title);
+            s
+        }))
     }
 
     /// Set (or replace) the title of a conversation. The title is sealed at rest

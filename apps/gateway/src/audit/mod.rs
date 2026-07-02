@@ -71,6 +71,15 @@ pub struct AuditRecord {
     pub duration_ms: Option<u64>,
     /// Exit code returned by the sandbox process. `None` for model calls.
     pub exit_code: Option<i32>,
+    // ── Control-plane attribution (profiles / usage-points) ──────────────────
+    /// Better Auth end-user id forwarded via `x-ryu-user-id`. `None` on
+    /// self-hosted / anonymous traffic. Drives per-user daily rollups pushed to
+    /// the control plane by the reporter.
+    pub user_id: Option<String>,
+    /// Product surface that originated this request, from `x-ryu-feature`
+    /// (`chat` | `island` | `predict` | `agent`). `None` when untagged. Powers
+    /// the per-feature usage breakdown in the daily rollup.
+    pub feature: Option<String>,
 }
 
 /// Filters for querying the local audit store. All fields are optional; a
@@ -133,6 +142,10 @@ pub struct AuditEntry {
     pub command: Option<String>,
     pub duration_ms: Option<u64>,
     pub exit_code: Option<i32>,
+    /// Better Auth end-user id (`x-ryu-user-id`); `None` when self-hosted.
+    pub user_id: Option<String>,
+    /// Product surface (`x-ryu-feature`): `chat` | `island` | `predict` | `agent`.
+    pub feature: Option<String>,
 }
 
 /// Default number of rows returned by a query when no limit is given.
@@ -218,6 +231,13 @@ impl AuditLogger {
         let _ = conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_log(event_type);",
         );
+        // Add control-plane attribution columns (profiles / usage-points). Each is
+        // a separate ALTER TABLE so a partial prior migration doesn't block both.
+        let _ = conn.execute_batch(
+            "ALTER TABLE audit_log ADD COLUMN user_id TEXT; \
+             CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_log(user_id);",
+        );
+        let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN feature TEXT;");
 
         // Load existing per-key token totals so budget enforcement survives restarts.
         let token_totals: DashMap<String, u64> = DashMap::new();
@@ -250,9 +270,10 @@ impl AuditLogger {
                          request_id, api_key, user_name, org_id, team_id, project_id,
                          provider, model, input_tokens, output_tokens,
                          cache_hit, latency_ms, eval_score, error, skill_ids, session_id,
-                         event_type, backend, command, duration_ms, exit_code
+                         event_type, backend, command, duration_ms, exit_code,
+                         user_id, feature
                      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
-                               ?17,?18,?19,?20,?21)",
+                               ?17,?18,?19,?20,?21,?22,?23)",
                     params![
                         record.request_id,
                         record.api_key,
@@ -275,6 +296,8 @@ impl AuditLogger {
                         record.command,
                         record.duration_ms.map(|v| v as i64),
                         record.exit_code,
+                        record.user_id,
+                        record.feature,
                     ],
                 ) {
                     error!("audit log write failed: {e}");
@@ -349,6 +372,8 @@ impl AuditLogger {
             command: Some(command),
             duration_ms: Some(duration_ms),
             exit_code: Some(exit_code),
+            user_id: None,
+            feature: None,
         }
     }
 
@@ -390,6 +415,8 @@ impl AuditLogger {
             command: Some(domain),
             duration_ms: None,
             exit_code: None,
+            user_id: None,
+            feature: None,
         }
     }
 
@@ -451,7 +478,8 @@ impl AuditLogger {
             "SELECT id, timestamp, request_id, api_key, user_name, org_id, team_id, \
              project_id, provider, model, input_tokens, output_tokens, cache_hit, \
              latency_ms, eval_score, error, skill_ids, session_id, \
-             event_type, backend, command, duration_ms, exit_code \
+             event_type, backend, command, duration_ms, exit_code, \
+             user_id, feature \
              FROM audit_log {where_sql} ORDER BY id DESC LIMIT {limit}"
         );
 
@@ -491,6 +519,8 @@ impl AuditLogger {
                     .unwrap_or(None)
                     .map(|v| v as u64),
                 exit_code: row.get(22).unwrap_or(None),
+                user_id: row.get(23).unwrap_or(None),
+                feature: row.get(24).unwrap_or(None),
             })
         })?;
 
@@ -573,6 +603,8 @@ mod tests {
             command: None,
             duration_ms: None,
             exit_code: None,
+            user_id: None,
+            feature: None,
         }
     }
 

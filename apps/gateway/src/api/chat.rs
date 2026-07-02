@@ -101,6 +101,11 @@ pub async fn chat_completions(
     let slot_model = header_string(&headers, "x-ryu-slot-chat-model");
     // Core conversation/session id for per-run audit correlation (M4 / #176).
     let session_id = header_string(&headers, "x-ryu-session-id");
+    // Product surface that originated this request (profiles / usage-points):
+    // `chat` | `island` | `predict` | `agent`. Recorded on the audit row so the
+    // reporter can build the per-feature daily usage breakdown. Absent on
+    // self-hosted / legacy callers.
+    let feature = header_string(&headers, "x-ryu-feature");
     // Companion-sourced flag (M7 / #199): true when Core has tagged this request as
     // originating from the screen-capture companion path. Triggers unconditional
     // Gateway DLP/PII redaction before the provider call.
@@ -132,6 +137,7 @@ pub async fn chat_completions(
             slot_provider,
             slot_model,
             session_id,
+            feature,
             companion_source,
             tool_search_requested,
             priority,

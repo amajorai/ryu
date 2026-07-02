@@ -147,6 +147,7 @@ use utoipa::OpenApi;
         super::add_participant_handler,
         super::remove_participant_handler,
         super::list_runs_handler,
+        super::runs_stream,
         super::get_run_trace_handler,
         super::create_session_handler,
         super::get_session_handler,

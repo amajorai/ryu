@@ -20,7 +20,7 @@ use tracing::{debug, info, warn};
 
 use crate::{config::TelegramChannelConfig, state::SharedState};
 
-use super::{handle_message, Channel, InboundMessage};
+use super::{handle_message, status::StatusReporter, Channel, InboundMessage};
 
 /// Seconds the Telegram server holds an open `getUpdates` request waiting for
 /// new messages (server-side long poll). Keeps request volume low.
@@ -45,10 +45,23 @@ pub struct TelegramChannel {
     team_id: Option<String>,
     /// Base URL of the Core sidecar, used when `agent_id` or `team_id` is set.
     core_url: String,
+    /// Reports this bot's live connection status to the control plane. `None`
+    /// for env-configured bots (no store id), which then show as `unknown`.
+    status: Option<StatusReporter>,
 }
 
 impl TelegramChannel {
     pub fn new(cfg: TelegramChannelConfig, http: reqwest::Client) -> anyhow::Result<Self> {
+        Self::new_with_status(cfg, http, None)
+    }
+
+    /// Like [`Self::new`] but attaches a liveness reporter so the bot heartbeats
+    /// its connection status back to the control plane.
+    pub fn new_with_status(
+        cfg: TelegramChannelConfig,
+        http: reqwest::Client,
+        status: Option<StatusReporter>,
+    ) -> anyhow::Result<Self> {
         if cfg.token.trim().is_empty() {
             anyhow::bail!("telegram channel token is empty");
         }
@@ -61,6 +74,7 @@ impl TelegramChannel {
             agent_id: cfg.agent_id,
             team_id: cfg.team_id,
             core_url: cfg.core_url,
+            status,
         })
     }
 
@@ -154,6 +168,11 @@ impl Channel for TelegramChannel {
 
     async fn run(self: Arc<Self>, state: SharedState) -> anyhow::Result<()> {
         debug!("telegram channel long-poll loop started");
+        // Announce that the bot is registered and connecting before the first
+        // (up to 25s) long poll returns, so the sidebar dot lights up promptly.
+        if let Some(reporter) = &self.status {
+            reporter.connecting().await;
+        }
         // Telegram acknowledges processed updates by advancing the offset to
         // (last update_id + 1); anything below the offset is never re-delivered.
         let mut offset: i64 = 0;
@@ -161,6 +180,10 @@ impl Channel for TelegramChannel {
         loop {
             match self.get_updates(offset).await {
                 Ok(updates) => {
+                    // A successful poll means the bot is live — heartbeat online.
+                    if let Some(reporter) = &self.status {
+                        reporter.online().await;
+                    }
                     for update in updates {
                         offset = offset.max(update.update_id + 1);
 
@@ -228,6 +251,9 @@ impl Channel for TelegramChannel {
                 }
                 Err(err) => {
                     warn!(error = %err, "telegram getUpdates failed, backing off");
+                    if let Some(reporter) = &self.status {
+                        reporter.error(&err.to_string()).await;
+                    }
                     tokio::time::sleep(ERROR_BACKOFF).await;
                 }
             }

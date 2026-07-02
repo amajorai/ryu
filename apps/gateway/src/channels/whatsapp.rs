@@ -41,7 +41,7 @@ use tracing::{debug, info, warn};
 
 use crate::{config::WhatsAppChannelConfig, state::SharedState};
 
-use super::{handle_message, Channel, InboundMessage};
+use super::{handle_message, status::StatusReporter, Channel, InboundMessage};
 
 /// Meta Graph API host. The version segment is appended per request.
 const GRAPH_HOST: &str = "https://graph.facebook.com";
@@ -68,10 +68,23 @@ pub struct WhatsAppChannel {
     team_id: Option<String>,
     /// Base URL of the Core sidecar. Used when `agent_id` or `team_id` is set.
     core_url: String,
+    /// Reports this bot's live connection status to the control plane. `None`
+    /// for env-configured bots (no store id), which then show as `unknown`.
+    status: Option<StatusReporter>,
 }
 
 impl WhatsAppChannel {
     pub fn new(cfg: WhatsAppChannelConfig, http: reqwest::Client) -> anyhow::Result<Self> {
+        Self::new_with_status(cfg, http, None)
+    }
+
+    /// Like [`Self::new`] but attaches a liveness reporter so the bot heartbeats
+    /// its connection status back to the control plane.
+    pub fn new_with_status(
+        cfg: WhatsAppChannelConfig,
+        http: reqwest::Client,
+        status: Option<StatusReporter>,
+    ) -> anyhow::Result<Self> {
         if cfg.access_token.trim().is_empty() {
             anyhow::bail!("whatsapp channel access_token is empty");
         }
@@ -101,6 +114,7 @@ impl WhatsAppChannel {
             agent_id: cfg.agent_id,
             team_id: cfg.team_id,
             core_url: cfg.core_url,
+            status,
         })
     }
 
@@ -184,7 +198,15 @@ impl Channel for WhatsAppChannel {
     }
 
     async fn run(self: Arc<Self>, state: SharedState) -> anyhow::Result<()> {
+        if let Some(reporter) = &self.status {
+            reporter.connecting().await;
+        }
         let addr: SocketAddr = self.webhook_bind.parse().map_err(|e| {
+            if let Some(reporter) = &self.status {
+                let reporter = reporter.clone();
+                let detail = format!("invalid webhook_bind {}", self.webhook_bind);
+                tokio::spawn(async move { reporter.error(&detail).await });
+            }
             anyhow::anyhow!("invalid whatsapp webhook_bind {}: {e}", self.webhook_bind)
         })?;
         let path = self.webhook_path.clone();
@@ -200,7 +222,15 @@ impl Channel for WhatsAppChannel {
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
         info!(addr = %addr, path = %path, "whatsapp webhook receiver listening");
-        axum::serve(listener, app).await?;
+        // The webhook receiver has no inbound poll cadence — it blocks in `serve`
+        // — so a background ticker re-asserts `online` while it's listening. It's
+        // aborted when `serve` returns so a stopped bot goes stale (→ offline).
+        let heartbeat = self.status.clone().map(StatusReporter::spawn_heartbeat);
+        let result = axum::serve(listener, app).await;
+        if let Some(handle) = heartbeat {
+            handle.abort();
+        }
+        result?;
         Ok(())
     }
 }

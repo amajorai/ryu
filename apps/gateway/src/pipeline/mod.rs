@@ -61,6 +61,11 @@ pub struct RequestContext {
     /// Core conversation/session id forwarded by Core via `x-ryu-session-id` (M4 / #176).
     /// Used as the correlation key for per-run/per-session audit queries.
     pub session_id: Option<String>,
+    /// Product surface that originated this request (profiles / usage-points),
+    /// from `x-ryu-feature` (`chat` | `island` | `predict` | `agent`). `None`
+    /// when untagged (self-hosted / legacy callers). Recorded on the audit row so
+    /// the reporter can build the per-feature daily usage breakdown.
+    pub feature: Option<String>,
     /// True when Core has tagged this request as originating from the context
     /// companion (screen-capture path). When set, Gateway DLP/PII redaction is
     /// applied unconditionally before the provider call, even if the local
@@ -162,6 +167,8 @@ pub struct AuthInputs<'a> {
     pub slot_model: Option<String>,
     /// Core conversation id (M4 / #176), from `x-ryu-session-id`.
     pub session_id: Option<String>,
+    /// Product surface (profiles / usage-points), from `x-ryu-feature`.
+    pub feature: Option<String>,
     /// Companion-sourced flag (M7 / #199), from `x-ryu-companion-source`.
     pub companion_source: bool,
     /// Explicit unified-tool-loop opt-in (#475), from `x-ryu-tool-search: on`.
@@ -202,6 +209,7 @@ pub fn authenticate(
         slot_provider,
         slot_model,
         session_id,
+        feature,
         companion_source,
         tool_search_requested,
         priority,
@@ -228,6 +236,7 @@ pub fn authenticate(
                 slot_provider: slot_provider.clone(),
                 slot_model: slot_model.clone(),
                 session_id: session_id.clone(),
+                feature: feature.clone(),
                 companion_source,
                 tool_search_requested,
                 priority,
@@ -262,6 +271,7 @@ pub fn authenticate(
                     slot_provider: slot_provider.clone(),
                     slot_model: slot_model.clone(),
                     session_id: session_id.clone(),
+                    feature: feature.clone(),
                     companion_source,
                     tool_search_requested,
                     priority,
@@ -300,6 +310,7 @@ pub fn authenticate(
                     slot_provider: slot_provider.clone(),
                     slot_model: slot_model.clone(),
                     session_id: session_id.clone(),
+                    feature: feature.clone(),
                     companion_source,
                     tool_search_requested,
                     priority,
@@ -521,6 +532,8 @@ fn pre_process(
                 )),
                 skill_ids: ctx.skill_ids.clone(),
                 session_id: ctx.session_id.clone(),
+                user_id: ctx.user_id.clone(),
+                feature: ctx.feature.clone(),
                 event_type: crate::audit::EventType::ModelCall,
                 backend: Some("companion".to_string()),
                 command: None,
@@ -940,6 +953,8 @@ pub async fn run(
                     error: None,
                     skill_ids: ctx.skill_ids.clone(),
                     session_id: ctx.session_id.clone(),
+                    user_id: ctx.user_id.clone(),
+                    feature: ctx.feature.clone(),
                     event_type: crate::audit::EventType::ModelCall,
                     backend: None,
                     command: None,
@@ -1088,6 +1103,8 @@ fn audit_cache_hit(
         error: None,
         skill_ids: ctx.skill_ids.clone(),
         session_id: ctx.session_id.clone(),
+        user_id: ctx.user_id.clone(),
+        feature: ctx.feature.clone(),
         event_type: crate::audit::EventType::ModelCall,
         backend: None,
         command: None,
@@ -1127,6 +1144,8 @@ fn audit_failure(
         error: Some(redacted_error),
         skill_ids: ctx.skill_ids.clone(),
         session_id: ctx.session_id.clone(),
+        user_id: ctx.user_id.clone(),
+        feature: ctx.feature.clone(),
         event_type: crate::audit::EventType::ModelCall,
         backend: None,
         command: None,
@@ -1558,6 +1577,8 @@ pub async fn run_multimodal(
                     error: None,
                     skill_ids: ctx.skill_ids.clone(),
                     session_id: ctx.session_id.clone(),
+                    user_id: ctx.user_id.clone(),
+                    feature: ctx.feature.clone(),
                     event_type: crate::audit::EventType::ModelCall,
                     backend: None,
                     command: None,
@@ -2165,6 +2186,8 @@ fn audit_debit_failure(state: &AppState, org_id: &str, request_id: &str, error: 
         error: Some(redacted_error),
         skill_ids: None,
         session_id: None,
+        user_id: None,
+        feature: None,
         event_type: crate::audit::EventType::ModelCall,
         backend: Some("credits".to_string()),
         command: None,
@@ -2349,6 +2372,8 @@ fn attach_stream_observer(
                         error: None,
                         skill_ids: s.ctx.skill_ids.clone(),
                         session_id: s.ctx.session_id.clone(),
+                        user_id: s.ctx.user_id.clone(),
+                        feature: s.ctx.feature.clone(),
                         event_type: crate::audit::EventType::ModelCall,
                         backend: None,
                         command: None,
@@ -2691,6 +2716,7 @@ mod tests {
             slot_provider: None,
             slot_model: None,
             session_id: None,
+            feature: None,
             companion_source: false,
             tool_search_requested: search,
             priority: crate::concurrency::Priority::Interactive,
@@ -3533,6 +3559,7 @@ mod tests {
             slot_provider: None,
             slot_model: None,
             session_id: None,
+            feature: None,
             companion_source: false,
             tool_search_requested: false,
             priority: crate::concurrency::Priority::Interactive,

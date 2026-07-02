@@ -5,12 +5,16 @@
 //! reconciles a shared budget through the coordinator so spend stays bounded
 //! across every user and machine on that budget.
 
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
-use crate::{audit::AuditQuery, state::SharedState};
+use crate::{
+    audit::{AuditEntry, AuditQuery},
+    state::SharedState,
+};
 
 /// Spawn the background reporting loop. A no-op when the control plane is
 /// disabled or no gateway key is configured.
@@ -47,6 +51,120 @@ fn now_ms() -> u64 {
 fn cost_micro_usd(state: &SharedState, input: u64, output: u64) -> u64 {
     let per_1k = state.config.control_plane.cost_per_1k_micro_usd;
     (input + output).saturating_mul(per_1k) / 1000
+}
+
+/// Length of the leading `YYYY-MM-DD` slice of a SQLite `datetime('now')`
+/// timestamp (always UTC), used as the per-day rollup key.
+const DAY_KEY_LEN: usize = 10;
+/// Divisor from milliseconds to whole seconds for `agentSeconds`.
+const MS_PER_SEC: u64 = 1000;
+
+/// Per-`(userId, day)` accumulator for the control-plane usage rollup. Mirrors
+/// the `UserUsageDaily` shape the ingest upserts via `$inc`.
+#[derive(Default)]
+struct UserDailyBucket {
+    input_tokens: u64,
+    output_tokens: u64,
+    request_count: u64,
+    /// Distinct session ids seen this day → `sessionCount`.
+    sessions: HashSet<String>,
+    /// Summed exec `duration_ms`; divided down to whole seconds at emit time.
+    agent_ms: u64,
+    /// Per-feature request counts (`chat` | `island` | `agent`).
+    feat_chat: u64,
+    feat_island: u64,
+    feat_agent: u64,
+    /// Predict impressions. We can only observe requests, so `accepted` is 0.
+    predict_shown: u64,
+    /// Per-model request counts.
+    by_model: HashMap<String, u64>,
+}
+
+impl UserDailyBucket {
+    /// Fold a single audit row (already known to carry a `user_id`) into the bucket.
+    fn absorb(&mut self, entry: &AuditEntry) {
+        self.input_tokens = self.input_tokens.saturating_add(entry.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(entry.output_tokens);
+        if entry.event_type == "model_call" {
+            self.request_count = self.request_count.saturating_add(1);
+            *self.by_model.entry(entry.model.clone()).or_insert(0) += 1;
+        }
+        if let Some(session) = &entry.session_id {
+            self.sessions.insert(session.clone());
+        }
+        if let Some(ms) = entry.duration_ms {
+            self.agent_ms = self.agent_ms.saturating_add(ms);
+        }
+        match entry.feature.as_deref() {
+            Some("chat") => self.feat_chat += 1,
+            Some("island") => self.feat_island += 1,
+            Some("agent") => self.feat_agent += 1,
+            Some("predict") => self.predict_shown += 1,
+            _ => {}
+        }
+    }
+
+    /// Serialise the `byFeature` object, emitting only the surfaces that fired so
+    /// the payload stays sparse (matches the optional `FeatureUsage` fields).
+    fn by_feature_json(&self) -> Value {
+        let mut feature = serde_json::Map::new();
+        if self.feat_chat > 0 {
+            feature.insert("chat".to_string(), json!(self.feat_chat));
+        }
+        if self.feat_island > 0 {
+            feature.insert("island".to_string(), json!(self.feat_island));
+        }
+        if self.feat_agent > 0 {
+            feature.insert("agent".to_string(), json!(self.feat_agent));
+        }
+        if self.predict_shown > 0 {
+            feature.insert(
+                "predict".to_string(),
+                json!({ "shown": self.predict_shown, "accepted": 0 }),
+            );
+        }
+        Value::Object(feature)
+    }
+}
+
+/// Group the recent audit rows that carry a forwarded `user_id` into per-user,
+/// per-UTC-day buckets shaped like `UserUsageDaily`. Self-hosted / untagged rows
+/// (no `user_id`) are skipped, so this is empty on single-user deployments.
+fn build_user_daily(state: &SharedState, entries: &[AuditEntry]) -> Vec<Value> {
+    let mut buckets: HashMap<(String, String), UserDailyBucket> = HashMap::new();
+    for entry in entries {
+        let Some(user_id) = entry.user_id.clone() else {
+            continue;
+        };
+        let Some(day) = entry.timestamp.get(..DAY_KEY_LEN) else {
+            continue;
+        };
+        buckets
+            .entry((user_id, day.to_string()))
+            .or_default()
+            .absorb(entry);
+    }
+
+    buckets
+        .into_iter()
+        .map(|((user_id, day), bucket)| {
+            json!({
+                "userId": user_id,
+                "day": day,
+                "inputTokens": bucket.input_tokens,
+                "outputTokens": bucket.output_tokens,
+                "requestCount": bucket.request_count,
+                "sessionCount": bucket.sessions.len() as u64,
+                "agentSeconds": bucket.agent_ms / MS_PER_SEC,
+                // Per-row provider cost isn't recorded; reuse the same flat token
+                // estimate the aggregate report uses so the field is populated
+                // consistently rather than sent as zero.
+                "costMicroUsd": cost_micro_usd(state, bucket.input_tokens, bucket.output_tokens),
+                "byFeature": bucket.by_feature_json(),
+                "byModel": bucket.by_model,
+            })
+        })
+        .collect()
 }
 
 /// Build the aggregate report plus a bounded slice of recent (redacted) audit
@@ -88,6 +206,11 @@ async fn push_report(state: &SharedState) -> anyhow::Result<()> {
         })
         .collect();
 
+    // Per-user daily rollup (profiles / usage-points). Derived from the SAME
+    // recent audit slice as `audit` above; rows without a forwarded user_id are
+    // skipped, so this is empty on self-hosted / single-user gateways.
+    let user_daily = build_user_daily(state, &entries);
+
     let payload = json!({
         "report": {
             "windowStart": now_ms().saturating_sub(cfg.report_interval_secs * 1000),
@@ -100,6 +223,7 @@ async fn push_report(state: &SharedState) -> anyhow::Result<()> {
             "evalScores": eval_scores,
         },
         "audit": audit,
+        "userDaily": user_daily,
     });
 
     let url = format!("{}/aggregation/ingest", cfg.base_url.trim_end_matches('/'));
@@ -121,6 +245,7 @@ async fn push_report(state: &SharedState) -> anyhow::Result<()> {
         requests = summary.request_count,
         cost_micro_usd = cost,
         audit_rows = audit.len(),
+        user_daily = payload["userDaily"].as_array().map_or(0, Vec::len),
         "pushed report to control plane"
     );
     Ok(())

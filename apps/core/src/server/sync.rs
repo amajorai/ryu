@@ -3,6 +3,11 @@
 //! Connects a local [`ConversationStore`] to the `:3000` server-side store
 //! (`POST /api/conversations-sync/push`, `GET /api/conversations-sync/pull`).
 //!
+//! **Read path:** the background loop prefers the live SSE change feed
+//! (`GET /api/conversations-sync/stream`), applying each delta as it arrives,
+//! and falls back to the `GET .../pull` long-poll when streaming is
+//! unavailable (old server, a proxy that strips streaming, transient error).
+//!
 //! **Conflict rule:** last-writer-wins on conversation metadata by
 //! `updated_at`; messages are union-merged by their stable UUID `id`
 //! (append-only — merge-by-id is always an additive insert).
@@ -183,6 +188,83 @@ impl SyncClient {
         }
         Ok(count)
     }
+
+    /// Consume the SSE change feed, applying each delta to the local store as it
+    /// arrives. Connects to `GET /api/conversations-sync/stream?since=<ms>`,
+    /// which first emits a snapshot of everything changed since `since_ms` and
+    /// then streams new deltas live (same LWW + union-merge semantics as
+    /// [`Self::pull_since`], via [`apply_sync_payload`]).
+    ///
+    /// Returns `Ok(())` when the server closes the stream; returns an error if
+    /// the stream cannot be established, so the caller can fall back to `/pull`.
+    ///
+    /// Per the repo convention, SSE is read with a fetch-style byte stream (not
+    /// an `EventSource`) so the bearer token rides the `Authorization` header.
+    /// The tiny frame parser mirrors [`parse_change_frame`] — `:` keepalive
+    /// comments and non-`data:` lines are ignored.
+    pub async fn stream_changes(
+        &self,
+        store: &ConversationStore,
+        since_ms: i64,
+    ) -> Result<(), SyncError> {
+        use futures_util::StreamExt;
+
+        let url = format!(
+            "{}/api/conversations-sync/stream?since={}",
+            self.server_url, since_ms
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .bearer_auth(&self.token)
+            .header("accept", "text/event-stream")
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(SyncError::ServerError(status, body));
+        }
+
+        let mut buf = String::new();
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            buf.push_str(&String::from_utf8_lossy(&chunk));
+            // SSE events are separated by a blank line — drain complete frames.
+            while let Some(idx) = buf.find("\n\n") {
+                let frame: String = buf.drain(..idx + 2).collect();
+                if let Some(payload) = parse_change_frame(&frame) {
+                    if let Err(e) = apply_sync_payload(store, &payload).await {
+                        tracing::warn!("cloud sync: applying streamed delta failed: {e}");
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Parse one SSE frame from the change feed into a [`SyncPayload`].
+/// Concatenates `data:` lines (SSE spec) and JSON-decodes them; ignores `:`
+/// keepalive comments plus the `event:`/`id:` lines. Returns `None` for
+/// keepalives and any frame that does not decode to a payload.
+fn parse_change_frame(raw: &str) -> Option<SyncPayload> {
+    let mut data = String::new();
+    for line in raw.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(rest) = line.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(rest.strip_prefix(' ').unwrap_or(rest));
+        }
+    }
+    if data.is_empty() {
+        return None;
+    }
+    serde_json::from_str(&data).ok()
 }
 
 // ── Background sync loop (opt-in, off by default) ─────────────────────────────
@@ -231,10 +313,13 @@ async fn sync_enabled(preferences: &super::preferences::PreferencesStore) -> boo
 /// startup and never alters default (local-first) behaviour.
 ///
 /// Each enabled tick: push every local conversation to the server store, then
-/// pull everything updated since the last successful pull (last-writer-wins +
-/// union-merge, applied by [`apply_sync_payload`]). All errors are best-effort:
-/// logged and swallowed so a flaky network or a signed-out user never panics or
-/// stalls Core.
+/// receive remote changes since the last watermark (last-writer-wins +
+/// union-merge, applied by [`apply_sync_payload`]). The read path prefers the
+/// live SSE change feed ([`SyncClient::stream_changes`]) — held open for up to
+/// one interval so deltas apply with near-zero latency while local pushes still
+/// recur — and falls back to the [`SyncClient::pull_since`] long-poll whenever
+/// streaming is unavailable. All errors are best-effort: logged and swallowed so
+/// a flaky network or a signed-out user never panics or stalls Core.
 pub fn spawn_sync_loop(
     conversations: ConversationStore,
     preferences: super::preferences::PreferencesStore,
@@ -293,17 +378,42 @@ pub fn spawn_sync_loop(
                 }
             }
 
-            // Pull remote changes since the last successful pull.
+            // Receive remote changes since the last watermark. Prefer the live
+            // SSE change feed; hold it open for at most one interval so local
+            // pushes still recur, then reconnect on the next tick with an
+            // advanced cursor. The watermark is captured BEFORE streaming, so a
+            // delta that lands mid-session (updated_at ≥ now_ms) is re-delivered
+            // by the next snapshot — apply is idempotent, so nothing is lost.
             let now_ms = chrono::Utc::now().timestamp_millis();
-            match client.pull_since(&conversations, pull_since_ms).await {
-                Ok(count) => {
-                    if count > 0 {
-                        tracing::info!("cloud sync: pulled {count} conversation(s)");
-                    }
+            match tokio::time::timeout(
+                SYNC_INTERVAL,
+                client.stream_changes(&conversations, pull_since_ms),
+            )
+            .await
+            {
+                // Session window elapsed while the stream was healthy, or the
+                // server closed it cleanly — advance the cursor and reconnect.
+                Err(_) | Ok(Ok(())) => {
                     pull_since_ms = now_ms;
                 }
-                Err(e) => {
-                    tracing::warn!("cloud sync: pull failed: {e}");
+                // SSE could not be used (old server, a proxy stripping
+                // streaming, transient error) — fall back to the /pull long-poll
+                // for this tick, keeping sync working end-to-end.
+                Ok(Err(stream_err)) => {
+                    tracing::debug!(
+                        "cloud sync: sse change feed unavailable, falling back to /pull: {stream_err}"
+                    );
+                    match client.pull_since(&conversations, pull_since_ms).await {
+                        Ok(count) => {
+                            if count > 0 {
+                                tracing::info!("cloud sync: pulled {count} conversation(s)");
+                            }
+                            pull_since_ms = now_ms;
+                        }
+                        Err(e) => {
+                            tracing::warn!("cloud sync: pull failed: {e}");
+                        }
+                    }
                 }
             }
         }

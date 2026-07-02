@@ -942,6 +942,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         )
         // ── Background-runs list + per-run trace (issues #128, #178) ────────
         .route("/api/runs", get(list_runs_handler))
+        .route("/api/runs/stream", get(runs_stream))
         .route("/api/runs/:id/trace", get(get_run_trace_handler))
         .route("/api/sessions", post(create_session_handler))
         .route("/api/sessions/:id", get(get_session_handler))
@@ -5906,6 +5907,73 @@ async fn list_runs_handler(State(state): State<ServerState>) -> axum::response::
         Ok(items) => Json(json!({ "runs": items })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
+}
+
+/// One frame of the `/api/runs/stream` feed. `snapshot` carries the full run list
+/// on connect; each subsequent `run` carries a single run whose status just
+/// changed. The `type` tag lets the client branch without a second endpoint.
+#[derive(serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum RunStreamFrame {
+    Snapshot {
+        runs: Vec<conversations::ConversationSummary>,
+    },
+    Run {
+        run: conversations::ConversationSummary,
+    },
+}
+
+/// `GET /api/runs/stream` — SSE: a full run snapshot on connect, then a frame per
+/// run whose `run_status` transitions. Replaces the desktop's 3s poll of
+/// `/api/runs` (issue #128); the snapshot-first contract lets a late/lagged client
+/// self-heal, so a `running → completed/failed` transition is never silently
+/// missed. Mirrors [`downloads_stream`].
+#[utoipa::path(
+    get,
+    path = "/api/runs/stream",
+    tag = "Conversations",
+    summary = "Background-runs SSE stream",
+    responses((status = 200, description = "Server-Sent Events stream"))
+)]
+async fn runs_stream(
+    State(state): State<ServerState>,
+) -> axum::response::sse::Sse<
+    impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    use tokio::sync::broadcast::error::RecvError;
+
+    // Subscribe BEFORE snapshotting so a transition in the gap between the two is
+    // still delivered as a delta (the snapshot may or may not include it; either
+    // way the client converges on the right terminal status).
+    let rx = conversations::subscribe_run_events();
+    let snapshot = RunStreamFrame::Snapshot {
+        runs: state.conversations.list_runs().await.unwrap_or_default(),
+    };
+
+    // State carries the (one-shot) snapshot until it's been emitted, then `None`.
+    // First poll yields the snapshot; subsequent polls forward live deltas.
+    let stream = futures_util::stream::unfold(
+        (rx, Some(snapshot)),
+        |(mut rx, pending_snapshot)| async move {
+            if let Some(snap) = pending_snapshot {
+                let data = serde_json::to_string(&snap).unwrap_or_default();
+                return Some((Ok(Event::default().data(data)), (rx, None)));
+            }
+            loop {
+                match rx.recv().await {
+                    Ok(ev) => {
+                        let frame = RunStreamFrame::Run { run: ev.run };
+                        let data = serde_json::to_string(&frame).unwrap_or_default();
+                        return Some((Ok(Event::default().data(data)), (rx, None)));
+                    }
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => return None,
+                }
+            }
+        },
+    );
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 /// `GET /api/runs/:id/trace` — return the ordered span list for a run (M4 / issue #178).

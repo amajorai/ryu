@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -24,7 +24,11 @@ use tracing::{debug, info, warn};
 
 use crate::{config::DiscordChannelConfig, state::SharedState};
 
-use super::{handle_message, Channel, InboundMessage};
+use super::{handle_message, status::StatusReporter, Channel, InboundMessage};
+
+/// Minimum spacing between `online` heartbeats. The poll loop runs every 2s, so
+/// this throttles the report to roughly one every 20s while healthy.
+const HEARTBEAT_MIN_SPACING: Duration = Duration::from_secs(20);
 
 /// Discord REST API base. Pinned to v10 (the current stable version).
 const API_BASE: &str = "https://discord.com/api/v10";
@@ -56,10 +60,23 @@ pub struct DiscordChannel {
     team_id: Option<String>,
     /// Base URL of the Core sidecar, used when `agent_id` or `team_id` is set.
     core_url: String,
+    /// Reports this bot's live connection status to the control plane. `None`
+    /// for env-configured bots (no store id), which then show as `unknown`.
+    status: Option<StatusReporter>,
 }
 
 impl DiscordChannel {
     pub fn new(cfg: DiscordChannelConfig, http: reqwest::Client) -> anyhow::Result<Self> {
+        Self::new_with_status(cfg, http, None)
+    }
+
+    /// Like [`Self::new`] but attaches a liveness reporter so the bot heartbeats
+    /// its connection status back to the control plane.
+    pub fn new_with_status(
+        cfg: DiscordChannelConfig,
+        http: reqwest::Client,
+        status: Option<StatusReporter>,
+    ) -> anyhow::Result<Self> {
         if cfg.token.trim().is_empty() {
             anyhow::bail!("discord channel token is empty");
         }
@@ -75,6 +92,7 @@ impl DiscordChannel {
             agent_id: cfg.agent_id,
             team_id: cfg.team_id,
             core_url: cfg.core_url,
+            status,
         })
     }
 
@@ -172,10 +190,16 @@ impl Channel for DiscordChannel {
 
     async fn run(self: Arc<Self>, state: SharedState) -> anyhow::Result<()> {
         debug!("discord channel poll loop started");
+        if let Some(reporter) = &self.status {
+            reporter.connecting().await;
+        }
         // Per-channel cursor: the snowflake id of the last message we processed.
         // Discord ids are monotonically increasing, so `after` cleanly excludes
         // anything we've already handled.
         let mut cursors: HashMap<String, String> = HashMap::new();
+        // Throttle `online` heartbeats — the poll loop is far faster than we need
+        // to report liveness.
+        let mut last_online: Option<Instant> = None;
 
         loop {
             for channel_id in &self.channel_ids {
@@ -183,6 +207,16 @@ impl Channel for DiscordChannel {
                 let is_seed_poll = after.is_none();
                 match self.fetch_messages(channel_id, after.as_deref()).await {
                     Ok(mut messages) => {
+                        // A successful fetch means the bot is live — heartbeat
+                        // online, throttled so we don't spam the control plane.
+                        if let Some(reporter) = &self.status {
+                            let due = last_online
+                                .map_or(true, |t| t.elapsed() >= HEARTBEAT_MIN_SPACING);
+                            if due {
+                                reporter.online().await;
+                                last_online = Some(Instant::now());
+                            }
+                        }
                         // Discord returns newest-first; process oldest-first so
                         // the cursor advances correctly and replies stay ordered.
                         messages.reverse();
@@ -261,6 +295,9 @@ impl Channel for DiscordChannel {
                             error = %err,
                             "discord message fetch failed, backing off"
                         );
+                        if let Some(reporter) = &self.status {
+                            reporter.error(&err.to_string()).await;
+                        }
                         tokio::time::sleep(ERROR_BACKOFF).await;
                     }
                 }

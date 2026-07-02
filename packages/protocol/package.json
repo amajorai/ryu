@@ -6,6 +6,7 @@
     "./agent-rules": "./src/agent-rules.ts",
     "./deep-link": "./src/deep-link.ts",
     "./hardware": "./src/hardware.ts",
+    "./sse": "./src/sse-client.ts",
     "./voice": "./src/voice.ts"
   },
   "devDependencies": {

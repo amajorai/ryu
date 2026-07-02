@@ -345,6 +345,44 @@ fn write_flattened(dest_dir: &Path, file_name: &str, bytes: &[u8]) -> anyhow::Re
     Ok(dest)
 }
 
+/// Recreate a shared-library alias (`libfoo.dylib` -> `libfoo.N.dylib`) as a
+/// symlink at `dest_dir/link_name` pointing at `target` (flattened to a bare
+/// basename so it resolves in the same directory).
+///
+/// llama.cpp release archives ship the unversioned / major-version dylib names
+/// as *symlink* entries, which carry no data body. Extracting them by reading
+/// bytes yields a 0-byte regular file that shadows the real versioned lib, so
+/// the binary fails at launch with a dyld "Library not loaded: @rpath/..."
+/// error. Recreate the link instead of writing empty bytes; a dangling link is
+/// fine here — the target lib may extract later in the same archive.
+fn write_symlink_flattened(
+    dest_dir: &Path,
+    link_name: &str,
+    target: &str,
+) -> anyhow::Result<PathBuf> {
+    let dest = dest_dir.join(link_name);
+    let target_basename = archive_basename(target).to_string();
+    // Replace any stale entry (e.g. a previous broken 0-byte extraction).
+    if std::fs::symlink_metadata(&dest).is_ok() {
+        std::fs::remove_file(&dest).ok();
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&target_basename, &dest)
+            .with_context(|| format!("symlink {} -> {}", dest.display(), target_basename))?;
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows assets ship DLLs (no symlinks); copy the target if present.
+        let src = dest_dir.join(&target_basename);
+        if src.exists() {
+            std::fs::copy(&src, &dest)
+                .with_context(|| format!("copy {} -> {}", src.display(), dest.display()))?;
+        }
+    }
+    Ok(dest)
+}
+
 /// Extract `binary_name` **plus every sibling shared library** from a release
 /// archive into `dest_dir`, flattening any internal directory prefix. Returns the
 /// path to the extracted binary.
@@ -429,6 +467,21 @@ fn extract_binary_with_libs_from_tar_gz(
         };
         let is_binary = is_wanted_binary(&file_name, binary_name);
         if !(is_binary || is_shared_library(&file_name)) {
+            continue;
+        }
+        // Symlink/hardlink entries (the `libfoo.dylib` -> `libfoo.N.dylib`
+        // aliases) carry no data body; reading them yields 0 bytes and would
+        // clobber the alias into an empty file, breaking the binary's @rpath
+        // resolution at launch. Recreate them as links pointing at the target.
+        let entry_type = entry.header().entry_type();
+        if entry_type.is_symlink() || entry_type.is_hard_link() {
+            if let Some(link) = entry.link_name().context("reading tar link name")? {
+                let target = link.to_string_lossy().into_owned();
+                let dest = write_symlink_flattened(dest_dir, &file_name, &target)?;
+                if is_binary {
+                    binary_path = Some(dest);
+                }
+            }
             continue;
         }
         let mut bytes = Vec::new();

@@ -10,6 +10,7 @@
 
 pub mod discord;
 pub mod slack;
+pub mod status;
 pub mod telegram;
 pub mod whatsapp;
 
@@ -118,6 +119,8 @@ fn channel_context(channel_name: &str) -> RequestContext {
         slot_model: None,
         // Channel messages don't have a session/conversation id.
         session_id: None,
+        // Channel messages aren't tagged with a control-plane product surface.
+        feature: None,
         // Channel messages are not companion-sourced.
         companion_source: false,
         // Channel messages do not opt into the unified tool loop.
@@ -225,8 +228,16 @@ pub async fn handle_message<C: Channel + ?Sized>(
 // ---------------------------------------------------------------------------
 
 /// One enabled bot config returned by the control-plane store endpoint.
+///
+/// The endpoint (`packages/api/src/routers/channels.ts`) serializes camelCase
+/// keys (`channelType`, `agentId`, `systemPrompt`), so map them to our snake_case
+/// fields — without this the store response fails to parse and the gateway
+/// silently falls back to env-only channel config.
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct StoredBotConfig {
+    /// The channel config's control-plane id, used to report liveness back.
+    id: String,
     channel_type: String,
     name: String,
     secrets: HashMap<String, String>,
@@ -404,13 +415,25 @@ pub async fn spawn_registered(state: SharedState) {
     let mut store_whatsapp = false;
 
     for bot in &store_configs {
+        // A store-sourced bot has a control-plane id, so it can report its live
+        // connection status back for the sidebar dot. Built once per bot and
+        // cloned into whichever channel adapter handles it.
+        let reporter = status::StatusReporter::new(
+            state.http.clone(),
+            &state.config.control_plane,
+            Some(bot.id.clone()),
+        );
         match bot.channel_type.as_str() {
             "telegram" => {
                 if let Some(cfg) = telegram_cfg_from_store(bot) {
                     info!(name = %bot.name, "registering telegram bot from store");
                     spawn_channel(
                         &state,
-                        telegram::TelegramChannel::new(cfg, state.http.clone()),
+                        telegram::TelegramChannel::new_with_status(
+                            cfg,
+                            state.http.clone(),
+                            reporter,
+                        ),
                     );
                     store_telegram = true;
                 } else {
@@ -420,7 +443,14 @@ pub async fn spawn_registered(state: SharedState) {
             "slack" => {
                 if let Some(cfg) = slack_cfg_from_store(bot) {
                     info!(name = %bot.name, "registering slack bot from store");
-                    spawn_channel(&state, slack::SlackChannel::new(cfg, state.http.clone()));
+                    spawn_channel(
+                        &state,
+                        slack::SlackChannel::new_with_status(
+                            cfg,
+                            state.http.clone(),
+                            reporter,
+                        ),
+                    );
                     store_slack = true;
                 } else {
                     warn!(name = %bot.name, "slack store config missing required secrets; skipping");
@@ -431,7 +461,11 @@ pub async fn spawn_registered(state: SharedState) {
                     info!(name = %bot.name, "registering discord bot from store");
                     spawn_channel(
                         &state,
-                        discord::DiscordChannel::new(cfg, state.http.clone()),
+                        discord::DiscordChannel::new_with_status(
+                            cfg,
+                            state.http.clone(),
+                            reporter,
+                        ),
                     );
                     store_discord = true;
                 } else {
@@ -443,7 +477,11 @@ pub async fn spawn_registered(state: SharedState) {
                     info!(name = %bot.name, "registering whatsapp bot from store");
                     spawn_channel(
                         &state,
-                        whatsapp::WhatsAppChannel::new(cfg, state.http.clone()),
+                        whatsapp::WhatsAppChannel::new_with_status(
+                            cfg,
+                            state.http.clone(),
+                            reporter,
+                        ),
                     );
                     store_whatsapp = true;
                 } else {
@@ -557,6 +595,35 @@ mod tests {
     fn extract_reply_none_when_missing() {
         let response = json!({ "choices": [] });
         assert!(extract_reply(&response).is_none());
+    }
+
+    #[test]
+    fn stored_bot_config_parses_camelcase_response() {
+        // The control-plane endpoint returns camelCase keys; the struct must map
+        // them (regression guard for the missing `rename_all`, which silently
+        // dropped every store config and fell back to env-only channels).
+        let raw = json!({
+            "channels": [
+                {
+                    "id": "chan-123",
+                    "channelType": "telegram",
+                    "name": "Support Bot",
+                    "secrets": { "bot_token": "tok:1" },
+                    "agentId": "acp:pi",
+                    "teamId": null,
+                    "model": null,
+                    "systemPrompt": "be nice"
+                }
+            ]
+        });
+        let parsed: StoredChannelsResponse = serde_json::from_value(raw).unwrap();
+        assert_eq!(parsed.channels.len(), 1);
+        let bot = &parsed.channels[0];
+        assert_eq!(bot.id, "chan-123");
+        assert_eq!(bot.channel_type, "telegram");
+        assert_eq!(bot.agent_id.as_deref(), Some("acp:pi"));
+        assert_eq!(bot.system_prompt.as_deref(), Some("be nice"));
+        assert!(bot.team_id.is_none());
     }
 
     #[test]

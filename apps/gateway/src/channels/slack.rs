@@ -29,7 +29,11 @@ use tracing::{debug, info, warn};
 
 use crate::{config::SlackChannelConfig, state::SharedState};
 
-use super::{handle_message, Channel, InboundMessage};
+use super::{
+    handle_message,
+    status::{StatusReporter, HEARTBEAT_INTERVAL},
+    Channel, InboundMessage,
+};
 
 /// Slack Web API base. Socket Mode is opened from here; replies post here too.
 const SLACK_API_BASE: &str = "https://slack.com/api";
@@ -54,10 +58,23 @@ pub struct SlackChannel {
     team_id: Option<String>,
     /// Base URL of the Core sidecar, used when `agent_id` or `team_id` is set.
     core_url: String,
+    /// Reports this bot's live connection status to the control plane. `None`
+    /// for env-configured bots (no store id), which then show as `unknown`.
+    status: Option<StatusReporter>,
 }
 
 impl SlackChannel {
     pub fn new(cfg: SlackChannelConfig, http: reqwest::Client) -> anyhow::Result<Self> {
+        Self::new_with_status(cfg, http, None)
+    }
+
+    /// Like [`Self::new`] but attaches a liveness reporter so the bot heartbeats
+    /// its connection status back to the control plane.
+    pub fn new_with_status(
+        cfg: SlackChannelConfig,
+        http: reqwest::Client,
+        status: Option<StatusReporter>,
+    ) -> anyhow::Result<Self> {
         if cfg.app_token.trim().is_empty() {
             anyhow::bail!("slack channel app_token is empty");
         }
@@ -73,6 +90,7 @@ impl SlackChannel {
             agent_id: cfg.agent_id,
             team_id: cfg.team_id,
             core_url: cfg.core_url,
+            status,
         })
     }
 
@@ -181,12 +199,18 @@ impl Channel for SlackChannel {
 
     async fn run(self: Arc<Self>, state: SharedState) -> anyhow::Result<()> {
         debug!("slack channel socket-mode loop started");
+        if let Some(reporter) = &self.status {
+            reporter.connecting().await;
+        }
 
         loop {
             let ws_url = match self.open_connection().await {
                 Ok(url) => url,
                 Err(err) => {
                     warn!(error = %err, "slack apps.connections.open failed, backing off");
+                    if let Some(reporter) = &self.status {
+                        reporter.error(&err.to_string()).await;
+                    }
                     tokio::time::sleep(RECONNECT_BACKOFF).await;
                     continue;
                 }
@@ -195,7 +219,26 @@ impl Channel for SlackChannel {
             match tokio_tungstenite::connect_async(&ws_url).await {
                 Ok((mut ws, _)) => {
                     debug!("slack socket-mode websocket connected");
-                    while let Some(frame) = ws.next().await {
+                    // The socket is open — the bot is live. Re-asserted below on
+                    // each idle timeout so a quiet channel stays fresh.
+                    if let Some(reporter) = &self.status {
+                        reporter.online().await;
+                    }
+                    // Read frames, but wake every HEARTBEAT_INTERVAL even when idle
+                    // to re-report `online` (the connection is still healthy).
+                    loop {
+                        let next =
+                            tokio::time::timeout(HEARTBEAT_INTERVAL, ws.next()).await;
+                        let frame = match next {
+                            Ok(Some(frame)) => frame,
+                            Ok(None) => break,
+                            Err(_) => {
+                                if let Some(reporter) = &self.status {
+                                    reporter.online().await;
+                                }
+                                continue;
+                            }
+                        };
                         let payload = match frame {
                             Ok(WsMessage::Text(text)) => text,
                             Ok(WsMessage::Ping(data)) => {
@@ -275,6 +318,9 @@ impl Channel for SlackChannel {
                 }
                 Err(err) => {
                     warn!(error = %err, "slack websocket connect failed, backing off");
+                    if let Some(reporter) = &self.status {
+                        reporter.error(&err.to_string()).await;
+                    }
                 }
             }
 

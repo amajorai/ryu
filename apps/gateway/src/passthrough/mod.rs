@@ -199,6 +199,12 @@ async fn forward(
     let started = std::time::Instant::now();
     let url = build_upstream_url(upstream_base, &path, raw_query.0.as_deref());
 
+    // Control-plane attribution (profiles / usage-points): tag the audit row with
+    // the forwarded end-user id + product surface when Core relays them. `None`
+    // for a bare subscription CLI (self-hosted) — the row is still recorded.
+    let user_id = header_string(&headers, "x-ryu-user-id");
+    let feature = header_string(&headers, "x-ryu-feature");
+
     // ── Request-side DLP: redact the outbound body when the firewall is on ─────
     // Only the prompt-carrying endpoint is scanned; other sub-paths (token
     // counting, etc.) are proxied untouched.
@@ -255,6 +261,8 @@ async fn forward(
                 &model,
                 started.elapsed().as_millis() as u64,
                 Some(format!("upstream request failed: {e}")),
+                user_id.clone(),
+                feature.clone(),
             );
             return (
                 StatusCode::BAD_GATEWAY,
@@ -271,6 +279,8 @@ async fn forward(
         &model,
         started.elapsed().as_millis() as u64,
         (!status.is_success()).then(|| format!("upstream status {status}")),
+        user_id.clone(),
+        feature.clone(),
     );
 
     // ── Stream the upstream response through a redact-and-audit tee ────────────
@@ -298,7 +308,7 @@ async fn forward(
     let scan_enabled = state.with_firewall(|fw| fw.config().enabled);
     let upstream_body = Body::from_stream(resp.bytes_stream());
     let response_body = if scan_enabled {
-        redact_response_passthrough(upstream_body, format, state.clone())
+        redact_response_passthrough(upstream_body, format, state.clone(), user_id, feature)
     } else {
         upstream_body
     };
@@ -402,6 +412,18 @@ fn redact_content(fw: &crate::firewall::FirewallScanner, content: &mut Value) {
     }
 }
 
+/// Read an optional non-empty header value as an owned string. Mirrors the
+/// `x-ryu-*` tag extraction used on the chat path so passthrough audit rows carry
+/// the same control-plane attribution.
+fn header_string(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
 /// A short, format-specific provider label for audit rows.
 fn provider_label(format: WireFormat) -> &'static str {
     match format {
@@ -416,6 +438,8 @@ fn emit_audit(
     model: &str,
     latency_ms: u64,
     error: Option<String>,
+    user_id: Option<String>,
+    feature: Option<String>,
 ) {
     state.audit.log(AuditRecord {
         request_id: format!(
@@ -438,6 +462,8 @@ fn emit_audit(
         error,
         skill_ids: None,
         session_id: None,
+        user_id,
+        feature,
         event_type: crate::audit::EventType::ModelCall,
         backend: None,
         command: None,
@@ -464,6 +490,10 @@ struct ResponseRedactState {
     accumulated: String,
     /// Set once the trailing remainder + audit have been flushed at stream end.
     flushed: bool,
+    /// Forwarded end-user id (`x-ryu-user-id`) for the end-of-stream audit row.
+    user_id: Option<String>,
+    /// Forwarded product surface (`x-ryu-feature`) for the end-of-stream audit row.
+    feature: Option<String>,
 }
 
 /// Stream the upstream SSE response to the client, redacting matched PII/secrets
@@ -472,7 +502,13 @@ struct ResponseRedactState {
 /// verbatim; unparseable events fail open (pass verbatim). The accumulated
 /// redacted text is scanned once at stream end to audit any residual outbound
 /// violation. Mirrors the request-side `redact_content` per-text-node `sanitize`.
-fn redact_response_passthrough(body: Body, format: WireFormat, state: SharedState) -> Body {
+fn redact_response_passthrough(
+    body: Body,
+    format: WireFormat,
+    state: SharedState,
+    user_id: Option<String>,
+    feature: Option<String>,
+) -> Body {
     use futures_util::StreamExt;
 
     let init = ResponseRedactState {
@@ -482,6 +518,8 @@ fn redact_response_passthrough(body: Body, format: WireFormat, state: SharedStat
         pending: Vec::new(),
         accumulated: String::new(),
         flushed: false,
+        user_id,
+        feature,
     };
 
     let transformed = futures_util::stream::unfold(init, |mut s| async move {
@@ -533,7 +571,13 @@ fn redact_response_passthrough(body: Body, format: WireFormat, state: SharedStat
                             redacted.into_bytes()
                         }
                     };
-                    audit_outbound(&s.state, s.format, &s.accumulated);
+                    audit_outbound(
+                        &s.state,
+                        s.format,
+                        &s.accumulated,
+                        s.user_id.clone(),
+                        s.feature.clone(),
+                    );
                     if tail_out.is_empty() {
                         return None;
                     }
@@ -549,7 +593,13 @@ fn redact_response_passthrough(body: Body, format: WireFormat, state: SharedStat
 /// Run the single end-of-stream outbound audit over the accumulated (already
 /// redacted) assistant text. A residual hit here means a secret slipped through
 /// per-delta redaction (e.g. split across two deltas — the known limitation).
-fn audit_outbound(state: &SharedState, format: WireFormat, text: &str) {
+fn audit_outbound(
+    state: &SharedState,
+    format: WireFormat,
+    text: &str,
+    user_id: Option<String>,
+    feature: Option<String>,
+) {
     if text.is_empty() {
         return;
     }
@@ -568,6 +618,8 @@ fn audit_outbound(state: &SharedState, format: WireFormat, text: &str) {
                 "outbound firewall violation: {}",
                 violation.pattern_name
             )),
+            user_id,
+            feature,
         );
     }
 }
