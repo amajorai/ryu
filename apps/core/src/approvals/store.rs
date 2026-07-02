@@ -114,7 +114,10 @@ impl ApprovalStore {
 
     /// Persist an updated request (decision, expiry, error), then broadcast a
     /// `Decided` event. The whole row is rewritten from the (already-mutated)
-    /// struct.
+    /// struct. Unconditional — used for post-decision writes (recording a tool
+    /// result/error on an already-decided row). For the pending→decided
+    /// **transition** use [`try_transition`](Self::try_transition), which is
+    /// atomic against concurrent deciders.
     pub async fn update(&self, req: &ApprovalRequest) -> Result<()> {
         let json = serde_json::to_string(req).context("serializing approval")?;
         let now = chrono::Utc::now().to_rfc3339();
@@ -130,6 +133,32 @@ impl ApprovalStore {
             request: req.clone(),
         });
         Ok(())
+    }
+
+    /// **Atomically** transition a row out of `Pending` to `req.status`, writing
+    /// `req` as the row's JSON. The `WHERE ... AND status = 'pending'` guard is a
+    /// compare-and-swap: exactly one of N concurrent deciders sees a row changed
+    /// (`Ok(true)`); the rest see `Ok(false)` and must NOT run side effects. This
+    /// closes the read-check-then-write TOCTOU where a double-approve could
+    /// double-execute the approved action. Broadcasts `Decided` only on success.
+    pub async fn try_transition(&self, req: &ApprovalRequest) -> Result<bool> {
+        let json = serde_json::to_string(req).context("serializing approval")?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let changed = {
+            let conn = self.conn.lock().await;
+            conn.execute(
+                "UPDATE approvals SET json = ?2, status = ?3, updated_at = ?4
+                 WHERE id = ?1 AND status = 'pending'",
+                params![req.id, json, req.status.as_str(), now],
+            )
+            .context("transitioning approval")?
+        };
+        if changed == 1 {
+            self.broadcast(ApprovalEvent::Decided {
+                request: req.clone(),
+            });
+        }
+        Ok(changed == 1)
     }
 
     /// Fetch a request by id.

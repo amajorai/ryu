@@ -10,6 +10,7 @@ use crate::{
     config::{ApiKeyConfig, AuthConfig, BudgetConfig, FirewallConfig, GatewayConfig},
     evals::EvalsRunner,
     firewall::FirewallScanner,
+    jobs::MediaJobStore,
     metrics::Metrics,
     policy::EffectivePolicy,
     providers::ProviderRegistry,
@@ -68,6 +69,9 @@ pub struct AppState {
     /// without a restart. The master key and require_auth flag are read from the
     /// static `config` field; only `api_keys` is mutable at runtime.
     pub auth: RwLock<AuthConfig>,
+    /// In-memory async media-job store (video generation). Job-based because
+    /// cloud video runs for minutes; the client polls the gateway.
+    pub jobs: MediaJobStore,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -145,6 +149,7 @@ impl AppState {
             auth: RwLock::new(auth),
             http,
             policy: RwLock::new(EffectivePolicy::default()),
+            jobs: MediaJobStore::new(),
         }
     }
 
@@ -266,6 +271,7 @@ impl AppState {
             auth: RwLock::new(auth),
             http,
             policy: RwLock::new(EffectivePolicy::default()),
+            jobs: MediaJobStore::new(),
         }
     }
 }

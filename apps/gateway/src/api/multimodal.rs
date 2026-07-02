@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -154,6 +154,58 @@ pub async fn audio_transcriptions(
     Ok(response)
 }
 
+/// POST /v1/videos/generations — submit a video-generation job (job-based; cloud
+/// video runs for minutes). Returns 202 with `{ id, status }`; poll the id via
+/// `GET /v1/videos/generations/{id}`.
+pub async fn video_generations(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Response, GatewayError> {
+    let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
+    let user_id = header_string(&headers, "x-ryu-user-id");
+    let agent_id = header_string(&headers, "x-ryu-agent-id");
+    // Per-agent video slot override (mirrors image/tts/stt).
+    let slot_provider = header_string(&headers, "x-ryu-slot-video-provider")
+        .and_then(|s| s.parse::<ProviderKind>().ok());
+    let slot_model = header_string(&headers, "x-ryu-slot-video-model");
+
+    let ctx = authenticate(
+        &state,
+        AuthInputs {
+            raw_api_key: raw_key,
+            user_id,
+            agent_id,
+            slot_provider,
+            slot_model,
+            ..Default::default()
+        },
+    )?;
+    debug!(request_id = %ctx.request_id, "video_generations: authenticated");
+
+    let output = pipeline::submit_video_job(state, ctx, body).await?;
+    Ok((StatusCode::ACCEPTED, Json(output)).into_response())
+}
+
+/// GET /v1/videos/generations/{id} — poll a submitted video job. Returns the
+/// job envelope with current `status` and, once succeeded, the media `data`.
+pub async fn video_job_status(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Response, GatewayError> {
+    let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
+    let ctx = authenticate(
+        &state,
+        AuthInputs {
+            raw_api_key: raw_key,
+            ..Default::default()
+        },
+    )?;
+    let output = pipeline::poll_video_job(state, ctx, id).await?;
+    Ok(Json(output).into_response())
+}
+
 /// GET /v1/modalities — list available modalities and their configured providers.
 pub async fn list_modalities(State(state): State<SharedState>) -> impl IntoResponse {
     use serde_json::json;
@@ -165,6 +217,7 @@ pub async fn list_modalities(State(state): State<SharedState>) -> impl IntoRespo
         Modality::Image,
         Modality::Tts,
         Modality::Stt,
+        Modality::Video,
     ]
     .iter()
     .map(|m| {

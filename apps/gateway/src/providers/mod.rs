@@ -1,10 +1,12 @@
 pub mod anthropic;
 pub mod core;
+pub mod fal;
 pub mod genai;
 pub mod local;
 pub mod modal;
 pub mod openai;
 pub mod openrouter;
+pub mod replicate;
 
 use std::pin::Pin;
 use std::time::Duration;
@@ -16,15 +18,18 @@ use tracing::warn;
 use crate::{
     config::{ProviderKind, ProvidersConfig},
     error::GatewayError,
+    jobs::VideoJob,
 };
 
 pub use anthropic::AnthropicProvider;
 pub use core::CoreProvider;
+pub use fal::FalProvider;
 pub use genai::GenAiProvider;
 pub use local::LocalProvider;
 pub use modal::ModalProvider;
 pub use openai::OpenAiProvider;
 pub use openrouter::OpenRouterProvider;
+pub use replicate::ReplicateProvider;
 
 pub struct ProviderRegistry {
     openai: Option<OpenAiProvider>,
@@ -34,6 +39,8 @@ pub struct ProviderRegistry {
     core: Option<CoreProvider>,
     modal: Option<ModalProvider>,
     genai: Option<GenAiProvider>,
+    replicate: Option<ReplicateProvider>,
+    fal: Option<FalProvider>,
 }
 
 impl ProviderRegistry {
@@ -88,6 +95,26 @@ impl ProviderRegistry {
             .as_ref()
             .map(|c| GenAiProvider::new(c.keys.clone()));
 
+        let replicate = config.replicate.as_ref().map(|c| {
+            ReplicateProvider::new(
+                client.clone(),
+                c.api_key.clone(),
+                c.base_url.clone(),
+                c.poll_interval_ms,
+                c.poll_timeout_secs,
+            )
+        });
+
+        let fal = config.fal.as_ref().map(|c| {
+            FalProvider::new(
+                client.clone(),
+                c.api_key.clone(),
+                c.base_url.clone(),
+                c.poll_interval_ms,
+                c.poll_timeout_secs,
+            )
+        });
+
         Self {
             openai,
             anthropic,
@@ -96,6 +123,8 @@ impl ProviderRegistry {
             core,
             modal,
             genai,
+            replicate,
+            fal,
         }
     }
 
@@ -108,6 +137,8 @@ impl ProviderRegistry {
             ProviderKind::Core => self.core.as_ref().map(|p| p as &dyn Provider),
             ProviderKind::Modal => self.modal.as_ref().map(|p| p as &dyn Provider),
             ProviderKind::GenAi => self.genai.as_ref().map(|p| p as &dyn Provider),
+            ProviderKind::Replicate => self.replicate.as_ref().map(|p| p as &dyn Provider),
+            ProviderKind::Fal => self.fal.as_ref().map(|p| p as &dyn Provider),
         }
     }
 
@@ -133,6 +164,12 @@ impl ProviderRegistry {
         }
         if self.genai.is_some() {
             out.push(ProviderKind::GenAi);
+        }
+        if self.replicate.is_some() {
+            out.push(ProviderKind::Replicate);
+        }
+        if self.fal.is_some() {
+            out.push(ProviderKind::Fal);
         }
         out
     }
@@ -305,6 +342,39 @@ pub trait Provider: Send + Sync {
             )))
         })
     }
+
+    /// Submit a video-generation job. Unlike the synchronous modalities, video
+    /// is job-based: this kicks off the provider's async prediction/queue and
+    /// returns a [`VideoJob`] handle (its `provider_ref` + initial status) the
+    /// gateway stores so the client can poll. `body` follows the same free-form
+    /// shape as image gen (`{ prompt, ... }`). Default: unsupported.
+    fn submit_video<'a>(
+        &'a self,
+        _model: &'a str,
+        _body: &'a Value,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>> {
+        let name = self.name();
+        Box::pin(async move {
+            Err(GatewayError::ProviderError(format!(
+                "{name} does not support video generation"
+            )))
+        })
+    }
+
+    /// Poll a previously-submitted video job by its `provider_ref` (returned from
+    /// [`Self::submit_video`]). Returns the job's current [`VideoJob`] state,
+    /// with `output` populated once it succeeds. Default: unsupported.
+    fn poll_video<'a>(
+        &'a self,
+        _provider_ref: &'a str,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>> {
+        let name = self.name();
+        Box::pin(async move {
+            Err(GatewayError::ProviderError(format!(
+                "{name} does not support video generation"
+            )))
+        })
+    }
 }
 
 // ─── Helper: build endpoint URLs for multimodal routes ───────────────────────
@@ -322,4 +392,78 @@ pub(super) fn audio_speech_url(base_url: &str) -> String {
 /// Build an `/v1/audio/transcriptions` URL from a base URL.
 pub(super) fn audio_transcriptions_url(base_url: &str) -> String {
     format!("{}/audio/transcriptions", base_url.trim_end_matches('/'))
+}
+
+// ─── Shared media-output normalization (cloud media providers) ────────────────
+
+/// Normalize an arbitrary provider media `output` (a URL string, a list of URLs,
+/// or a nested object like `{ images: [{ url }] }`) into the OpenAI-ish
+/// `{ "data": [{ "url": … }], "raw": <original> }` shape the desktop clients
+/// render. `raw` preserves the full provider output for callers that need it.
+pub(super) fn normalize_media_output(output: &Value) -> Value {
+    let mut data: Vec<Value> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    collect_media_urls(output, &mut data, &mut seen);
+    serde_json::json!({ "data": data, "raw": output.clone() })
+}
+
+/// Recursively collect renderable media URLs from an arbitrary output value,
+/// de-duplicating so repeated URLs (e.g. a result echoed in nested fields) are
+/// emitted once.
+fn collect_media_urls(value: &Value, out: &mut Vec<Value>, seen: &mut Vec<String>) {
+    match value {
+        Value::String(s) if is_media_url(s) => {
+            if !seen.iter().any(|u| u == s) {
+                seen.push(s.clone());
+                out.push(serde_json::json!({ "url": s }));
+            }
+        }
+        Value::Array(arr) => {
+            for v in arr {
+                collect_media_urls(v, out, seen);
+            }
+        }
+        Value::Object(map) => {
+            for v in map.values() {
+                collect_media_urls(v, out, seen);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Whether a string looks like a fetchable media URL or an inline data URI.
+fn is_media_url(s: &str) -> bool {
+    s.starts_with("http://") || s.starts_with("https://") || s.starts_with("data:")
+}
+
+#[cfg(test)]
+mod media_output_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn normalizes_string_url() {
+        let out = normalize_media_output(&json!("https://r.example/a.png"));
+        assert_eq!(out["data"][0]["url"], json!("https://r.example/a.png"));
+    }
+
+    #[test]
+    fn normalizes_array_of_urls() {
+        let out = normalize_media_output(&json!(["https://x/a.mp4", "https://x/b.mp4"]));
+        assert_eq!(out["data"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn normalizes_fal_images_shape() {
+        let out =
+            normalize_media_output(&json!({ "images": [{ "url": "https://x/i.png", "width": 512 }] }));
+        assert_eq!(out["data"][0]["url"], json!("https://x/i.png"));
+    }
+
+    #[test]
+    fn dedupes_repeated_urls() {
+        let out = normalize_media_output(&json!({ "video": { "url": "https://x/v.mp4" }, "url": "https://x/v.mp4" }));
+        assert_eq!(out["data"].as_array().unwrap().len(), 1);
+    }
 }

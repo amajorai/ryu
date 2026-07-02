@@ -31,6 +31,15 @@ pub fn router(state: SharedState) -> Router {
             "/v1/audio/transcriptions",
             post(multimodal::audio_transcriptions),
         )
+        // Video generation (job-based: submit + poll)
+        .route(
+            "/v1/videos/generations",
+            post(multimodal::video_generations),
+        )
+        .route(
+            "/v1/videos/generations/:id",
+            get(multimodal::video_job_status),
+        )
         // Modality registry
         .route("/v1/modalities", get(multimodal::list_modalities))
         .route("/v1/models", get(models::list_models))

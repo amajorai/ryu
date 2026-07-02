@@ -1070,6 +1070,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── Generative-media data path (image/video) — proxies to sd-server ──
         .route("/api/images/generate", post(media::generate_image))
         .route("/api/video/generate", post(media::generate_video))
+        // Poll a cloud video-generation job (job-based; see media::generate_video)
+        .route("/api/video/jobs/:id", get(media::poll_video_job))
         .route(
             "/api/media/upload",
             post(media::upload_media)
@@ -1154,8 +1156,12 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             get(monitors_api::list_monitor_alerts),
         )
         // ── Approval inbox (human-in-the-loop) ──────────────────────────────
-        // Static `events` registered before `:id` so it matches first.
+        // Static `events` / `mode` registered before `:id` so they match first.
         .route("/api/approvals/events", get(approvals_api::approval_events))
+        .route(
+            "/api/approvals/mode",
+            get(approvals_api::get_mode).put(approvals_api::set_mode),
+        )
         .route("/api/approvals", get(approvals_api::list_approvals))
         .route("/api/approvals/:id", get(approvals_api::get_approval))
         .route(
@@ -1485,6 +1491,21 @@ async fn set_preference(
                 crate::openrouter_auth::set_key(&body.value);
                 if let Err(e) = state.gateway.refresh().await {
                     tracing::warn!("gateway: refresh after OpenRouter key change failed: {e}");
+                }
+            }
+            // Cloud media provider keys (Replicate / Fal): same pattern — sync the
+            // resolver and respawn the gateway so its `replicate` / `fal` media
+            // providers pick up the new key (read from spawn env).
+            if key == crate::replicate_auth::REPLICATE_API_KEY_PREF_KEY {
+                crate::replicate_auth::set_key(&body.value);
+                if let Err(e) = state.gateway.refresh().await {
+                    tracing::warn!("gateway: refresh after Replicate key change failed: {e}");
+                }
+            }
+            if key == crate::fal_auth::FAL_API_KEY_PREF_KEY {
+                crate::fal_auth::set_key(&body.value);
+                if let Err(e) = state.gateway.refresh().await {
+                    tracing::warn!("gateway: refresh after Fal key change failed: {e}");
                 }
             }
             // Claude Code gateway-routing toggle: keep the in-process flag in sync
@@ -7388,6 +7409,9 @@ async fn search_space(
 #[derive(serde::Deserialize)]
 struct CreatePageBody {
     title: String,
+    /// When set, create a child "row page" parented to this document (a database).
+    #[serde(default)]
+    parent_id: Option<String>,
 }
 
 /// `POST /api/spaces/:id/pages` — create an empty Notion-style markdown page.
@@ -7410,7 +7434,11 @@ async fn create_page(
     } else {
         body.title.trim()
     };
-    match state.spaces.create_page(&id, title).await {
+    let result = match body.parent_id.as_deref() {
+        Some(parent) => state.spaces.create_child_page(&id, title, parent).await,
+        None => state.spaces.create_page(&id, title).await,
+    };
+    match result {
         Ok(document_id) => Json(json!({ "id": document_id })).into_response(),
         Err(e) => {
             let msg = e.to_string();

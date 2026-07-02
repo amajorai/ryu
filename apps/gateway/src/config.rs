@@ -105,6 +105,26 @@ pub struct CreditsConfig {
     /// never billed here — only Composio executions.
     #[serde(default)]
     pub cost_per_tool_call_micro_usd: u64,
+    /// Per-call cost in micro-USD for a successful image generation. Cloud media
+    /// providers (Replicate/Fal/OpenRouter) do not report a usage.cost the way
+    /// chat does, so managed nodes meter media at a configured flat rate per
+    /// call, debited through the same at-cost + markup path as tokens. Default: 0
+    /// ⇒ media is free until a deployment provisions a rate
+    /// (`GATEWAY_CREDITS_COST_PER_IMAGE_MICRO_USD`).
+    #[serde(default)]
+    pub cost_per_image_micro_usd: u64,
+    /// Per-call cost in micro-USD for a successful video generation job.
+    /// `GATEWAY_CREDITS_COST_PER_VIDEO_MICRO_USD`. Default: 0.
+    #[serde(default)]
+    pub cost_per_video_micro_usd: u64,
+    /// Per-call cost in micro-USD for a successful TTS synthesis.
+    /// `GATEWAY_CREDITS_COST_PER_TTS_MICRO_USD`. Default: 0.
+    #[serde(default)]
+    pub cost_per_tts_micro_usd: u64,
+    /// Per-call cost in micro-USD for a successful STT transcription.
+    /// `GATEWAY_CREDITS_COST_PER_STT_MICRO_USD`. Default: 0.
+    #[serde(default)]
+    pub cost_per_stt_micro_usd: u64,
     /// What the budget layer does when an org's wallet is empty: `stop` (default)
     /// aborts the next request; `downgrade` reroutes to `wallet_empty_downgrade_to`.
     #[serde(default)]
@@ -141,6 +161,10 @@ impl Default for CreditsConfig {
             internal_secret: None,
             markup_bps: 0,
             cost_per_tool_call_micro_usd: 0,
+            cost_per_image_micro_usd: 0,
+            cost_per_video_micro_usd: 0,
+            cost_per_tts_micro_usd: 0,
+            cost_per_stt_micro_usd: 0,
             wallet_empty_action: WalletEmptyAction::default(),
             wallet_empty_downgrade_to: None,
             timeout_ms: default_credits_timeout_ms(),
@@ -165,6 +189,20 @@ impl CreditsConfig {
     /// exactly like token cost. Saturating to avoid overflow.
     pub fn tool_call_cost_micro_usd(&self, n: u64) -> u64 {
         self.cost_per_tool_call_micro_usd.saturating_mul(n)
+    }
+
+    /// The raw (pre-markup) flat cost in micro-USD for one successful media call
+    /// of `modality`. Chat is never metered here (it uses real token/usage.cost);
+    /// returns 0 for Chat and for any modality whose per-call rate is unset. Pass
+    /// through [`Self::debit_amount`] to apply the platform markup, like tokens.
+    pub fn media_cost_micro_usd(&self, modality: &Modality) -> u64 {
+        match modality {
+            Modality::Image => self.cost_per_image_micro_usd,
+            Modality::Video => self.cost_per_video_micro_usd,
+            Modality::Tts => self.cost_per_tts_micro_usd,
+            Modality::Stt => self.cost_per_stt_micro_usd,
+            Modality::Chat => 0,
+        }
     }
 
     /// Whether the hook is active: enabled with both a control-plane URL and an
@@ -365,6 +403,13 @@ pub struct ProvidersConfig {
     pub core: Option<CoreProviderConfig>,
     pub modal: Option<ModalProviderConfig>,
     pub genai: Option<GenAiProviderConfig>,
+    /// Replicate (https://replicate.com) — cloud image/video generation via an
+    /// async prediction API (create → poll → output URL). Opt-in: constructed
+    /// only when an API key is present.
+    pub replicate: Option<ReplicateProviderConfig>,
+    /// Fal (https://fal.ai) — cloud image/video/audio generation via a queued
+    /// request API (submit → poll status → result). Opt-in.
+    pub fal: Option<FalProviderConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -500,6 +545,63 @@ pub struct GenAiProviderConfig {
     pub keys: std::collections::HashMap<String, String>,
 }
 
+/// Replicate (https://replicate.com) — cloud generative media over an async
+/// prediction API. A request creates a prediction (`POST /predictions` with a
+/// versioned model or `POST /models/{owner}/{name}/predictions`), then the
+/// gateway polls the returned prediction until it reaches a terminal state and
+/// exposes the `output` (usually a URL, or list of URLs). Image gen blocks and
+/// polls inline (fast enough); video gen submits a job the client polls.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ReplicateProviderConfig {
+    /// Replicate API token (sent as `Authorization: Bearer <token>`).
+    pub api_key: String,
+    #[serde(default = "replicate_base_url")]
+    pub base_url: String,
+    /// Poll interval in milliseconds while a prediction is running. Default: 1500.
+    #[serde(default = "default_media_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+    /// Max seconds to block-and-poll an inline (image) prediction before giving
+    /// up. Video never blocks this long — it returns a job id. Default: 120.
+    #[serde(default = "default_media_poll_timeout_secs")]
+    pub poll_timeout_secs: u64,
+}
+
+fn replicate_base_url() -> String {
+    "https://api.replicate.com/v1".to_string()
+}
+
+/// Fal (https://fal.ai) — cloud generative media over a queued request API. A
+/// request submits to `https://queue.fal.run/{model}` and receives a
+/// `request_id` + status/response URLs; the gateway polls the status URL until
+/// `COMPLETED`, then fetches the response. Image gen blocks and polls inline;
+/// video gen submits a job the client polls.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FalProviderConfig {
+    /// Fal API key (sent as `Authorization: Key <key>`).
+    pub api_key: String,
+    /// Queue base URL (model id is appended per request). Default:
+    /// `https://queue.fal.run`.
+    #[serde(default = "fal_base_url")]
+    pub base_url: String,
+    /// Poll interval in milliseconds while a request is queued/in-progress.
+    #[serde(default = "default_media_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+    /// Max seconds to block-and-poll an inline (image) request. Default: 120.
+    #[serde(default = "default_media_poll_timeout_secs")]
+    pub poll_timeout_secs: u64,
+}
+
+fn fal_base_url() -> String {
+    "https://queue.fal.run".to_string()
+}
+
+fn default_media_poll_interval_ms() -> u64 {
+    1500
+}
+fn default_media_poll_timeout_secs() -> u64 {
+    120
+}
+
 /// The modality of a request. The router uses this to pick a provider that
 /// supports the requested capability, so an agent's chat, image-gen, TTS, and
 /// STT calls can each go to different providers.
@@ -515,6 +617,9 @@ pub enum Modality {
     Tts,
     /// Speech-to-text transcription.
     Stt,
+    /// Video generation. Unlike the other modalities this is job-based: a submit
+    /// creates a job the client polls, because cloud video runs for minutes.
+    Video,
 }
 
 impl Modality {
@@ -524,6 +629,7 @@ impl Modality {
             Modality::Image => "image",
             Modality::Tts => "tts",
             Modality::Stt => "stt",
+            Modality::Video => "video",
         }
     }
 }
@@ -713,6 +819,8 @@ pub enum ProviderKind {
     Core,
     Modal,
     GenAi,
+    Replicate,
+    Fal,
 }
 
 impl ProviderKind {
@@ -725,6 +833,8 @@ impl ProviderKind {
             ProviderKind::Core => "core",
             ProviderKind::Modal => "modal",
             ProviderKind::GenAi => "genai",
+            ProviderKind::Replicate => "replicate",
+            ProviderKind::Fal => "fal",
         }
     }
 }
@@ -741,6 +851,8 @@ impl std::str::FromStr for ProviderKind {
             "core" => Ok(ProviderKind::Core),
             "modal" => Ok(ProviderKind::Modal),
             "genai" => Ok(ProviderKind::GenAi),
+            "replicate" => Ok(ProviderKind::Replicate),
+            "fal" => Ok(ProviderKind::Fal),
             other => Err(format!("unknown provider kind: {other}")),
         }
     }
@@ -1199,6 +1311,40 @@ impl GatewayConfig {
             });
         }
 
+        // Replicate (cloud image/video). Key presence alone activates the
+        // provider — mirrors the OpenRouter block. base_url overridable for
+        // proxies / self-host.
+        if let Ok(key) = std::env::var("REPLICATE_API_KEY") {
+            if !key.trim().is_empty() {
+                let base_url = std::env::var("REPLICATE_BASE_URL")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(replicate_base_url);
+                config.providers.replicate = Some(ReplicateProviderConfig {
+                    api_key: key,
+                    base_url,
+                    poll_interval_ms: default_media_poll_interval_ms(),
+                    poll_timeout_secs: default_media_poll_timeout_secs(),
+                });
+            }
+        }
+
+        // Fal (cloud image/video/audio). Key presence alone activates it.
+        if let Ok(key) = std::env::var("FAL_API_KEY") {
+            if !key.trim().is_empty() {
+                let base_url = std::env::var("FAL_BASE_URL")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(fal_base_url);
+                config.providers.fal = Some(FalProviderConfig {
+                    api_key: key,
+                    base_url,
+                    poll_interval_ms: default_media_poll_interval_ms(),
+                    poll_timeout_secs: default_media_poll_timeout_secs(),
+                });
+            }
+        }
+
         // Core sidecar manager
         if let Ok(url) = std::env::var("CORE_URL") {
             let token = std::env::var("CORE_TOKEN").ok();
@@ -1537,6 +1683,31 @@ impl GatewayConfig {
         if let Ok(raw) = std::env::var("GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD") {
             if let Ok(cost) = raw.trim().parse::<u64>() {
                 config.credits.cost_per_tool_call_micro_usd = cost;
+            }
+        }
+        // Per-modality flat media rates (managed metering; 0 = free by default).
+        for (var, slot) in [
+            (
+                "GATEWAY_CREDITS_COST_PER_IMAGE_MICRO_USD",
+                &mut config.credits.cost_per_image_micro_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_VIDEO_MICRO_USD",
+                &mut config.credits.cost_per_video_micro_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_TTS_MICRO_USD",
+                &mut config.credits.cost_per_tts_micro_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_STT_MICRO_USD",
+                &mut config.credits.cost_per_stt_micro_usd,
+            ),
+        ] {
+            if let Ok(raw) = std::env::var(var) {
+                if let Ok(cost) = raw.trim().parse::<u64>() {
+                    *slot = cost;
+                }
             }
         }
         if let Ok(raw) = std::env::var("GATEWAY_CREDITS_WALLET_EMPTY_ACTION") {

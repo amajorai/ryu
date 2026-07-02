@@ -35,6 +35,8 @@ mod model_format;
 mod monitors;
 mod okf;
 mod openrouter_auth;
+mod fal_auth;
+mod replicate_auth;
 mod paths;
 mod pi_config;
 mod plugin_host;
@@ -433,6 +435,18 @@ async fn main() {
     {
         openrouter_auth::set_key(&key);
     }
+    // Same for the cloud media provider keys (Replicate / Fal): load them into
+    // their in-process resolvers so the gateway inherits `REPLICATE_API_KEY` /
+    // `FAL_API_KEY` and activates its `replicate` / `fal` media providers.
+    if let Ok(Some(key)) = preferences
+        .get(replicate_auth::REPLICATE_API_KEY_PREF_KEY)
+        .await
+    {
+        replicate_auth::set_key(&key);
+    }
+    if let Ok(Some(key)) = preferences.get(fal_auth::FAL_API_KEY_PREF_KEY).await {
+        fal_auth::set_key(&key);
+    }
     // Same for the Artificial Analysis API key, which enriches the model catalog
     // with independent benchmark stats (intelligence/speed/price).
     if let Ok(Some(key)) = preferences
@@ -701,7 +715,9 @@ async fn main() {
     };
     let approval_engine =
         crate::approvals::ApprovalEngine::new(approval_store, reqwest::Client::new())
-            .with_monitors(monitor_engine.store.clone());
+            .with_monitors(monitor_engine.store.clone())
+            .with_registry(Arc::clone(&mcp_registry))
+            .with_preferences(preferences.clone());
     crate::approvals::set_global_engine(approval_engine.clone());
     {
         let sweep_engine = approval_engine.clone();

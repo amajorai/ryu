@@ -73,6 +73,17 @@ pub struct ImageSlot {
     pub provider: Option<String>,
 }
 
+/// Video-generation slot. `provider` is the gateway ProviderKind string (e.g.
+/// `"replicate"`, `"fal"`); video routes through the gateway's job-based
+/// `/v1/videos/generations` path.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct VideoSlot {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
 /// Memory / Spaces slot: which Space(s) the agent reads and writes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct MemorySlot {
@@ -179,6 +190,9 @@ pub struct AgentRecord {
     /// Image-generation slot.
     #[serde(default)]
     pub image_model: Option<ImageSlot>,
+    /// Video-generation slot.
+    #[serde(default)]
+    pub video_model: Option<VideoSlot>,
     /// Memory / Spaces slot.
     #[serde(default)]
     pub memory: Option<MemorySlot>,
@@ -272,6 +286,9 @@ pub struct CreateAgent {
     pub tts: Option<TtsSlot>,
     #[serde(default)]
     pub image_model: Option<ImageSlot>,
+    /// Video-generation slot.
+    #[serde(default)]
+    pub video_model: Option<VideoSlot>,
     #[serde(default)]
     pub memory: Option<MemorySlot>,
     #[serde(default)]
@@ -310,6 +327,7 @@ impl Default for CreateAgent {
             stt: None,
             tts: None,
             image_model: None,
+            video_model: None,
             memory: None,
             persona: None,
             policy_ref: None,
@@ -356,6 +374,9 @@ pub struct UpdateAgent {
     pub tts: Option<TtsSlot>,
     #[serde(default)]
     pub image_model: Option<ImageSlot>,
+    /// Video-generation slot.
+    #[serde(default)]
+    pub video_model: Option<VideoSlot>,
     #[serde(default)]
     pub memory: Option<MemorySlot>,
     #[serde(default)]
@@ -452,6 +473,7 @@ impl AgentStore {
             "stt        TEXT",
             "tts        TEXT",
             "image_model TEXT",
+            "video_model TEXT",
             "memory     TEXT",
             "persona    TEXT",
             "policy_ref TEXT",
@@ -670,7 +692,7 @@ impl AgentStore {
                     created_at, updated_at,
                     chat_model, stt, tts, image_model, memory, persona, policy_ref,
                     version, locked, inference, composio_actions, skills,
-                    identity_profile_ids, orchestrator, can_create_agents
+                    identity_profile_ids, orchestrator, can_create_agents, video_model
              FROM agents ORDER BY built_in DESC, created_at ASC",
         )?;
         let rows = stmt
@@ -715,7 +737,7 @@ impl AgentStore {
                         created_at, updated_at,
                         chat_model, stt, tts, image_model, memory, persona, policy_ref,
                         version, locked, inference, composio_actions, skills,
-                        identity_profile_ids, orchestrator, can_create_agents
+                        identity_profile_ids, orchestrator, can_create_agents, video_model
                  FROM agents WHERE id = ?1",
                 params![id],
                 row_to_record,
@@ -758,12 +780,12 @@ impl AgentStore {
         conn.execute(
             "INSERT INTO agents
                 (id, name, description, system_prompt, tools, model, engine, built_in,
-                 chat_model, stt, tts, image_model, memory, persona, policy_ref,
+                 chat_model, stt, tts, image_model, video_model, memory, persona, policy_ref,
                  inference, version, locked, composio_actions, skills,
                  identity_profile_ids, orchestrator, can_create_agents,
                  created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0,
-                     ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                     ?8, ?9, ?10, ?11, ?23, ?12, ?13, ?14,
                      ?15, ?16, 0, ?17, ?18,
                      ?19, ?21, ?22, ?20, ?20)",
             params![
@@ -789,6 +811,7 @@ impl AgentStore {
                 now,
                 input.orchestrator.map(i64::from),
                 input.can_create_agents.map(i64::from),
+                serialize_slot(&input.video_model),
             ],
         )?;
         Ok(AgentRecord {
@@ -812,6 +835,7 @@ impl AgentStore {
             stt: input.stt,
             tts: input.tts,
             image_model: input.image_model,
+            video_model: input.video_model,
             memory: input.memory,
             persona: input.persona,
             policy_ref: input.policy_ref,
@@ -835,7 +859,7 @@ impl AgentStore {
                             created_at, updated_at,
                             chat_model, stt, tts, image_model, memory, persona, policy_ref,
                             version, locked, inference, composio_actions, skills,
-                            identity_profile_ids, orchestrator, can_create_agents
+                            identity_profile_ids, orchestrator, can_create_agents, video_model
                      FROM agents WHERE id = ?1",
                     params![id],
                     row_to_record,
@@ -864,6 +888,7 @@ impl AgentStore {
                 && patch.stt.is_none()
                 && patch.tts.is_none()
                 && patch.image_model.is_none()
+                && patch.video_model.is_none()
                 && patch.memory.is_none()
                 && patch.persona.is_none()
                 && patch.policy_ref.is_none()
@@ -915,6 +940,9 @@ impl AgentStore {
             if let Some(image_model) = patch.image_model {
                 record.image_model = Some(image_model);
             }
+            if let Some(video_model) = patch.video_model {
+                record.video_model = Some(video_model);
+            }
             if let Some(memory) = patch.memory {
                 record.memory = Some(memory);
             }
@@ -955,6 +983,7 @@ impl AgentStore {
                 "UPDATE agents SET name = ?2, description = ?3, system_prompt = ?4,
                     tools = ?5, model = ?6, engine = ?7,
                     chat_model = ?8, stt = ?9, tts = ?10, image_model = ?11,
+                    video_model = ?24,
                     memory = ?12, persona = ?13, policy_ref = ?14, inference = ?15,
                     version = ?16, locked = ?17, composio_actions = ?18, skills = ?19,
                     identity_profile_ids = ?20, orchestrator = ?22,
@@ -984,6 +1013,7 @@ impl AgentStore {
                     now,
                     record.orchestrator.map(i64::from),
                     record.can_create_agents.map(i64::from),
+                    serialize_slot(&record.video_model),
                 ],
             )?;
         }
@@ -1071,6 +1101,9 @@ pub struct AgentTemplateConfig {
     pub tts: Option<TtsSlot>,
     #[serde(default)]
     pub image_model: Option<ImageSlot>,
+    /// Video-generation slot.
+    #[serde(default)]
+    pub video_model: Option<VideoSlot>,
     #[serde(default)]
     pub memory: Option<MemorySlot>,
     #[serde(default)]
@@ -1099,6 +1132,7 @@ impl AgentRecord {
                 stt: self.stt.clone(),
                 tts: self.tts.clone(),
                 image_model: self.image_model.clone(),
+                video_model: self.video_model.clone(),
                 memory: self.memory.clone(),
                 persona: self.persona.clone(),
                 policy_ref: self.policy_ref.clone(),
@@ -1125,6 +1159,7 @@ impl AgentTemplate {
             stt: self.agent_config.stt,
             tts: self.agent_config.tts,
             image_model: self.agent_config.image_model,
+            video_model: self.agent_config.video_model,
             memory: self.agent_config.memory,
             persona: self.agent_config.persona,
             policy_ref: self.agent_config.policy_ref,
@@ -1180,6 +1215,13 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRecord> {
     // default (orchestrator on, can_create_agents off).
     let orchestrator = row.get::<_, Option<i64>>(23).ok().flatten().map(|v| v != 0);
     let can_create_agents = row.get::<_, Option<i64>>(24).ok().flatten().map(|v| v != 0);
+    // Column 25 is the video slot (appended after the orchestration flags).
+    // A missing column (older row from before the migration) → None (fail-soft).
+    let video_model = row
+        .get::<_, Option<String>>(25)
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok());
     Ok(AgentRecord {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -1201,6 +1243,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRecord> {
         stt: parse_slot(row.get(11)?),
         tts: parse_slot(row.get(12)?),
         image_model: parse_slot(row.get(13)?),
+        video_model,
         memory: parse_slot(row.get(14)?),
         persona: parse_slot(row.get(15)?),
         policy_ref: parse_slot(row.get(16)?),
@@ -1368,6 +1411,10 @@ mod tests {
             model_id: Some("gpt-4o".into()),
             engine: Some("acp:claude".into()),
         };
+        let video = VideoSlot {
+            model_id: Some("fal-ai/ltx-video".into()),
+            provider: Some("fal".into()),
+        };
 
         let created = store
             .create(CreateAgent {
@@ -1376,6 +1423,7 @@ mod tests {
                 tts: Some(tts.clone()),
                 stt: Some(stt.clone()),
                 image_model: Some(img.clone()),
+                video_model: Some(video.clone()),
                 memory: Some(mem.clone()),
                 persona: Some(persona.clone()),
                 policy_ref: Some(policy.clone()),
@@ -1389,6 +1437,7 @@ mod tests {
         assert_eq!(fetched.tts.as_ref(), Some(&tts));
         assert_eq!(fetched.stt.as_ref(), Some(&stt));
         assert_eq!(fetched.image_model.as_ref(), Some(&img));
+        assert_eq!(fetched.video_model.as_ref(), Some(&video));
         assert_eq!(fetched.memory.as_ref(), Some(&mem));
         assert_eq!(fetched.persona.as_ref(), Some(&persona));
         assert_eq!(fetched.policy_ref.as_ref(), Some(&policy));
@@ -1414,6 +1463,14 @@ mod tests {
             patched.tts.as_ref(),
             Some(&tts),
             "unpatched slots are preserved"
+        );
+        // Regression: an unrelated patch must not wipe the video slot (the
+        // update() SELECT must read video_model so it round-trips through the
+        // read-modify-write).
+        assert_eq!(
+            patched.video_model.as_ref(),
+            Some(&video),
+            "video_model survives an unrelated update"
         );
     }
 

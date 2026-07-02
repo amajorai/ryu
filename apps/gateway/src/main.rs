@@ -13,6 +13,7 @@ mod error;
 mod evals;
 mod firewall;
 mod governance;
+mod jobs;
 mod metrics;
 mod passthrough;
 mod pipeline;

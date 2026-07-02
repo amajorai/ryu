@@ -8,6 +8,17 @@
  * CLI users run `bunx ryu pack <dir>` via the bin entry in package.json.
  */
 
+export type {
+	AgentConfig,
+	AgentEvent,
+	AgentTool,
+	Endpoint,
+	GenerateResult,
+	QueryInput,
+	QueryOptions,
+	RemoteToolRef,
+} from "./agent/index.ts";
+export { Agent, createAgent, query, ryuTool } from "./agent/index.ts";
 export {
 	AgentBuilder,
 	agent,

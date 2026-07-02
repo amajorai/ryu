@@ -1070,6 +1070,8 @@ pub struct AgentSlots {
     pub chat: Option<(String, Option<String>)>,
     /// Image-generation slot: `(provider, model)`. Both may be `None`.
     pub image: Option<(String, Option<String>)>,
+    /// Video-generation slot: `(provider, model)`. Both may be `None`.
+    pub video: Option<(String, Option<String>)>,
     /// Text-to-speech slot: `(provider, model)`. Both may be `None`.
     pub tts: Option<(String, Option<String>)>,
     /// Speech-to-text slot: `(provider, model)`. Both may be `None`.
@@ -1119,6 +1121,10 @@ async fn resolve_binding(
                 chat: chat_slot,
                 image: record
                     .image_model
+                    .as_ref()
+                    .and_then(|s| s.provider.as_ref().map(|p| (p.clone(), s.model_id.clone()))),
+                video: record
+                    .video_model
                     .as_ref()
                     .and_then(|s| s.provider.as_ref().map(|p| (p.clone(), s.model_id.clone()))),
                 tts: record
@@ -3223,6 +3229,12 @@ async fn connect_openai(
         builder = builder.header("x-ryu-slot-image-provider", prov.as_str());
         if let Some(m) = mdl {
             builder = builder.header("x-ryu-slot-image-model", m.as_str());
+        }
+    }
+    if let Some((prov, mdl)) = &slots.video {
+        builder = builder.header("x-ryu-slot-video-provider", prov.as_str());
+        if let Some(m) = mdl {
+            builder = builder.header("x-ryu-slot-video-model", m.as_str());
         }
     }
     if let Some((prov, mdl)) = &slots.tts {

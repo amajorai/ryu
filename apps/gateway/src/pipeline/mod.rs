@@ -88,6 +88,15 @@ pub struct RequestContext {
     /// still overrides. `None` (or an unknown name) ⇒ no profile ⇒ today's
     /// allowlist behavior, unchanged.
     pub tool_profile: Option<String>,
+    /// Raw tool passthrough (SDK-side agent loops), from `x-ryu-raw-tools`. When
+    /// true, BOTH managed tool loops (unified search + legacy Composio) are
+    /// suppressed and the request takes the plain completion branch, so the
+    /// caller's own `tools` are forwarded verbatim and its `tool_calls` are
+    /// returned un-intercepted. This lets `@ryu/sdk`'s in-process agent loop run
+    /// its own tool calling against a Composio-on node without Core's loop
+    /// swallowing the calls. Governance still applies where tools actually
+    /// execute (Core `/api/mcp/tools/call` enforces the agent allowlist).
+    pub raw_tools: bool,
 }
 
 /// Describes the degraded mode the pipeline entered, if any, for this request.
@@ -177,6 +186,10 @@ pub struct AuthInputs<'a> {
     pub priority: crate::concurrency::Priority,
     /// Named tool-policy profile (#473 profiles), from `x-ryu-tool-profile`.
     pub tool_profile: Option<String>,
+    /// Raw tool passthrough (SDK-side agent loops), from `x-ryu-raw-tools`.
+    /// Suppresses both managed tool loops so the caller's own tools/tool_calls
+    /// pass through untouched.
+    pub raw_tools: bool,
 }
 
 impl<'a> AuthInputs<'a> {
@@ -214,6 +227,7 @@ pub fn authenticate(
         tool_search_requested,
         priority,
         tool_profile,
+        raw_tools,
     } = inputs;
     // Use the live auth config (via RwLock) so keys added via PUT /v1/config
     // take effect immediately without a gateway restart.
@@ -241,6 +255,7 @@ pub fn authenticate(
                 tool_search_requested,
                 priority,
                 tool_profile: tool_profile.clone(),
+                raw_tools,
             });
         }
 
@@ -276,6 +291,7 @@ pub fn authenticate(
                     tool_search_requested,
                     priority,
                     tool_profile: tool_profile.clone(),
+                    raw_tools,
                 });
             }
         }
@@ -315,6 +331,7 @@ pub fn authenticate(
                     tool_search_requested,
                     priority,
                     tool_profile: tool_profile.clone(),
+                    raw_tools,
                 });
             }
         }
@@ -748,7 +765,15 @@ pub async fn run(
         // holds the slot while the engine idles, waiting on the child). So we gate
         // only NON-tool-loop completions — exactly the plain-chat traffic where
         // batching + priority matter most; the tool-loop path stays ungated.
-        let runs_tool_loop = state.tools.is_some() && tool_signal_active(&ctx, &state.config.tools);
+        // Raw passthrough (`x-ryu-raw-tools`) forces the plain branch; otherwise
+        // unified (catalog + signal) wins, then legacy Composio, then plain.
+        let loop_kind = select_tool_loop(
+            &ctx,
+            state.tools.is_some(),
+            state.composio.is_some(),
+            &state.config.tools,
+        );
+        let runs_tool_loop = matches!(loop_kind, ToolLoopKind::Unified);
         let _admission = if runs_tool_loop {
             crate::concurrency::AdmissionPermit::none()
         } else {
@@ -775,65 +800,77 @@ pub async fn run(
             budget.as_ref().map(|b| b.action),
             Some(crate::config::BudgetAction::Restrict)
         );
-        let completion_result = if let (Some(catalog), true) =
-            (&state.tools, tool_signal_active(&ctx, &state.config.tools))
-        {
-            let allowed = effective_tool_allowlist(&ctx, &state.config.tools);
-            let tool_ctx = crate::tools::ToolLoopContext {
-                agent_id: ctx.agent_id.clone(),
-                user_id: ctx.user_id.clone(),
-                allowed,
-            };
-            if !tools_restricted {
-                crate::tools::inject_search_tool(&mut body, &state.config.tools.always_on);
+        let completion_result = match loop_kind {
+            ToolLoopKind::Unified => {
+                let catalog = state
+                    .tools
+                    .as_ref()
+                    .expect("Unified selected ⇒ tools catalog present");
+                let allowed = effective_tool_allowlist(&ctx, &state.config.tools);
+                let tool_ctx = crate::tools::ToolLoopContext {
+                    agent_id: ctx.agent_id.clone(),
+                    user_id: ctx.user_id.clone(),
+                    allowed,
+                };
+                if !tools_restricted {
+                    crate::tools::inject_search_tool(&mut body, &state.config.tools.always_on);
+                }
+                crate::tools::run_tool_loop(
+                    &mut body,
+                    provider,
+                    &decision.model,
+                    catalog,
+                    &tool_ctx,
+                    state.config.tools.max_rounds,
+                    state.config.tools.describe_top_n,
+                )
+                .await
             }
-            crate::tools::run_tool_loop(
-                &mut body,
-                provider,
-                &decision.model,
-                catalog,
-                &tool_ctx,
-                state.config.tools.max_rounds,
-                state.config.tools.describe_top_n,
-            )
-            .await
-        } else if let Some(composio) = &state.composio {
-            // Legacy Composio loop: returns (response, billable_tool_calls).
-            state.metrics.inc_composio_calls();
-            let entity_id = ctx
-                .user_id
-                .as_deref()
-                .unwrap_or(&state.config.composio.entity_id);
-            // Per-agent allowlist (#456): when Core forwards `x-ryu-tools`,
-            // scope the tool loop to exactly those actions; otherwise fall back
-            // to the gateway's global `composio.actions` config.
-            // `"*"` is stripped for the same reason as in `parse_tool_actions`:
-            // the client header must not be able to introduce a wildcard grant.
-            let per_request: Vec<String> = ctx
-                .tool_actions
-                .as_deref()
-                .map(|s| {
-                    s.split(',')
-                        .map(str::trim)
-                        .filter(|x| !x.is_empty() && *x != "*")
-                        .map(String::from)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let allowed: &[String] = if per_request.is_empty() {
-                composio.actions()
-            } else {
-                &per_request
-            };
-            composio
-                .run_tool_loop(&mut body, provider, &decision.model, entity_id, allowed)
-                .await
-        } else {
-            // Plain completion: no tool loop ⇒ no billable tool calls.
-            provider
-                .complete(&decision.model, &body)
-                .await
-                .map(|v| (v, 0u64))
+            ToolLoopKind::Composio => {
+                let composio = state
+                    .composio
+                    .as_ref()
+                    .expect("Composio selected ⇒ Composio configured");
+                // Legacy Composio loop: returns (response, billable_tool_calls).
+                state.metrics.inc_composio_calls();
+                let entity_id = ctx
+                    .user_id
+                    .as_deref()
+                    .unwrap_or(&state.config.composio.entity_id);
+                // Per-agent allowlist (#456): when Core forwards `x-ryu-tools`,
+                // scope the tool loop to exactly those actions; otherwise fall back
+                // to the gateway's global `composio.actions` config.
+                // `"*"` is stripped for the same reason as in `parse_tool_actions`:
+                // the client header must not be able to introduce a wildcard grant.
+                let per_request: Vec<String> = ctx
+                    .tool_actions
+                    .as_deref()
+                    .map(|s| {
+                        s.split(',')
+                            .map(str::trim)
+                            .filter(|x| !x.is_empty() && *x != "*")
+                            .map(String::from)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let allowed: &[String] = if per_request.is_empty() {
+                    composio.actions()
+                } else {
+                    &per_request
+                };
+                composio
+                    .run_tool_loop(&mut body, provider, &decision.model, entity_id, allowed)
+                    .await
+            }
+            ToolLoopKind::Plain => {
+                // Plain completion: no tool loop ⇒ no billable tool calls. Also the
+                // raw-passthrough target — the caller's own tools/tool_calls pass
+                // through untouched.
+                provider
+                    .complete(&decision.model, &body)
+                    .await
+                    .map(|v| (v, 0u64))
+            }
         };
 
         match completion_result {
@@ -1209,7 +1246,10 @@ pub async fn run_stream(
     // the final SSE from the buffered turn (carrying usage so the observer records
     // real tokens). The default path (no signal) falls through to the fast stream
     // below with zero added latency.
-    let tools_active = state.tools.is_some() && tool_signal_active(&ctx, &state.config.tools);
+    // Raw passthrough (`x-ryu-raw-tools`) suppresses the unified loop here too, so
+    // an SDK-side agent's own tools stream through untouched.
+    let tools_active =
+        !ctx.raw_tools && state.tools.is_some() && tool_signal_active(&ctx, &state.config.tools);
     let tools_restricted = matches!(
         budget.as_ref().map(|b| b.action),
         Some(crate::config::BudgetAction::Restrict)
@@ -1546,6 +1586,11 @@ pub async fn run_multimodal(
             Modality::Tts => provider.synthesize_speech(&decision.model, &body).await,
             Modality::Stt => provider.transcribe_audio(&decision.model, &body).await,
             Modality::Chat => provider.complete(&decision.model, &body).await,
+            // Video is job-based (submit + poll); it never flows through the
+            // block-and-return path. `submit_video_job` handles it instead.
+            Modality::Video => Err(GatewayError::ProviderError(
+                "video generation is job-based; use POST /v1/videos/generations".to_string(),
+            )),
         };
 
         match result {
@@ -1608,6 +1653,30 @@ pub async fn run_multimodal(
                     "multimodal request completed"
                 );
 
+                // Managed media metering: debit the configured flat per-modality
+                // rate on success. Cloud media providers don't report a
+                // usage.cost like chat, so managed nodes meter media at a fixed
+                // rate through the same at-cost + markup path as tokens. NOP
+                // unless credits are active, an org is present, and a rate is set
+                // (default 0 = free), so local/BYOK installs are unaffected.
+                // Filter empty org (mirrors the chat debit path) and, for image,
+                // skip billing a "success" that produced no media (content-
+                // filtered / empty output).
+                if let Some(org_id) = ctx.org_id.clone().filter(|s| !s.is_empty()) {
+                    let cost = state.config.credits.media_cost_micro_usd(&modality);
+                    let has_output = modality != Modality::Image
+                        || response["data"].as_array().is_some_and(|a| !a.is_empty());
+                    if cost > 0 && has_output {
+                        tokio::spawn(debit_wallet_for_request(
+                            state.clone(),
+                            org_id,
+                            format!("{}:{}", ctx.request_id, modality.as_str()),
+                            "media",
+                            cost,
+                        ));
+                    }
+                }
+
                 return Ok(PipelineOutput {
                     response,
                     context: ctx,
@@ -1659,6 +1728,214 @@ pub async fn run_multimodal(
     Err(err)
 }
 
+// ─── Video generation (job-based) ─────────────────────────────────────────────
+
+/// Submit a video-generation job. Runs the SAME governance as `run_multimodal`
+/// (inbound firewall, rate limit, routing, budget) but, because cloud video runs
+/// for minutes, it does not block: it kicks off the provider's async job, stores
+/// a [`crate::jobs::MediaJob`] keyed by the request id, and returns the job
+/// envelope (`{ id, status, model }`) for the client to poll.
+pub async fn submit_video_job(
+    state: Arc<AppState>,
+    ctx: RequestContext,
+    mut body: Value,
+) -> Result<Value, GatewayError> {
+    let start = Instant::now();
+    state.metrics.inc_requests();
+    let requested_model = body["model"].as_str().unwrap_or("unknown").to_string();
+
+    // Inbound firewall on the prompt.
+    let prompt_text = multimodal_input_text(&body, &Modality::Video);
+    let inbound: Result<(), GatewayError> = state.with_firewall(|fw| {
+        if let Some(violation) = fw.scan_inbound(&prompt_text) {
+            if *fw.policy() == FirewallPolicy::Block {
+                state.metrics.inc_firewall_blocked();
+                return Err(GatewayError::FirewallBlocked(format!(
+                    "Inbound content blocked: {} ({:?})",
+                    violation.pattern_name, violation.kind
+                )));
+            }
+            warn!(
+                request_id = %ctx.request_id,
+                pattern = %violation.pattern_name,
+                "firewall: inbound violation on video request"
+            );
+        }
+        Ok(())
+    });
+    inbound.map_err(|e| {
+        state.metrics.inc_errors();
+        audit_failure(&state, &ctx, &requested_model, &e, start);
+        e
+    })?;
+
+    // Rate limit + burst.
+    if !state
+        .rate_limiter
+        .check_request_for_key(&ctx.api_key, ctx.key_config.as_ref())
+        || !state.rate_limiter.check_burst(&ctx.api_key)
+    {
+        state.metrics.inc_rate_limited();
+        let e = GatewayError::RateLimited;
+        audit_failure(&state, &ctx, &requested_model, &e, start);
+        return Err(e);
+    }
+
+    // Route (honor per-agent video slot) + budget.
+    let decision = state.router.route_modality_with_slot(
+        &Modality::Video,
+        &requested_model,
+        ctx.slot_provider.as_ref(),
+        ctx.slot_model.as_deref(),
+    );
+    let mut decision = decision;
+    let _budget = enforce_budget(&state, &ctx, &mut body, &mut decision).map_err(|e| {
+        state.metrics.inc_errors();
+        audit_failure(&state, &ctx, &requested_model, &e, start);
+        e
+    })?;
+
+    let provider_kind = decision.provider.clone();
+    if state.circuit_breaker.is_open(provider_kind.as_str()) {
+        let e = GatewayError::CircuitOpen(provider_kind.as_str());
+        audit_failure(&state, &ctx, &decision.model, &e, start);
+        return Err(e);
+    }
+    let Some(provider) = state.providers.get(&provider_kind) else {
+        let e = GatewayError::AllProvidersUnavailable(format!(
+            "video provider '{}' not configured",
+            provider_kind.as_str()
+        ));
+        audit_failure(&state, &ctx, &decision.model, &e, start);
+        return Err(e);
+    };
+
+    state.metrics.inc_provider_request(provider.name());
+    let job = provider
+        .submit_video(&decision.model, &body)
+        .await
+        .map_err(|e| {
+            state.circuit_breaker.record_failure(provider.name());
+            state.metrics.inc_provider_error(provider.name());
+            audit_failure(&state, &ctx, &decision.model, &e, start);
+            e
+        })?;
+    state.circuit_breaker.record_success(provider.name());
+
+    let media_job = crate::jobs::MediaJob {
+        id: ctx.request_id.clone(),
+        provider: provider_kind,
+        provider_ref: job.provider_ref,
+        model: decision.model.clone(),
+        status: job.status,
+        output: job.output,
+        error: job.error,
+        created_ms: crate::jobs::now_ms(),
+        org_id: ctx.org_id.clone(),
+        api_key: ctx.api_key.clone(),
+    };
+    // If the provider completed the job synchronously at submit, bill here — no
+    // later poll will observe a Queued→Succeeded transition. Idempotent via the
+    // `{id}:video` ref so it never double-charges against the poll debit.
+    let terminal_success = media_job.status == crate::jobs::JobStatus::Succeeded;
+    let has_output = media_job
+        .output
+        .as_ref()
+        .and_then(|o| o["data"].as_array())
+        .is_some_and(|a| !a.is_empty());
+    let job_id = media_job.id.clone();
+    let job_org = media_job.org_id.clone();
+    let response = media_job.to_response();
+    state.jobs.insert(media_job);
+
+    if terminal_success && has_output {
+        if let Some(org_id) = job_org.filter(|s| !s.is_empty()) {
+            let cost = state.config.credits.media_cost_micro_usd(&Modality::Video);
+            if cost > 0 {
+                tokio::spawn(debit_wallet_for_request(
+                    state.clone(),
+                    org_id,
+                    format!("{job_id}:video"),
+                    "media",
+                    cost,
+                ));
+            }
+        }
+    }
+
+    info!(
+        request_id = %ctx.request_id,
+        provider = provider.name(),
+        model = %decision.model,
+        "video job submitted"
+    );
+    Ok(response)
+}
+
+/// Poll a previously-submitted video job by id. Tenant-isolated: the polling API
+/// key must match the key that submitted the job. Terminal jobs return their
+/// cached result; otherwise the provider is re-polled and the store updated. On
+/// the transition to `succeeded` the configured flat video rate is debited once
+/// (idempotent via the `{id}:video` ref).
+pub async fn poll_video_job(
+    state: Arc<AppState>,
+    ctx: RequestContext,
+    job_id: String,
+) -> Result<Value, GatewayError> {
+    let Some(job) = state.jobs.get(&job_id) else {
+        return Err(GatewayError::BadRequest(format!(
+            "no such video job: {job_id}"
+        )));
+    };
+    // Tenant isolation: one caller must not read another's job by guessing an id.
+    if job.api_key != ctx.api_key {
+        return Err(GatewayError::Unauthorized(
+            "video job belongs to a different key".to_string(),
+        ));
+    }
+    if job.status.is_terminal() {
+        return Ok(job.to_response());
+    }
+
+    let Some(provider) = state.providers.get(&job.provider) else {
+        return Err(GatewayError::AllProvidersUnavailable(format!(
+            "video provider '{}' not configured",
+            job.provider.as_str()
+        )));
+    };
+
+    let poll = provider.poll_video(&job.provider_ref).await?;
+    let newly_succeeded = poll.status == crate::jobs::JobStatus::Succeeded && !job.status.is_terminal();
+    state.jobs.update(&job_id, |j| {
+        j.status = poll.status;
+        j.output = poll.output.clone();
+        j.error = poll.error.clone();
+    });
+
+    let poll_has_output = poll
+        .output
+        .as_ref()
+        .and_then(|o| o["data"].as_array())
+        .is_some_and(|a| !a.is_empty());
+    if newly_succeeded && poll_has_output {
+        if let Some(org_id) = job.org_id.clone().filter(|s| !s.is_empty()) {
+            let cost = state.config.credits.media_cost_micro_usd(&Modality::Video);
+            if cost > 0 {
+                tokio::spawn(debit_wallet_for_request(
+                    state.clone(),
+                    org_id,
+                    format!("{job_id}:video"),
+                    "media",
+                    cost,
+                ));
+            }
+        }
+    }
+
+    let updated = state.jobs.get(&job_id).unwrap_or(job);
+    Ok(updated.to_response())
+}
+
 // ─── Unified tool loop signal (#475) ───────────────────────────────────────────
 
 /// Whether this request should run the unified search-based tool loop.
@@ -1684,6 +1961,41 @@ fn tool_signal_active(ctx: &RequestContext, cfg: &crate::config::ToolsConfig) ->
         return false;
     }
     ctx.tools_header_present || ctx.tool_search_requested
+}
+
+/// Which completion path the pipeline takes for this request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolLoopKind {
+    /// Unified search-based tool loop (catalog wired + per-request signal).
+    Unified,
+    /// Legacy Composio tool loop (Composio configured).
+    Composio,
+    /// Plain completion — no managed tool loop.
+    Plain,
+}
+
+/// Decide which completion branch to run — the single source of truth for the
+/// precedence in `run` (unified → legacy Composio → plain).
+///
+/// Raw passthrough (`x-ryu-raw-tools`, `ctx.raw_tools`) short-circuits to
+/// `Plain` so an SDK-side agent loop's own `tools`/`tool_calls` are forwarded
+/// verbatim even on a Composio-on node — Core's loop never intercepts them.
+fn select_tool_loop(
+    ctx: &RequestContext,
+    has_catalog: bool,
+    has_composio: bool,
+    cfg: &crate::config::ToolsConfig,
+) -> ToolLoopKind {
+    if ctx.raw_tools {
+        return ToolLoopKind::Plain;
+    }
+    if has_catalog && tool_signal_active(ctx, cfg) {
+        return ToolLoopKind::Unified;
+    }
+    if has_composio {
+        return ToolLoopKind::Composio;
+    }
+    ToolLoopKind::Plain
 }
 
 /// Parse the per-request `x-ryu-tools` CSV into a list of FQ tool ids.
@@ -1769,7 +2081,7 @@ fn effective_tool_allowlist(ctx: &RequestContext, cfg: &crate::config::ToolsConf
 /// inbound firewall scanning. Image: `prompt`; TTS: `input`; STT: no text.
 fn multimodal_input_text(body: &Value, modality: &Modality) -> String {
     match modality {
-        Modality::Image => body["prompt"].as_str().unwrap_or("").to_string(),
+        Modality::Image | Modality::Video => body["prompt"].as_str().unwrap_or("").to_string(),
         Modality::Tts => body["input"].as_str().unwrap_or("").to_string(),
         Modality::Stt | Modality::Chat => String::new(),
     }
@@ -2721,6 +3033,7 @@ mod tests {
             tool_search_requested: search,
             priority: crate::concurrency::Priority::Interactive,
             tool_profile: None,
+            raw_tools: false,
         }
     }
 
@@ -2752,6 +3065,45 @@ mod tests {
             ..crate::config::ToolsConfig::default()
         };
         assert!(!tool_signal_active(&new_header, &disabled));
+    }
+
+    #[test]
+    fn select_tool_loop_raw_passthrough_forces_plain() {
+        let cfg = crate::config::ToolsConfig::default();
+
+        // A request that WOULD hit the unified loop (catalog wired + signal)...
+        let signaled = signal_ctx(Some("composio__GMAIL_SEARCH_EMAILS"), true, false);
+        assert_eq!(
+            select_tool_loop(&signaled, true, true, &cfg),
+            ToolLoopKind::Unified
+        );
+        // ...and one that WOULD hit the legacy Composio loop (no signal, Composio on).
+        let bare = signal_ctx(None, false, false);
+        assert_eq!(
+            select_tool_loop(&bare, false, true, &cfg),
+            ToolLoopKind::Composio
+        );
+
+        // raw_tools forces Plain in BOTH cases, even with Composio configured —
+        // so an SDK-side loop's own tool_calls are never swallowed.
+        let mut raw_signaled = signaled;
+        raw_signaled.raw_tools = true;
+        assert_eq!(
+            select_tool_loop(&raw_signaled, true, true, &cfg),
+            ToolLoopKind::Plain
+        );
+        let mut raw_bare = bare;
+        raw_bare.raw_tools = true;
+        assert_eq!(
+            select_tool_loop(&raw_bare, false, true, &cfg),
+            ToolLoopKind::Plain
+        );
+
+        // Sanity: no catalog and no Composio ⇒ Plain regardless of signal.
+        assert_eq!(
+            select_tool_loop(&signal_ctx(None, true, false), false, false, &cfg),
+            ToolLoopKind::Plain
+        );
     }
 
     // ─── Tool-policy profile resolution (#473 profiles) ──────────────────────
@@ -3564,6 +3916,7 @@ mod tests {
             tool_search_requested: false,
             priority: crate::concurrency::Priority::Interactive,
             tool_profile: None,
+            raw_tools: false,
         };
 
         let body = Body::from(fixture);

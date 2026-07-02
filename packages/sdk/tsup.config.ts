@@ -5,6 +5,7 @@ export default defineConfig({
 		index: "src/index.ts",
 		manifest: "src/manifest.ts",
 		cli: "src/cli.ts",
+		agent: "src/agent/index.ts",
 	},
 	format: ["esm", "cjs"],
 	dts: true,

@@ -111,6 +111,21 @@ pub enum PendingAction {
     },
     /// Run an agent prompt from a fired trigger.
     TriggerAgent { agent_id: String, prompt: String },
+    /// Execute a gated agent tool call on approve. Captures the full re-dispatch
+    /// context so the approved run is identical to the one that was gated; run
+    /// through the registry's no-gate entry so it never re-raises an approval.
+    ToolCall {
+        tool_id: String,
+        arguments: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        allowlist: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user_id: Option<String>,
+        #[serde(default)]
+        profile_ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
 }
 
 /// One queued approval request.
@@ -140,6 +155,10 @@ pub struct ApprovalRequest {
     /// Populated when an approved action failed to execute (surfaced in the inbox).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Populated with an approved tool call's output (bounded preview) so the
+    /// inbox shows what running it returned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
     /// What runs on approve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<PendingAction>,
@@ -170,11 +189,26 @@ impl ApprovalRequest {
             status: ApprovalStatus::Pending,
             note: None,
             error: None,
+            result: None,
             action,
             created_at: now,
             decided_at: None,
             expires_at: None,
         }
+    }
+
+    /// Build a request for a gated agent tool call (slice 2). `risk_tags` come
+    /// from the policy classifier; `action` carries the re-dispatch context.
+    pub fn for_tool_call(tool_id: &str, risk_tags: Vec<String>, action: PendingAction) -> Self {
+        let mut req = Self::new(
+            ApprovalKind::ToolCall,
+            format!("Tool call: {tool_id}"),
+            format!("An agent wants to run the tool `{tool_id}`, which is configured to require your approval before it executes."),
+            Some(action),
+        );
+        req.source_ref = Some(tool_id.to_owned());
+        req.risk_tags = risk_tags;
+        req
     }
 
     /// Build a request for a scheduled job flagged `require_approval`.
@@ -233,6 +267,12 @@ pub struct ApprovalEngine {
     /// Borrowed from the monitors engine for push-token reuse (mobile push).
     /// Optional so the engine works headless / in tests with no monitors store.
     monitors: Option<crate::monitors::store::MonitorStore>,
+    /// The MCP registry, used to *execute* an approved [`PendingAction::ToolCall`]
+    /// on approve (re-dispatching through the no-gate entry so it doesn't re-gate).
+    /// Optional so the engine works in tests without a registry.
+    registry: Option<std::sync::Arc<crate::sidecar::mcp::McpRegistry>>,
+    /// Preferences store, read for the global `approval-mode` (Layer B).
+    preferences: Option<crate::server::preferences::PreferencesStore>,
 }
 
 impl ApprovalEngine {
@@ -241,6 +281,8 @@ impl ApprovalEngine {
             store,
             http,
             monitors: None,
+            registry: None,
+            preferences: None,
         }
     }
 
@@ -249,6 +291,41 @@ impl ApprovalEngine {
     pub fn with_monitors(mut self, monitors: crate::monitors::store::MonitorStore) -> Self {
         self.monitors = Some(monitors);
         self
+    }
+
+    /// Attach the MCP registry so an approved tool call can be executed on
+    /// approve. Builder-style; without it a `ToolCall` approval can't run.
+    pub fn with_registry(
+        mut self,
+        registry: std::sync::Arc<crate::sidecar::mcp::McpRegistry>,
+    ) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// Attach the preferences store so the global approval mode (Layer B) is
+    /// readable. Builder-style; without it the mode resolves to `Off`.
+    pub fn with_preferences(
+        mut self,
+        preferences: crate::server::preferences::PreferencesStore,
+    ) -> Self {
+        self.preferences = Some(preferences);
+        self
+    }
+
+    /// The current global approval mode (Layer B), read from the `approval-mode`
+    /// preference. Resolves to `Off` when unset or no preferences store attached.
+    pub async fn approval_mode(&self) -> policy::ApprovalMode {
+        let Some(prefs) = &self.preferences else {
+            return policy::ApprovalMode::Off;
+        };
+        let raw = prefs
+            .get(policy::APPROVAL_MODE_PREF)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        policy::ApprovalMode::from_pref(&raw)
     }
 
     /// Raise a pending approval request (deferred, non-blocking). Persists +
@@ -288,7 +365,8 @@ impl ApprovalEngine {
         let Some(mut req) = self.store.get(id).await? else {
             return Ok(None);
         };
-        // Idempotency guard: anything already decided/expired is returned as-is.
+        // Fast-path idempotency: anything already decided/expired is returned
+        // as-is (the authoritative guard is the atomic CAS below).
         if req.status != ApprovalStatus::Pending {
             return Ok(Some(req));
         }
@@ -300,34 +378,41 @@ impl ApprovalEngine {
         req.note = note;
         req.decided_at = Some(chrono::Utc::now().to_rfc3339());
 
-        // Reject teardown is quick (a file write) — do it inline so the row's
-        // final state is settled before we return.
-        if !approve {
-            if let Some(action) = req.action.clone() {
-                reject_action(&action).await;
-            }
+        // ATOMIC compare-and-swap from Pending: exactly one of N concurrent
+        // deciders wins. Only the winner runs side effects, so a double-approve
+        // (double-click / phone+desktop) can never double-execute the action.
+        // The status is flipped durably BEFORE the action runs (crash-safety: a
+        // crash mid-execute leaves an Approved row whose action was lost, never
+        // double-run).
+        if !self.store.try_transition(&req).await? {
+            // Someone else decided it first — return the current persisted state.
+            return Ok(self.store.get(id).await?);
         }
 
-        // Flip the status durably FIRST (idempotency + crash-safety: a crash now
-        // leaves an Approved row whose action never ran — lost, never double-run).
-        self.store.update(&req).await?;
-
-        // Run the approved action in the background so the decide call (and the
-        // HTTP approve handler) returns immediately rather than blocking for the
-        // whole workflow/agent run. Any execution error is recorded back onto the
-        // row + re-broadcast so the inbox shows it.
         if approve {
+            // Run the approved action in the background so the decide call (and the
+            // HTTP approve handler) returns immediately rather than blocking for the
+            // whole workflow/agent run. Success (a tool result) / failure is
+            // recorded back onto the row + re-broadcast so the inbox shows it.
             if let Some(action) = req.action.clone() {
                 let engine = self.clone();
                 let id = req.id.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = execute_action(&action).await {
-                        let msg = format!("{e:#}");
-                        tracing::warn!("approval {id}: action failed: {msg}");
-                        engine.record_action_error(&id, msg).await;
+                    match engine.execute_action(&action).await {
+                        Ok(Some(result)) => engine.record_action_result(&id, result).await,
+                        Ok(None) => {}
+                        Err(e) => {
+                            let msg = format!("{e:#}");
+                            tracing::warn!("approval {id}: action failed: {msg}");
+                            engine.record_action_error(&id, msg).await;
+                        }
                     }
                 });
             }
+        } else if let Some(action) = req.action.clone() {
+            // Reject teardown (fail a suspended workflow gate). Only the winner
+            // reaches here, so it runs exactly once.
+            reject_action(&action).await;
         }
 
         Ok(Some(req))
@@ -342,6 +427,24 @@ impl ApprovalEngine {
         }
     }
 
+    /// Record an approved action's result (a tool call's output) onto the row so
+    /// the inbox shows what the approved call returned. Best-effort.
+    async fn record_action_result(&self, id: &str, result: String) {
+        if let Ok(Some(mut req)) = self.store.get(id).await {
+            // Bound the stored preview so a large tool result can't bloat the row
+            // (char-based so a multi-byte codepoint is never split).
+            const MAX: usize = 4000;
+            req.result = Some(if result.chars().count() > MAX {
+                let mut s: String = result.chars().take(MAX).collect();
+                s.push('…');
+                s
+            } else {
+                result
+            });
+            let _ = self.store.update(&req).await;
+        }
+    }
+
     /// Cancel a pending request programmatically (e.g. its source run was deleted).
     pub async fn cancel(&self, id: &str) -> anyhow::Result<Option<ApprovalRequest>> {
         let Some(mut req) = self.store.get(id).await? else {
@@ -352,7 +455,10 @@ impl ApprovalEngine {
         }
         req.status = ApprovalStatus::Cancelled;
         req.decided_at = Some(chrono::Utc::now().to_rfc3339());
-        self.store.update(&req).await?;
+        // CAS so a cancel racing an approve can't both act.
+        if !self.store.try_transition(&req).await? {
+            return Ok(self.store.get(id).await?);
+        }
         Ok(Some(req))
     }
 
@@ -365,12 +471,14 @@ impl ApprovalEngine {
         for mut req in stale {
             req.status = ApprovalStatus::Expired;
             req.decided_at = Some(now.clone());
-            // A rejected/expired workflow gate must fail its run so it doesn't
-            // hang suspended forever.
-            if let Some(action) = req.action.clone() {
-                reject_action(&action).await;
-            }
-            if self.store.update(&req).await.is_ok() {
+            // CAS from Pending: only expire (and tear down) if we win the race
+            // against a concurrent approve/reject — otherwise the decider owns it.
+            if self.store.try_transition(&req).await.unwrap_or(false) {
+                // A rejected/expired workflow gate must fail its run so it doesn't
+                // hang suspended forever.
+                if let Some(action) = req.action.clone() {
+                    reject_action(&action).await;
+                }
                 n += 1;
             }
         }
@@ -413,38 +521,77 @@ impl ApprovalEngine {
     }
 }
 
-/// Execute an approved action. Each arm proxies the existing engine the
-/// corresponding source already uses, so an approved run is identical to the
-/// autonomous run it replaced.
-async fn execute_action(action: &PendingAction) -> anyhow::Result<()> {
-    match action {
-        PendingAction::ScheduledJob { target } => {
-            crate::scheduler::run_target(target)
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
-            Ok(())
-        }
-        PendingAction::WorkflowResume { run_id } => {
-            crate::workflow::resume_run(run_id, r#"{"approved":true}"#.to_owned())
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
-            Ok(())
-        }
-        PendingAction::TriggerWorkflow {
-            workflow_id,
-            payload_json,
-        } => {
-            crate::composio_triggers::run_workflow_for_trigger(workflow_id, payload_json).await?;
-            Ok(())
-        }
-        PendingAction::TriggerAgent { agent_id, prompt } => {
-            let run_id = format!("approvalrun_{}", uuid::Uuid::new_v4().simple());
-            if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
-                runner
-                    .run(Some(agent_id.clone()), run_id, prompt.clone())
-                    .await?;
+impl ApprovalEngine {
+    /// Execute an approved action. Each arm proxies the existing engine the
+    /// corresponding source already uses, so an approved run is identical to the
+    /// autonomous run it replaced. Returns `Some(result)` for a tool call (the
+    /// tool's output, recorded onto the row for the inbox), `None` otherwise.
+    async fn execute_action(&self, action: &PendingAction) -> anyhow::Result<Option<String>> {
+        match action {
+            PendingAction::ScheduledJob { target } => {
+                crate::scheduler::run_target(target)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                Ok(None)
             }
-            Ok(())
+            PendingAction::WorkflowResume { run_id } => {
+                crate::workflow::resume_run(run_id, r#"{"approved":true}"#.to_owned())
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                Ok(None)
+            }
+            PendingAction::TriggerWorkflow {
+                workflow_id,
+                payload_json,
+            } => {
+                crate::composio_triggers::run_workflow_for_trigger(workflow_id, payload_json)
+                    .await?;
+                Ok(None)
+            }
+            PendingAction::TriggerAgent { agent_id, prompt } => {
+                let run_id = format!("approvalrun_{}", uuid::Uuid::new_v4().simple());
+                if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
+                    runner
+                        .run(Some(agent_id.clone()), run_id, prompt.clone())
+                        .await?;
+                }
+                Ok(None)
+            }
+            PendingAction::ToolCall {
+                tool_id,
+                arguments,
+                allowlist,
+                user_id,
+                profile_ids,
+                session_id,
+            } => {
+                let registry = self.registry.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("no MCP registry attached; cannot run approved tool call")
+                })?;
+                // Re-dispatch through the NO-GATE entry so the approved call runs
+                // exactly once and does not re-raise an approval (infinite loop).
+                let result = registry
+                    .call_tool_with_identity_no_gate(
+                        tool_id,
+                        arguments.clone(),
+                        allowlist.as_deref(),
+                        user_id.as_deref(),
+                        profile_ids,
+                        session_id.clone(),
+                    )
+                    .await?;
+                // The no-gate path can still return an identity `__ryu_elicitation__`
+                // envelope (a bound domain is NEEDS_AUTH). That is NOT a successful
+                // run — the tool did not execute and no plane will consume the
+                // envelope here — so surface it as an error on the row rather than a
+                // false "result", telling the user the connection needs a login.
+                if result.get("__ryu_elicitation__").is_some() {
+                    return Err(anyhow::anyhow!(
+                        "the approved tool `{tool_id}` needs an account connection that isn't logged in; connect it, then re-issue the request"
+                    ));
+                }
+                Ok(Some(serde_json::to_string(&result).unwrap_or_default()))
+            }
         }
     }
 }
@@ -459,6 +606,63 @@ async fn reject_action(action: &PendingAction) {
     }
 }
 
+/// Layer-B approval gate at the tool-dispatch chokepoint. If the global approval
+/// mode gates `tool_id`, mint a `ToolCall` approval capturing the full
+/// re-dispatch context and return `Some(err)` — the caller returns that error
+/// **instead of dispatching** the tool. Returning an error (not a plain
+/// "pending" value) is deliberate: every plane treats a tool error as
+/// not-done, so a gated call can never masquerade as a completed side effect
+/// (a sandbox program's `await tool()` throws rather than silently continuing;
+/// the chat/ACP model sees "approval required"). The engine runs the tool for
+/// real on approve.
+///
+/// Returns `None` when nothing gates the call — the default `off` mode ⇒ every
+/// call is `None` ⇒ zero behavior change.
+///
+/// **Fail-closed:** if the approval cannot be persisted, this still returns
+/// `Some(err)` so the risky action is NOT run when its required approval could
+/// not be recorded.
+///
+/// Layer A (per-agent `approval_tools`) is not fed here yet — the chokepoint has
+/// no agent record — so this is Layer B only for now; the policy composes A too
+/// once agent context is threaded.
+pub async fn gate_tool_call(
+    tool_id: &str,
+    arguments: &serde_json::Value,
+    allowlist: Option<&[String]>,
+    user_id: Option<&str>,
+    profile_ids: &[String],
+    session_id: Option<String>,
+) -> Option<anyhow::Error> {
+    // Composio owns its own connection-required path; leave it to that flow.
+    if tool_id.starts_with("composio__") {
+        return None;
+    }
+    let engine = global_engine()?;
+    let mode = engine.approval_mode().await;
+    let tags = policy::should_require_approval_local(&[], tool_id, mode)?;
+
+    let action = PendingAction::ToolCall {
+        tool_id: tool_id.to_owned(),
+        arguments: arguments.clone(),
+        allowlist: allowlist.map(<[String]>::to_vec),
+        user_id: user_id.map(str::to_owned),
+        profile_ids: profile_ids.to_vec(),
+        session_id,
+    };
+    let req = ApprovalRequest::for_tool_call(tool_id, tags, action);
+    match engine.request(req).await {
+        Ok(created) => Some(anyhow::anyhow!(
+            "This action (`{tool_id}`) requires your approval before it runs. It has been queued in your Approvals inbox (id {}) and will run once you approve it.",
+            created.id
+        )),
+        // Fail CLOSED: could not queue the approval ⇒ do NOT run the tool.
+        Err(e) => Some(anyhow::anyhow!(
+            "This action (`{tool_id}`) requires approval, but the approval could not be queued ({e}); it was not run."
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,6 +674,31 @@ mod tests {
             "a test request".to_owned(),
             None,
         )
+    }
+
+    #[tokio::test]
+    async fn approval_mode_defaults_off_without_preferences() {
+        let store = ApprovalStore::open_in_memory().unwrap();
+        let engine = ApprovalEngine::new(store, reqwest::Client::new());
+        assert_eq!(engine.approval_mode().await, policy::ApprovalMode::Off);
+    }
+
+    #[test]
+    fn for_tool_call_carries_kind_source_and_action() {
+        let action = PendingAction::ToolCall {
+            tool_id: "gmail__send_email".to_owned(),
+            arguments: serde_json::json!({ "to": "x" }),
+            allowlist: None,
+            user_id: None,
+            profile_ids: Vec::new(),
+            session_id: None,
+        };
+        let req =
+            ApprovalRequest::for_tool_call("gmail__send_email", vec!["send".to_owned()], action);
+        assert_eq!(req.kind, ApprovalKind::ToolCall);
+        assert_eq!(req.source_ref.as_deref(), Some("gmail__send_email"));
+        assert!(matches!(req.action, Some(PendingAction::ToolCall { .. })));
+        assert!(req.risk_tags.iter().any(|t| t == "send"));
     }
 
     #[tokio::test]
@@ -508,6 +737,28 @@ mod tests {
             r2.status,
             ApprovalStatus::Rejected,
             "a decided request must not re-transition (idempotency)"
+        );
+    }
+
+    #[tokio::test]
+    async fn try_transition_only_first_winner_succeeds() {
+        // The CAS that prevents a concurrent double-approve from double-executing:
+        // exactly one transition out of Pending reports success.
+        let store = ApprovalStore::open_in_memory().unwrap();
+        let mut req = pending_req();
+        store.insert(&req).await.unwrap();
+
+        req.status = ApprovalStatus::Approved;
+        assert!(
+            store.try_transition(&req).await.unwrap(),
+            "first transition out of Pending must win"
+        );
+
+        let mut req2 = req.clone();
+        req2.status = ApprovalStatus::Rejected;
+        assert!(
+            !store.try_transition(&req2).await.unwrap(),
+            "second transition must lose (row is no longer Pending) — no double-execute"
         );
     }
 

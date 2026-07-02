@@ -128,6 +128,9 @@ pub struct Document {
     pub chunk_count: i64,
     /// `"page"` (markdown) or `"database"` (data-grid JSON in `source`).
     pub kind: String,
+    /// Parent document id when this is a database "row page"; `None` for
+    /// top-level documents.
+    pub parent_id: Option<String>,
 }
 
 /// A document with its full editable markdown source (Notion-style page).
@@ -146,6 +149,8 @@ pub struct DocumentContent {
     pub chunk_count: i64,
     /// `"page"` (markdown) or `"database"` (data-grid JSON in `source`).
     pub kind: String,
+    /// Parent document id when this is a database "row page"; `None` otherwise.
+    pub parent_id: Option<String>,
 }
 
 /// Current embedding model identity for a Space store.
@@ -508,6 +513,16 @@ impl SpaceStore {
         let _ = conn
             .execute_batch("ALTER TABLE documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'page';");
 
+        // Idempotent migration: a document may belong to a parent document — used by
+        // database "row pages" (a row's body is a child `kind='page'` doc whose
+        // `parent_id` is the database). Top-level listings filter `parent_id IS NULL`
+        // so row-body pages never show as loose documents; deleting the parent
+        // cascades to children (handled explicitly in `delete_document`).
+        let _ = conn.execute_batch("ALTER TABLE documents ADD COLUMN parent_id TEXT;");
+        let _ = conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_documents_parent ON documents(parent_id, created_at);",
+        );
+
         // Multi-user tenancy (collaboration epic, Phase 0): the verified human
         // owner of the document, the org it belongs to, its sharing visibility,
         // and an optional owning team. Guarded by a PRAGMA table_info existence
@@ -572,7 +587,8 @@ impl SpaceStore {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
             "SELECT s.id, s.name, s.description, s.created_at, s.updated_at,
-                    (SELECT COUNT(*) FROM documents d WHERE d.space_id = s.id),
+                    (SELECT COUNT(*) FROM documents d
+                        WHERE d.space_id = s.id AND d.parent_id IS NULL),
                     s.retrieval_mode
              FROM spaces s
              ORDER BY s.updated_at DESC",
@@ -602,9 +618,9 @@ impl SpaceStore {
         let mut stmt = conn.prepare(
             "SELECT d.id, d.space_id, d.title, d.created_at,
                     (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id),
-                    d.kind
+                    d.kind, d.parent_id
              FROM documents d
-             WHERE d.space_id = ?1
+             WHERE d.space_id = ?1 AND d.parent_id IS NULL
              ORDER BY d.created_at ASC",
         )?;
         let rows = stmt.query_map([space_id], |row| {
@@ -615,6 +631,7 @@ impl SpaceStore {
                 created_at: row.get(3)?,
                 chunk_count: row.get(4)?,
                 kind: row.get(5)?,
+                parent_id: row.get(6)?,
             })
         })?;
         let mut out = Vec::new();
@@ -692,24 +709,38 @@ impl SpaceStore {
     /// Returns the new document id. The editor fills it in via `update_document`,
     /// which is what produces chunks + embeddings.
     pub async fn create_page(&self, space_id: &str, title: &str) -> Result<String> {
-        self.create_document_of_kind(space_id, title, "page").await
+        self.create_document_of_kind(space_id, title, "page", None)
+            .await
+    }
+
+    /// Create an empty page whose `parent_id` is `parent` — a database "row page".
+    /// It embeds like any page but is hidden from top-level document listings.
+    pub async fn create_child_page(
+        &self,
+        space_id: &str,
+        title: &str,
+        parent: &str,
+    ) -> Result<String> {
+        self.create_document_of_kind(space_id, title, "page", Some(parent))
+            .await
     }
 
     /// Create an empty database (data-grid) document in a Space. Same lifecycle as
     /// a page — the editor fills its grid JSON in via `update_document`, which
     /// chunks + embeds the flattened cell text so the database stays searchable.
     pub async fn create_database(&self, space_id: &str, title: &str) -> Result<String> {
-        self.create_document_of_kind(space_id, title, "database")
+        self.create_document_of_kind(space_id, title, "database", None)
             .await
     }
 
     /// Shared constructor for an empty document of a given `kind`
-    /// (`"page"` | `"database"`).
+    /// (`"page"` | `"database"`), optionally parented to another document.
     async fn create_document_of_kind(
         &self,
         space_id: &str,
         title: &str,
         kind: &str,
+        parent_id: Option<&str>,
     ) -> Result<String> {
         let document_id = uuid::Uuid::new_v4().to_string();
         let now = now_millis();
@@ -726,9 +757,9 @@ impl SpaceStore {
             anyhow::bail!("space '{space_id}' not found");
         }
         conn.execute(
-            "INSERT INTO documents (id, space_id, title, created_at, source, updated_at, kind)
-             VALUES (?1, ?2, ?3, ?4, '', ?4, ?5)",
-            params![document_id, space_id, title, now, kind],
+            "INSERT INTO documents (id, space_id, title, created_at, source, updated_at, kind, parent_id)
+             VALUES (?1, ?2, ?3, ?4, '', ?4, ?5, ?6)",
+            params![document_id, space_id, title, now, kind, parent_id],
         )
         .context("inserting document")?;
         conn.execute(
@@ -776,7 +807,7 @@ impl SpaceStore {
             .query_row(
                 "SELECT d.id, d.space_id, d.title, d.source, d.created_at, d.updated_at,
                         (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id),
-                        d.kind
+                        d.kind, d.parent_id
                  FROM documents d WHERE d.id = ?1",
                 params![doc_id],
                 |row| {
@@ -789,6 +820,7 @@ impl SpaceStore {
                         updated_at: row.get(5)?,
                         chunk_count: row.get(6)?,
                         kind: row.get(7)?,
+                        parent_id: row.get(8)?,
                     })
                 },
             )
@@ -886,18 +918,39 @@ impl SpaceStore {
         Ok(())
     }
 
-    /// Delete a single document and all its chunks/vectors/graph rows. Returns
-    /// whether a document row was removed.
+    /// Delete a document and all its chunks/vectors/graph rows. If the document
+    /// has child documents (e.g. a database's row pages, linked by `parent_id`),
+    /// they are removed too — including their vec0 vectors, which no FK cascade
+    /// reaches. Returns whether the target document row was removed.
     pub async fn delete_document(&self, doc_id: &str) -> Result<bool> {
         let mut conn = self.conn.lock().await;
         let tx = conn.transaction().context("starting delete transaction")?;
-        tx.execute(
-            "DELETE FROM chunk_vectors WHERE rowid IN
-                 (SELECT rowid FROM chunks WHERE document_id = ?1)",
-            params![doc_id],
-        )
-        .context("deleting doc chunk vectors")?;
-        // chunks + graph rows cascade from the document row via ON DELETE CASCADE.
+
+        // Collect child document ids (one level — row pages have no children).
+        let child_ids: Vec<String> = {
+            let mut stmt = tx
+                .prepare("SELECT id FROM documents WHERE parent_id = ?1")
+                .context("preparing child lookup")?;
+            let ids = stmt.query_map(params![doc_id], |row| row.get::<_, String>(0))?;
+            ids.filter_map(std::result::Result::ok).collect()
+        };
+
+        // Delete vec0 vectors for the target AND every child (vec0 has no cascade).
+        for id in std::iter::once(doc_id.to_string()).chain(child_ids.iter().cloned()) {
+            tx.execute(
+                "DELETE FROM chunk_vectors WHERE rowid IN
+                     (SELECT rowid FROM chunks WHERE document_id = ?1)",
+                params![id],
+            )
+            .context("deleting doc chunk vectors")?;
+        }
+
+        // Delete child document rows first (their chunks/graph cascade), then the
+        // target document row (its chunks + graph rows cascade via ON DELETE CASCADE).
+        for id in &child_ids {
+            tx.execute("DELETE FROM documents WHERE id = ?1", params![id])
+                .context("deleting child document")?;
+        }
         let removed = tx
             .execute("DELETE FROM documents WHERE id = ?1", params![doc_id])
             .context("deleting document")?;

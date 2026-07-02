@@ -821,8 +821,11 @@ impl McpRegistry {
         user_id: Option<&str>,
     ) -> Result<Value> {
         // No identity binding on the plain path (workflows/monitors/recipes have
-        // no agent card). The richer `call_tool_with_identity` carries it.
-        self.call_tool_with_identity(tool_id, arguments, allowlist, user_id, &[], None)
+        // no agent card). Route through the NO-GATE core: the approval gate is for
+        // *agent* tool calls (the chat/ACP/PTC planes call `call_tool_with_identity`
+        // directly), not for autonomous internal engine operations, which cannot
+        // consume an `approval_pending` result and would stall under manual mode.
+        self.call_tool_with_identity_no_gate(tool_id, arguments, allowlist, user_id, &[], None)
             .await
     }
 
@@ -839,7 +842,54 @@ impl McpRegistry {
     ///
     /// `profile_ids` empty = no vault consult (the binding is opt-in). The other
     /// arguments behave exactly as [`call_tool_with_user`](Self::call_tool_with_user).
+    ///
+    /// This is the **gated** entry: before the identity consult it runs the
+    /// human-in-the-loop approval gate ([`crate::approvals::gate_tool_call`]). If
+    /// the global approval mode gates this tool, the call is **not** executed —
+    /// a plain `approval_pending` result is returned (queued in the inbox) and the
+    /// approval engine runs the tool on approve via
+    /// [`call_tool_with_identity_no_gate`](Self::call_tool_with_identity_no_gate).
+    /// Default mode `off` ⇒ the gate never fires ⇒ behavior is identical to before.
     pub async fn call_tool_with_identity(
+        &self,
+        tool_id: &str,
+        arguments: Value,
+        allowlist: Option<&[String]>,
+        user_id: Option<&str>,
+        profile_ids: &[String],
+        session_id: Option<String>,
+    ) -> Result<Value> {
+        if let Some(err) = crate::approvals::gate_tool_call(
+            tool_id,
+            &arguments,
+            allowlist,
+            user_id,
+            profile_ids,
+            session_id.clone(),
+        )
+        .await
+        {
+            // Gated: return the "approval required" error instead of dispatching.
+            // Every plane treats a tool error as not-done, so the call cannot be
+            // mistaken for a completed side effect; the engine runs it on approve.
+            return Err(err);
+        }
+        self.call_tool_with_identity_no_gate(
+            tool_id,
+            arguments,
+            allowlist,
+            user_id,
+            profile_ids,
+            session_id,
+        )
+        .await
+    }
+
+    /// The ungated tool-dispatch core: identity consult + provider dispatch, with
+    /// **no** approval gate. Called by [`call_tool_with_identity`] after the gate
+    /// permits the call, and directly by the approval engine to run an approved
+    /// tool call exactly once (without re-raising an approval).
+    pub(crate) async fn call_tool_with_identity_no_gate(
         &self,
         tool_id: &str,
         arguments: Value,
@@ -931,8 +981,14 @@ impl McpRegistry {
             }
             // Re-enter for the target. The recursive future is boxed because an
             // async fn cannot name its own type. No allowlist: the app-layer check
-            // above is the gate; the target is manifest-fixed.
-            return Box::pin(self.call_tool_with_user(tool, arguments, None, user_id)).await;
+            // above is the gate; the target is manifest-fixed. Use the NO-GATE
+            // entry: the approval gate (if any) applies to the granted `app__` id,
+            // not to the manifest-fixed target — otherwise an app tool would raise
+            // a second approval for its inner target.
+            return Box::pin(self.call_tool_with_identity_no_gate(
+                tool, arguments, None, user_id, &[], None,
+            ))
+            .await;
         }
 
         // Built-in Shadow provider (U15): dispatched over HTTP.

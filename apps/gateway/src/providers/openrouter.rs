@@ -189,6 +189,74 @@ impl Provider for OpenRouterProvider {
             Ok(Body::from_stream(resp.bytes_stream()))
         })
     }
+
+    /// Image generation via OpenRouter's chat-completions image *output modality*
+    /// — OpenRouter has no OpenAI-style `/images/generations` endpoint. We turn
+    /// the image request into a chat call with `modalities: ["image", "text"]`,
+    /// then extract the returned image parts
+    /// (`choices[].message.images[].image_url.url`, usually a base64 data URL)
+    /// into the OpenAI-ish `{ "data": [{ "url": … }] }` shape.
+    ///
+    /// A caller that already provides `messages` (full chat control) has them
+    /// forwarded verbatim; otherwise the `prompt` becomes a single user message.
+    fn generate_image<'a>(
+        &'a self,
+        model: &'a str,
+        body: &'a Value,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, GatewayError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut payload = if body.get("messages").is_some() {
+                body.clone()
+            } else {
+                let prompt = body.get("prompt").and_then(Value::as_str).unwrap_or("");
+                json!({ "messages": [{ "role": "user", "content": prompt }] })
+            };
+            payload["model"] = Value::String(model.to_string());
+            // Request image output. Don't clobber a caller-supplied modalities.
+            if payload.get("modalities").is_none() {
+                payload["modalities"] = json!(["image", "text"]);
+            }
+            self.options.apply(&mut payload);
+            debug!(provider = "openrouter", model, "sending image generation (chat) request");
+
+            let resp = self
+                .client
+                .post(chat_completions_url(&self.base_url))
+                .bearer_auth(&self.api_key)
+                .header("HTTP-Referer", &self.site_url)
+                .header("X-Title", &self.site_name)
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e| {
+                    GatewayError::ProviderError(format!("openrouter image request failed: {e}"))
+                })?;
+
+            let json = check_response_status(resp, "openrouter").await?;
+            Ok(extract_chat_images(&json))
+        })
+    }
+}
+
+/// Pull image parts out of an OpenRouter chat-completions response into the
+/// OpenAI images `{ "data": [{ "url": … }], "raw": <response> }` shape. Images
+/// live at `choices[].message.images[].image_url.url` (base64 data URLs).
+fn extract_chat_images(response: &Value) -> Value {
+    let mut data: Vec<Value> = Vec::new();
+    if let Some(choices) = response["choices"].as_array() {
+        for choice in choices {
+            if let Some(images) = choice["message"]["images"].as_array() {
+                for img in images {
+                    if let Some(url) = img["image_url"]["url"].as_str() {
+                        data.push(json!({ "url": url }));
+                    } else if let Some(url) = img["url"].as_str() {
+                        data.push(json!({ "url": url }));
+                    }
+                }
+            }
+        }
+    }
+    json!({ "data": data, "raw": response.clone() })
 }
 
 #[cfg(test)]

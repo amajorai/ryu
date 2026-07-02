@@ -410,6 +410,7 @@ mod tests {
             stt: None,
             tts: None,
             image_model: None,
+            video_model: None,
             memory: None,
             persona: None,
             policy_ref: None,

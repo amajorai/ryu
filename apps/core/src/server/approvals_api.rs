@@ -108,6 +108,42 @@ pub async fn reject_approval(
     decide(&state, &id, false, note).await
 }
 
+/// `GET /api/approvals/mode` — the global approval mode (Layer B): `off` /
+/// `smart` / `manual`. `off` is the default (gates nothing).
+pub async fn get_mode(State(state): State<ServerState>) -> Json<serde_json::Value> {
+    let mode = state.approvals.approval_mode().await;
+    Json(json!({ "mode": mode.as_str() }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetModeBody {
+    /// `off` / `smart` / `manual` (anything else is treated as `off`).
+    mode: String,
+}
+
+/// `PUT /api/approvals/mode` — set the global approval mode.
+pub async fn set_mode(
+    State(state): State<ServerState>,
+    Json(body): Json<SetModeBody>,
+) -> (axum::http::StatusCode, Json<serde_json::Value>) {
+    // Normalize through the enum so only a valid mode is ever stored.
+    let mode = crate::approvals::policy::ApprovalMode::from_pref(&body.mode);
+    match state
+        .preferences
+        .set(crate::approvals::policy::APPROVAL_MODE_PREF, mode.as_str())
+        .await
+    {
+        Ok(()) => (
+            axum::http::StatusCode::OK,
+            Json(json!({ "mode": mode.as_str() })),
+        ),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "success": false, "error": e.to_string() })),
+        ),
+    }
+}
+
 /// `GET /api/approvals/events` — SSE feed of approval events (created / decided).
 pub async fn approval_events(
     State(state): State<ServerState>,

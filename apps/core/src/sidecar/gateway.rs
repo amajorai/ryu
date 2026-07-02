@@ -180,6 +180,20 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
             "gateway: managed node has no OpenRouter key (set RYU_OPENROUTER_API_KEY); openrouter provider will be inactive"
         );
     }
+    // Cloud media providers (Replicate / Fal): inject the resolved keys so the
+    // gateway activates its `replicate` / `fal` providers for cloud image/video
+    // generation — key presence alone flips each on. Same preferences-first/env-
+    // fallback resolver as OpenRouter above, so a key set in the desktop UI (BYOK)
+    // or by a managed-node operator both reach the gateway. On a managed node the
+    // operator sets these once and every end user gets cloud media with zero setup.
+    if let Some(key) = crate::replicate_auth::key() {
+        tracing::info!("gateway: Replicate key present, enabling replicate media provider");
+        env.push(("REPLICATE_API_KEY".to_owned(), key));
+    }
+    if let Some(key) = crate::fal_auth::key() {
+        tracing::info!("gateway: Fal key present, enabling fal media provider");
+        env.push(("FAL_API_KEY".to_owned(), key));
+    }
     // Unified tool gateway (#475): point the gateway's `providers.core` at this
     // Core instance so the gateway's search-based tool loop and `/v1/exec/tool`
     // can reach Core's unified catalog (`/api/tools/{search,describe}`,

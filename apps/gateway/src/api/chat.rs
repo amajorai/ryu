@@ -124,6 +124,19 @@ pub async fn chat_completions(
     // selected profile name; the gateway resolves it to an allowlist preset in
     // `effective_tool_allowlist`. Absent or unknown ⇒ today's allowlist path.
     let tool_profile = header_string(&headers, "x-ryu-tool-profile");
+    // Raw tool passthrough (SDK-side agent loops). When `on`/`true`/`1`, the
+    // gateway suppresses BOTH managed tool loops (unified + legacy Composio) and
+    // takes the plain branch, so the caller's own `tools` and `tool_calls` pass
+    // through untouched. Set by `@ryu/sdk`'s agent runtime so its in-process loop
+    // owns tool calling even against a Composio-on node.
+    let raw_tools = headers
+        .get("x-ryu-raw-tools")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| {
+            let v = v.trim().to_ascii_lowercase();
+            matches!(v.as_str(), "on" | "true" | "1" | "yes")
+        })
+        .unwrap_or(false);
 
     let ctx = authenticate(
         &state,
@@ -142,6 +155,7 @@ pub async fn chat_completions(
             tool_search_requested,
             priority,
             tool_profile,
+            raw_tools,
         },
     )?;
     debug!(request_id = %ctx.request_id, "chat_completions: authenticated");

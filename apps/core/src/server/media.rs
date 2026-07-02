@@ -249,6 +249,68 @@ fn media_client() -> reqwest::Client {
         .expect("reqwest client")
 }
 
+/// Cloud media providers routed through the Gateway (governed, metered) rather
+/// than the local stable-diffusion.cpp engine. A request selects one via a
+/// `"provider"` field in the body; anything else (or absent) uses the local
+/// engine, so the default local path is unchanged.
+const CLOUD_PROVIDERS: [&str; 3] = ["openrouter", "replicate", "fal"];
+
+/// Returns the normalized cloud provider id when the body selects one, else
+/// `None` (⇒ the local sd-server path).
+fn cloud_provider(body: &Value) -> Option<String> {
+    body.get("provider")
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| CLOUD_PROVIDERS.contains(&s.as_str()))
+}
+
+/// Forward a media request to the Gateway, routing to `provider` via the
+/// per-request slot header for `modality` (image/video). The Gateway runs the
+/// full firewall/budget/metering pipeline and returns a normalized body.
+async fn forward_to_gateway(
+    modality: &str,
+    endpoint: &str,
+    provider: &str,
+    body: Value,
+) -> (StatusCode, Json<Value>) {
+    use crate::sidecar::gateway::{gateway_token, gateway_url};
+    let base = gateway_url();
+    let url = format!("{}{endpoint}", base.trim_end_matches('/'));
+    let slot_header = format!("x-ryu-slot-{modality}-provider");
+
+    let mut req = media_client()
+        .post(&url)
+        .header(slot_header, provider)
+        .json(&body);
+    if let Some(t) = gateway_token() {
+        req = req.bearer_auth(t);
+    }
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({
+                    "error": format!("cloud media gateway not reachable at {url}: {e}")
+                })),
+            );
+        }
+    };
+    let status = resp.status();
+    let bytes = resp.bytes().await.unwrap_or_default();
+    let value: Value = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }));
+    if !status.is_success() {
+        // Preserve 202 Accepted (video job submitted) as success; treat other
+        // non-2xx as an error with the upstream detail.
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": format!("cloud media provider returned {status}"), "detail": value })),
+        );
+    }
+    (StatusCode::OK, Json(value))
+}
+
 /// Forward a JSON body to a media-engine endpoint and pass the response through.
 async fn proxy(endpoint: &str, body: Value) -> (StatusCode, Json<Value>) {
     let url = format!("{}{endpoint}", sd_base_url());
@@ -301,6 +363,10 @@ pub async fn generate_image(Json(mut body): Json<Value>) -> impl IntoResponse {
     if let Some(obj) = body.as_object_mut() {
         obj.entry("n").or_insert(json!(1));
     }
+    // Cloud provider selected → route through the Gateway; else the local engine.
+    if let Some(provider) = cloud_provider(&body) {
+        return forward_to_gateway("image", "/v1/images/generations", &provider, body).await;
+    }
     proxy("/v1/images/generations", body).await
 }
 
@@ -321,7 +387,46 @@ pub async fn generate_video(Json(body): Json<Value>) -> impl IntoResponse {
             Json(json!({ "error": "missing `prompt` (the text to render)" })),
         );
     }
+    // Cloud provider selected → submit a Gateway video job (job-based; poll via
+    // `GET /api/video/jobs/:id`). Else the local engine (synchronous).
+    if let Some(provider) = cloud_provider(&body) {
+        return forward_to_gateway("video", "/v1/videos/generations", &provider, body).await;
+    }
     proxy("/sdcpp/v1/vid_gen", body).await
+}
+
+/// `GET /api/video/jobs/:id` — poll a cloud video-generation job submitted via
+/// `POST /api/video/generate` with a cloud provider. Passes through to the
+/// Gateway's `GET /v1/videos/generations/:id`; returns the job envelope with
+/// current `status` and, once succeeded, the media `data`.
+pub async fn poll_video_job(Path(id): Path<String>) -> impl IntoResponse {
+    use crate::sidecar::gateway::{gateway_token, gateway_url};
+    let base = gateway_url();
+    let url = format!("{}/v1/videos/generations/{id}", base.trim_end_matches('/'));
+    let mut req = media_client().get(&url);
+    if let Some(t) = gateway_token() {
+        req = req.bearer_auth(t);
+    }
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": format!("cloud media gateway not reachable: {e}") })),
+            );
+        }
+    };
+    let status = resp.status();
+    let bytes = resp.bytes().await.unwrap_or_default();
+    let value: Value = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }));
+    if !status.is_success() {
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": format!("video job poll returned {status}"), "detail": value })),
+        );
+    }
+    (StatusCode::OK, Json(value))
 }
 
 #[cfg(test)]

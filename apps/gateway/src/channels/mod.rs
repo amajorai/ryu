@@ -129,6 +129,8 @@ fn channel_context(channel_name: &str) -> RequestContext {
         priority: crate::concurrency::Priority::Interactive,
         // Channel messages don't select a named tool-policy profile.
         tool_profile: None,
+        // Bots use the managed tool loops, not SDK raw passthrough.
+        raw_tools: false,
     }
 }
 
