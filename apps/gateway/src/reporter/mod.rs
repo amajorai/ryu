@@ -167,6 +167,84 @@ fn build_user_daily(state: &SharedState, entries: &[AuditEntry]) -> Vec<Value> {
         .collect()
 }
 
+/// Per-`(userId, agentId, day)` accumulator for the control-plane agent usage
+/// rollup. Mirrors the `AgentUsageDaily` shape the ingest upserts via `$inc`.
+#[derive(Default)]
+struct AgentDailyBucket {
+    input_tokens: u64,
+    output_tokens: u64,
+    request_count: u64,
+    /// Distinct session ids seen this day → `sessionCount`.
+    sessions: HashSet<String>,
+    /// Summed exec `duration_ms`; divided down to whole seconds at emit time.
+    agent_ms: u64,
+    /// Per-model request counts.
+    by_model: HashMap<String, u64>,
+}
+
+impl AgentDailyBucket {
+    /// Fold a single audit row (already known to carry both a `user_id` and an
+    /// `agent_id`) into the bucket.
+    fn absorb(&mut self, entry: &AuditEntry) {
+        self.input_tokens = self.input_tokens.saturating_add(entry.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(entry.output_tokens);
+        if entry.event_type == "model_call" {
+            self.request_count = self.request_count.saturating_add(1);
+            *self.by_model.entry(entry.model.clone()).or_insert(0) += 1;
+        }
+        if let Some(session) = &entry.session_id {
+            self.sessions.insert(session.clone());
+        }
+        if let Some(ms) = entry.duration_ms {
+            self.agent_ms = self.agent_ms.saturating_add(ms);
+        }
+    }
+}
+
+/// Group the recent audit rows that carry BOTH a forwarded `user_id` AND an
+/// `agent_id` into per-user, per-agent, per-UTC-day buckets shaped like
+/// `AgentUsageDaily`. Rows missing either id are skipped, so this is empty on
+/// single-user / untagged deployments.
+fn build_agent_daily(state: &SharedState, entries: &[AuditEntry]) -> Vec<Value> {
+    let mut buckets: HashMap<(String, String, String), AgentDailyBucket> = HashMap::new();
+    for entry in entries {
+        let Some(user_id) = entry.user_id.clone() else {
+            continue;
+        };
+        let Some(agent_id) = entry.agent_id.clone() else {
+            continue;
+        };
+        let Some(day) = entry.timestamp.get(..DAY_KEY_LEN) else {
+            continue;
+        };
+        buckets
+            .entry((user_id, agent_id, day.to_string()))
+            .or_default()
+            .absorb(entry);
+    }
+
+    buckets
+        .into_iter()
+        .map(|((user_id, agent_id, day), bucket)| {
+            json!({
+                "userId": user_id,
+                "agentId": agent_id,
+                "day": day,
+                "inputTokens": bucket.input_tokens,
+                "outputTokens": bucket.output_tokens,
+                "requestCount": bucket.request_count,
+                "sessionCount": bucket.sessions.len() as u64,
+                "agentSeconds": bucket.agent_ms / MS_PER_SEC,
+                // Per-row provider cost isn't recorded; reuse the same flat token
+                // estimate the aggregate report uses so the field is populated
+                // consistently rather than sent as zero.
+                "costMicroUsd": cost_micro_usd(state, bucket.input_tokens, bucket.output_tokens),
+                "byModel": bucket.by_model,
+            })
+        })
+        .collect()
+}
+
 /// Build the aggregate report plus a bounded slice of recent (redacted) audit
 /// rows and POST them to `/aggregation/ingest`.
 async fn push_report(state: &SharedState) -> anyhow::Result<()> {
@@ -211,6 +289,11 @@ async fn push_report(state: &SharedState) -> anyhow::Result<()> {
     // skipped, so this is empty on self-hosted / single-user gateways.
     let user_daily = build_user_daily(state, &entries);
 
+    // Per-user-per-agent daily rollup (agent-level attribution). Derived from the
+    // SAME recent audit slice; rows missing a user_id OR agent_id are skipped, so
+    // this is empty on self-hosted / single-user / untagged gateways.
+    let agent_daily = build_agent_daily(state, &entries);
+
     let payload = json!({
         "report": {
             "windowStart": now_ms().saturating_sub(cfg.report_interval_secs * 1000),
@@ -224,6 +307,7 @@ async fn push_report(state: &SharedState) -> anyhow::Result<()> {
         },
         "audit": audit,
         "userDaily": user_daily,
+        "agentDaily": agent_daily,
     });
 
     let url = format!("{}/aggregation/ingest", cfg.base_url.trim_end_matches('/'));
@@ -246,6 +330,7 @@ async fn push_report(state: &SharedState) -> anyhow::Result<()> {
         cost_micro_usd = cost,
         audit_rows = audit.len(),
         user_daily = payload["userDaily"].as_array().map_or(0, Vec::len),
+        agent_daily = payload["agentDaily"].as_array().map_or(0, Vec::len),
         "pushed report to control plane"
     );
     Ok(())

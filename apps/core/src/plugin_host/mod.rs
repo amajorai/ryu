@@ -11,6 +11,13 @@
 //!   one non-streaming gateway completion (grant `hook:side-model`). The model is
 //!   resolved swappably (explicit → pref key → env → local default), never
 //!   hardcoded; the call is gateway-governed inside `call_side_model`.
+//! - `host.runAgent({ task, agent_id?, preset?, wall_time_secs?, max_tokens? })` →
+//!   spawn ONE full sub-agent with a clean context and return its final text
+//!   (grant `hook:run-agent`). Routes through the delegation engine
+//!   ([`crate::workflow::delegation`]): with a live agent runner the sub-agent runs
+//!   the real chat path (its own engine, tools, MCP, Gateway routing), so it can
+//!   gather actual evidence instead of judging from the transcript. This is the
+//!   "proof of work" primitive that the `io.ryu.proof` plugin builds on.
 //! - `host.storage.{get,set,delete,keys}(key, value?)` → the plugin's own
 //!   namespaced KV ([`crate::plugin_storage`]), grant `storage:kv`.
 //! - `host.log(...)` → captured logs.
@@ -250,6 +257,7 @@ fn build_hook_program(ctx: &HookContext, entry_code: &str) -> String {
         r#"const ctx = {ctx};
 const host = {{
   sideModel: (a) => tools.host.sideModel(a ?? {{}}),
+  runAgent: (a) => tools.host.runAgent(a ?? {{}}),
   storage: {{
     get: (k, ns) => tools.host.storage_get({{ key: String(k), namespace: ns }}),
     set: (k, v, ns) => tools.host.storage_set({{ key: String(k), value: typeof v === "string" ? v : JSON.stringify(v), namespace: ns }}),
@@ -355,7 +363,7 @@ mod tests {
                     .unwrap_or("")
                     .to_string();
                 let value = match method.as_str() {
-                    "sideModel" => self.side_value.clone(),
+                    "sideModel" | "runAgent" => self.side_value.clone(),
                     "storage_get" => self
                         .store
                         .lock()
@@ -501,6 +509,54 @@ mod tests {
             directive,
             HookDirective::Continue {
                 text: "Begin working toward this goal: write a haiku".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn live_proof_fixture_set_command_continues() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // A `/proof <cond>` user message must set the goal and kick off work,
+        // exactly like `/goal` — the difference is what the *later* rounds do
+        // (spawn a verifier agent), which the bridge covers.
+        let ctx = HookContext {
+            conversation_id: Some("c1".into()),
+            transcript: vec![HookMessage {
+                role: "user".into(),
+                content: "/proof the build passes".into(),
+            }],
+            ..Default::default()
+        };
+        let directive = run_fixture("io.ryu.proof", ctx, serde_json::Value::Null).await;
+        assert_eq!(
+            directive,
+            HookDirective::Continue {
+                text: "Begin working toward this goal: the build passes".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn live_proof_fixture_clear_command_notes() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // `/proof clear` must stop the loop and surface a note, never continue.
+        let ctx = HookContext {
+            conversation_id: Some("c1".into()),
+            transcript: vec![HookMessage {
+                role: "user".into(),
+                content: "/proof clear".into(),
+            }],
+            ..Default::default()
+        };
+        let directive = run_fixture("io.ryu.proof", ctx, serde_json::Value::Null).await;
+        assert_eq!(
+            directive,
+            HookDirective::Note {
+                text: "Proof goal cleared.".into()
             }
         );
     }

@@ -411,6 +411,10 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("fixtures/double-check.plugin.json"),
     include_str!("fixtures/goal.plugin.json"),
     include_str!("fixtures/advisor.plugin.json"),
+    // `proof` is `goal`'s stronger sibling: instead of a one-line transcript
+    // judge, each round spawns an INDEPENDENT verifier sub-agent (grant
+    // `hook:run-agent`) that gathers real evidence with tools before deciding.
+    include_str!("fixtures/proof.plugin.json"),
 ];
 
 /// Loader that merges built-in manifests with user-installed ones from
@@ -803,6 +807,10 @@ mod tests {
         assert!(
             manifests.iter().any(|m| m.id == "io.ryu.shadow"),
             "built-in Shadow manifest should be loaded"
+        );
+        assert!(
+            manifests.iter().any(|m| m.id == "io.ryu.proof"),
+            "built-in Proof of Work manifest should be loaded"
         );
     }
 

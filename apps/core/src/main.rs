@@ -1,3 +1,4 @@
+mod activity;
 mod agent_routing;
 mod agents;
 mod approvals;
@@ -732,6 +733,24 @@ async fn main() {
         });
     }
 
+    // Unified activity feed. Opens its own SQLite store (`~/.ryu/activity.db`) and
+    // aggregates every producing engine's events into one cross-module timeline via
+    // background subscribe-loops (`crate::activity::ingest`). Records *what happened*
+    // ⇒ Core; nothing about it is policy. Wired sources: monitors + quests +
+    // approvals + meetings (all four expose a broadcast bus); the manual POST
+    // endpoint keeps the slice testable regardless.
+    let activity_store = match crate::activity::ActivityStore::open_default() {
+        Ok(store) => store,
+        Err(e) => panic!("failed to open activity store: {e:#}"),
+    };
+    crate::activity::ingest::spawn(
+        activity_store.clone(),
+        &monitor_engine,
+        &quest_engine,
+        &approval_engine,
+        &meeting_engine,
+    );
+
     // Identity Vault (#517): crypto-sealed per-domain agent connections. Opens its
     // own SQLite store under ~/.ryu/identities.db and is published as a
     // process-global so off-`ServerState` callers — the health-check loop and the
@@ -884,6 +903,7 @@ async fn main() {
         quests: quest_engine,
         dashboards: dashboard_engine,
         approvals: approval_engine,
+        activity: activity_store,
         mesh: crate::mesh::MeshHandle::new(),
         connections: crate::connections::ConnectionRegistry::new(),
         hardware: hardware_store,

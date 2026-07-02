@@ -76,6 +76,10 @@ pub struct AuditRecord {
     /// self-hosted / anonymous traffic. Drives per-user daily rollups pushed to
     /// the control plane by the reporter.
     pub user_id: Option<String>,
+    /// Selected agent id forwarded via `x-ryu-agent-id`. `None` on
+    /// self-hosted / untagged traffic. Drives per-agent daily rollups pushed to
+    /// the control plane by the reporter.
+    pub agent_id: Option<String>,
     /// Product surface that originated this request, from `x-ryu-feature`
     /// (`chat` | `island` | `predict` | `agent`). `None` when untagged. Powers
     /// the per-feature usage breakdown in the daily rollup.
@@ -144,6 +148,8 @@ pub struct AuditEntry {
     pub exit_code: Option<i32>,
     /// Better Auth end-user id (`x-ryu-user-id`); `None` when self-hosted.
     pub user_id: Option<String>,
+    /// Selected agent id (`x-ryu-agent-id`); `None` when untagged.
+    pub agent_id: Option<String>,
     /// Product surface (`x-ryu-feature`): `chat` | `island` | `predict` | `agent`.
     pub feature: Option<String>,
 }
@@ -237,6 +243,10 @@ impl AuditLogger {
             "ALTER TABLE audit_log ADD COLUMN user_id TEXT; \
              CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_log(user_id);",
         );
+        let _ = conn.execute_batch(
+            "ALTER TABLE audit_log ADD COLUMN agent_id TEXT; \
+             CREATE INDEX IF NOT EXISTS idx_audit_agent_id ON audit_log(agent_id);",
+        );
         let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN feature TEXT;");
 
         // Load existing per-key token totals so budget enforcement survives restarts.
@@ -271,9 +281,9 @@ impl AuditLogger {
                          provider, model, input_tokens, output_tokens,
                          cache_hit, latency_ms, eval_score, error, skill_ids, session_id,
                          event_type, backend, command, duration_ms, exit_code,
-                         user_id, feature
+                         user_id, agent_id, feature
                      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
-                               ?17,?18,?19,?20,?21,?22,?23)",
+                               ?17,?18,?19,?20,?21,?22,?23,?24)",
                     params![
                         record.request_id,
                         record.api_key,
@@ -297,6 +307,7 @@ impl AuditLogger {
                         record.duration_ms.map(|v| v as i64),
                         record.exit_code,
                         record.user_id,
+                        record.agent_id,
                         record.feature,
                     ],
                 ) {
@@ -373,6 +384,7 @@ impl AuditLogger {
             duration_ms: Some(duration_ms),
             exit_code: Some(exit_code),
             user_id: None,
+            agent_id: None,
             feature: None,
         }
     }
@@ -416,6 +428,7 @@ impl AuditLogger {
             duration_ms: None,
             exit_code: None,
             user_id: None,
+            agent_id: None,
             feature: None,
         }
     }
@@ -479,7 +492,7 @@ impl AuditLogger {
              project_id, provider, model, input_tokens, output_tokens, cache_hit, \
              latency_ms, eval_score, error, skill_ids, session_id, \
              event_type, backend, command, duration_ms, exit_code, \
-             user_id, feature \
+             user_id, agent_id, feature \
              FROM audit_log {where_sql} ORDER BY id DESC LIMIT {limit}"
         );
 
@@ -520,7 +533,8 @@ impl AuditLogger {
                     .map(|v| v as u64),
                 exit_code: row.get(22).unwrap_or(None),
                 user_id: row.get(23).unwrap_or(None),
-                feature: row.get(24).unwrap_or(None),
+                agent_id: row.get(24).unwrap_or(None),
+                feature: row.get(25).unwrap_or(None),
             })
         })?;
 
@@ -604,6 +618,7 @@ mod tests {
             duration_ms: None,
             exit_code: None,
             user_id: None,
+            agent_id: None,
             feature: None,
         }
     }

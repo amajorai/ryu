@@ -6,8 +6,11 @@
 //!
 //! This module owns the *definition* and *graph* layer:
 //!   - [`Workflow`] — the persisted definition (nodes + edges).
-//!   - [`NodeKind`] — the core node types (Prompt, Condition, Transform, Tool,
-//!     Input, Output, Webhook, Delay, SubWorkflow, AgentDelegate).
+//!   - [`NodeKind`] — the typed node kinds. Data/logic (Input, Output, Prompt,
+//!     Condition, Transform, SetState, Delay, Note, While, Guardrails, Webhook),
+//!     orchestration (SubWorkflow, AgentDelegate, Awakeable), desktop automation
+//!     (Recipe, GhostAction), and the **Runnable** nodes that run any executable
+//!     Ryu object as a step: Agent, Skill, Mcp, and Plugin.
 //!   - [`WorkflowGraph`] — a validated petgraph DAG built from a [`Workflow`].
 //!
 //! Per the Core-vs-Gateway rule this is **Core**: it decides *what runs*
@@ -79,6 +82,22 @@ pub enum NodeKind {
         /// Fully-qualified tool id (`<server>__<tool>`, e.g. `spider__crawl`).
         /// A bare server name with no `__` is rejected at run time.
         name: String,
+        /// Free-form JSON args passed to the tool.
+        #[serde(default)]
+        args: serde_json::Value,
+    },
+    /// Calls a specific tool on a named MCP server — the explicit two-field form
+    /// of [`NodeKind::Tool`]. `server` and `tool` are joined into the
+    /// `<server>__<tool>` id the MCP registry expects, so authors pick a server
+    /// and a tool separately instead of hand-assembling the compound id. The
+    /// upstream `input` and a stable idempotency key are folded into the call
+    /// exactly as for a `Tool` node; `args` string leaves are templates
+    /// (`{{input}}`, `{{nodes.<id>}}`, `{{state.<key>}}`, `{{trigger.*}}`).
+    Mcp {
+        /// The MCP server name (e.g. `spider`, `ghost`, `skills`).
+        server: String,
+        /// The tool name on that server (e.g. `crawl`, `ghost_click`).
+        tool: String,
         /// Free-form JSON args passed to the tool.
         #[serde(default)]
         args: serde_json::Value,
@@ -181,6 +200,61 @@ pub enum NodeKind {
         /// Optional caps override (concurrency clamped to the hard max).
         #[serde(default)]
         caps: Option<delegation::DelegationCaps>,
+    },
+    /// Runs a single configured **agent** on a task, routing through the agent
+    /// runner (the agent's full engine / gateway / tool / persona path). The
+    /// first-class alternative to a [`NodeKind::Prompt`] node: instead of
+    /// authoring a raw LLM prompt you pick an installed agent and hand it a task.
+    /// Unlike [`NodeKind::AgentDelegate`] this is a *single* in-context step, not
+    /// a clean-context fan-out — use it when a workflow step simply *is* "let
+    /// agent X handle this". The `task` template is resolved (`{{input}}` + the
+    /// full grammar) before the run; when absent the incoming value is the task.
+    /// Per the Core-vs-Gateway rule this decides *what runs* (which agent) →
+    /// Core; the agent's own model calls stay gateway-governed.
+    Agent {
+        /// The configured agent id to run.
+        agent_id: String,
+        /// Task template; `{{input}}` (+ the full grammar) is resolved before the
+        /// run. Absent = the incoming value is used verbatim as the task.
+        #[serde(default)]
+        task: Option<String>,
+    },
+    /// Applies an Agent **Skill** to the incoming value. The skill's instruction
+    /// body (its `SKILL.md`) is loaded from the skills registry and run as the
+    /// system context for the step: instructions + the resolved `task` (default
+    /// `{{input}}`) are handed to the chosen agent, or to the default gateway LLM
+    /// when no `agent_id` is set. Net-new — skills were injectable instruction
+    /// text only until now, never a runnable workflow step. Decides *what runs*
+    /// (which skill) → Core; the underlying model call stays gateway-governed.
+    Skill {
+        /// The installed skill id (its `SKILL.md` stem in the skills registry).
+        skill: String,
+        /// Optional agent to execute the skill under; defaults to the gateway LLM.
+        #[serde(default)]
+        agent_id: Option<String>,
+        /// Task template appended after the skill body. Absent = `{{input}}`.
+        #[serde(default)]
+        task: Option<String>,
+    },
+    /// Invokes a Runnable that an installed **plugin** bundles. The plugin's
+    /// manifest is resolved by `plugin_id`, its `runnables` are searched for
+    /// `runnable_id`, and the entry is dispatched to that kind's execution path:
+    /// a `tool` runnable → the MCP registry, an `agent` runnable → the agent
+    /// runner, a `workflow` runnable → a sub-workflow run, a `skill` runnable →
+    /// the skill path. Non-executable kinds (companion/channel/engine/policy)
+    /// are rejected at run time. This is the object-model bridge — a workflow
+    /// step that runs any Runnable an app contributes (`AGENTS.md` Runnable
+    /// union). Decides *what runs* → Core; every model call stays
+    /// gateway-governed. `args` string leaves are templates.
+    Plugin {
+        /// Installed plugin id (the manifest `id`, e.g. `com.example.my-app`).
+        plugin_id: String,
+        /// The bundled runnable's id (must exist in the plugin manifest's
+        /// `runnables`).
+        runnable_id: String,
+        /// Free-form JSON args passed to the resolved runnable.
+        #[serde(default)]
+        args: serde_json::Value,
     },
     /// A durable pause/human-in-the-loop gate — the **Temporal Signal /
     /// Restate Durable Promise** analogue (an external trigger resumes a

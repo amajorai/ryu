@@ -99,6 +99,34 @@ impl PermissionPreset {
     }
 }
 
+/// An **inline, ephemeral sub-agent definition** — a "dynamic subagent" the
+/// parent (or the calling LLM) invents at runtime instead of naming a
+/// pre-registered [`agent_id`](DelegateSpec::agent_id). It carries just enough to
+/// run one focused, clean-context turn: an LLM-authored system prompt, an optional
+/// model override, and an advertised tool allowlist. This is the lightweight
+/// counterpart to the registered-agent path: it runs as a single Gateway-routed
+/// completion (no ACP tool loop, no persisted agent row), so every call still
+/// passes through the Gateway firewall/DLP/budget/audit pipeline. For a
+/// tool-executing sub-agent, name a registered `agent_id` instead.
+///
+/// `Eq`-safe by construction (no float fields) so [`DelegateSpec`] keeps `Eq`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InlineAgentDef {
+    /// The role/instructions for this ephemeral sub-agent, authored at runtime.
+    pub system_prompt: String,
+    /// Optional model id for this sub-agent. Falls back to `RYU_DEFAULT_LLM_MODEL`
+    /// then the built-in default when omitted/empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Tool names listed in this sub-agent's system prompt **for awareness only**.
+    /// The inline path is a single clean-context completion with no tool loop, so
+    /// an inline sub-agent *cannot execute* these — name a registered `agent_id`
+    /// (which runs the full ACP tool loop) for a tool-executing specialist. An
+    /// empty list lists none.
+    #[serde(default)]
+    pub tools: Vec<String>,
+}
+
 /// A single delegation request: a self-contained task for one sub-agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DelegateSpec {
@@ -113,6 +141,12 @@ pub struct DelegateSpec {
     /// Permission preset governing the delegate's capabilities.
     #[serde(default)]
     pub preset: PermissionPreset,
+    /// Optional **inline ephemeral agent** definition. When set (and no registered
+    /// `agent_id` runner takes the call), the delegate runs as an LLM-authored,
+    /// clean-context sub-agent using this definition instead of the preset-derived
+    /// system prompt — the "dynamic subagent" path. See [`InlineAgentDef`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline: Option<InlineAgentDef>,
 }
 
 /// Caps applied to a fan-out of delegates.
@@ -497,33 +531,70 @@ async fn call_sub_agent(spec: &DelegateSpec, max_tokens: u32) -> Result<String, 
     // synthetic preset system message do NOT apply on this path — the chosen
     // agent's own config takes over (the `run_one` wall-time timeout still bounds
     // it). The `None` path below keeps both.
-    if let Some(id) = spec.agent_id.as_deref().filter(|s| !s.is_empty()) {
-        if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
-            let conversation_id = format!("delegate-{}", uuid::Uuid::new_v4().simple());
-            return runner
-                .run(Some(id.to_string()), conversation_id, spec.task.clone())
-                .await
-                .map_err(|e| format!("delegate '{id}' failed: {e}"));
+    //
+    // An **inline** ephemeral definition always takes the clean-context Gateway
+    // path below, regardless of any `agent_id` also present. This keeps precedence
+    // identical across every entry point (the `delegate__fanout` tool, the workflow
+    // `AgentDelegate` node, and the raw `/api/delegate/stream` API) and independent
+    // of whether a runner happens to be live: `inline` set ⇒ inline runs, period.
+    if spec.inline.is_none() {
+        if let Some(id) = spec.agent_id.as_deref().filter(|s| !s.is_empty()) {
+            if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
+                let conversation_id = format!("delegate-{}", uuid::Uuid::new_v4().simple());
+                return runner
+                    .run(Some(id.to_string()), conversation_id, spec.task.clone())
+                    .await
+                    .map_err(|e| format!("delegate '{id}' failed: {e}"));
+            }
         }
     }
 
     let gw_url = crate::sidecar::gateway::gateway_url();
     let gw_token = crate::sidecar::gateway::gateway_token();
 
-    let model = std::env::var("RYU_DEFAULT_LLM_MODEL")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "gpt-4o-mini".to_string());
-
-    // Clean context: a fresh system message describing the preset, then ONLY the
-    // task. No parent conversation history is ever included.
-    let system = format!(
-        "You are a Ryu sub-agent running under the '{:?}' permission preset. \
-         Allowed tools: {}. You have no access to the parent agent's conversation \
-         history; work only from the task below.",
-        spec.preset,
-        spec.preset.allowed_tools().join(", "),
-    );
+    // Model + clean-context system message. An inline ephemeral agent definition
+    // (an LLM-authored "dynamic subagent" with no registered `agent_id`) overrides
+    // the preset-derived model and system prompt; otherwise the preset supplies
+    // both. Either way this is a single clean-context completion routed through the
+    // Gateway — no parent conversation history is ever included.
+    let env_model = || {
+        std::env::var("RYU_DEFAULT_LLM_MODEL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "gpt-4o-mini".to_string())
+    };
+    let (model, system) = match spec.inline.as_ref() {
+        Some(inline) => {
+            let model = inline
+                .model
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(env_model);
+            let advertised = if inline.tools.is_empty() {
+                "none".to_string()
+            } else {
+                inline.tools.join(", ")
+            };
+            let system = format!(
+                "{}\n\nYou are a Ryu sub-agent running in a clean context: you have no \
+                 access to the parent agent's conversation history — work only from the \
+                 task below. Advertised tools: {}.",
+                inline.system_prompt.trim(),
+                advertised,
+            );
+            (model, system)
+        }
+        None => {
+            let system = format!(
+                "You are a Ryu sub-agent running under the '{:?}' permission preset. \
+                 Allowed tools: {}. You have no access to the parent agent's conversation \
+                 history; work only from the task below.",
+                spec.preset,
+                spec.preset.allowed_tools().join(", "),
+            );
+            (env_model(), system)
+        }
+    };
 
     let payload = serde_json::json!({
         "model": model,
@@ -669,6 +740,7 @@ mod tests {
             task: "x".into(),
             agent_id: None,
             preset: PermissionPreset::Summarise,
+            inline: None,
         }];
         let err = run_fanout(
             specs,
@@ -703,6 +775,7 @@ mod tests {
             task: "hang".into(),
             agent_id: None,
             preset: PermissionPreset::Summarise,
+            inline: None,
         };
         let caps = DelegationCaps {
             wall_time_secs: 1,
@@ -733,6 +806,7 @@ mod tests {
                 task: format!("task {i}"),
                 agent_id: None,
                 preset: PermissionPreset::Summarise,
+                inline: None,
             })
             .collect();
 
@@ -794,12 +868,14 @@ mod tests {
                 task: "should be skipped".into(),
                 agent_id: None,
                 preset: PermissionPreset::Summarise,
+                inline: None,
             },
             DelegateSpec {
                 id: "d1".into(),
                 task: "will fail fast (gateway unreachable)".into(),
                 agent_id: None,
                 preset: PermissionPreset::Summarise,
+                inline: None,
             },
         ];
 
@@ -846,6 +922,7 @@ mod tests {
             task: "any task".into(),
             agent_id: None,
             preset: PermissionPreset::Summarise,
+            inline: None,
         };
         let caps = DelegationCaps {
             wall_time_secs: 3,
@@ -864,6 +941,116 @@ mod tests {
         unsafe {
             std::env::remove_var("RYU_GATEWAY_URL");
         }
+    }
+
+    #[tokio::test]
+    async fn inline_delegate_takes_clean_context_gateway_path() {
+        // An inline ephemeral sub-agent (no registered agent_id) must run through
+        // the Gateway completion path — proven here by the fail-closed error when
+        // the gateway is unreachable. This exercises the inline branch of
+        // `call_sub_agent` end-to-end without a live gateway.
+        unsafe {
+            std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
+            std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
+        }
+
+        let spec = DelegateSpec {
+            id: "inline0".into(),
+            task: "classify this ticket".into(),
+            agent_id: None,
+            preset: PermissionPreset::default(),
+            inline: Some(InlineAgentDef {
+                system_prompt: "You are a terse ticket triager. Reply with one label.".into(),
+                model: Some("gpt-4o-mini".into()),
+                tools: vec!["read_memory".into()],
+            }),
+        };
+        let caps = DelegationCaps {
+            wall_time_secs: 3,
+            ..Default::default()
+        };
+        let results = run_fanout(vec![spec], caps, 1, None)
+            .await
+            .expect("fan-out itself doesn't error");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "inline0");
+        let err = results[0].error.as_deref().unwrap_or("");
+        assert!(
+            err.contains("gateway") || err.contains("wall-time"),
+            "inline delegate must go through the gateway path (fail-closed), got: {err}"
+        );
+
+        unsafe {
+            std::env::remove_var("RYU_GATEWAY_URL");
+        }
+    }
+
+    #[tokio::test]
+    async fn inline_takes_precedence_over_agent_id() {
+        // A spec that carries BOTH an agent_id and an inline def must take the
+        // inline clean-context Gateway path uniformly (never the registered-agent
+        // path), so behavior does not depend on whether a runner is live. With an
+        // unreachable gateway this surfaces as the fail-closed gateway error.
+        unsafe {
+            std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
+            std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
+        }
+        let spec = DelegateSpec {
+            id: "both".into(),
+            task: "do the thing".into(),
+            agent_id: Some("ryu".into()),
+            preset: PermissionPreset::default(),
+            inline: Some(InlineAgentDef {
+                system_prompt: "You are an inline specialist.".into(),
+                model: None,
+                tools: vec![],
+            }),
+        };
+        let results = run_fanout(
+            vec![spec],
+            DelegationCaps {
+                wall_time_secs: 3,
+                ..Default::default()
+            },
+            1,
+            None,
+        )
+        .await
+        .expect("fan-out runs");
+        assert_eq!(results.len(), 1);
+        let err = results[0].error.as_deref().unwrap_or("");
+        assert!(
+            err.contains("gateway") || err.contains("wall-time"),
+            "inline+agent_id must take the inline gateway path, got: {err}"
+        );
+        unsafe {
+            std::env::remove_var("RYU_GATEWAY_URL");
+        }
+    }
+
+    #[test]
+    fn inline_agent_def_survives_json_round_trip() {
+        // The inline field must (de)serialize so workflow-authored `AgentDelegate`
+        // nodes and the `delegate__fanout` tool can carry inline sub-agents.
+        let spec = DelegateSpec {
+            id: "d0".into(),
+            task: "t".into(),
+            agent_id: None,
+            preset: PermissionPreset::default(),
+            inline: Some(InlineAgentDef {
+                system_prompt: "be brief".into(),
+                model: None,
+                tools: vec!["web_search".into(), "web_fetch".into()],
+            }),
+        };
+        let json = serde_json::to_string(&spec).expect("serialize");
+        let back: DelegateSpec = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(spec, back);
+        // A spec without inline omits the field and still parses (back-compat).
+        let legacy: DelegateSpec =
+            serde_json::from_str(r#"{"id":"d1","task":"t"}"#).expect("legacy parse");
+        assert!(legacy.inline.is_none());
+        assert!(legacy.agent_id.is_none());
     }
 
     #[test]

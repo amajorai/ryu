@@ -1,5 +1,7 @@
-//! Claude Code subscription usage. Reads `~/.claude/.credentials.json` (the
-//! OAuth credential the `claude` CLI stores) and calls
+//! Claude Code subscription usage. Reads the OAuth credential the `claude` CLI
+//! stores — `~/.claude/.credentials.json` on Windows/Linux, or the login
+//! Keychain (generic password, service `Claude Code-credentials`) on macOS,
+//! where the CLI keeps the same JSON blob instead of an on-disk file — and calls
 //! `GET https://api.anthropic.com/api/oauth/usage` — the same endpoint Claude
 //! Code's own `/usage` uses — then maps `five_hour` / `seven_day` /
 //! `seven_day_sonnet` / `extra_usage` into normalized windows.
@@ -69,12 +71,60 @@ fn default_home() -> PathBuf {
         .join(".claude")
 }
 
+/// Read the Claude OAuth credentials JSON. Prefers the on-disk file (correct on
+/// Windows/Linux, and when `CLAUDE_CONFIG_DIR` is set); on macOS the `claude`
+/// CLI stores the same blob in the login Keychain instead, so fall back to that
+/// when the file is absent/empty.
+fn read_credentials() -> Option<String> {
+    if let Some(text) = read_file(&credentials_path()) {
+        if !text.trim().is_empty() {
+            return Some(text);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        read_keychain()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+/// macOS stores the `claude` CLI OAuth blob as a login-Keychain generic
+/// password (service `Claude Code-credentials`), not on disk. Shell out to the
+/// signed `security` tool to read the same JSON payload. Runs off the async
+/// worker (see [`fetch`]) because a first-time read can surface a Keychain
+/// authorization dialog and block until the user answers.
+#[cfg(target_os = "macos")]
+fn read_keychain() -> Option<String> {
+    const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+    let output = std::process::Command::new("security")
+        .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 pub(super) async fn fetch(agent_id: &str) -> UsageSnapshot {
     let unavailable =
         |reason: UsageUnavailable| UsageSnapshot::unavailable(agent_id, "claude", reason);
 
-    let Some(text) = read_file(&credentials_path()) else {
-        return unavailable(UsageUnavailable::NotLoggedIn);
+    // Off the async worker: the macOS Keychain fallback can block on an
+    // authorization dialog, and the file read is sync IO either way.
+    let text = match tokio::task::spawn_blocking(read_credentials).await {
+        Ok(Some(text)) => text,
+        Ok(None) => return unavailable(UsageUnavailable::NotLoggedIn),
+        Err(_) => return unavailable(UsageUnavailable::Error),
     };
     let Ok(parsed) = serde_json::from_str::<CredentialsFile>(&text) else {
         return unavailable(UsageUnavailable::NotLoggedIn);

@@ -203,6 +203,7 @@ async fn forward(
     // the forwarded end-user id + product surface when Core relays them. `None`
     // for a bare subscription CLI (self-hosted) — the row is still recorded.
     let user_id = header_string(&headers, "x-ryu-user-id");
+    let agent_id = header_string(&headers, "x-ryu-agent-id");
     let feature = header_string(&headers, "x-ryu-feature");
 
     // ── Request-side DLP: redact the outbound body when the firewall is on ─────
@@ -262,6 +263,7 @@ async fn forward(
                 started.elapsed().as_millis() as u64,
                 Some(format!("upstream request failed: {e}")),
                 user_id.clone(),
+                agent_id.clone(),
                 feature.clone(),
             );
             return (
@@ -280,6 +282,7 @@ async fn forward(
         started.elapsed().as_millis() as u64,
         (!status.is_success()).then(|| format!("upstream status {status}")),
         user_id.clone(),
+        agent_id.clone(),
         feature.clone(),
     );
 
@@ -308,7 +311,14 @@ async fn forward(
     let scan_enabled = state.with_firewall(|fw| fw.config().enabled);
     let upstream_body = Body::from_stream(resp.bytes_stream());
     let response_body = if scan_enabled {
-        redact_response_passthrough(upstream_body, format, state.clone(), user_id, feature)
+        redact_response_passthrough(
+            upstream_body,
+            format,
+            state.clone(),
+            user_id,
+            agent_id,
+            feature,
+        )
     } else {
         upstream_body
     };
@@ -439,6 +449,7 @@ fn emit_audit(
     latency_ms: u64,
     error: Option<String>,
     user_id: Option<String>,
+    agent_id: Option<String>,
     feature: Option<String>,
 ) {
     state.audit.log(AuditRecord {
@@ -463,6 +474,7 @@ fn emit_audit(
         skill_ids: None,
         session_id: None,
         user_id,
+        agent_id,
         feature,
         event_type: crate::audit::EventType::ModelCall,
         backend: None,
@@ -492,6 +504,8 @@ struct ResponseRedactState {
     flushed: bool,
     /// Forwarded end-user id (`x-ryu-user-id`) for the end-of-stream audit row.
     user_id: Option<String>,
+    /// Forwarded agent id (`x-ryu-agent-id`) for the end-of-stream audit row.
+    agent_id: Option<String>,
     /// Forwarded product surface (`x-ryu-feature`) for the end-of-stream audit row.
     feature: Option<String>,
 }
@@ -507,6 +521,7 @@ fn redact_response_passthrough(
     format: WireFormat,
     state: SharedState,
     user_id: Option<String>,
+    agent_id: Option<String>,
     feature: Option<String>,
 ) -> Body {
     use futures_util::StreamExt;
@@ -519,6 +534,7 @@ fn redact_response_passthrough(
         accumulated: String::new(),
         flushed: false,
         user_id,
+        agent_id,
         feature,
     };
 
@@ -576,6 +592,7 @@ fn redact_response_passthrough(
                         s.format,
                         &s.accumulated,
                         s.user_id.clone(),
+                        s.agent_id.clone(),
                         s.feature.clone(),
                     );
                     if tail_out.is_empty() {
@@ -598,6 +615,7 @@ fn audit_outbound(
     format: WireFormat,
     text: &str,
     user_id: Option<String>,
+    agent_id: Option<String>,
     feature: Option<String>,
 ) {
     if text.is_empty() {
@@ -619,6 +637,7 @@ fn audit_outbound(
                 violation.pattern_name
             )),
             user_id,
+            agent_id,
             feature,
         );
     }

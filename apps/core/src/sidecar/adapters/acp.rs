@@ -3,7 +3,8 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use agent_client_protocol::schema::{
-    ContentBlock, ImageContent, InitializeRequest, NewSessionRequest, NewSessionResponse,
+    AvailableCommandInput, ContentBlock, ImageContent, InitializeRequest, NewSessionRequest,
+    NewSessionResponse,
     PromptRequest, PromptResponse, ProtocolVersion, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionId,
     SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
@@ -60,6 +61,11 @@ pub enum AcpEvent {
     /// leaving "plan" after presenting a plan). Carries the new mode id so the
     /// desktop's mode picker stays in sync. Agent-initiated, not user-driven.
     ModeChanged(String),
+    /// The agent advertised (or updated) the slash commands it can execute
+    /// (ACP `available_commands_update`). Carries a normalized
+    /// `[{ name, description, hint }, …]` array; each update REPLACES the
+    /// client's cached list. Drives the desktop's `/` command popover.
+    AvailableCommands(serde_json::Value),
     /// The agent is asking the user to approve a tool call because the active
     /// permission mode requires it. The client renders the `options` as
     /// allow/reject buttons and echoes the chosen `option_id` back via
@@ -506,14 +512,15 @@ impl AgentAdapter for AcpAdapter {
                             metadata: Some(serde_json::json!({ "error": true })),
                         });
                     }
-                    // Reasoning, plan snapshots, mode changes and permission
-                    // prompts are surfaced only on the streaming path
-                    // (route_acp_stream); this legacy collect path returns final
-                    // text + tool metadata and runs non-interactively.
+                    // Reasoning, plan snapshots, mode changes, permission
+                    // prompts and command advertisements are surfaced only on the
+                    // streaming path (route_acp_stream); this legacy collect path
+                    // returns final text + tool metadata and runs non-interactively.
                     AcpEvent::Text(_)
                     | AcpEvent::Thought(_)
                     | AcpEvent::Plan(_)
                     | AcpEvent::ModeChanged(_)
+                    | AcpEvent::AvailableCommands(_)
                     | AcpEvent::PermissionRequest { .. } => {}
                 }
             }
@@ -812,6 +819,34 @@ pub async fn run_acp_prompt(
                                             // desktop's mode picker in sync.
                                             let _ = tx_chunk.send(AcpEvent::ModeChanged(
                                                 m.current_mode_id.to_string(),
+                                            ));
+                                        }
+                                        SessionUpdate::AvailableCommandsUpdate(u) => {
+                                            // The agent published its slash commands.
+                                            // Normalize to { name, description, hint }
+                                            // and forward; the desktop replaces its
+                                            // cached list and renders the `/` popover.
+                                            let commands: Vec<serde_json::Value> = u
+                                                .available_commands
+                                                .into_iter()
+                                                .map(|c| {
+                                                    let hint = match c.input {
+                                                        Some(
+                                                            AvailableCommandInput::Unstructured(
+                                                                i,
+                                                            ),
+                                                        ) => Some(i.hint),
+                                                        _ => None,
+                                                    };
+                                                    serde_json::json!({
+                                                        "name": c.name,
+                                                        "description": c.description,
+                                                        "hint": hint,
+                                                    })
+                                                })
+                                                .collect();
+                                            let _ = tx_chunk.send(AcpEvent::AvailableCommands(
+                                                serde_json::Value::Array(commands),
                                             ));
                                         }
                                         _ => {}

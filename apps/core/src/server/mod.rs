@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
+pub mod activity_api;
 pub mod approvals_api;
 pub mod auto_title;
 pub mod conversations;
@@ -175,6 +176,12 @@ pub struct ServerState {
     /// approved action runs. Decides *what runs* ⇒ Core; the *requires-approval*
     /// policy is a user flag today (a Gateway consult once tool risk-tags land).
     pub approvals: crate::approvals::ApprovalEngine,
+    /// Unified activity feed: one cross-module timeline of what the node did
+    /// (monitor alerts, quest completions, approvals, meetings, manual notes).
+    /// Backed by `~/.ryu/activity.db` with a broadcast channel for live SSE. Fed
+    /// by background ingest loops (`crate::activity::ingest`) that subscribe to
+    /// each producing engine. Records *what happened* ⇒ Core.
+    pub activity: crate::activity::ActivityStore,
     /// Optional mesh plane (#478): a thin handle over the Tailscale/Headscale
     /// status read path. The daemon itself is an opt-in Sidecar (never in
     /// `startup_order`); this handle backs `GET /api/mesh/status`.
@@ -1083,6 +1090,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── Git branch list + switch (composer branch selector) ─────────────
         .route("/api/git/branches", get(git::git_branches))
         .route("/api/git/checkout", post(git::git_checkout))
+        // ── Git commit + push (pinned-summary "commit & push" button) ───────
+        .route("/api/git/commit-push", post(git::git_commit_push))
         // ── Worktree diff (read-only, Unit U011) ────────────────────────────
         .route("/api/worktree/:run_id/diff", get(worktree_diff_handler))
         // ── Worktree status (persistent-session: is a worktree live?) ───────
@@ -1109,6 +1118,17 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/workflows/:id/run", post(run_workflow))
         .route("/workflows/runs/:run_id", get(get_workflow_run))
         .route("/workflows/runs/:run_id/resume", post(resume_workflow_run))
+        // ── Activity feed (unified cross-module timeline) ───────────────────
+        // The SSE `stream` route is registered before the collection route (no
+        // `:id` routes exist here, but the convention is preserved).
+        .route(
+            "/api/activity/stream",
+            get(activity_api::activity_stream),
+        )
+        .route(
+            "/api/activity",
+            get(activity_api::list_activity).post(activity_api::create_activity),
+        )
         // ── Website monitors (price/content/stock/keyword/uptime) ───────────
         // Static segments (`alerts`, `push-tokens`) are registered before the
         // `:id` routes so they match first.

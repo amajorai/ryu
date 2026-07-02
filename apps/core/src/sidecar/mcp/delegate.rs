@@ -33,7 +33,21 @@
 //! agent ([`crate::registry::DEFAULT_AGENT_ID`]) rather than a bare LLM call, so a
 //! delegated subtask runs as a *real* agent with its own tools, gateway routing,
 //! and persona. (The engine's `PermissionPreset` only governs the bare-LLM path and
-//! is therefore not exposed on this tool — a delegate here is always a real agent.)
+//! is therefore not exposed on this tool.)
+//!
+//! # Inline "dynamic subagents"
+//!
+//! Alternatively a task may carry a `system_prompt` (plus optional `model` and
+//! `tools`), which defines an **ephemeral sub-agent inline** — the LangChain-style
+//! "dynamic subagent" the calling model invents at runtime instead of naming a
+//! pre-registered agent. Such a delegate runs as a single **clean-context Gateway
+//! completion** ([`InlineAgentDef`]): no ACP tool loop, no persisted agent row, but
+//! every call still routes through the Gateway firewall/DLP/budget/audit. Because
+//! there is no tool loop, an inline sub-agent's `tools` are advisory prompt text
+//! only — it cannot *execute* them. When a `system_prompt` is present, `agent_id`
+//! is ignored (uniformly, at every entry point). Use `agent_id` for a
+//! tool-executing specialist; use `system_prompt` to spin up a purpose-built
+//! reasoner for one task with zero setup.
 //!
 //! # Bounding fan-out
 //!
@@ -51,7 +65,9 @@ use serde_json::{json, Value};
 use tokio::sync::Semaphore;
 
 use super::RegistryTool;
-use crate::workflow::delegation::{self, DelegateSpec, DelegationCaps, PermissionPreset};
+use crate::workflow::delegation::{
+    self, DelegateSpec, DelegationCaps, InlineAgentDef, PermissionPreset,
+};
 
 /// Reserved registry server name for the built-in delegation provider.
 pub const SERVER_NAME: &str = "delegate";
@@ -80,7 +96,10 @@ fn fanout_schema() -> Value {
                     "type": "object",
                     "properties": {
                         "task": { "type": "string", "description": "The self-contained instruction for one sub-agent. Include everything it needs; it cannot see this conversation." },
-                        "agent_id": { "type": "string", "description": "Agent to run this subtask (omit to use the node's default agent)." }
+                        "agent_id": { "type": "string", "description": "Existing agent to run this subtask (omit to use the node's default agent). Ignored when system_prompt is set." },
+                        "system_prompt": { "type": "string", "description": "Define a sub-agent inline (a 'dynamic subagent'): its role and instructions. When set, this subtask runs as a fresh clean-context agent with these instructions — no pre-registered agent needed — and agent_id is ignored. Use this to spin up a purpose-built specialist for one task." },
+                        "model": { "type": "string", "description": "Optional model for an inline sub-agent (only used together with system_prompt)." },
+                        "tools": { "type": "array", "items": { "type": "string" }, "description": "Tool names listed in an inline sub-agent's prompt for awareness ONLY (used with system_prompt). An inline sub-agent runs as a single completion and cannot execute tools — use agent_id for a tool-executing specialist." }
                     },
                     "required": ["task"]
                 }
@@ -136,22 +155,64 @@ async fn fanout(arguments: Value) -> Result<Value> {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .ok_or_else(|| anyhow::anyhow!("tasks[{i}].task must be a non-empty string"))?;
-        // Default each delegate to a real agent so it has tools/governance, not a
-        // bare LLM call. An explicit empty/whitespace agent_id falls back too.
-        let agent_id = item
-            .get("agent_id")
+        // An inline `system_prompt` defines an ephemeral "dynamic subagent": the
+        // subtask runs as a fresh, clean-context agent authored right here (routed
+        // through the Gateway), with no registered agent_id. Otherwise default the
+        // delegate to a real agent so it has tools/governance, not a bare LLM call.
+        let inline = item
+            .get("system_prompt")
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .unwrap_or(default_agent)
-            .to_owned();
+            .map(|system_prompt| {
+                let model = item
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned);
+                let tools = item
+                    .get("tools")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                InlineAgentDef {
+                    system_prompt: system_prompt.to_owned(),
+                    model,
+                    tools,
+                }
+            });
+
+        // An inline sub-agent takes the clean-context Gateway path (no registered
+        // agent_id); otherwise route to a real agent (explicit empty/whitespace
+        // agent_id falls back to the node's default).
+        let agent_id = if inline.is_some() {
+            None
+        } else {
+            Some(
+                item.get("agent_id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(default_agent)
+                    .to_owned(),
+            )
+        };
         specs.push(DelegateSpec {
             id: format!("d{i}"),
             task: task.to_owned(),
-            agent_id: Some(agent_id),
-            // Preset only governs the bare-LLM path, which this tool never takes
-            // (every delegate routes to a real agent). Kept at the safe default.
+            agent_id,
+            // Preset only governs the bare-LLM path (no agent_id, no inline). Kept
+            // at the safe default; inline defs supply their own system prompt.
             preset: PermissionPreset::default(),
+            inline,
         });
     }
 
@@ -221,6 +282,52 @@ mod tests {
     #[tokio::test]
     async fn unknown_tool_errors() {
         assert!(dispatch("nope", json!({})).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn fanout_inline_subagent_runs_via_gateway() {
+        // A task carrying a system_prompt defines an inline "dynamic subagent":
+        // it must run through the clean-context Gateway path (no registered agent),
+        // so with an unreachable gateway it fails fast but the fan-out still
+        // returns one result for it.
+        unsafe {
+            std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
+            std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
+        }
+        let out = dispatch(
+            "fanout",
+            json!({
+                "tasks": [{
+                    "task": "summarise the attached note",
+                    "system_prompt": "You are a one-sentence summariser.",
+                    "model": "gpt-4o-mini",
+                    "tools": ["read_memory"]
+                }],
+                "wall_time_secs": 2
+            }),
+        )
+        .await
+        .expect("fan-out itself succeeds");
+        assert_eq!(out["ok"], json!(true));
+        assert_eq!(out["count"], json!(1));
+        let results = out["results"].as_array().expect("results array");
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]["error"].is_string(),
+            "inline delegate must carry a fail-closed gateway error"
+        );
+        unsafe {
+            std::env::remove_var("RYU_GATEWAY_URL");
+        }
+    }
+
+    #[test]
+    fn fanout_schema_advertises_inline_fields() {
+        let schema = fanout_schema();
+        let item_props = &schema["properties"]["tasks"]["items"]["properties"];
+        assert!(item_props.get("system_prompt").is_some());
+        assert!(item_props.get("model").is_some());
+        assert!(item_props.get("tools").is_some());
     }
 
     #[tokio::test]

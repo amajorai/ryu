@@ -14,11 +14,14 @@ use serde_json::{json, Value};
 
 use crate::server::ServerState;
 use crate::tool_exec::{InvokeOutcome, SandboxBridge, ToolInvokeResult};
+use crate::workflow::delegation::{run_fanout, DelegateSpec, DelegationCaps, PermissionPreset};
 
 /// Grant required to call `host.sideModel`.
 const GRANT_SIDE_MODEL: &str = "hook:side-model";
 /// Grant required to call `host.storage.*`.
 const GRANT_STORAGE: &str = "storage:kv";
+/// Grant required to call `host.runAgent` (spawn a full tool-using sub-agent).
+const GRANT_RUN_AGENT: &str = "hook:run-agent";
 
 /// Bridges sandbox `host.*` calls for one plugin hook run.
 pub struct PluginHookBridge {
@@ -41,10 +44,79 @@ impl PluginHookBridge {
         let method = path.strip_prefix("host.").unwrap_or(&path);
         match method {
             "sideModel" => self.side_model(args).await,
+            "runAgent" => self.run_agent(args).await,
             "storage_get" | "storage_set" | "storage_delete" | "storage_keys" => {
                 self.storage(method, args).await
             }
             other => err(format!("unknown host capability '{other}'")),
+        }
+    }
+
+    /// `host.runAgent({ task, agent_id?, preset?, wall_time_secs?, max_tokens? })`
+    /// — spawn ONE full sub-agent with a clean context (it sees only `task`, never
+    /// the parent transcript) and return its final text. Unlike `sideModel` (a
+    /// single toolless completion), this routes through the delegation engine
+    /// ([`crate::workflow::delegation::run_fanout`]): when `agent_id` names a
+    /// configured agent and the agent runner is live, the sub-agent runs the real
+    /// chat path — its own engine, tools, MCP, and Gateway routing — so it can
+    /// gather actual evidence (read files, run tests, hit endpoints) rather than
+    /// guess from the conversation. This is the "proof of work" primitive: an
+    /// independent agent that must *prove* a goal was done, not merely judge it.
+    async fn run_agent(&self, args: Value) -> InvokeOutcome {
+        if !self.grants.contains(GRANT_RUN_AGENT) {
+            return err(format!(
+                "capability '{GRANT_RUN_AGENT}' not granted to plugin '{}'",
+                self.plugin_id
+            ));
+        }
+        let task = args
+            .get("task")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        if task.is_empty() {
+            return err("host.runAgent requires a non-empty 'task'".to_string());
+        }
+        let agent_id = args
+            .get("agent_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let preset = parse_preset(args.get("preset").and_then(Value::as_str));
+
+        // Bound the verifier: clamp the wall time to a sane range so a stuck
+        // sub-agent can never wedge the post-turn hook indefinitely.
+        let mut caps = DelegationCaps {
+            max_concurrent: 1,
+            ..DelegationCaps::default()
+        };
+        if let Some(w) = args.get("wall_time_secs").and_then(Value::as_u64) {
+            caps.wall_time_secs = w.clamp(5, 600);
+        }
+        if let Some(mt) = args.get("max_tokens").and_then(Value::as_u64) {
+            caps.max_tokens = mt.min(u64::from(u32::MAX)) as u32;
+        }
+
+        let spec = DelegateSpec {
+            id: "proof".to_string(),
+            task: task.to_string(),
+            agent_id,
+            preset,
+            inline: None,
+        };
+        // depth = 1: a top-level delegation launched from the chat path.
+        match run_fanout(vec![spec], caps, 1, None).await {
+            Ok(mut results) => match results.pop() {
+                Some(res) => match res.output {
+                    Some(out) => ok(json!(out)),
+                    None => err(res
+                        .error
+                        .unwrap_or_else(|| "verifier agent produced no output".to_string())),
+                },
+                None => err("verifier agent returned no result".to_string()),
+            },
+            Err(e) => err(e.to_string()),
         }
     }
 
@@ -161,6 +233,18 @@ impl SandboxBridge for PluginHookBridge {
     }
 }
 
+/// Map a permission-preset string to the closed [`PermissionPreset`] set. An
+/// unknown/absent value falls back to the safest non-trivial preset (read but
+/// never mutate) — the right default for an independent verifier.
+fn parse_preset(s: Option<&str>) -> PermissionPreset {
+    match s.map(str::trim).unwrap_or_default() {
+        "research" => PermissionPreset::Research,
+        "code_write" => PermissionPreset::CodeWrite,
+        "summarise" | "summarize" => PermissionPreset::Summarise,
+        _ => PermissionPreset::CodeRead,
+    }
+}
+
 /// A successful host result.
 fn ok(value: Value) -> InvokeOutcome {
     InvokeOutcome::Result(ToolInvokeResult {
@@ -194,6 +278,28 @@ mod tests {
     fn grant_constants_are_stable() {
         assert_eq!(GRANT_SIDE_MODEL, "hook:side-model");
         assert_eq!(GRANT_STORAGE, "storage:kv");
+        assert_eq!(GRANT_RUN_AGENT, "hook:run-agent");
+    }
+
+    #[test]
+    fn parse_preset_defaults_to_code_read() {
+        assert_eq!(parse_preset(None), PermissionPreset::CodeRead);
+        assert_eq!(parse_preset(Some("")), PermissionPreset::CodeRead);
+        assert_eq!(parse_preset(Some("nonsense")), PermissionPreset::CodeRead);
+        assert_eq!(parse_preset(Some("research")), PermissionPreset::Research);
+        assert_eq!(
+            parse_preset(Some("code_write")),
+            PermissionPreset::CodeWrite
+        );
+        assert_eq!(parse_preset(Some("summarize")), PermissionPreset::Summarise);
+    }
+
+    #[test]
+    fn run_agent_gate_requires_grant() {
+        let g = grants(&["hook:side-model"]);
+        assert!(!g.contains(GRANT_RUN_AGENT));
+        let g = grants(&["hook:run-agent"]);
+        assert!(g.contains(GRANT_RUN_AGENT));
     }
 
     #[test]

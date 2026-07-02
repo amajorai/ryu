@@ -124,6 +124,7 @@ pub fn engine_model_catalog() -> std::collections::BTreeMap<String, Vec<EngineMo
         vec![
             engine_model("opus", "Opus"),
             engine_model("sonnet", "Sonnet"),
+            engine_model("fable", "Fable"),
             engine_model("haiku", "Haiku"),
         ],
     );
@@ -147,10 +148,13 @@ pub fn engine_model_catalog() -> std::collections::BTreeMap<String, Vec<EngineMo
         "hermes".to_string(),
         vec![engine_model("hermes3", "Hermes 3")],
     );
-    catalog.insert(
-        "local".to_string(),
-        vec![engine_model("gemma-4-e2b-it", "Gemma 4 E2B")],
-    );
+    let local_models = vec![engine_model("gemma-4-e2b-it", "Gemma 4 E2B")];
+    // The flagship `ryu` agent (Pi + Gateway) runs on the local engine by
+    // default, so its picker surfaces the same local models as `local`.
+    // Without this key `resolveEngine("ryu")` finds no catalog entry and the
+    // selector collapses to a single "Auto" option.
+    catalog.insert("ryu".to_string(), local_models.clone());
+    catalog.insert("local".to_string(), local_models);
     catalog
 }
 
@@ -540,8 +544,8 @@ fn ui_finish() -> Vec<u8> {
 
 /// Custom `data-<name>` part — an arbitrary structured payload the desktop reads
 /// off `message.parts` (Vercel AI SDK data parts). Used for ACP control events
-/// that are neither text nor tool calls: agent-initiated mode changes and
-/// interactive tool-permission prompts.
+/// that are neither text nor tool calls: agent-initiated mode changes,
+/// interactive tool-permission prompts, and slash-command advertisements.
 fn ui_data(name: &str, data: &Value) -> Vec<u8> {
     ui_chunk(&serde_json::json!({ "type": format!("data-{name}"), "data": data }))
 }
@@ -3118,6 +3122,11 @@ async fn connect_openai(
     model: &str,
     api_key: Option<&str>,
     agent_id: Option<&str>,
+    // Verified Better Auth user id of the caller (from the inbound `x-ryu-user-id`
+    // header via `identity_from_headers`, stamped onto `ChatStreamRequest`). Forwarded
+    // as `x-ryu-user-id` so the gateway's per-user usage attribution / budgets are live.
+    // `None` in the single-tenant / loopback (anonymous) flow.
+    user_id: Option<&str>,
     // Active skill ids for Gateway attribution (AC3). Forwarded as
     // `x-ryu-skill-ids: id1,id2` so the Gateway can record them in the audit row.
     skill_ids: &[String],
@@ -3175,6 +3184,16 @@ async fn connect_openai(
     if let Some(aid) = agent_id.filter(|a| !a.is_empty()) {
         builder = builder.header("x-ryu-agent-id", aid);
     }
+    // Forward the verified caller so the gateway's per-user usage attribution and
+    // per-user budgets are live (previously never sent, leaving them inert). Only
+    // set when non-empty — anonymous/loopback turns leave it off, as before.
+    if let Some(uid) = user_id.filter(|u| !u.is_empty()) {
+        builder = builder.header("x-ryu-user-id", uid);
+    }
+    // Static feature tag for the main chat path so the gateway can attribute
+    // usage/budgets per feature. This connector serves the chat-completions path
+    // exclusively (only reached via `route_openai_stream`).
+    builder = builder.header("x-ryu-feature", "chat");
     // Thread the Core session/conversation id so the gateway can correlate audit
     // rows back to a specific chat run without a separate session store (M4 / #176).
     if let Some(sid) = session_id.filter(|s| !s.is_empty()) {
@@ -3267,6 +3286,9 @@ async fn connect_with_fallback(
     primary_model: &str,
     primary_api_key: Option<&str>,
     primary_agent_id: Option<&str>,
+    // Verified caller user id forwarded to the gateway as `x-ryu-user-id` for
+    // per-user attribution/budgets. `None` for anonymous/loopback turns.
+    user_id: Option<&str>,
     // Active skill ids forwarded to Gateway attribution (M3 / #145 AC3).
     skill_ids: &[String],
     // Per-agent Composio action allowlist forwarded to the gateway (#456).
@@ -3290,6 +3312,7 @@ async fn connect_with_fallback(
         primary_model,
         primary_api_key,
         primary_agent_id,
+        user_id,
         skill_ids,
         composio_actions,
         session_id,
@@ -3323,6 +3346,7 @@ async fn connect_with_fallback(
                 &fallback.model,
                 fallback.api_key.as_deref(),
                 primary_agent_id,
+                user_id,
                 skill_ids,
                 composio_actions,
                 session_id,
@@ -3458,6 +3482,12 @@ where
     // without a separate session store (M4 / #176).
     let session_id = req.conversation_id.clone();
 
+    // Verified caller identity (server-stamped from the inbound `x-ryu-user-id`
+    // header via `identity_from_headers`; `#[serde(skip)]` so a client body cannot
+    // spoof it). Forwarded to the gateway as `x-ryu-user-id` so per-user usage
+    // attribution and budgets are live. `None` on anonymous/loopback turns.
+    let user_id = req.author_user_id.clone();
+
     // Attempt the primary connection; fall back to the registry-configured
     // fallback provider (if any) on a transport failure (self-healing, AC1–AC4).
     let upstream = match connect_with_fallback(
@@ -3466,6 +3496,7 @@ where
         &model,
         api_key.as_deref(),
         agent_id.as_deref(),
+        user_id.as_deref(),
         active_skill_ids.as_slice(),
         composio_actions.as_slice(),
         session_id.as_deref(),
@@ -3903,6 +3934,14 @@ where
                     let _ = ui_tx_clone.send(ui_data(
                         "ryu-acp-mode",
                         &serde_json::json!({ "currentModeId": mode_id }),
+                    ));
+                }
+                acp::AcpEvent::AvailableCommands(commands) => {
+                    // Agent published its slash commands; forward the full list so
+                    // the desktop replaces its cached set and renders the `/` popover.
+                    let _ = ui_tx_clone.send(ui_data(
+                        "ryu-acp-commands",
+                        &serde_json::json!({ "commands": commands }),
                     ));
                 }
                 acp::AcpEvent::PermissionRequest {
@@ -5011,6 +5050,7 @@ mod tests {
             "primary-model",
             None,
             None,
+            None, // no user id
             &[],  // no active skills
             &[],  // no composio actions
             None, // no session id
@@ -5046,6 +5086,7 @@ mod tests {
             "model",
             None,
             None,
+            None, // no user id
             &[],  // no active skills
             &[],  // no composio actions
             None, // no session id

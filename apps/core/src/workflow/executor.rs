@@ -240,7 +240,7 @@ fn run_workflow_inner(
                     .unwrap_or_default()
             } else {
                 mark(&mut run, &node.id, NodeStatus::Running, None, None);
-                let _ = store::save_run(&run);
+                store::save_run(&run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
 
                 // Temporal-style retry loop with an optional per-node wall-clock
                 // timeout per attempt. A node with no `retry` policy runs once
@@ -265,7 +265,8 @@ fn run_workflow_inner(
                         st.status = NodeStatus::Running;
                         st.attempts
                     };
-                    let _ = store::save_run(&run);
+                    store::save_run(&run)
+                        .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
 
                     let attempt_result = run_node_attempt(node, &node_input, &mut run, depth).await;
 
@@ -287,7 +288,8 @@ fn run_workflow_inner(
                             run.status = RunStatus::AwaitingInput;
                             run.awaiting_node = Some(node.id.clone());
                             run.updated_at = chrono::Utc::now().to_rfc3339();
-                            let _ = store::save_run(&run);
+                            store::save_run(&run)
+                                .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
                             // Surface the HITL gate in the approval inbox so the
                             // user can approve (resume) or reject (fail) it from
                             // one place. Best-effort + deduped on the run id, so a
@@ -309,7 +311,8 @@ fn run_workflow_inner(
                         Err(e) => match decide_retry(&policy, attempt, max_attempts, &e) {
                             RetryDecision::Fail => break Err(e),
                             RetryDecision::Retry(sleep_ms) => {
-                                let _ = store::save_run(&run);
+                                store::save_run(&run)
+                                    .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
                                 tokio::time::sleep(std::time::Duration::from_millis(sleep_ms))
                                     .await;
                             }
@@ -329,7 +332,8 @@ fn run_workflow_inner(
                         );
                         run.status = RunStatus::Failed;
                         run.error = Some(e.clone());
-                        let _ = store::save_run(&run);
+                        store::save_run(&run)
+                            .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
                         return Err(e);
                     }
                 }
@@ -366,7 +370,7 @@ fn run_workflow_inner(
                 }
             }
 
-            let _ = store::save_run(&run);
+            store::save_run(&run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
 
             // Decrement indegree of successors along active edges.
             for edge in graph.graph.edges_directed(idx, Direction::Outgoing) {
@@ -392,7 +396,8 @@ fn run_workflow_inner(
                             None,
                             None,
                         );
-                        let _ = store::save_run(&run);
+                        store::save_run(&run)
+                            .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
                     }
                 }
                 if *entry == 0 && !pruned_nodes.contains(&target) {
@@ -417,7 +422,7 @@ fn run_workflow_inner(
             run.status = RunStatus::Completed;
         }
         run.updated_at = chrono::Utc::now().to_rfc3339();
-        let _ = store::save_run(&run);
+        store::save_run(&run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
         Ok(run)
     })
 }
@@ -709,14 +714,14 @@ async fn execute_node(
                 }
             };
             if stamped {
-                let _ = store::save_run(run);
+                store::save_run(run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
             }
             // Clamp to 0 so a backward clock jump (now > wake_at by skew) can
             // never produce a negative duration / cast surprise — a past wake_at
-            // just means "fire now". Durability note: the checkpoint above is a
-            // best-effort file write (same as every node checkpoint); a hard OS
-            // crash in the sub-millisecond window before the sleep may re-sleep
-            // the full delay. A clean restart always resumes with the remainder.
+            // just means "fire now". Durability note: a failed checkpoint save
+            // fails the run (same as every node checkpoint); a hard OS crash in
+            // the sub-millisecond window before the sleep may re-sleep the full
+            // delay. A clean restart always resumes with the remainder.
             let remaining = (wake_at - chrono::Utc::now()).num_milliseconds().max(0);
             if remaining > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(remaining as u64)).await;
@@ -775,6 +780,15 @@ async fn execute_node(
             let idem_key = idempotency_key(&run.run_id, &node.id);
             run_tool(name, &resolved_args, input, &idem_key).await
         }
+        NodeKind::Mcp { server, tool, args } => {
+            // The explicit two-field form of a Tool node: join `<server>__<tool>`
+            // into the id the MCP registry expects, then reuse the Tool path so
+            // idempotency-key + `input` folding behave identically.
+            let resolved_args = resolve_json_strings(args, &ctx);
+            let idem_key = idempotency_key(&run.run_id, &node.id);
+            let tool_id = format!("{server}__{tool}");
+            run_tool(&tool_id, &resolved_args, input, &idem_key).await
+        }
         NodeKind::Recipe { recipe, params } => {
             let resolved_params = resolve_json_strings(params, &ctx);
             run_recipe(recipe, &resolved_params).await
@@ -805,6 +819,39 @@ async fn execute_node(
         }
         NodeKind::AgentDelegate { delegates, caps } => {
             run_agent_delegate(delegates, caps.clone(), input, depth, &run.run_id, &node.id).await
+        }
+        NodeKind::Agent { agent_id, task } => {
+            // A dedicated "run agent X on this task" step. `run_prompt` already
+            // routes a set agent id through the agent runner (and falls back to
+            // the gateway LLM in headless/test contexts), so reuse it: the task
+            // template is the agent's instruction.
+            let task_tmpl = task.as_deref().unwrap_or("{{input}}");
+            let rendered = resolve(task_tmpl, &ctx);
+            run_prompt(&rendered, Some(agent_id), &run.run_id, &node.id).await
+        }
+        NodeKind::Skill { skill, agent_id, task } => {
+            let task_tmpl = task.as_deref().unwrap_or("{{input}}");
+            let rendered = resolve(task_tmpl, &ctx);
+            run_skill(skill, agent_id.as_deref(), &rendered, &run.run_id, &node.id).await
+        }
+        NodeKind::Plugin {
+            plugin_id,
+            runnable_id,
+            args,
+        } => {
+            let resolved_args = resolve_json_strings(args, &ctx);
+            let idem_key = idempotency_key(&run.run_id, &node.id);
+            run_plugin(
+                plugin_id,
+                runnable_id,
+                &resolved_args,
+                input,
+                &idem_key,
+                &run.run_id,
+                &node.id,
+                depth,
+            )
+            .await
         }
         // Signal the outer loop to suspend by returning the sentinel. The outer
         // loop recognises this exact value and transitions the run to
@@ -923,7 +970,7 @@ async fn run_while_loop(
         // nodes).
         run.state.insert(counter_key.clone(), counter.to_string());
         run.state.insert(carry_key.clone(), carry.clone());
-        let _ = store::save_run(run);
+        store::save_run(run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
     }
 
     // Loop finished: the node produces the final carry as a plain data value.
@@ -964,6 +1011,7 @@ async fn run_agent_delegate(
                 task,
                 agent_id: d.agent_id.clone(),
                 preset: d.preset,
+                inline: d.inline.clone(),
             }
         })
         .collect();
@@ -1148,6 +1196,133 @@ async fn run_prompt(
         .unwrap_or_default()
         .to_string();
     Ok(text)
+}
+
+/// Execute a `Skill` node: load the skill's instruction body from the registry
+/// and run it (skill body + resolved task) through the chosen agent, or the
+/// default gateway LLM when no agent is set. The composed text reuses the same
+/// `## Skill: <name>` framing the chat injector uses ([`crate::skills`]), so a
+/// skill behaves the same whether it is injected into a chat turn or driven as a
+/// workflow step. Fails clearly when the skill is not installed.
+async fn run_skill(
+    skill_id: &str,
+    agent_id: Option<&str>,
+    task: &str,
+    run_id: &str,
+    node_id: &str,
+) -> Result<String, String> {
+    let record = crate::skills::SkillRegistry::load()
+        .list_all()
+        .into_iter()
+        .find(|s| s.id == skill_id)
+        .ok_or_else(|| format!("skill node: skill '{skill_id}' is not installed"))?;
+
+    // Compose the skill body as the leading context, then the resolved task —
+    // the same block shape the chat/ACP injectors build from a skill record.
+    let composed = format!(
+        "## Skill: {}\n{}\n\n{}",
+        record.name, record.instructions, task
+    );
+    run_prompt(&composed, agent_id, run_id, node_id).await
+}
+
+/// Execute a `Plugin` node: resolve the installed plugin's manifest, find the
+/// named bundled runnable, and dispatch it to that kind's execution path. This
+/// is the object-model bridge — a workflow step that runs any Runnable an app
+/// contributes (`AGENTS.md` Runnable union: Agent · Workflow · Tool · Skill).
+///
+/// Kind dispatch:
+/// - `tool` → the MCP registry, using the entry's `ToolConfig.slug` as the tool
+///   id (reusing [`run_tool`], so `input` + idempotency-key folding match a
+///   `Tool` node).
+/// - `agent` → the agent runner, running the agent registered under the
+///   runnable id with `input` as the task (reusing [`run_prompt`]).
+/// - `skill` → the skill path, using the entry's `SkillConfig.skill_id`.
+/// - `workflow` → a sub-workflow run of the entry's `WorkflowConfig.entry`
+///   (the same deterministic-child-id path as a `SubWorkflow` node).
+///
+/// Non-executable kinds (companion/channel/engine/policy) are rejected: they are
+/// surfaces/bindings, not input→output runnables. Decides *what runs* → Core;
+/// every model call the dispatched runnable makes stays gateway-governed.
+#[allow(clippy::too_many_arguments)]
+async fn run_plugin(
+    plugin_id: &str,
+    runnable_id: &str,
+    args: &serde_json::Value,
+    input: &str,
+    idem_key: &str,
+    run_id: &str,
+    node_id: &str,
+    depth: usize,
+) -> Result<String, String> {
+    use crate::plugin_manifest::PluginManifestLoader;
+    use crate::runnable::RunnableKind;
+
+    let manifest = PluginManifestLoader::load()
+        .into_iter()
+        .find(|m| m.id == plugin_id)
+        .ok_or_else(|| format!("plugin node: plugin '{plugin_id}' is not installed"))?;
+
+    let entry = manifest
+        .runnables()
+        .iter()
+        .find(|r| r.id == runnable_id)
+        .ok_or_else(|| {
+            format!("plugin node: plugin '{plugin_id}' has no runnable '{runnable_id}'")
+        })?;
+
+    // Small helper to pull a required string field out of the entry's per-kind
+    // config blob, with a clear error when the manifest is malformed.
+    let config_str = |field: &str| -> Result<String, String> {
+        entry
+            .config
+            .as_ref()
+            .and_then(|c| c.get(field))
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                format!(
+                    "plugin node: runnable '{runnable_id}' of plugin '{plugin_id}' is missing config field '{field}'"
+                )
+            })
+    };
+
+    match entry.kind {
+        RunnableKind::Tool => {
+            let slug = config_str("slug")?;
+            run_tool(&slug, args, input, idem_key).await
+        }
+        RunnableKind::Agent => {
+            // Run the agent registered under the runnable id; the pipeline value
+            // is the task. Fails clearly if the plugin's agent is not (yet)
+            // registered in the agent store.
+            run_prompt(input, Some(&entry.id), run_id, node_id).await
+        }
+        RunnableKind::Skill => {
+            let skill_id = config_str("skill_id")?;
+            run_skill(&skill_id, None, input, run_id, node_id).await
+        }
+        RunnableKind::Workflow => {
+            let wf_id = config_str("entry")?;
+            let sub = store::load_workflow(&wf_id).map_err(|e| {
+                format!("plugin node: workflow runnable '{wf_id}' not found: {e}")
+            })?;
+            let mut sub_input = HashMap::new();
+            sub_input.insert("input".to_string(), input.to_string());
+            // Deterministic child run id (same scheme as a SubWorkflow node) so a
+            // resumed parent re-enters the SAME inner run after a restart.
+            let sub_run_id = format!("{run_id}-plugin-{node_id}");
+            let result = run_workflow_inner(&sub, sub_input, sub_run_id, depth + 1).await?;
+            Ok(result.output.values().next().cloned().unwrap_or_default())
+        }
+        RunnableKind::Companion
+        | RunnableKind::Channel
+        | RunnableKind::Engine
+        | RunnableKind::Policy => Err(format!(
+            "plugin node: runnable '{runnable_id}' has kind '{}', which is a surface/binding, not a runnable workflow step",
+            entry.kind.as_str()
+        )),
+    }
 }
 
 /// Run a `Guardrails` node by routing the incoming text through the Gateway
@@ -1803,6 +1978,38 @@ mod tests {
         let _ = run_workflow(&wf, empty_input(), run_id.clone()).await;
         let run = store::load_run(&run_id).expect("run persisted");
         assert_eq!(run.nodes.get("t").map(|s| s.attempts), Some(1));
+    }
+
+    /// A run whose checkpoint cannot be persisted must fail rather than
+    /// continue: on a later crash/resume it would reload stale state and re-run
+    /// already-completed side-effecting nodes. Fault injection: a run id
+    /// containing `.` is outside `store`'s id charset, so every `save_run`
+    /// returns `Err` — the very first checkpoint (marking the first node
+    /// Running) must abort the run.
+    #[tokio::test]
+    async fn checkpoint_save_failure_fails_the_run() {
+        use crate::workflow::{NodeKind, Workflow, WorkflowNode};
+        let wf = Workflow {
+            id: format!("ckpt-{}", uuid::Uuid::new_v4().simple()),
+            name: "c".into(),
+            description: None,
+            nodes: vec![WorkflowNode {
+                id: "in".into(),
+                retry: None,
+                timeout_ms: None,
+                kind: NodeKind::Input { key: None },
+            }],
+            edges: Vec::new(),
+            triggers: Vec::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let res = run_workflow(&wf, empty_input(), "bad.run.id".into()).await;
+        let err = res.expect_err("run must fail when its checkpoint cannot be saved");
+        assert!(
+            err.contains("failed to persist checkpoint"),
+            "unexpected error: {err}"
+        );
     }
 
     /// A per-node timeout cancels a slow attempt and fails fast (Temporal
@@ -3057,6 +3264,116 @@ mod tests {
         assert_eq!(
             run.nodes.get("no").map(|s| s.status),
             Some(NodeStatus::Skipped)
+        );
+    }
+
+    // ── Agent / Skill / Mcp / Plugin node kinds (Runnable node support) ────────
+
+    #[test]
+    fn new_node_kinds_round_trip_wire_format() {
+        use serde_json::json;
+
+        // The desktop canvas flattens `NodeKind` onto `WorkflowNode` via
+        // `#[serde(flatten)]` with a snake_case `type` tag — lock that shape so a
+        // saved workflow keeps loading and the palette/config stay in sync.
+        for (value, expected_type) in [
+            (
+                json!({ "type": "agent", "agent_id": "researcher", "task": "Summarise {{input}}" }),
+                "agent",
+            ),
+            (
+                json!({ "type": "skill", "skill": "pdf", "agent_id": null, "task": "{{input}}" }),
+                "skill",
+            ),
+            (
+                json!({ "type": "mcp", "server": "spider", "tool": "crawl", "args": { "url": "x" } }),
+                "mcp",
+            ),
+            (
+                json!({ "type": "plugin", "plugin_id": "com.example.app", "runnable_id": "r1", "args": {} }),
+                "plugin",
+            ),
+        ] {
+            let kind: NodeKind =
+                serde_json::from_value(value.clone()).expect("deserialize new node kind");
+            let back = serde_json::to_value(&kind).expect("serialize new node kind");
+            assert_eq!(
+                back.get("type").and_then(|v| v.as_str()),
+                Some(expected_type),
+                "type tag must round-trip for {expected_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_and_skill_default_task_to_input() {
+        use serde_json::json;
+
+        // `task` is optional; when absent the executor falls back to `{{input}}`.
+        let agent: NodeKind =
+            serde_json::from_value(json!({ "type": "agent", "agent_id": "a" })).unwrap();
+        match agent {
+            NodeKind::Agent { agent_id, task } => {
+                assert_eq!(agent_id, "a");
+                assert_eq!(task, None);
+            }
+            other => panic!("expected Agent, got {other:?}"),
+        }
+
+        let skill: NodeKind =
+            serde_json::from_value(json!({ "type": "skill", "skill": "s" })).unwrap();
+        match skill {
+            NodeKind::Skill {
+                skill,
+                agent_id,
+                task,
+            } => {
+                assert_eq!(skill, "s");
+                assert_eq!(agent_id, None);
+                assert_eq!(task, None);
+            }
+            other => panic!("expected Skill, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn run_plugin_reports_missing_plugin() {
+        // An id that is neither a built-in fixture nor an installed manifest must
+        // fail with a clear "not installed" error rather than panicking.
+        let err = run_plugin(
+            "com.ryu.definitely-not-installed",
+            "r1",
+            &serde_json::json!({}),
+            "input",
+            "idem",
+            "run",
+            "node",
+            0,
+        )
+        .await
+        .expect_err("unknown plugin must error");
+        assert!(
+            err.contains("not installed"),
+            "error should name the missing plugin: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_skill_reports_missing_skill() {
+        // A bogus skill id is never installed regardless of the skills dir, so the
+        // node must fail clearly instead of silently producing empty output.
+        let err = run_skill(
+            "ryu:definitely-not-a-real-skill/v0",
+            None,
+            "input",
+            "run",
+            "node",
+        )
+        .await
+        .expect_err("unknown skill must error");
+        assert!(
+            err.contains("not installed"),
+            "error should name the missing skill: {err}"
         );
     }
 }
