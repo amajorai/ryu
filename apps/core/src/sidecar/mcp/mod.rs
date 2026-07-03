@@ -986,7 +986,12 @@ impl McpRegistry {
             // not to the manifest-fixed target — otherwise an app tool would raise
             // a second approval for its inner target.
             return Box::pin(self.call_tool_with_identity_no_gate(
-                tool, arguments, None, user_id, &[], None,
+                tool,
+                arguments,
+                None,
+                user_id,
+                &[],
+                None,
             ))
             .await;
         }

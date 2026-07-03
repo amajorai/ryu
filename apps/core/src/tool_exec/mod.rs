@@ -517,7 +517,9 @@ pub async fn resume_execution_opt(
                 Some(format!("scan denied (resume): {reason}")),
             )
             .await;
-            return Some(ExecOutcome::error(format!("gateway denied resume: {reason}")));
+            return Some(ExecOutcome::error(format!(
+                "gateway denied resume: {reason}"
+            )));
         }
         ExecScanOutcome::ApprovalRequired(reason) => {
             tracing::warn!(

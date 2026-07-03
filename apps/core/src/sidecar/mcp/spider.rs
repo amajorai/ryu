@@ -294,7 +294,11 @@ mod tests {
 
     #[tokio::test]
     async fn private_ip_is_blocked() {
-        for url in ["http://10.0.0.1/", "http://127.0.0.1/", "https://192.168.1.1/"] {
+        for url in [
+            "http://10.0.0.1/",
+            "http://127.0.0.1/",
+            "https://192.168.1.1/",
+        ] {
             let err = dispatch("crawl", json!({ "url": url })).await;
             assert!(err.is_err(), "private/loopback IP {url} must be blocked");
         }

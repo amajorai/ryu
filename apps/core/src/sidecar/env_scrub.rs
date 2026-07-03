@@ -42,7 +42,14 @@ const SENSITIVE_MARKERS: [&str; 7] = [
 /// credentials. This project is Windows-first, so omitting them would break MCP.
 pub const MCP_SAFE_ALLOWLIST: &[&str] = &[
     // POSIX essentials.
-    "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "SHELL", "TMPDIR",
+    "PATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "TERM",
+    "SHELL",
+    "TMPDIR",
     // Windows essentials: required for a Windows `npx`/`node` MCP server to
     // launch and resolve modules. None are secret-like.
     "SYSTEMROOT",
@@ -98,9 +105,7 @@ pub fn scrub_child_env(
 /// Allow-list scrub for MCP stdio servers: pass ONLY [`MCP_SAFE_ALLOWLIST`] vars
 /// (exact, case-insensitive) plus any key starting with `XDG_`. Everything else
 /// is dropped. The server config's declared env is applied on top by the caller.
-pub fn mcp_safe_env(
-    base: impl IntoIterator<Item = (String, String)>,
-) -> Vec<(String, String)> {
+pub fn mcp_safe_env(base: impl IntoIterator<Item = (String, String)>) -> Vec<(String, String)> {
     base.into_iter()
         .filter(|(key, _)| is_mcp_safe_key(key))
         .collect()
@@ -180,7 +185,10 @@ mod tests {
             has(&out, "SSH_AUTH_SOCK"),
             "extra_allow keeps a secret-like key (case-insensitive)"
         );
-        assert!(!has(&out, "OPENAI_API_KEY"), "non-allowed secret still dropped");
+        assert!(
+            !has(&out, "OPENAI_API_KEY"),
+            "non-allowed secret still dropped"
+        );
     }
 
     #[test]

@@ -26,7 +26,11 @@ const PLAN_TIMEOUT: Duration = Duration::from_secs(35);
 
 /// Path to the installed llmfit binary, when present (`~/.ryu/bin/llmfit`).
 fn llmfit_binary() -> Option<PathBuf> {
-    let name = if cfg!(windows) { "llmfit.exe" } else { "llmfit" };
+    let name = if cfg!(windows) {
+        "llmfit.exe"
+    } else {
+        "llmfit"
+    };
     let path = crate::paths::ryu_dir().join("bin").join(name);
     path.exists().then_some(path)
 }

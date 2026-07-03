@@ -160,7 +160,9 @@ async fn synth_via_sidecar(
     if !resp.status().is_success() {
         let status = resp.status();
         let detail = resp.text().await.unwrap_or_default();
-        return Err(format!("ryu-tts engine '{engine}' returned {status}: {detail}"));
+        return Err(format!(
+            "ryu-tts engine '{engine}' returned {status}: {detail}"
+        ));
     }
 
     resp.bytes()

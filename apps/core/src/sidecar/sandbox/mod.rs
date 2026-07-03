@@ -185,8 +185,7 @@ impl SandboxCapabilities {
             return Vec::new();
         }
         let allow_write = self.workspace_access == WorkspaceAccess::ReadWrite;
-        let mut mounts: std::collections::HashMap<PathBuf, bool> =
-            std::collections::HashMap::new();
+        let mut mounts: std::collections::HashMap<PathBuf, bool> = std::collections::HashMap::new();
         for path in &self.fs_read_paths {
             mounts.entry(path.clone()).or_insert(false);
         }

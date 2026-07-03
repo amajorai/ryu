@@ -100,9 +100,8 @@ impl ActivityStore {
                 }
             }
             None => {
-                let mut stmt = conn.prepare(
-                    "SELECT json FROM activity_items ORDER BY created_at DESC LIMIT ?1",
-                )?;
+                let mut stmt = conn
+                    .prepare("SELECT json FROM activity_items ORDER BY created_at DESC LIMIT ?1")?;
                 let rows = stmt.query_map(params![limit], map)?;
                 for row in rows {
                     if let Ok(item) = serde_json::from_str::<ActivityItem>(&row?) {

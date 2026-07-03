@@ -613,7 +613,37 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
     // before `state` is moved into `.with_state(state)` below.
     let connections = state.connections.clone();
 
-    // CORS: allow Desktop webview (dev + prod) and localhost dev servers.
+    // CORS: allow the Desktop webview (dev + prod), localhost dev servers, and
+    // the hosted web app. `apps/webapp` is local-first: even when served from
+    // https://app.ryuhq.com the browser talks DIRECTLY to the user's LOCAL Core
+    // on 127.0.0.1:7980. That is both cross-origin (origin = app.ryuhq.com) and a
+    // private-network request (public page → loopback), so we must (a) list
+    // app.ryuhq.com as an allowed origin AND (b) enable `allow_private_network`
+    // so Chrome's Private Network Access preflight succeeds. Extra origins (e.g.
+    // a staging web host) can be added without a rebuild via RYU_CORS_ORIGINS
+    // (comma-separated).
+    let mut cors_origins: Vec<HeaderValue> = [
+        "http://localhost:5173",   // desktop vite dev
+        "http://localhost:5174",   // webapp vite dev
+        "http://127.0.0.1:5173",   // desktop vite dev (127 variant)
+        "http://127.0.0.1:5174",   // webapp vite dev (127 variant)
+        "http://localhost:1420",   // tauri dev
+        "tauri://localhost",       // tauri prod (macOS/Linux)
+        "https://tauri.localhost", // tauri prod (Windows)
+        "https://app.ryuhq.com",   // hosted web app → local Core
+    ]
+    .into_iter()
+    .filter_map(|origin| origin.parse::<HeaderValue>().ok())
+    .collect();
+    if let Ok(extra) = std::env::var("RYU_CORS_ORIGINS") {
+        cors_origins.extend(
+            extra
+                .split(',')
+                .map(str::trim)
+                .filter(|origin| !origin.is_empty())
+                .filter_map(|origin| origin.parse::<HeaderValue>().ok()),
+        );
+    }
     let cors = CorsLayer::new()
         .allow_methods([
             Method::GET,
@@ -623,12 +653,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             Method::OPTIONS,
         ])
         .allow_headers(tower_http::cors::Any)
-        .allow_origin([
-            "http://localhost:5173".parse::<HeaderValue>().unwrap(),
-            "http://localhost:1420".parse::<HeaderValue>().unwrap(),
-            "tauri://localhost".parse::<HeaderValue>().unwrap(),
-            "https://tauri.localhost".parse::<HeaderValue>().unwrap(),
-        ]);
+        .allow_private_network(true)
+        .allow_origin(cors_origins);
 
     let public = Router::new()
         .route("/api/health", get(health))
@@ -4276,6 +4302,13 @@ async fn list_agents(State(state): State<ServerState>) -> Json<serde_json::Value
             for record in records.into_iter().filter(|r| !r.built_in) {
                 let locked_flag = record.locked.then_some(true);
                 let enabled = (record.id == *default_agent_id).then_some(true);
+                // Surface the persona's custom avatar (a data URL) on the summary
+                // so the chat picker / transcript can render it without a second
+                // fetch of the full record.
+                let avatar_url = record
+                    .persona
+                    .as_ref()
+                    .and_then(|p| p.avatar_url.clone());
                 agents.push(crate::sidecar::adapters::AgentInfo {
                     id: record.id,
                     name: record.name,
@@ -4294,6 +4327,7 @@ async fn list_agents(State(state): State<ServerState>) -> Json<serde_json::Value
                     // Custom agents from the DB don't carry bypass metadata — they
                     // go through the normal OpenAI-compat path.
                     gateway_bypass: None,
+                    avatar_url,
                 });
             }
         }

@@ -894,6 +894,43 @@ pub struct FirewallConfig {
     /// keep on. Set to false to disable the wrapping.
     #[serde(default = "default_true")]
     pub wrap_untrusted_tool_results: bool,
+
+    /// User-defined firewall patterns, merged on top of the curated built-in
+    /// PII/secret/injection sets when the scanner is (re)built. Each entry is a
+    /// regex tagged with the category it belongs to; invalid regexes are skipped
+    /// with a warning rather than failing the whole config (fail-open on the
+    /// *pattern*, never on the firewall). Empty by default so existing configs
+    /// keep the built-in-only behaviour.
+    #[serde(default)]
+    pub custom_patterns: Vec<CustomPattern>,
+}
+
+/// The category a [`CustomPattern`] belongs to. Determines which built-in
+/// pattern set it is merged into, and therefore which toggles govern it:
+/// `Pii`/`Secret` follow `redact_pii`/`redact_secrets` under the Sanitize
+/// policy, and `PromptInjection` participates in inbound injection scanning.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomPatternKind {
+    #[default]
+    Pii,
+    Secret,
+    PromptInjection,
+}
+
+/// A single user-defined firewall pattern.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CustomPattern {
+    /// Human-readable label; also used as the placeholder marker on redaction
+    /// (e.g. a `name` of `internal_id` redacts to `[REDACTED:INTERNAL_ID]`).
+    pub name: String,
+    /// The regular expression, in the `regex` crate's syntax. The crate is
+    /// backtracking-free, so caller-supplied patterns cannot cause catastrophic
+    /// (ReDoS) blow-up.
+    pub regex: String,
+    /// Which built-in category this pattern is merged into.
+    #[serde(default)]
+    pub kind: CustomPatternKind,
 }
 
 impl Default for FirewallConfig {
@@ -907,6 +944,7 @@ impl Default for FirewallConfig {
             redact_pii: true,
             redact_secrets: true,
             wrap_untrusted_tool_results: true,
+            custom_patterns: Vec::new(),
         }
     }
 }

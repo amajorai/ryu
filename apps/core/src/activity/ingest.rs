@@ -44,15 +44,17 @@ pub fn from_monitor_alert(alert: &Alert) -> ActivityItem {
 /// A quest event. Deletions carry no feed value and are dropped (`None`).
 pub fn from_quest_event(event: &QuestEvent) -> Option<ActivityItem> {
     let item = match event {
-        QuestEvent::Completed { quest, auto } => {
-            ActivityItem::new("quest", "quests", format!("Quest completed: {}", quest.title))
-                .with_body(quest.detail.clone())
-                .with_level(ActivityLevel::Success)
-                .with_metadata(serde_json::json!({
-                    "quest_id": quest.id,
-                    "auto": auto,
-                }))
-        }
+        QuestEvent::Completed { quest, auto } => ActivityItem::new(
+            "quest",
+            "quests",
+            format!("Quest completed: {}", quest.title),
+        )
+        .with_body(quest.detail.clone())
+        .with_level(ActivityLevel::Success)
+        .with_metadata(serde_json::json!({
+            "quest_id": quest.id,
+            "auto": auto,
+        })),
         QuestEvent::Suggested {
             quest,
             confidence,
@@ -96,9 +98,9 @@ pub fn from_approval_event(event: &ApprovalEvent) -> ActivityItem {
         ApprovalEvent::Decided { request } => {
             let level = match request.status {
                 ApprovalStatus::Approved => ActivityLevel::Success,
-                ApprovalStatus::Rejected
-                | ApprovalStatus::Expired
-                | ApprovalStatus::Cancelled => ActivityLevel::Warning,
+                ApprovalStatus::Rejected | ApprovalStatus::Expired | ApprovalStatus::Cancelled => {
+                    ActivityLevel::Warning
+                }
                 ApprovalStatus::Pending => ActivityLevel::Info,
             };
             let created = request
@@ -135,11 +137,13 @@ pub fn from_meeting_event(event: &MeetingEvent) -> Option<ActivityItem> {
         } => ActivityItem::new("meeting", "meetings", format!("Meeting detected: {title}"))
             .with_metadata(serde_json::json!({ "app": app }))
             .with_created_at(epoch_secs(detected_at)),
-        MeetingEvent::Started { meeting } => {
-            ActivityItem::new("meeting", "meetings", format!("Meeting started: {}", meeting.title))
-                .with_metadata(serde_json::json!({ "meeting_id": meeting.id }))
-                .with_created_at(epoch_secs(&meeting.started_at))
-        }
+        MeetingEvent::Started { meeting } => ActivityItem::new(
+            "meeting",
+            "meetings",
+            format!("Meeting started: {}", meeting.title),
+        )
+        .with_metadata(serde_json::json!({ "meeting_id": meeting.id }))
+        .with_created_at(epoch_secs(&meeting.started_at)),
         MeetingEvent::Finalized { meeting } => ActivityItem::new(
             "meeting",
             "meetings",

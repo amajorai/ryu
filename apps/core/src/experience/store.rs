@@ -147,7 +147,11 @@ impl ExperienceStore {
 
     /// Mark every captured turn of a conversation excluded (per-conversation
     /// opt-out applied retroactively).
-    pub async fn exclude_conversation(&self, conversation_id: &str, excluded: bool) -> Result<usize> {
+    pub async fn exclude_conversation(
+        &self,
+        conversation_id: &str,
+        excluded: bool,
+    ) -> Result<usize> {
         let conn = self.conn.lock().await;
         let n = conn
             .execute(
@@ -185,7 +189,11 @@ impl ExperienceStore {
     }
 
     /// High-reward, non-excluded rows — the reward-filtered training set (RFT).
-    pub async fn list_for_training(&self, min_reward: f64, limit: usize) -> Result<Vec<Experience>> {
+    pub async fn list_for_training(
+        &self,
+        min_reward: f64,
+        limit: usize,
+    ) -> Result<Vec<Experience>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
             "SELECT id, conversation_id, agent_id, user_text, assistant_text, outcome,
@@ -201,8 +209,7 @@ impl ExperienceStore {
     /// `(total, scored, trainable_at_min)` counts for the buffer overview.
     pub async fn counts(&self, min_reward: f64) -> Result<(usize, usize, usize)> {
         let conn = self.conn.lock().await;
-        let total: i64 =
-            conn.query_row("SELECT COUNT(*) FROM experience", [], |r| r.get(0))?;
+        let total: i64 = conn.query_row("SELECT COUNT(*) FROM experience", [], |r| r.get(0))?;
         let scored: i64 = conn.query_row(
             "SELECT COUNT(*) FROM experience WHERE reward IS NOT NULL",
             [],
@@ -233,9 +240,7 @@ impl ExperienceStore {
     }
 }
 
-fn collect(
-    rows: impl Iterator<Item = rusqlite::Result<Experience>>,
-) -> Result<Vec<Experience>> {
+fn collect(rows: impl Iterator<Item = rusqlite::Result<Experience>>) -> Result<Vec<Experience>> {
     let mut out = Vec::new();
     for row in rows {
         out.push(row?);
@@ -306,7 +311,10 @@ mod tests {
     #[tokio::test]
     async fn exclude_conversation_blocks_training() {
         let store = open_tmp("exclude").await;
-        store.record_if_absent(&sample("a", Some(0.95))).await.unwrap();
+        store
+            .record_if_absent(&sample("a", Some(0.95)))
+            .await
+            .unwrap();
         assert_eq!(store.list_for_training(0.7, 10).await.unwrap().len(), 1);
         let n = store.exclude_conversation("conv-1", true).await.unwrap();
         assert_eq!(n, 1);

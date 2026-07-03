@@ -183,6 +183,11 @@ pub fn is_gateway_routing() -> bool {
 /// the provider-level `openai-completions` — and the Gateway then 404s `/responses`
 /// (or routes the wrong model id). Declaring the model as a custom `openai-completions`
 /// model makes Pi send the right id over chat-completions to the Gateway.
+///
+/// The declared `models` array is a **union**: already-declared ids + the zero-key
+/// local default ([`default_gateway_model`]) + `model`. Merging (instead of
+/// replacing) means switching models in the composer never removes an earlier
+/// model from Pi's available list, so the user can always switch back.
 fn gateway_openai_patch(model: Option<&str>) -> Map<String, Value> {
     let base = crate::sidecar::gateway::gateway_url();
     let v1 = format!("{}/v1", base.trim_end_matches('/'));
@@ -194,10 +199,44 @@ fn gateway_openai_patch(model: Option<&str>) -> Map<String, Value> {
         Value::String("openai-completions".to_owned()),
     );
     patch.insert("apiKey".to_owned(), Value::String(token));
-    if let Some(id) = model.map(str::trim).filter(|s| !s.is_empty()) {
-        patch.insert("models".to_owned(), json!([{ "id": id }]));
+
+    // Union of declared model ids (order-preserving, deduped).
+    let mut ids: Vec<String> = read_models()["providers"]
+        .get("openai")
+        .and_then(|p| p.get("models"))
+        .and_then(Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|m| m.get("id").and_then(Value::as_str))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let default_local = default_gateway_model();
+    for candidate in [Some(default_local.as_str()), model] {
+        if let Some(id) = candidate.map(str::trim).filter(|s| !s.is_empty()) {
+            if !ids.iter().any(|existing| existing == id) {
+                ids.push(id.to_owned());
+            }
+        }
+    }
+    if !ids.is_empty() {
+        let entries: Vec<Value> = ids.into_iter().map(|id| json!({ "id": id })).collect();
+        patch.insert("models".to_owned(), Value::Array(entries));
     }
     patch
+}
+
+/// The zero-key default model for the managed Pi in Gateway-routed mode: the
+/// registry's local llama.cpp chat model (swappable via `RYU_LOCAL_CHAT_MODEL_ID`
+/// / `registry.json`, never hardcoded here). The gateway's built-in prefix rules
+/// route `gemma*`-style ids to its `local` provider (the llama.cpp sidecar), so a
+/// fresh install with no API keys gets a working model out of the box.
+pub fn default_gateway_model() -> String {
+    crate::registry::ProviderRegistry::load()
+        .local_chat_model
+        .id
 }
 
 /// Ensure `models.json` pins the `openai` provider at the Gateway whenever the
@@ -212,6 +251,117 @@ pub fn ensure_gateway_models_json() -> Result<()> {
         upsert_provider("openai", gateway_openai_patch(model.as_deref()))?;
     }
     Ok(())
+}
+
+/// Value written to Pi's `settings.json` `skills` array to disable Pi's own
+/// skill auto-discovery (`!` = exclude pattern, `**` = everything). Pi always
+/// auto-loads `~/.agents/skills` (a hard-coded home path, independent of
+/// `PI_CODING_AGENT_DIR`), which duplicated — and bypassed the allowlist of —
+/// Core's own governed skill injection on the ACP prompt (QA finding B1).
+const PI_SKILLS_DISABLED: &str = "!**";
+
+/// Enforce the managed-Pi config invariants. Idempotent; called at spawn time
+/// (see `acp::ryu_pi_acp_cmd` and the `ryu` PATH-fallback route) so a fresh
+/// install works with zero setup:
+///
+/// 1. **Pi-side skill injection off** — Core injects the (allowlist-gated) skill
+///    block into the ACP prompt itself, so Pi loading `~/.agents/skills` on top
+///    double-injected ~100 ungoverned SKILL.md manifests (QA B1). Written only
+///    when the user has not set the `skills` key, so an explicit user choice in
+///    the managed dir always stands.
+/// 2. **A valid default model in Gateway mode** — Pi with no `defaultModel`
+///    parrots its skill manifest instead of answering (QA B1). When Gateway-routed
+///    and no model is set, default to [`default_gateway_model`] (the local
+///    llama.cpp model — resolvable through the gateway with zero API keys) and
+///    normalize `defaultProvider` to the gateway-redirected `openai`.
+/// 3. **The Gateway provider pin** — [`ensure_gateway_models_json`], declaring
+///    the model so Pi actually sends it over chat-completions.
+pub fn ensure_managed_defaults() -> Result<()> {
+    let mut settings = read_settings();
+    let mut dirty = false;
+
+    if !settings.extra.contains_key("skills") {
+        settings
+            .extra
+            .insert("skills".to_owned(), json!([PI_SKILLS_DISABLED]));
+        dirty = true;
+    }
+
+    let gateway = settings.extra.get(ROUTING_KEY).and_then(Value::as_str) != Some(ROUTING_DIRECT);
+    if gateway {
+        let has_model = settings
+            .default_model
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|s| !s.is_empty());
+        if !has_model {
+            settings.default_model = Some(default_gateway_model());
+            dirty = true;
+        }
+        let has_provider = settings
+            .default_provider
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|s| !s.is_empty());
+        if !has_provider {
+            // Gateway mode stores the built-in `openai` provider on disk (the
+            // models.json pin redirects it at the local Gateway).
+            settings.default_provider = Some("openai".to_owned());
+            dirty = true;
+        }
+    }
+
+    if dirty {
+        write_settings(&settings)?;
+    }
+    ensure_gateway_models_json()
+}
+
+/// Persist a composer-picked model for the managed Pi (QA finding B2).
+///
+/// pi-acp reports models as `"<provider>/<model-id>"` (split at the FIRST `/`,
+/// mirroring pi-acp's own `setSessionModel` parsing); a bare id is treated as a
+/// model on the current provider. pi-acp spawns a fresh Pi RPC process per
+/// `session/new` — one per chat turn — so a write here (made before the turn's
+/// session is built) takes effect on the very turn that carried the pick, and
+/// becomes Pi's `defaultModel` for every later session.
+///
+/// In Gateway-routed mode only picks on the gateway-redirected `openai` provider
+/// are persisted (anything else would silently flip Pi onto a direct provider the
+/// user never configured; those picks still apply live for the turn via the ACP
+/// `model` config option — see `acp::apply_turn_config`). In direct mode the pick
+/// is mirrored verbatim into `defaultProvider`/`defaultModel`.
+pub fn persist_turn_model(picked: &str) -> Result<()> {
+    let picked = picked.trim();
+    if picked.is_empty() {
+        return Ok(());
+    }
+    let (provider, model) = match picked.split_once('/') {
+        Some((p, m)) if !p.trim().is_empty() && !m.trim().is_empty() => (Some(p.trim()), m.trim()),
+        _ => (None, picked),
+    };
+
+    let mut settings = read_settings();
+    let gateway = settings.extra.get(ROUTING_KEY).and_then(Value::as_str) != Some(ROUTING_DIRECT);
+
+    if gateway {
+        if provider.is_some_and(|p| p != "openai") {
+            return Ok(());
+        }
+        if settings.default_model.as_deref() != Some(model) {
+            settings.default_provider = Some("openai".to_owned());
+            settings.default_model = Some(model.to_owned());
+            write_settings(&settings)?;
+        }
+        // Declare the pick so Pi lists + sends it (merge — see gateway_openai_patch).
+        return upsert_provider("openai", gateway_openai_patch(Some(model)));
+    }
+
+    if let Some(p) = provider {
+        settings.default_provider = Some(p.to_owned());
+    }
+    settings.default_model = Some(model.to_owned());
+    write_settings(&settings)
 }
 
 // ── models.json ───────────────────────────────────────────────────────────────
@@ -412,7 +562,11 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         // `openrouter/auto` is OpenRouter's Auto Router: it picks the best model
         // per prompt at no extra fee. Listed first so managed users get a
         // zero-decision "just route it well" option.
-        suggested_models: &["openrouter/auto", "anthropic/claude-sonnet-4", "openai/gpt-4o"],
+        suggested_models: &[
+            "openrouter/auto",
+            "anthropic/claude-sonnet-4",
+            "openai/gpt-4o",
+        ],
     },
 ];
 
@@ -661,8 +815,13 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
 mod tests {
     use super::*;
 
+    /// Serializes the module's tests: they all mutate the same process-global
+    /// `RYU_PI_AGENT_DIR` env var, so parallel test threads would race.
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Point the config dir at a temp location for the duration of a test.
     fn with_temp_dir<F: FnOnce()>(f: F) {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("ryu-pi-config-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         std::env::set_var("RYU_PI_AGENT_DIR", &dir);
@@ -757,6 +916,117 @@ mod tests {
             })
             .unwrap_err();
             assert!(err.to_string().contains("unknown provider"));
+        });
+    }
+
+    #[test]
+    fn managed_defaults_fill_model_provider_and_disable_pi_skills() {
+        with_temp_dir(|| {
+            ensure_managed_defaults().unwrap();
+            let settings = read_settings();
+            // Fresh install (gateway-routed by default): a non-empty zero-key
+            // default model + the gateway-redirected provider are written…
+            let model = settings.default_model.clone().unwrap();
+            assert!(!model.trim().is_empty());
+            assert_eq!(settings.default_provider.as_deref(), Some("openai"));
+            // …Pi's own skill auto-discovery is disabled…
+            assert_eq!(
+                settings.extra.get("skills"),
+                Some(&json!([PI_SKILLS_DISABLED]))
+            );
+            // …and the model is declared on the gateway-pinned openai provider.
+            let models = read_models();
+            let declared = models["providers"]["openai"]["models"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            assert!(declared.iter().any(|m| m["id"] == json!(model.clone())));
+        });
+    }
+
+    #[test]
+    fn managed_defaults_do_not_clobber_user_choices() {
+        with_temp_dir(|| {
+            let _ = ensure_dir();
+            fs::write(
+                settings_path(),
+                r#"{"defaultProvider":"openai","defaultModel":"my-model","skills":["+/keep/me"]}"#,
+            )
+            .unwrap();
+            ensure_managed_defaults().unwrap();
+            let settings = read_settings();
+            assert_eq!(settings.default_model.as_deref(), Some("my-model"));
+            assert_eq!(settings.extra.get("skills"), Some(&json!(["+/keep/me"])));
+        });
+    }
+
+    #[test]
+    fn persist_turn_model_gateway_openai_pick_is_persisted_and_declared() {
+        with_temp_dir(|| {
+            persist_turn_model("openai/gpt-4o").unwrap();
+            let settings = read_settings();
+            assert_eq!(settings.default_provider.as_deref(), Some("openai"));
+            assert_eq!(settings.default_model.as_deref(), Some("gpt-4o"));
+            let models = read_models();
+            let declared = models["providers"]["openai"]["models"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            assert!(declared.iter().any(|m| m["id"] == json!("gpt-4o")));
+        });
+    }
+
+    #[test]
+    fn persist_turn_model_gateway_skips_non_openai_providers() {
+        with_temp_dir(|| {
+            persist_turn_model("anthropic/claude-sonnet-4").unwrap();
+            let settings = read_settings();
+            // Gateway mode must not be flipped onto a direct provider by a pick.
+            assert!(settings.default_model.is_none());
+            assert!(settings.default_provider.is_none());
+        });
+    }
+
+    #[test]
+    fn persist_turn_model_direct_mode_mirrors_pick() {
+        with_temp_dir(|| {
+            apply(PiConfigInput {
+                provider: "anthropic".to_owned(),
+                model: Some("claude-3-5-haiku-20241022".to_owned()),
+                thinking_level: None,
+                api_key: Some("sk-ant-test".to_owned()),
+                base_url: None,
+                api: None,
+            })
+            .unwrap();
+            persist_turn_model("anthropic/claude-sonnet-4-20250514").unwrap();
+            let settings = read_settings();
+            assert_eq!(settings.default_provider.as_deref(), Some("anthropic"));
+            assert_eq!(
+                settings.default_model.as_deref(),
+                Some("claude-sonnet-4-20250514")
+            );
+            // Direct mode is preserved.
+            assert!(!is_gateway_routing());
+        });
+    }
+
+    #[test]
+    fn gateway_patch_merges_declared_models_instead_of_replacing() {
+        with_temp_dir(|| {
+            persist_turn_model("openai/model-a").unwrap();
+            persist_turn_model("openai/model-b").unwrap();
+            let models = read_models();
+            let declared: Vec<String> = models["providers"]["openai"]["models"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|m| m["id"].as_str().map(str::to_owned))
+                .collect();
+            // Both picks stay declared so the user can switch back.
+            assert!(declared.iter().any(|id| id == "model-a"));
+            assert!(declared.iter().any(|id| id == "model-b"));
         });
     }
 

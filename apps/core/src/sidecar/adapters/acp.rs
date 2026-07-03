@@ -704,6 +704,7 @@ impl AgentAdapter for AcpAdapter {
                 locked: None,
                 enabled: None,
                 gateway_bypass: None,
+                avatar_url: None,
             }])
         })
     }
@@ -726,6 +727,7 @@ impl AgentAdapter for AcpAdapter {
                 locked: None,
                 enabled: None,
                 gateway_bypass: None,
+                avatar_url: None,
             })
         })
     }
@@ -2352,6 +2354,7 @@ impl AcpAgentRegistry {
                     locked: None,
                     enabled,
                     gateway_bypass,
+                    avatar_url: None,
                 }
             })
             .collect()

@@ -309,7 +309,7 @@ async fn fetch_tarball(client: &reqwest::Client, url: &str, dest: &Path) -> Resu
         bytes.extend_from_slice(&chunk);
     }
     let extract_root = dest.join("extract");
-    crate::sidecar::download_manager::extract_tar_gz_to_dir(&bytes, &extract_root)
+    crate::sidecar::download_manager::extract_tar_gz_to_dir(&bytes, &extract_root, None)
         .context("extracting tarball")?;
     Ok(extract_root)
 }

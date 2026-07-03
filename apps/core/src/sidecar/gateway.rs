@@ -64,8 +64,16 @@ pub fn gateway_token() -> Option<String> {
 ///      operator can point the gateway at an external/custom local server.
 ///   2. Otherwise the persisted active local engine (U4) is mapped to its
 ///      serving URL.
+///   3. Otherwise, when the default local stack (`llamacpp`) is installed per
+///      the version store, its URL — a fresh install has no persisted engine
+///      selection (nothing ever swapped), and without this fallback the gateway
+///      got NO `local` provider, so the zero-key default chat model
+///      (`gemma* → Local`) failed with "all_providers_unavailable" even while
+///      llama-server was healthy (QA finding B1's last leg). `start_all` also
+///      persists its resolved resident engine now, but the gateway spawns
+///      concurrently with `start_all`, so this closes the first-boot race too.
 ///
-/// Returns `None` when neither is set, in which case the gateway falls back to
+/// Returns `None` when none apply, in which case the gateway falls back to
 /// its own built-in default (Ollama on `11434`).
 pub fn local_engine_gateway_url() -> Option<String> {
     if let Ok(url) = std::env::var(ENV_LOCAL_LLM_URL) {
@@ -73,8 +81,14 @@ pub fn local_engine_gateway_url() -> Option<String> {
             return Some(url);
         }
     }
-    let active = ActiveEngineStore::load().active?;
-    local_engine_url(&active).map(str::to_owned)
+    if let Some(active) = ActiveEngineStore::load().active {
+        return local_engine_url(&active).map(str::to_owned);
+    }
+    let versions = crate::sidecar::download_manager::VersionStore::load();
+    if versions.installed_version("llamacpp").is_some() {
+        return local_engine_url("llamacpp").map(str::to_owned);
+    }
+    None
 }
 
 /// Environment overrides Core layers onto the spawned gateway so it routes the

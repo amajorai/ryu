@@ -73,7 +73,11 @@ impl ActivityItem {
     /// Build a fresh item with a generated UUID and the current time, at the
     /// default (`Info`) level with empty metadata. Fill remaining fields via the
     /// `with_*` builders.
-    pub fn new(kind: impl Into<String>, source: impl Into<String>, title: impl Into<String>) -> Self {
+    pub fn new(
+        kind: impl Into<String>,
+        source: impl Into<String>,
+        title: impl Into<String>,
+    ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             kind: kind.into(),

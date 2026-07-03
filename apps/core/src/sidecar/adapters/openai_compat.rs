@@ -80,6 +80,7 @@ impl AgentAdapter for OpenAiCompatAdapter {
                 locked: None,
                 enabled: None,
                 gateway_bypass: None,
+                avatar_url: None,
             }])
         })
     }
@@ -102,6 +103,7 @@ impl AgentAdapter for OpenAiCompatAdapter {
                 locked: None,
                 enabled: None,
                 gateway_bypass: None,
+                avatar_url: None,
             })
         })
     }

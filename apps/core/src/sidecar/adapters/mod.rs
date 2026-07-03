@@ -86,6 +86,13 @@ pub struct AgentInfo {
     /// them. The residual bypass is an explicit design choice (AC3 of #214).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gateway_bypass: Option<bool>,
+    /// Custom avatar image for the agent, as a data URL (or remote URL), taken
+    /// from the agent's persona slot. When present, clients render this in place
+    /// of the engine logo. Only custom (DB-backed) agents carry it; registry
+    /// built-ins leave it `None` and fall back to the engine logo. Omitted from
+    /// the response when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

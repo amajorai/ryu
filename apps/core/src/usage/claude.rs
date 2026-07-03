@@ -240,7 +240,9 @@ fn format_plan(subscription_type: Option<&str>, rate_limit_tier: Option<&str>) -
     let base = title_case(raw);
     let multiplier = rate_limit_tier.and_then(|tier| {
         tier.split(|c: char| !c.is_ascii_alphanumeric())
-            .find(|seg| seg.ends_with('x') && seg[..seg.len() - 1].chars().all(|c| c.is_ascii_digit()))
+            .find(|seg| {
+                seg.ends_with('x') && seg[..seg.len() - 1].chars().all(|c| c.is_ascii_digit())
+            })
             .filter(|seg| seg.len() > 1)
             .map(str::to_string)
     });
@@ -257,7 +259,9 @@ fn title_case(s: &str) -> String {
         .map(|w| {
             let mut chars = w.chars();
             match chars.next() {
-                Some(first) => first.to_ascii_uppercase().to_string() + &chars.as_str().to_ascii_lowercase(),
+                Some(first) => {
+                    first.to_ascii_uppercase().to_string() + &chars.as_str().to_ascii_lowercase()
+                }
                 None => String::new(),
             }
         })

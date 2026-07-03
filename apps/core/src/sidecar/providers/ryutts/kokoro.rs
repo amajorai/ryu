@@ -74,8 +74,14 @@ impl KokoroDownloader {
             std::env::var("RYU_KOKORO_MODEL_URL").unwrap_or_else(|_| MODEL_URL.to_string());
         let voices_url =
             std::env::var("RYU_KOKORO_VOICES_URL").unwrap_or_else(|_| VOICES_URL.to_string());
-        self.ensure_file(&model_url, &model_path(), MODEL_STORE_KEY, MODEL_FILE, downloads)
-            .await?;
+        self.ensure_file(
+            &model_url,
+            &model_path(),
+            MODEL_STORE_KEY,
+            MODEL_FILE,
+            downloads,
+        )
+        .await?;
         self.ensure_file(
             &voices_url,
             &voices_path(),

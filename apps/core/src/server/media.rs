@@ -305,7 +305,9 @@ async fn forward_to_gateway(
         // non-2xx as an error with the upstream detail.
         return (
             StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": format!("cloud media provider returned {status}"), "detail": value })),
+            Json(
+                json!({ "error": format!("cloud media provider returned {status}"), "detail": value }),
+            ),
         );
     }
     (StatusCode::OK, Json(value))

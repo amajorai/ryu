@@ -120,7 +120,10 @@ async fn pref(state: &ServerState, key: &str) -> Option<String> {
 }
 
 fn truthy(s: &str) -> bool {
-    matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    matches!(
+        s.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 /// Global opt-in. Default OFF — learning never happens unless the user enables it.
@@ -246,10 +249,17 @@ pub async fn resolve_prm(state: &ServerState) -> ModelSource {
         .or_else(|| std::env::var("RYU_LEARNING_PRM_MODEL").ok())
         .or_else(|| std::env::var("RYU_DEFAULT_LLM_MODEL").ok())
         .unwrap_or_else(|| crate::registry::DEFAULT_LLM_MODEL.to_string());
-    let effort = pref(state, LEARNING_PRM_EFFORT_PREF).await.unwrap_or_default();
+    let effort = pref(state, LEARNING_PRM_EFFORT_PREF)
+        .await
+        .unwrap_or_default();
     let url = pref(state, LEARNING_PRM_URL_PREF).await;
     let key = pref(state, LEARNING_PRM_KEY_PREF).await;
-    ModelSource { model, effort, url, key }
+    ModelSource {
+        model,
+        effort,
+        url,
+        key,
+    }
 }
 
 /// Skill-synthesis source. Defaults local-first (cheap, private) — synthesis is a
@@ -260,8 +270,15 @@ pub async fn resolve_synth(state: &ServerState) -> ModelSource {
         .or_else(|| std::env::var("RYU_LEARNING_SYNTH_MODEL").ok())
         .or_else(|| std::env::var("RYU_DEFAULT_LLM_MODEL").ok())
         .unwrap_or_else(|| crate::registry::DEFAULT_LOCAL_CHAT_MODEL_ID.to_string());
-    let effort = pref(state, LEARNING_SYNTH_EFFORT_PREF).await.unwrap_or_default();
-    ModelSource { model, effort, url: None, key: None }
+    let effort = pref(state, LEARNING_SYNTH_EFFORT_PREF)
+        .await
+        .unwrap_or_default();
+    ModelSource {
+        model,
+        effort,
+        url: None,
+        key: None,
+    }
 }
 
 pub async fn resolve_config(state: &ServerState) -> LearningConfig {
@@ -310,11 +327,17 @@ async fn run_model(
     if let Some(k) = src.key.as_deref().filter(|k| !k.is_empty()) {
         req = req.bearer_auth(k);
     }
-    let resp = req.send().await.map_err(|e| format!("PRM endpoint unreachable: {e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("PRM endpoint unreachable: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("PRM endpoint returned {}", resp.status()));
     }
-    let v: Value = resp.json().await.map_err(|e| format!("PRM bad JSON: {e}"))?;
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("PRM bad JSON: {e}"))?;
     Ok(v["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("")
@@ -386,7 +409,12 @@ pub async fn sweep_into_buffer(state: &ServerState) -> Result<usize> {
                     excluded: false,
                     created_at: chrono::Utc::now().to_rfc3339(),
                 };
-                if state.experience.record_if_absent(&exp).await.unwrap_or(false) {
+                if state
+                    .experience
+                    .record_if_absent(&exp)
+                    .await
+                    .unwrap_or(false)
+                {
                     added += 1;
                 }
             }
@@ -479,7 +507,12 @@ pub async fn score_buffer(state: &ServerState, limit: usize) -> Result<usize> {
         match run_model(state, &src, PRM_SYSTEM, &user).await {
             Ok(answer) => {
                 if let Some(reward) = parse_reward(&answer) {
-                    if state.experience.set_reward(&exp.id, reward).await.unwrap_or(false) {
+                    if state
+                        .experience
+                        .set_reward(&exp.id, reward)
+                        .await
+                        .unwrap_or(false)
+                    {
                         scored += 1;
                     }
                 } else {
@@ -542,9 +575,7 @@ pub fn slugify(name: &str) -> String {
 
 /// Render a validated `SKILL.md` body from synthesized fields.
 pub fn build_skill_md(name: &str, description: &str, instructions: &str) -> String {
-    format!(
-        "---\nname: {name}\ndescription: {description}\n---\n\n{instructions}\n"
-    )
+    format!("---\nname: {name}\ndescription: {description}\n---\n\n{instructions}\n")
 }
 
 /// Extract the first balanced `{...}` that parses as JSON from a possibly-fenced
@@ -645,9 +676,8 @@ pub async fn synthesize_skill(
         .await
         .map_err(|e| anyhow::anyhow!("synthesis model call failed: {e}"))?;
 
-    let obj = extract_json_object(&answer).ok_or_else(|| {
-        anyhow::anyhow!("synthesis returned no JSON object: {answer:?}")
-    })?;
+    let obj = extract_json_object(&answer)
+        .ok_or_else(|| anyhow::anyhow!("synthesis returned no JSON object: {answer:?}"))?;
     let name = obj["name"].as_str().unwrap_or("").trim().to_string();
     if name.is_empty() {
         return Ok(SynthOutcome {
@@ -657,7 +687,11 @@ pub async fn synthesize_skill(
         });
     }
     let description = obj["description"].as_str().unwrap_or("").trim().to_string();
-    let instructions = obj["instructions"].as_str().unwrap_or("").trim().to_string();
+    let instructions = obj["instructions"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if instructions.is_empty() {
         return Ok(SynthOutcome {
             created: false,
@@ -752,8 +786,14 @@ pub fn build_jsonl(rows: &[Experience]) -> String {
     for r in rows {
         let sample = SftSample {
             messages: vec![
-                SftMessage { role: "user".into(), content: r.user_text.clone() },
-                SftMessage { role: "assistant".into(), content: r.assistant_text.clone() },
+                SftMessage {
+                    role: "user".into(),
+                    content: r.user_text.clone(),
+                },
+                SftMessage {
+                    role: "assistant".into(),
+                    content: r.assistant_text.clone(),
+                },
             ],
         };
         if let Ok(line) = serde_json::to_string(&sample) {
@@ -899,7 +939,11 @@ async fn dispatch_cycle(
     let requested_remote = resolve_train_target(state).await == "remote";
     let remote = resolve_remote(state).await;
     if requested_remote && remote.is_none() {
-        fail(&mut out, "cannot dispatch: learning.train-target=remote but learning.remote-url is unset".to_string());
+        fail(
+            &mut out,
+            "cannot dispatch: learning.train-target=remote but learning.remote-url is unset"
+                .to_string(),
+        );
         return out;
     }
     let use_remote = requested_remote && remote.is_some();
@@ -948,7 +992,10 @@ async fn dispatch_cycle(
                 .get("job_id")
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
-            out.note = format!("fine-tune dispatched from base '{base}' on {} samples", rows.len());
+            out.note = format!(
+                "fine-tune dispatched from base '{base}' on {} samples",
+                rows.len()
+            );
         }
         Err((code, err)) => {
             let msg = err
@@ -1043,7 +1090,8 @@ mod tests {
 
     #[test]
     fn extract_json_object_strips_fences() {
-        let v = extract_json_object("here you go:\n```json\n{\"name\":\"x\",\"a\":1}\n```\n").unwrap();
+        let v =
+            extract_json_object("here you go:\n```json\n{\"name\":\"x\",\"a\":1}\n```\n").unwrap();
         assert_eq!(v["name"], "x");
         assert_eq!(v["a"], 1);
     }

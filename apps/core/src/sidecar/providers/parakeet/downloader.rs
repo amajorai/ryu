@@ -24,6 +24,13 @@ pub const MODEL_DIR_NAME: &str = "parakeet-tdt-0.6b-v3-int8";
 const DEFAULT_MODEL_URL: &str = "https://blob.handy.computer/parakeet-v3-int8.tar.gz";
 const MODEL_STORE_KEY: &str = "parakeet-model:v3-int8";
 
+/// Decompression-bomb cap for the model archive. The int8 ONNX bundle is
+/// ~478 MB compressed and expands past the extractor's 500 MB default cap
+/// (ONNX weights barely compress), so a model-class bound is needed: 4 GiB
+/// keeps bomb protection while leaving headroom for swapped-in model URLs
+/// (`RYU_PARAKEET_MODEL_URL`).
+const MODEL_EXTRACT_CAP_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
 /// Resolved directory that holds the extracted ONNX model files.
 pub fn model_dir() -> PathBuf {
     ryu_dir().join("models").join(MODEL_DIR_NAME)
@@ -106,23 +113,43 @@ impl ParakeetDownloader {
             })
             .await
             .context("downloading parakeet model archive")?;
-        let archive = tokio::fs::read(&archive_path)
+        // Extract + validate as its own DownloadCenter task so a failure here
+        // (bomb-cap hit, truncated archive, missing files) is NOT silent: the
+        // overlay shows a Failed "Parakeet v3 (extract)" entry carrying the
+        // error, the same way other post-download install steps report.
+        let archive_to_extract = archive_path.clone();
+        let written = downloads
+            .register_indeterminate(
+                "parakeet-extract:v3-int8".to_string(),
+                crate::downloads::DownloadKind::Voice,
+                "Parakeet v3 (extract)".to_string(),
+                async move {
+                    let archive = tokio::fs::read(&archive_to_extract)
+                        .await
+                        .context("reading downloaded parakeet model archive")?;
+                    let models_dir = ryu_dir().join("models");
+                    let written = tokio::task::spawn_blocking(move || {
+                        extract_tar_gz_to_dir(
+                            &archive,
+                            &models_dir,
+                            Some(MODEL_EXTRACT_CAP_BYTES),
+                        )
+                    })
+                    .await
+                    .context("spawn_blocking for tar.gz extraction")??;
+
+                    if !model_present() {
+                        anyhow::bail!(
+                            "parakeet archive did not contain the expected model files in {} (got: {})",
+                            MODEL_DIR_NAME,
+                            written.join(", ")
+                        );
+                    }
+                    Ok(written)
+                },
+            )
             .await
-            .context("reading downloaded parakeet model archive")?;
-
-        let models_dir = ryu_dir().join("models");
-        let written =
-            tokio::task::spawn_blocking(move || extract_tar_gz_to_dir(&archive, &models_dir))
-                .await
-                .context("spawn_blocking for tar.gz extraction")??;
-
-        if !model_present() {
-            anyhow::bail!(
-                "parakeet archive did not contain the expected model files in {} (got: {})",
-                MODEL_DIR_NAME,
-                written.join(", ")
-            );
-        }
+            .context("extracting parakeet model archive")?;
 
         VersionStore::record_persisted(MODEL_STORE_KEY, MODEL_DIR_NAME, "v3-int8")
             .context("writing versions.json after parakeet model install")?;

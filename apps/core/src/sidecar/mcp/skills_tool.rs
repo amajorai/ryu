@@ -438,8 +438,9 @@ fn do_author(arguments: Value, registry: &SkillRegistry) -> Result<Value> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or(name);
-    let slug = sanitize_slug(slug_source)
-        .ok_or_else(|| anyhow::anyhow!("could not derive a safe skill slug from '{slug_source}'"))?;
+    let slug = sanitize_slug(slug_source).ok_or_else(|| {
+        anyhow::anyhow!("could not derive a safe skill slug from '{slug_source}'")
+    })?;
 
     let md = render_skill_md(
         name,
@@ -453,8 +454,9 @@ fn do_author(arguments: Value, registry: &SkillRegistry) -> Result<Value> {
 
     // Fail closed: the file we are about to persist must parse back through the
     // exact loader `reload()` uses, so we never leave an unreadable skill on disk.
-    crate::skills::parse_skill_md(&slug, &md)
-        .map_err(|e| anyhow::anyhow!("authored skill did not round-trip through the loader: {e}"))?;
+    crate::skills::parse_skill_md(&slug, &md).map_err(|e| {
+        anyhow::anyhow!("authored skill did not round-trip through the loader: {e}")
+    })?;
 
     let skill_dir = SkillRegistry::skills_dir().join(&slug);
     std::fs::create_dir_all(&skill_dir)
@@ -662,9 +664,13 @@ mod tests {
         let env = author_env();
         let reg = SkillRegistry::empty();
 
-        let out = dispatch("author", author_args("My Skill", "my-skill", "do step one"), &reg)
-            .await
-            .expect("author ok");
+        let out = dispatch(
+            "author",
+            author_args("My Skill", "my-skill", "do step one"),
+            &reg,
+        )
+        .await
+        .expect("author ok");
         assert_eq!(out["ok"], json!(true));
         assert_eq!(out["id"], json!("my-skill"));
         assert_eq!(out["refined"], json!(false));
@@ -702,7 +708,9 @@ mod tests {
             .expect("search ok");
         let results = found["results"].as_array().expect("array");
         assert!(
-            results.iter().any(|r| r["id"] == json!("conflict-resolver")),
+            results
+                .iter()
+                .any(|r| r["id"] == json!("conflict-resolver")),
             "authored skill is searchable after authoring"
         );
 
@@ -743,7 +751,10 @@ mod tests {
             .await
             .expect("load ok");
         let body = loaded["instructions"].as_str().expect("body");
-        assert!(body.contains("second procedure text"), "refined body persists");
+        assert!(
+            body.contains("second procedure text"),
+            "refined body persists"
+        );
         assert!(!body.contains("first procedure text"), "old body replaced");
     }
 
@@ -839,8 +850,8 @@ mod tests {
 
         let md = std::fs::read_to_string(env.skills_dir.join("tricky").join("SKILL.md"))
             .expect("read back");
-        let rec = crate::skills::parse_skill_md("tricky", &md)
-            .expect("escaped front-matter round-trips");
+        let rec =
+            crate::skills::parse_skill_md("tricky", &md).expect("escaped front-matter round-trips");
         assert_eq!(rec.name, tricky);
     }
 }

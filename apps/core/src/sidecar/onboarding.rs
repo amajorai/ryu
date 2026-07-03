@@ -618,52 +618,56 @@ impl SetupManager {
         // is installed), we also create its venv + mark `ryutts` installed so it
         // auto-starts and Kokoro is live by default. Non-fatal throughout: any failure
         // (or an un-provisioned sidecar) degrades to the OuteTTS fallback at runtime.
-        let kokoro_installed = match crate::sidecar::providers::ryutts::kokoro::KokoroDownloader::new()
-            .ensure_installed(downloads)
-            .await
-        {
-            Ok(_) => {
-                match crate::sidecar::providers::ryutts::ensure_kokoro_runtime().await {
-                    Ok(true) => {
-                        self.mark_installed("ryutts").await;
-                        // Persist so a restart re-seeds `ryutts` as installed and
-                        // `start_all` brings the default TTS engine up automatically.
-                        if let Err(e) = crate::sidecar::download_manager::VersionStore::record_persisted(
-                            "ryutts",
-                            "kokoro-82m-v1.0",
-                            "installed",
-                        ) {
-                            tracing::warn!("recording ryutts install failed: {e:#}");
-                        }
-                        tracing::info!(
+        let kokoro_installed =
+            match crate::sidecar::providers::ryutts::kokoro::KokoroDownloader::new()
+                .ensure_installed(downloads)
+                .await
+            {
+                Ok(_) => {
+                    match crate::sidecar::providers::ryutts::ensure_kokoro_runtime().await {
+                        Ok(true) => {
+                            self.mark_installed("ryutts").await;
+                            // Persist so a restart re-seeds `ryutts` as installed and
+                            // `start_all` brings the default TTS engine up automatically.
+                            if let Err(e) =
+                                crate::sidecar::download_manager::VersionStore::record_persisted(
+                                    "ryutts",
+                                    "kokoro-82m-v1.0",
+                                    "installed",
+                                )
+                            {
+                                tracing::warn!("recording ryutts install failed: {e:#}");
+                            }
+                            tracing::info!(
                             "onboarding: Kokoro 82M default TTS installed + sidecar provisioned"
                         );
-                    }
-                    Ok(false) => {
-                        tracing::info!(
+                        }
+                        Ok(false) => {
+                            tracing::info!(
                             "onboarding: Kokoro 82M model downloaded; TTS sidecar code not \
                              installed yet — run `bun run dev:tts` (or install it) to serve Kokoro. \
                              OuteTTS is the runtime fallback until then."
                         );
-                    }
-                    Err(e) => {
-                        let msg = format!(
+                        }
+                        Err(e) => {
+                            let msg = format!(
                             "Kokoro TTS runtime provisioning failed (TTS falls back to OuteTTS): {e:#}"
                         );
-                        tracing::warn!("{}", msg);
-                        warnings.push(msg);
+                            tracing::warn!("{}", msg);
+                            warnings.push(msg);
+                        }
                     }
+                    true
                 }
-                true
-            }
-            Err(e) => {
-                let msg =
-                    format!("Kokoro 82M model download failed (TTS falls back to OuteTTS): {e:#}");
-                tracing::warn!("{}", msg);
-                warnings.push(msg);
-                false
-            }
-        };
+                Err(e) => {
+                    let msg = format!(
+                        "Kokoro 82M model download failed (TTS falls back to OuteTTS): {e:#}"
+                    );
+                    tracing::warn!("{}", msg);
+                    warnings.push(msg);
+                    false
+                }
+            };
 
         let status = LocalStackStatus {
             llamacpp_installed,

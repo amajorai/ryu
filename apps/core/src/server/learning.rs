@@ -26,7 +26,11 @@ pub async fn list(State(state): State<ServerState>) -> Response {
     match state.experience.list(200).await {
         Ok(rows) => {
             let min_reward = learning::resolve_min_reward(&state).await;
-            let counts = state.experience.counts(min_reward).await.unwrap_or((0, 0, 0));
+            let counts = state
+                .experience
+                .counts(min_reward)
+                .await
+                .unwrap_or((0, 0, 0));
             (
                 axum::http::StatusCode::OK,
                 Json(json!({
@@ -78,7 +82,10 @@ pub async fn synthesize(State(state): State<ServerState>, Json(body): Json<Value
 /// dataset. Dry run by default; `{ "execute": true }` is reserved for dispatching
 /// the fine-tune (not wired in the scaffold; needs a GPU + the original base).
 pub async fn cycle(State(state): State<ServerState>, Json(body): Json<Value>) -> Response {
-    let execute = body.get("execute").and_then(Value::as_bool).unwrap_or(false);
+    let execute = body
+        .get("execute")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     match learning::run_cycle(&state, execute).await {
         Ok(plan) => Json(plan).into_response(),
         Err(e) => err(e),
@@ -92,7 +99,10 @@ pub async fn exclude(State(state): State<ServerState>, Json(body): Json<Value>) 
     let Some(cid) = body.get("conversation_id").and_then(Value::as_str) else {
         return bad_request("missing `conversation_id`");
     };
-    let excluded = body.get("excluded").and_then(Value::as_bool).unwrap_or(true);
+    let excluded = body
+        .get("excluded")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     // Flip already-buffered rows FIRST and surface any failure — the retroactive
     // training-exclusion guarantee depends on this UPDATE, so a swallowed error
     // (e.g. a busy WAL) must not be reported as success. Only persist the pref

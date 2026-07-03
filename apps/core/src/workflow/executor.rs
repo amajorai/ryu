@@ -829,7 +829,11 @@ async fn execute_node(
             let rendered = resolve(task_tmpl, &ctx);
             run_prompt(&rendered, Some(agent_id), &run.run_id, &node.id).await
         }
-        NodeKind::Skill { skill, agent_id, task } => {
+        NodeKind::Skill {
+            skill,
+            agent_id,
+            task,
+        } => {
             let task_tmpl = task.as_deref().unwrap_or("{{input}}");
             let rendered = resolve(task_tmpl, &ctx);
             run_skill(skill, agent_id.as_deref(), &rendered, &run.run_id, &node.id).await

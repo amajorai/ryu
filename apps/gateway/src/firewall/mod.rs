@@ -1,7 +1,7 @@
 use regex::Regex;
 use tracing::warn;
 
-use crate::config::{FirewallConfig, FirewallPolicy};
+use crate::config::{CustomPatternKind, FirewallConfig, FirewallPolicy};
 
 pub mod cmdscan;
 
@@ -29,10 +29,34 @@ pub struct FirewallScanner {
 
 impl FirewallScanner {
     pub fn new(config: FirewallConfig) -> Self {
-        let pii_patterns = build_pii_patterns();
-        let secret_patterns = build_secret_patterns();
-        let injection_patterns = build_injection_patterns();
+        let mut pii_patterns = build_pii_patterns();
+        let mut secret_patterns = build_secret_patterns();
+        let mut injection_patterns = build_injection_patterns();
         let outbound_patterns = build_outbound_patterns();
+
+        // Merge user-defined patterns on top of the curated sets. A pattern that
+        // fails to compile is skipped with a warning rather than dropping the
+        // whole firewall config — one bad regex must never disable protection.
+        for pat in &config.custom_patterns {
+            let name = pat.name.trim();
+            if name.is_empty() || pat.regex.trim().is_empty() {
+                warn!("Firewall: skipping custom pattern with empty name or regex");
+                continue;
+            }
+            match Regex::new(&pat.regex) {
+                Ok(re) => {
+                    let target = match pat.kind {
+                        CustomPatternKind::Pii => &mut pii_patterns,
+                        CustomPatternKind::Secret => &mut secret_patterns,
+                        CustomPatternKind::PromptInjection => &mut injection_patterns,
+                    };
+                    target.push((name.to_string(), re));
+                }
+                Err(e) => {
+                    warn!(pattern = %name, error = %e, "Firewall: skipping invalid custom pattern regex");
+                }
+            }
+        }
 
         // Seed the process-global untrusted-content wrapping flag from config.
         // This is the single chokepoint hit at startup AND on every hot-swap
@@ -454,7 +478,7 @@ fn compile_patterns(raw: &[(&str, &str)]) -> Vec<(String, Regex)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{FirewallConfig, FirewallPolicy};
+    use crate::config::{CustomPattern, FirewallConfig, FirewallPolicy};
 
     fn scanner_with(redact_pii: bool, redact_secrets: bool) -> FirewallScanner {
         FirewallScanner::new(FirewallConfig {
@@ -522,6 +546,77 @@ mod tests {
         assert!(
             !out.contains("sk-abcdefghijklmnopqrstu"),
             "secret key should be redacted: {out}"
+        );
+    }
+
+    // ── Custom pattern tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn custom_pii_pattern_is_scanned_and_redacted() {
+        let scanner = FirewallScanner::new(FirewallConfig {
+            policy: FirewallPolicy::Sanitize,
+            custom_patterns: vec![CustomPattern {
+                name: "employee_id".to_string(),
+                regex: r"EMP-\d{6}".to_string(),
+                kind: CustomPatternKind::Pii,
+            }],
+            ..FirewallConfig::default()
+        });
+        // Inbound scan should trip on the custom PII pattern.
+        let hit = scanner.scan_inbound("my badge is EMP-123456 thanks");
+        assert!(hit.is_some(), "custom PII pattern should match inbound");
+        // Sanitize should replace it with the name-derived marker.
+        let out = scanner.sanitize("my badge is EMP-123456 thanks");
+        assert!(
+            !out.contains("EMP-123456"),
+            "custom PII should be redacted: {out}"
+        );
+        assert!(
+            out.contains("[REDACTED:EMPLOYEE_ID]"),
+            "marker should derive from the pattern name: {out}"
+        );
+    }
+
+    #[test]
+    fn custom_secret_pattern_is_redacted_outbound() {
+        let scanner = FirewallScanner::new(FirewallConfig {
+            policy: FirewallPolicy::Sanitize,
+            custom_patterns: vec![CustomPattern {
+                name: "internal_token".to_string(),
+                regex: r"INT_[A-Z0-9]{10}".to_string(),
+                kind: CustomPatternKind::Secret,
+            }],
+            ..FirewallConfig::default()
+        });
+        let hit = scanner.scan_outbound("leaked INT_ABCDE12345 value");
+        assert!(hit.is_some(), "custom secret pattern should match outbound");
+    }
+
+    #[test]
+    fn invalid_custom_pattern_is_skipped_not_fatal() {
+        // An unclosed group is invalid regex; the scanner must still build and
+        // keep the built-in patterns working.
+        let scanner = FirewallScanner::new(FirewallConfig {
+            policy: FirewallPolicy::Sanitize,
+            custom_patterns: vec![
+                CustomPattern {
+                    name: "broken".to_string(),
+                    regex: r"(unclosed".to_string(),
+                    kind: CustomPatternKind::Pii,
+                },
+                CustomPattern {
+                    name: "".to_string(),
+                    regex: r"nonempty".to_string(),
+                    kind: CustomPatternKind::Pii,
+                },
+            ],
+            ..FirewallConfig::default()
+        });
+        // Built-in email PII still fires despite the invalid custom entries.
+        let out = scanner.sanitize("reach me at user@example.com");
+        assert!(
+            !out.contains("user@example.com"),
+            "built-in PII must still redact when a custom pattern is invalid: {out}"
         );
     }
 

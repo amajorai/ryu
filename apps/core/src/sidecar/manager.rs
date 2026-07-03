@@ -92,6 +92,19 @@ impl SidecarManager {
         let resident_engine = self.resolve_resident_engine().await;
         if let Some(engine) = &resident_engine {
             *self.active_engine.lock().await = Some(engine.clone());
+            // Persist the resolved resident so `local_engine_gateway_url()` (which
+            // reads the on-disk store) can register it as the gateway's `local`
+            // provider. Without this, a fresh install that never performed an
+            // explicit engine swap left the gateway with NO local provider — the
+            // zero-key default model (routed `gemma* → Local`) then failed with
+            // "all_providers_unavailable" even though llama-server was healthy
+            // (QA finding B1's last leg). The gateway sidecar computes its spawn
+            // env after this point in `start_all`, so ordering is safe.
+            if ActiveEngineStore::load().active.as_deref() != Some(engine.as_str()) {
+                if let Err(e) = ActiveEngineStore::save_active(Some(engine)) {
+                    tracing::warn!(error = %e, engine, "could not persist resident local engine");
+                }
+            }
         }
 
         for name in &self.startup_order {

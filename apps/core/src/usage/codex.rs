@@ -183,7 +183,9 @@ fn window(
 fn title_case_plan(s: &str) -> String {
     let mut chars = s.trim().chars();
     match chars.next() {
-        Some(first) => first.to_ascii_uppercase().to_string() + &chars.as_str().to_ascii_lowercase(),
+        Some(first) => {
+            first.to_ascii_uppercase().to_string() + &chars.as_str().to_ascii_lowercase()
+        }
         None => String::new(),
     }
 }

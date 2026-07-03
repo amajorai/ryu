@@ -338,7 +338,10 @@ impl SamplingConfig {
                         .filter_map(|(k, v)| {
                             let id: i64 = k.parse().ok()?;
                             let bias = serde_json::Number::from_f64(v.as_f64()?)?;
-                            Some(Value::Array(vec![Value::Number(id.into()), Value::Number(bias)]))
+                            Some(Value::Array(vec![
+                                Value::Number(id.into()),
+                                Value::Number(bias),
+                            ]))
                         })
                         .collect();
                     if !pairs.is_empty() {
@@ -356,7 +359,10 @@ impl SamplingConfig {
                     body.insert("response_format".to_owned(), rf.clone());
                 }
                 if !self.logit_bias.is_empty() {
-                    body.insert("logit_bias".to_owned(), Value::Object(self.logit_bias.clone()));
+                    body.insert(
+                        "logit_bias".to_owned(),
+                        Value::Object(self.logit_bias.clone()),
+                    );
                 }
             }
             Engine::Mlx => {
@@ -375,7 +381,10 @@ impl SamplingConfig {
                     body.insert("response_format".to_owned(), rf.clone());
                 }
                 if !self.logit_bias.is_empty() {
-                    body.insert("logit_bias".to_owned(), Value::Object(self.logit_bias.clone()));
+                    body.insert(
+                        "logit_bias".to_owned(),
+                        Value::Object(self.logit_bias.clone()),
+                    );
                 }
             }
         }
@@ -969,7 +978,12 @@ mod tests {
             ..Default::default()
         };
 
-        for e in [Engine::LlamaCpp, Engine::Vllm, Engine::Sglang, Engine::Other] {
+        for e in [
+            Engine::LlamaCpp,
+            Engine::Vllm,
+            Engine::Sglang,
+            Engine::Other,
+        ] {
             let mut body = Map::new();
             s.apply_to_body(e, &mut body);
             assert_eq!(

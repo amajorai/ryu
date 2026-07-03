@@ -20,12 +20,13 @@ mod dashboard;
 mod data_path;
 mod downloads;
 mod events;
+mod experience;
+mod fal_auth;
 mod finetune;
 mod hardware;
 mod hf_auth;
 mod identity;
 mod identity_verify;
-mod experience;
 mod inference;
 mod learning;
 mod mcp_catalog;
@@ -36,8 +37,6 @@ mod model_format;
 mod monitors;
 mod okf;
 mod openrouter_auth;
-mod fal_auth;
-mod replicate_auth;
 mod paths;
 mod pi_config;
 mod plugin_host;
@@ -50,6 +49,7 @@ mod quests;
 mod realtime;
 mod recipes;
 mod registry;
+mod replicate_auth;
 mod runnable;
 mod sandbox;
 mod scheduler;
@@ -84,9 +84,7 @@ use sidecar::{
         whispercpp::WhisperCppManager, DockerModelRunnerManager,
     },
     tailscale::TailscaleManager,
-    tools::{
-        ghost::GhostManager, llmfit::LlmFit, shadow::ShadowManager, spider::SpiderManager,
-    },
+    tools::{ghost::GhostManager, llmfit::LlmFit, shadow::ShadowManager, spider::SpiderManager},
     SidecarManager,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -1249,8 +1247,7 @@ fn ensure_learning_cycle_job() -> Result<(), String> {
 
     const JOB_ID: &str = "learning-cycle";
 
-    let interval =
-        std::env::var("RYU_LEARNING_INTERVAL").unwrap_or_else(|_| "1h".to_string());
+    let interval = std::env::var("RYU_LEARNING_INTERVAL").unwrap_or_else(|_| "1h".to_string());
     let now = chrono::Utc::now().to_rfc3339();
     let existing = job_store::load_job(JOB_ID).ok();
     let job = ScheduledJob {

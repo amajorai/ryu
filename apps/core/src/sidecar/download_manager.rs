@@ -171,6 +171,11 @@ pub(crate) fn extract_from_tar_gz(data: &[u8], binary_name: &str) -> anyhow::Res
     anyhow::bail!("binary '{binary_name}' not found in archive")
 }
 
+/// Default decompression-bomb cap for [`extract_tar_gz_to_dir`]: 500 MB of
+/// expanded bytes. Appropriate for skill/tool tarballs; model-class archives
+/// legitimately expand past this and must pass an explicit larger cap.
+pub(crate) const DEFAULT_EXTRACT_CAP_BYTES: u64 = 500 * 1024 * 1024;
+
 /// Extract **every** file entry from a `.tar.gz` archive into `dest_dir`,
 /// preserving the archive's internal directory structure. Returns the list of
 /// written relative paths.
@@ -179,7 +184,16 @@ pub(crate) fn extract_from_tar_gz(data: &[u8], binary_name: &str) -> anyhow::Res
 /// blob.handy.computer, which expands to a `parakeet-tdt-0.6b-v3-int8/` dir with
 /// encoder/decoder/nemo128 `.onnx` files + `vocab.txt`). Entries are sanitized to
 /// stay within `dest_dir` (no `..` traversal).
-pub(crate) fn extract_tar_gz_to_dir(data: &[u8], dest_dir: &Path) -> anyhow::Result<Vec<String>> {
+///
+/// `max_total_bytes` is the decompression-bomb cap on total expanded bytes;
+/// `None` uses [`DEFAULT_EXTRACT_CAP_BYTES`] (500 MB). Callers extracting
+/// model-class archives (which legitimately expand into the GB range) should
+/// pass an explicit, still-bounded cap instead of removing the guard.
+pub(crate) fn extract_tar_gz_to_dir(
+    data: &[u8],
+    dest_dir: &Path,
+    max_total_bytes: Option<u64>,
+) -> anyhow::Result<Vec<String>> {
     use flate2::read::GzDecoder;
     use std::io::Read;
     use tar::Archive;
@@ -189,7 +203,7 @@ pub(crate) fn extract_tar_gz_to_dir(data: &[u8], dest_dir: &Path) -> anyhow::Res
 
     // Decompression-bomb guard: cap both the total bytes written and the number
     // of entries so a tiny gzip can't expand to fill the disk.
-    const MAX_TOTAL_BYTES: u64 = 500 * 1024 * 1024;
+    let max_total_bytes = max_total_bytes.unwrap_or(DEFAULT_EXTRACT_CAP_BYTES);
     const MAX_ENTRIES: usize = 50_000;
 
     let gz = GzDecoder::new(data);
@@ -231,9 +245,9 @@ pub(crate) fn extract_tar_gz_to_dir(data: &[u8], dest_dir: &Path) -> anyhow::Res
             .read_to_end(&mut bytes)
             .context("reading entry bytes")?;
         total_bytes += bytes.len() as u64;
-        if total_bytes > MAX_TOTAL_BYTES {
+        if total_bytes > max_total_bytes {
             anyhow::bail!(
-                "archive expands past the {MAX_TOTAL_BYTES}-byte cap (decompression bomb?)"
+                "archive expands past the {max_total_bytes}-byte cap (decompression bomb?)"
             );
         }
         std::fs::write(&out_path, &bytes)
@@ -578,7 +592,6 @@ impl SidecarManifest for ZeroClawManifest {
         "v0.1.0"
     }
 }
-
 
 pub struct LlamaCppManifest;
 
