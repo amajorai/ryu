@@ -153,6 +153,8 @@ use utoipa::OpenApi;
         super::get_session_handler,
         super::update_session_status_handler,
         super::list_sessions_for_conversation_handler,
+        super::list_agent_threads_handler,
+        super::import_agent_thread_handler,
         super::data_admin::data_counts,
         super::data_admin::data_clear,
         super::list_spaces,

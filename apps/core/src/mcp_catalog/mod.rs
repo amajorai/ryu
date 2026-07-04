@@ -90,17 +90,49 @@ pub fn registry_base(base_url: Option<&str>) -> String {
 /// The list envelope returned by `/v0.1/servers`.
 #[derive(Debug, Clone, Deserialize)]
 struct ServerListEnvelope {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_server_entries")]
     servers: Vec<ServerJson>,
     #[serde(default)]
     metadata: ListMetadata,
 }
 
-/// Pagination metadata; only `next_cursor` is surfaced.
+/// Pagination metadata; only the forward cursor is surfaced. The official
+/// registry sends `nextCursor` (camelCase); older mirrors/fixtures use
+/// `next_cursor` — accept both.
 #[derive(Debug, Clone, Default, Deserialize)]
 struct ListMetadata {
-    #[serde(default)]
+    #[serde(default, alias = "nextCursor")]
     next_cursor: Option<String>,
+}
+
+/// One element of the registry's `servers[]` array. The official v0.1 registry
+/// wraps each server as `{ "server": { … }, "_meta": { … } }`; older mirrors and
+/// our test fixtures use the flat `{ name, … }` shape. Accept both so a registry
+/// shape change never blanks the catalog (the old flat parse returned 502).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum ServerEntry {
+    Wrapped { server: ServerJson },
+    Flat(ServerJson),
+}
+
+impl ServerEntry {
+    fn into_server(self) -> ServerJson {
+        match self {
+            ServerEntry::Wrapped { server } => server,
+            ServerEntry::Flat(server) => server,
+        }
+    }
+}
+
+/// Deserialize a `servers[]` array of mixed wrapped/flat entries into flat
+/// [`ServerJson`]s, so the rest of the pipeline stays shape-agnostic.
+fn deserialize_server_entries<'de, D>(deserializer: D) -> Result<Vec<ServerJson>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let entries = Vec::<ServerEntry>::deserialize(deserializer)?;
+    Ok(entries.into_iter().map(ServerEntry::into_server).collect())
 }
 
 /// One server entry in the registry, following the `server.json` schema. Only
@@ -393,12 +425,12 @@ fn parse_server_list_envelope(bytes: &[u8]) -> Result<ServerListEnvelope> {
             return Ok(env);
         }
     }
-    // Fall back to a bare array of server entries.
-    let servers: Vec<ServerJson> = serde_json::from_slice(bytes).map_err(|e| {
+    // Fall back to a bare array of server entries (wrapped or flat).
+    let entries: Vec<ServerEntry> = serde_json::from_slice(bytes).map_err(|e| {
         anyhow!("registry response is neither a servers envelope nor an array: {e}")
     })?;
     Ok(ServerListEnvelope {
-        servers,
+        servers: entries.into_iter().map(ServerEntry::into_server).collect(),
         metadata: ListMetadata::default(),
     })
 }
@@ -728,6 +760,46 @@ mod tests {
         let arr = br#"[{ "name": "io.github.x/y" }]"#;
         let servers = parse_server_list(arr).expect("array fallback parses");
         assert_eq!(servers.len(), 1);
+    }
+
+    // The official v0.1 registry wraps each entry as `{ server, _meta }` and
+    // paginates with `nextCursor` (camelCase). Regression for the 502 that shape
+    // caused before the parser tolerated both wrapped and flat entries.
+    const WRAPPED_LIST: &str = r#"{
+        "servers": [
+            {
+                "server": {
+                    "name": "io.github.acme/files",
+                    "description": "Filesystem tools",
+                    "version": "1.4.0",
+                    "remotes": [
+                        { "type": "streamable-http", "url": "https://mcp.acme.com/files" }
+                    ]
+                },
+                "_meta": { "io.modelcontextprotocol.registry/official": { "id": "x" } }
+            }
+        ],
+        "metadata": { "nextCursor": "next-page", "count": 1 }
+    }"#;
+
+    #[test]
+    fn parses_wrapped_registry_shape() {
+        let env = parse_server_list_envelope(WRAPPED_LIST.as_bytes()).expect("parse wrapped");
+        assert_eq!(env.servers.len(), 1);
+        assert_eq!(env.servers[0].name, "io.github.acme/files");
+        assert_eq!(env.metadata.next_cursor.as_deref(), Some("next-page"));
+        let card = server_to_card(&env.servers[0]);
+        assert_eq!(card["id"], "io.github.acme/files");
+        assert_eq!(card["has_remotes"], true);
+    }
+
+    #[test]
+    fn parses_wrapped_bare_array() {
+        // A bare array whose elements are wrapped also unwraps (resilience path).
+        let arr = br#"[{ "server": { "name": "io.github.x/y" }, "_meta": {} }]"#;
+        let servers = parse_server_list(arr).expect("wrapped array fallback parses");
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "io.github.x/y");
     }
 
     #[test]

@@ -820,6 +820,14 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/agents/:id/export", get(export_agent))
         .route("/api/agents/:id/tools", get(list_tools))
         .route("/api/agents/:id/migrate-to-ryu", post(migrate_to_ryu))
+        // ── Import a past thread from an agent's own on-disk history store
+        //    (Claude Code / Codex), Zed/VS Code parity. List, then import one
+        //    into a Ryu conversation. ──
+        .route("/api/agents/:id/threads", get(list_agent_threads_handler))
+        .route(
+            "/api/agents/:id/threads/import",
+            post(import_agent_thread_handler),
+        )
         // ── ACP session config (agent-reported permission modes / models /
         //    config options like reasoning effort), Zed-style ──
         .route("/api/agents/:id/acp-config", get(acp_config))
@@ -6192,6 +6200,185 @@ async fn list_sessions_for_conversation_handler(
     }
 }
 
+/// Resolve an agent id to its engine (the `AgentInfo.engine` value, e.g.
+/// `claude`/`codex`), so the native-history reader knows which on-disk store to
+/// read. Falls back to the id with any `acp:` prefix stripped when the agent is
+/// not in the registry (BYO agents), which is a no-op for unknown engines.
+fn resolve_agent_engine(state: &ServerState, agent_id: &str) -> Option<String> {
+    state
+        .agents
+        .list_infos()
+        .into_iter()
+        .find(|i| i.id == agent_id)
+        .and_then(|i| i.engine)
+        .or_else(|| Some(agent_id.strip_prefix("acp:").unwrap_or(agent_id).to_string()))
+}
+
+/// List the threads in an agent's own on-disk history store (Claude Code / Codex)
+/// that Ryu can import. Optional `?cwd=` filters to threads from one directory.
+/// Unsupported engines return an empty list (not an error) so the UI can always
+/// offer the affordance and show an empty state.
+#[utoipa::path(
+    get,
+    path = "/api/agents/{id}/threads",
+    tag = "Agents",
+    summary = "List an agent's importable native threads",
+    params(
+        ("id" = String, Path),
+        ("cwd" = Option<String>, Query, description = "Filter to threads from this working directory")
+    ),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn list_agent_threads_handler(
+    State(state): State<ServerState>,
+    axum::extract::Path(agent_id): axum::extract::Path<String>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    let engine = match resolve_agent_engine(&state, &agent_id) {
+        Some(e) => e,
+        None => {
+            return Json(json!({ "agent_id": agent_id, "threads": [] })).into_response();
+        }
+    };
+    let cwd = params.get("cwd").map(String::as_str).filter(|s| !s.is_empty());
+    // Blocking filesystem scan — hop off the async runtime.
+    let result = tokio::task::spawn_blocking({
+        let engine = engine.clone();
+        let cwd = cwd.map(str::to_string);
+        move || crate::native_history::list_threads(&engine, cwd.as_deref())
+    })
+    .await;
+    match result {
+        Ok(Ok(threads)) => Json(json!({
+            "agent_id": agent_id,
+            "engine": engine,
+            "supported": crate::native_history::engine_supports_history(&engine),
+            "threads": threads,
+        }))
+        .into_response(),
+        Ok(Err(e)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ImportThreadBody {
+    thread_id: String,
+}
+
+/// Import one native thread into a fresh Ryu conversation: read the agent's
+/// on-disk transcript and persist it as conversation messages, stamping the
+/// origin + the agent-native session id (for a future `session/load` resume).
+/// Returns the new `conversation_id` so the client can open it.
+#[utoipa::path(
+    post,
+    path = "/api/agents/{id}/threads/import",
+    tag = "Agents",
+    summary = "Import a native thread into a Ryu conversation",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn import_agent_thread_handler(
+    State(state): State<ServerState>,
+    axum::extract::Path(agent_id): axum::extract::Path<String>,
+    Json(body): Json<ImportThreadBody>,
+) -> axum::response::Response {
+    let engine = match resolve_agent_engine(&state, &agent_id) {
+        Some(e) => e,
+        None => return json_error(StatusCode::BAD_REQUEST, "unknown agent".to_string()),
+    };
+    let thread_id = body.thread_id.clone();
+    let read = tokio::task::spawn_blocking({
+        let engine = engine.clone();
+        move || crate::native_history::read_thread(&engine, &thread_id)
+    })
+    .await;
+    let imported = match read {
+        Ok(Ok(t)) => t,
+        Ok(Err(e)) => return json_error(StatusCode::NOT_FOUND, e.to_string()),
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    if imported.messages.is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "thread has no messages".to_string());
+    }
+
+    // Dedup: a repeat import of the same agent-native thread focuses the existing
+    // Ryu conversation instead of creating a duplicate.
+    let origin = format!("import:{engine}");
+    if let Some(native_id) = imported.thread.native_session_id.as_deref() {
+        match state
+            .conversations
+            .find_imported_conversation(&origin, native_id)
+            .await
+        {
+            Ok(Some(existing)) => {
+                return Json(json!({
+                    "conversation_id": existing,
+                    "agent_id": agent_id,
+                    "engine": engine,
+                    "message_count": imported.messages.len(),
+                    "truncated": imported.truncated,
+                    "title": imported.thread.title,
+                    "already_imported": true,
+                }))
+                .into_response();
+            }
+            Ok(None) => {}
+            Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        }
+    }
+
+    let conversation_id = format!("conv_{}", uuid::Uuid::new_v4());
+    if let Err(e) = state
+        .conversations
+        .ensure_conversation(&conversation_id, Some(&agent_id), Some(&imported.thread.title))
+        .await
+    {
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    }
+    for msg in &imported.messages {
+        if let Err(e) = state
+            .conversations
+            .append_message(&conversation_id, &msg.role, &msg.content, Some(&agent_id), None, None)
+            .await
+        {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+        }
+    }
+    if let Err(e) = state
+        .conversations
+        .set_import_source(
+            &conversation_id,
+            &origin,
+            imported.thread.native_session_id.as_deref(),
+        )
+        .await
+    {
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    }
+    // Preserve the title even though append_message derives one from the first
+    // user turn — a native summary is a better title when present. set_title
+    // marks it custom so the background auto-namer never clobbers it.
+    if let Err(e) = state
+        .conversations
+        .set_title(&conversation_id, &imported.thread.title)
+        .await
+    {
+        tracing::warn!("import: failed to set title for {conversation_id}: {e:#}");
+    }
+
+    Json(json!({
+        "conversation_id": conversation_id,
+        "agent_id": agent_id,
+        "engine": engine,
+        "message_count": imported.messages.len(),
+        "truncated": imported.truncated,
+        "title": imported.thread.title,
+    }))
+    .into_response()
+}
+
 /// Real tools available for an agent. For ACP agents this is the set of tools
 /// the agent has actually invoked this run (they expose no static catalog);
 /// for OpenAI-compatible agents it is currently empty.
@@ -7968,6 +8155,15 @@ async fn composio_connections(
     State(state): State<ServerState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    // No Composio key is the default state, not a failure: report it as an empty,
+    // unconfigured list (200) so callers show a "connect an integration" empty
+    // state rather than a load error. 502 stays reserved for real upstream faults.
+    if !crate::composio_auth::is_configured() {
+        return (
+            StatusCode::OK,
+            Json(json!({ "data": [], "configured": false })),
+        );
+    }
     let toolkit = params.get("toolkit").map(String::as_str).unwrap_or("");
     match crate::composio_connect::list_connections(&state.client, toolkit).await {
         Ok(value) => (StatusCode::OK, Json(value)),

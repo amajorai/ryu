@@ -463,6 +463,19 @@ impl ConversationStore {
                 "team_id",
                 "ALTER TABLE conversations ADD COLUMN team_id       TEXT",
             ),
+            // Imported threads (agent-native history import, Zed/VS Code parity):
+            // `origin` marks where a conversation came from (e.g. `import:claude`)
+            // and `native_session_id` records the agent's own session/thread id so
+            // a future ACP `session/load` can warm-resume the agent's context.
+            // Both nullable → existing conversations are native Ryu threads.
+            (
+                "origin",
+                "ALTER TABLE conversations ADD COLUMN origin        TEXT",
+            ),
+            (
+                "native_session_id",
+                "ALTER TABLE conversations ADD COLUMN native_session_id TEXT",
+            ),
         ] {
             if !existing_conv_columns.contains(col) {
                 conn.execute_batch(ddl)
@@ -544,6 +557,51 @@ impl ConversationStore {
         )
         .context("setting run metadata")?;
         Ok(())
+    }
+
+    /// Record that a conversation was imported from an agent's native history
+    /// store: `origin` (e.g. `import:claude`) and the agent-native `session_id`.
+    /// Call after the conversation row exists. Callers dedup on
+    /// [`find_imported_conversation`] before creating, so a re-import returns the
+    /// existing conversation rather than writing a duplicate.
+    pub async fn set_import_source(
+        &self,
+        conversation_id: &str,
+        origin: &str,
+        native_session_id: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE conversations
+             SET origin = ?2, native_session_id = ?3
+             WHERE id = ?1",
+            params![conversation_id, origin, native_session_id],
+        )
+        .context("setting import source")?;
+        Ok(())
+    }
+
+    /// Find an already-imported conversation by its import origin + agent-native
+    /// session id, so a repeat import focuses the existing thread instead of
+    /// creating a duplicate. Returns `None` when nothing matches (or the source
+    /// thread carried no native session id to key on).
+    pub async fn find_imported_conversation(
+        &self,
+        origin: &str,
+        native_session_id: &str,
+    ) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let id = conn
+            .query_row(
+                "SELECT id FROM conversations
+                 WHERE origin = ?1 AND native_session_id = ?2
+                 ORDER BY updated_at DESC LIMIT 1",
+                params![origin, native_session_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("looking up imported conversation")?;
+        Ok(id)
     }
 
     /// Update the run_status column of a conversation.

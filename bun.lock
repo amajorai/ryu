@@ -83,6 +83,7 @@
         "@tauri-apps/plugin-store": "^2.4.2",
         "@tauri-apps/plugin-updater": "^2",
         "@xyflow/react": "^12.10.2",
+        "agentation": "^3.0.2",
         "ai": "catalog:",
         "better-auth": "^1.5.5",
         "class-variance-authority": "^0.7.1",

@@ -35,6 +35,7 @@ mod mesh;
 mod model_catalog;
 mod model_format;
 mod monitors;
+mod native_history;
 mod okf;
 mod openrouter_auth;
 mod paths;
