@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "node scripts/dev.js",
-    "dev:watch": "cargo watch -x run",
-    "build": "cargo build --release",
+    "dev:watch": "cargo watch -x 'run --features sandbox-wasmtime'",
+    "build": "cargo build --release --features sandbox-wasmtime",
     "check": "cargo check"
   }
 }

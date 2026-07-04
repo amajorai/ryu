@@ -138,6 +138,14 @@ sentry = { version = "0.34", default-features = false, features = ["backtrace", 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal"] }
 
+# Optional: wasmtime sandbox backend (feature sandbox-wasmtime). Cross-platform
+# (macOS/Windows/Linux), so it MUST live in the main [dependencies] table — not
+# under a per-OS [target...] block, or `dep:wasmtime` resolves to nothing off
+# that OS and the feature fails to compile there. Binary-size delta (release):
+# measured in docs/spikes/0188-wasmtime-wasi-ceiling.md
+wasmtime = { version = "45", optional = true }
+wasmtime-wasi = { version = "45", features = ["p1", "p2"], optional = true }
+
 # OS keychain for the at-rest master key (see src/crypto/mod.rs). Per-platform
 # native backend so the key lives outside ~/.ryu: Windows Credential Manager,
 # macOS Keychain, Linux Secret Service. Falls back to a file key when absent.
@@ -151,11 +159,6 @@ keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
-
-# Optional: wasmtime sandbox backend (feature sandbox-wasmtime).
-# Binary-size delta (release): measured in docs/spikes/0188-wasmtime-wasi-ceiling.md
-wasmtime = { version = "45", optional = true }
-wasmtime-wasi = { version = "45", features = ["p1", "p2"], optional = true }
 
 # ── Parakeet v3 STT (ONNX) — opt-in, off by default ──────────────────────────
 # Parakeet inference runs in-process via transcribe-rs (git-only, pulls a heavy
@@ -186,6 +189,10 @@ tool-exec-deno = []
 tool-exec-quickjs = []
 tool-exec-securexec = []
 tool-exec-justbash = []
+# Off in `default` on purpose (spike 0188: keep `cargo test`/CI lean). The dev
+# and release binaries the user actually runs DO enable it — see the `dev`/
+# `dev:watch`/`build` scripts in apps/core/package.json — so the shipped app has
+# the default WASM sandbox compiled in and `detect_backend("wasmtime")` is true.
 sandbox-wasmtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
 # Parakeet STT inference. Requires the commented transcribe-rs/once_cell/tempfile
 # optional deps above to be uncommented first:

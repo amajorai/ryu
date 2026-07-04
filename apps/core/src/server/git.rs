@@ -419,6 +419,75 @@ fn commit_and_push(cwd: &str, message: &str) -> Result<CommitPushOutcome, String
     })
 }
 
+// ── Create a new project folder ("Start from scratch") ────────────────────────
+
+#[derive(Deserialize)]
+pub struct NewFolderBody {
+    name: String,
+}
+
+/// `POST /api/workspace/new-folder` `{ name }`
+///
+/// Create a fresh, empty project folder under `~/Documents/Ryu/<name>` and return
+/// its absolute path so the desktop's "Start from scratch" flow can open it. This
+/// is Core: it owns the local filesystem (the desktop's Tauri fs ACL is
+/// intentionally narrow), so folder creation lives here rather than in the client.
+/// `name` is validated to a single path segment — no separators, `..`, or control
+/// characters — so it can never escape the Ryu projects root. Returns HTTP 409
+/// when a folder of that name already exists (so the picker asks for another).
+pub async fn create_project_folder(Json(body): Json<NewFolderBody>) -> axum::response::Response {
+    let name = body.name.trim().to_string();
+    if let Err(msg) = validate_folder_name(&name) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))).into_response();
+    }
+
+    let Some(docs) = dirs::document_dir() else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "could not resolve the Documents directory" })),
+        )
+            .into_response();
+    };
+    let target = docs.join("Ryu").join(&name);
+
+    if target.exists() {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": format!("A folder named \"{name}\" already exists") })),
+        )
+            .into_response();
+    }
+
+    match std::fs::create_dir_all(&target) {
+        Ok(()) => Json(json!({ "path": target.to_string_lossy() })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("failed to create folder: {e}") })),
+        )
+            .into_response(),
+    }
+}
+
+/// Validate a project-folder name is a single, safe path segment.
+fn validate_folder_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("A folder name is required".to_string());
+    }
+    if name.chars().count() > 120 {
+        return Err("That name is too long".to_string());
+    }
+    if name == "." || name == ".." || name.contains("..") {
+        return Err("That name is not allowed".to_string());
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err("A folder name cannot contain slashes".to_string());
+    }
+    if name.chars().any(char::is_control) {
+        return Err("A folder name cannot contain control characters".to_string());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,5 +505,21 @@ mod tests {
     #[test]
     fn parse_ahead_behind_no_upstream() {
         assert_eq!(parse_ahead_behind(Some("")), (0, 0));
+    }
+
+    #[test]
+    fn folder_name_accepts_plain_names() {
+        assert!(validate_folder_name("My Project").is_ok());
+        assert!(validate_folder_name("ryu-app_2").is_ok());
+    }
+
+    #[test]
+    fn folder_name_rejects_traversal_and_separators() {
+        assert!(validate_folder_name("").is_err());
+        assert!(validate_folder_name("..").is_err());
+        assert!(validate_folder_name("a/b").is_err());
+        assert!(validate_folder_name("a\\b").is_err());
+        assert!(validate_folder_name("foo..bar").is_err());
+        assert!(validate_folder_name("bad\nname").is_err());
     }
 }

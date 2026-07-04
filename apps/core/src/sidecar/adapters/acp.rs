@@ -317,6 +317,13 @@ pub fn resolve_permission(request_id: &str, option_id: Option<String>) -> bool {
 // low-level connection, reads the full response, and drops it. Results are
 // cached per spawn command (an agent's advertised set is static per binary).
 
+/// Ceiling on a single ACP config probe (`initialize` + `session/new`). Long
+/// enough for a cold `npx` spawn of a large agent binary plus a first backend
+/// round-trip, short enough that a wedged `session/new` (e.g. Codex against an
+/// unreachable provider) fails fast and stays retryable rather than hanging the
+/// desktop's picker request forever.
+const ACP_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 type ConfigCache = Mutex<std::collections::HashMap<String, serde_json::Value>>;
 
 fn config_cache() -> &'static ConfigCache {
@@ -341,27 +348,44 @@ pub async fn probe_acp_config(
     let agent =
         AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
     let probe_cmd = spawn_cmd.clone();
-    let value = Client
-        .builder()
-        .connect_with(agent, move |cx: ConnectionTo<Agent>| {
-            let cwd = cwd.clone();
-            async move {
-                cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
-                    .block_task()
-                    .await?;
-                let resp: NewSessionResponse = cx
-                    .send_request(NewSessionRequest::new(cwd))
-                    .block_task()
-                    .await?;
-                Ok(serde_json::json!({
-                    "modes": resp.modes,
-                    "models": resp.models,
-                    "configOptions": resp.config_options,
-                }))
-            }
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("ACP probe: {e}"))?;
+    // Bound the whole probe. Some agents advertise their session config statically
+    // (Claude Code, Pi, the Ryu flagship) and answer `session/new` instantly; others
+    // do real backend work inside `session/new` — Codex, notably, reaches its model
+    // provider there, so an unreachable/cold/unauthenticated backend makes it hang
+    // indefinitely (`initialize` returns, `session/new` never does). Without a
+    // ceiling the request — and the desktop's per-agent pickers that depend on it —
+    // would hang forever; with it the caller gets a clear, retryable error and falls
+    // back to no pickers instead of a wedged spinner. Nothing here is agent-specific.
+    let value = tokio::time::timeout(
+        ACP_PROBE_TIMEOUT,
+        Client
+            .builder()
+            .connect_with(agent, move |cx: ConnectionTo<Agent>| {
+                let cwd = cwd.clone();
+                async move {
+                    cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .block_task()
+                        .await?;
+                    let resp: NewSessionResponse = cx
+                        .send_request(NewSessionRequest::new(cwd))
+                        .block_task()
+                        .await?;
+                    Ok(serde_json::json!({
+                        "modes": resp.modes,
+                        "models": resp.models,
+                        "configOptions": resp.config_options,
+                    }))
+                }
+            }),
+    )
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "ACP probe timed out after {}s — the agent's session/new never responded (is its model backend reachable/authenticated?)",
+            ACP_PROBE_TIMEOUT.as_secs()
+        )
+    })?
+    .map_err(|e| anyhow::anyhow!("ACP probe: {e}"))?;
     if let Ok(mut m) = config_cache().lock() {
         m.insert(probe_cmd, value.clone());
     }

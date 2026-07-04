@@ -1126,6 +1126,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/git/checkout", post(git::git_checkout))
         // ── Git commit + push (pinned-summary "commit & push" button) ───────
         .route("/api/git/commit-push", post(git::git_commit_push))
+        // ── Create a new project folder ("Start from scratch") ──────────────
+        .route("/api/workspace/new-folder", post(git::create_project_folder))
         // ── Worktree diff (read-only, Unit U011) ────────────────────────────
         .route("/api/worktree/:run_id/diff", get(worktree_diff_handler))
         // ── Worktree status (persistent-session: is a worktree live?) ───────

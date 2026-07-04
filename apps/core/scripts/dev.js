@@ -37,7 +37,13 @@ if (process.platform === "win32") {
 	} catch {}
 }
 
-const child = spawn("cargo", ["run"], {
+// Ship the default WASM sandbox (wasmtime) in the running binary. The Cargo
+// `default` feature set stays lean (so `cargo test`/CI don't pay the wasmtime +
+// cranelift compile cost per spike 0188), but the dev and release binaries the
+// user actually runs must have it compiled in — otherwise `detect_backend`
+// reports wasmtime unavailable and the Store shows the default sandbox as
+// not-ready. See apps/core/package.json `build` for the release counterpart.
+const child = spawn("cargo", ["run", "--features", "sandbox-wasmtime"], {
 	stdio: "inherit",
 	env: process.env,
 	shell: false,
