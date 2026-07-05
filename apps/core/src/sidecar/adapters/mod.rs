@@ -32,6 +32,88 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+// ── Live stream registry ────────────────────────────────────────────────────────
+//
+// Per-conversation broadcast channel that the ACP detached task publishes UI
+// frames to. A reconnecting client (e.g. user navigated away and came back)
+// subscribes via `GET /api/chat/stream/resume/:conversation_id` to pick up
+// live frames from the still-running turn.
+
+/// A live stream entry: holds the broadcast sender and a snapshot of text
+/// accumulated so far, so a late-joining subscriber can replay the current
+/// reply before seeing new deltas.
+struct LiveStream {
+    /// Broadcast sender for UI frames (SSE bytes). Subscribers receive frames
+    /// in real-time as the ACP task produces them.
+    tx: tokio::sync::broadcast::Sender<Vec<u8>>,
+    /// Accumulated reply text so far — a late subscriber replays this as a
+    /// synthetic `text-start + text-delta` before forwarding live frames.
+    text_snapshot: std::sync::Mutex<String>,
+}
+
+fn live_stream_registry(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, Arc<LiveStream>>> {
+    static REG: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, Arc<LiveStream>>>,
+    > = std::sync::OnceLock::new();
+    REG.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Register a live stream for a conversation. Called when the ACP task starts.
+fn register_live_stream(conversation_id: &str) -> Arc<LiveStream> {
+    let (tx, _) = tokio::sync::broadcast::channel(256);
+    let live = Arc::new(LiveStream {
+        tx,
+        text_snapshot: std::sync::Mutex::new(String::new()),
+    });
+    if let Ok(mut reg) = live_stream_registry().lock() {
+        reg.insert(conversation_id.to_owned(), Arc::clone(&live));
+    }
+    live
+}
+
+/// Remove a conversation's live stream (turn ended).
+fn unregister_live_stream(conversation_id: &str) {
+    if let Ok(mut reg) = live_stream_registry().lock() {
+        reg.remove(conversation_id);
+    }
+}
+
+/// Get a conversation's live stream (if a turn is in-flight).
+pub fn get_live_stream(
+    conversation_id: &str,
+) -> Option<Arc<LiveStream>> {
+    live_stream_registry()
+        .lock()
+        .ok()
+        .and_then(|reg| reg.get(conversation_id).cloned())
+}
+
+/// Subscribe to a running turn's live UI frames. Returns `None` if no turn
+/// is in-flight for this conversation. The returned stream forwards live
+/// frames as they arrive from the ACP task. The caller should load persisted
+/// messages separately (via `GET /api/conversations/:id`) for history — this
+/// stream carries only new frames from the subscribe point onward.
+pub fn subscribe_live_stream(
+    conversation_id: &str,
+) -> Option<impl futures_util::Stream<Item = Result<Vec<u8>, std::convert::Infallible>>> {
+    let live = get_live_stream(conversation_id)?;
+    let mut rx = live.tx.subscribe();
+    Some(async_stream::stream! {
+        // Forward live frames from the broadcast until the turn ends.
+        loop {
+            match rx.recv().await {
+                Ok(frame) => yield Ok(frame),
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // Slow consumer — skip missed frames and continue.
+                    continue;
+                }
+            }
+        }
+    })
+}
+
 // ── Shared domain types ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -544,9 +626,212 @@ fn acp_tool_ui_name(kind: &str, title: &str, input: &Value) -> (String, bool) {
     }
 }
 
+/// Reshape an ACP agent's "ask the user a question" tool call into the desktop's
+/// `QuestionConfig` shape so it renders as the rich Question card rather than a
+/// generic tool row (the desktop's `tool-Question` renderer). ACP has no single
+/// standard question tool, so this is a best-effort adapter over the common
+/// shapes: a top-level `questions: [...]` array (e.g. Claude's `AskUserQuestion`)
+/// or a single-question `{ question|prompt, options }`. Each question maps to
+/// `{ id, title, description?, kind, options:[{ id, label, description? }] }`
+/// where `kind` is `multi` when the source is multi-select, `single` when it
+/// carries options, else `text`.
+///
+/// Returns `None` (leaving the call as an ordinary dynamic tool row) unless at
+/// least one well-formed question with a non-empty title results — so a tool we
+/// misread never renders as a blank/null card.
+fn acp_question_input(title: &str, input: &Value) -> Option<Value> {
+    let title_hints = {
+        let t = title.to_ascii_lowercase();
+        t.contains("question") || t.contains("ask")
+    };
+    let looks_like_question =
+        title_hints || input.get("questions").is_some() || input.get("question").is_some();
+    if !looks_like_question {
+        return None;
+    }
+
+    let raw_questions: Vec<&Value> = match input.get("questions").and_then(Value::as_array) {
+        Some(arr) => arr.iter().collect(),
+        None => vec![input],
+    };
+
+    let str_of = |v: &Value, keys: &[&str]| -> Option<String> {
+        for k in keys {
+            if let Some(s) = v.get(*k).and_then(Value::as_str) {
+                if !s.is_empty() {
+                    return Some(s.to_owned());
+                }
+            }
+        }
+        None
+    };
+
+    let mut questions: Vec<Value> = Vec::new();
+    for (qi, q) in raw_questions.iter().enumerate() {
+        let Some(q_title) = str_of(q, &["title", "question", "header", "prompt", "text"]) else {
+            continue;
+        };
+        let description = str_of(q, &["description", "subtitle", "detail", "hint"]);
+        let multi = q
+            .get("multiSelect")
+            .or_else(|| q.get("multi_select"))
+            .or_else(|| q.get("multiple"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mut options: Vec<Value> = Vec::new();
+        if let Some(opts) = q.get("options").and_then(Value::as_array) {
+            for (oi, o) in opts.iter().enumerate() {
+                if let Some(s) = o.as_str() {
+                    options.push(serde_json::json!({ "id": s, "label": s }));
+                    continue;
+                }
+                let label = str_of(o, &["label", "title", "name", "value", "text"])
+                    .unwrap_or_else(|| format!("Option {}", oi + 1));
+                let id = str_of(o, &["id", "value", "label", "name"])
+                    .unwrap_or_else(|| format!("opt-{oi}"));
+                let odesc = str_of(o, &["description", "subtitle", "detail"]);
+                let mut opt = serde_json::json!({ "id": id, "label": label });
+                if let Some(d) = odesc {
+                    opt["description"] = Value::String(d);
+                }
+                options.push(opt);
+            }
+        }
+        let kind = if multi {
+            "multi"
+        } else if options.is_empty() {
+            "text"
+        } else {
+            "single"
+        };
+        let mut question = serde_json::json!({
+            "id": str_of(q, &["id"]).unwrap_or_else(|| format!("q-{qi}")),
+            "title": q_title,
+            "kind": kind,
+        });
+        if let Some(d) = description {
+            question["description"] = Value::String(d);
+        }
+        if !options.is_empty() {
+            question["options"] = Value::Array(options);
+        }
+        questions.push(question);
+    }
+
+    if questions.is_empty() {
+        return None;
+    }
+    let total = questions.len();
+    Some(serde_json::json!({
+        "questions": questions,
+        "totalQuestions": total,
+        "questionIndex": 1,
+    }))
+}
+
 /// `finish` part — marks the assistant message complete.
 fn ui_finish() -> Vec<u8> {
     ui_chunk(&serde_json::json!({ "type": "finish" }))
+}
+
+/// Accumulates an assistant turn's structured render `parts` (the AI SDK *reduced*
+/// UIMessage part shape) alongside the SSE frames, so the exact tool/text/file
+/// parts the live turn showed can be persisted and re-rendered on reload — the
+/// cowork context (Progress / Sources / Subagents) and the transcript's tool rows,
+/// not just flat `content` text.
+///
+/// It mirrors the AI SDK client's frame reduction: text deltas coalesce into one
+/// `text` part per block id, and a tool's `tool-output-available` frame patches the
+/// same part its `tool-input-available` opened (matched by `toolCallId`) — so the
+/// persisted array is byte-for-byte what the client built from the live stream.
+#[derive(Default)]
+struct PartsAccumulator {
+    parts: Vec<Value>,
+    /// `toolCallId` → index in `parts`, so an output frame patches the part its
+    /// input opened (and a re-emitted plan/thought snapshot updates in place).
+    tool_idx: std::collections::HashMap<String, usize>,
+    /// text block id → index in `parts`, so deltas append to the open text part.
+    text_idx: std::collections::HashMap<String, usize>,
+}
+
+impl PartsAccumulator {
+    /// Append a streamed text delta to the (single) text part for `block_id`,
+    /// opening it on first delta.
+    fn text_delta(&mut self, block_id: &str, delta: &str) {
+        if let Some(&i) = self.text_idx.get(block_id) {
+            let prev = self.parts[i]
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            self.parts[i]["text"] = Value::String(format!("{prev}{delta}"));
+        } else {
+            let i = self.parts.len();
+            self.parts
+                .push(serde_json::json!({ "type": "text", "text": delta, "state": "done" }));
+            self.text_idx.insert(block_id.to_owned(), i);
+        }
+    }
+
+    /// Open (or update in place) a tool part. Mirrors [`ui_tool_input`]:
+    /// `dynamic = false` → a `tool-<name>` part; `dynamic = true` → a
+    /// `dynamic-tool` part carrying `toolName`. Re-emitting the same id (plan /
+    /// thinking snapshots) refreshes its `input`.
+    fn tool_input(&mut self, id: &str, tool_name: &str, input: &Value, dynamic: bool) {
+        if let Some(&i) = self.tool_idx.get(id) {
+            self.parts[i]["input"] = input.clone();
+            return;
+        }
+        let i = self.parts.len();
+        let part = if dynamic {
+            serde_json::json!({
+                "type": "dynamic-tool",
+                "toolName": tool_name,
+                "toolCallId": id,
+                "state": "input-available",
+                "input": input,
+            })
+        } else {
+            serde_json::json!({
+                "type": format!("tool-{tool_name}"),
+                "toolCallId": id,
+                "state": "input-available",
+                "input": input,
+            })
+        };
+        self.parts.push(part);
+        self.tool_idx.insert(id.to_owned(), i);
+    }
+
+    /// Patch a tool part with its terminal `output` + state. Mirrors
+    /// [`ui_tool_output`]: `error` sets `output-error`, else `output-available`. A
+    /// bare output with no matching input part is dropped (not renderable).
+    fn tool_output(&mut self, id: &str, output: &Value, error: bool) {
+        if let Some(&i) = self.tool_idx.get(id) {
+            let state = if error { "output-error" } else { "output-available" };
+            self.parts[i]["state"] = Value::String(state.to_owned());
+            self.parts[i]["output"] = output.clone();
+        }
+    }
+
+    /// Append an inline `file` part (assistant media block). Mirrors the `file`
+    /// chunk the [`acp::AcpEvent::Media`] arm emits.
+    fn file(&mut self, media_type: &str, url: &str) {
+        self.parts.push(serde_json::json!({
+            "type": "file",
+            "mediaType": media_type,
+            "url": url,
+        }));
+    }
+
+    fn is_empty(&self) -> bool {
+        self.parts.is_empty()
+    }
+
+    /// Serialize the accumulated parts for the `messages.parts` column. Falls back
+    /// to `"[]"` if serialization somehow fails (it cannot for these JSON values).
+    fn to_json(&self) -> String {
+        serde_json::to_string(&self.parts).unwrap_or_else(|_| "[]".to_owned())
+    }
 }
 
 /// Custom `data-<name>` part — an arbitrary structured payload the desktop reads
@@ -3820,6 +4105,14 @@ async fn route_acp_stream(
     // completion task continues to run and finishes persistence/cleanup.
     let (ui_tx, mut ui_rx) = tokio::sync::mpsc::unbounded_channel::<UiFrame>();
 
+    // Live stream: register a broadcast channel keyed by conversation id so a
+    // reconnecting client can subscribe via `/api/chat/stream/resume/:id` and
+    // pick up live frames from this still-running turn.
+    let live_stream = persist_conversation_id
+        .as_deref()
+        .map(register_live_stream);
+    let live_conv_id_for_cleanup = persist_conversation_id.clone();
+
     // Detached completion task — owns the worktree guard, persist closure,
     // and diff store reference.  Runs to completion even when the SSE client
     // disconnects.  Frame sequence on the happy path is unchanged:
@@ -3831,7 +4124,23 @@ async fn route_acp_stream(
         // the guard drops here and cleans up via its Drop impl.
         let mut guard = worktree_guard;
 
+        // Helper: send a frame to both the original HTTP client (ui_tx_clone)
+        // and the live stream broadcast (for reconnecting clients).
+        macro_rules! emit {
+            ($frame:expr) => {{
+                let f = $frame;
+                if let Some(ref ls) = live_stream {
+                    let _ = ls.tx.send(f.clone());
+                }
+                let _ = ui_tx_clone.send(f);
+            }};
+        }
+
         let mut reply = String::new();
+        // Structured render parts, built in lockstep with the emitted UI frames so
+        // the exact tool/text/file parts survive a reload (cowork context + tool
+        // rows), not just the flat `reply` text. Persisted once at turn end.
+        let mut acc = PartsAccumulator::default();
         // Incremental persistence: instead of a FnOnce that fires at the end,
         // we create the assistant message row on the first text chunk and
         // periodically update it as more text arrives. This way the reply
@@ -3876,7 +4185,7 @@ async fn route_acp_stream(
         let mut usage_completion: Option<u64> = None;
         let mut usage_total_tokens: Option<u64> = None;
 
-        let _ = ui_tx_clone.send(ui_start());
+        emit!(ui_start());
 
         // Close-out frames for the open Thinking part (macro so the loop arms
         // and both exit paths share it without fighting the borrow checker).
@@ -3884,8 +4193,9 @@ async fn route_acp_stream(
             () => {
                 if thought_open {
                     let tid = format!("{THOUGHT_ID}-{thought_seq}");
-                    let _ = ui_tx_clone
-                        .send(ui_tool_output(&tid, &serde_json::json!({ "done": true }), false));
+                    let done = serde_json::json!({ "done": true });
+                    emit!(ui_tool_output(&tid, &done, false));
+                    acc.tool_output(&tid, &done, false);
                     thought_open = false;
                     thought_acc.clear();
                     thought_seq += 1;
@@ -3896,7 +4206,7 @@ async fn route_acp_stream(
             () => {
                 if text_open {
                     let tid = format!("{TEXT_ID}-{text_seq}");
-                    let _ = ui_tx_clone.send(ui_text_end(&tid));
+                    emit!(ui_text_end(&tid));
                     text_open = false;
                     text_seq += 1;
                 }
@@ -3905,6 +4215,20 @@ async fn route_acp_stream(
 
         while let Some(event) = acp_rx.recv().await {
             match event {
+                acp::AcpEvent::UserText(text) => {
+                    // A replayed USER message chunk (ACP `user_message_chunk`,
+                    // chiefly from a `session/load` history replay). Surface it as a
+                    // data part so the client can render prior user turns of a
+                    // resumed session, rather than dropping it (it must NOT join the
+                    // assistant `reply` buffer). No-op for empty chunks.
+                    if text.is_empty() {
+                        continue;
+                    }
+                    emit!(ui_data(
+                        "ryu-acp-user",
+                        &serde_json::json!({ "text": text }),
+                    ));
+                }
                 acp::AcpEvent::Text(text) => {
                     if text.is_empty() {
                         continue;
@@ -3954,13 +4278,22 @@ async fn route_acp_stream(
                         }
                     }
 
+                    // Update the live stream text snapshot so a late
+                    // subscriber replays the accumulated reply.
+                    if let Some(ref ls) = live_stream {
+                        if let Ok(mut snap) = ls.text_snapshot.lock() {
+                            snap.push_str(&text);
+                        }
+                    }
+
                     if !text_open {
                         text_open = true;
                         let id = format!("{TEXT_ID}-{text_seq}");
-                        let _ = ui_tx_clone.send(ui_text_start(&id));
+                        emit!(ui_text_start(&id));
                     }
                     let id = format!("{TEXT_ID}-{text_seq}");
-                    let _ = ui_tx_clone.send(ui_text_delta(&id, &text));
+                    emit!(ui_text_delta(&id, &text));
+                    acc.text_delta(&id, &text);
                 }
                 acp::AcpEvent::Thought(text) => {
                     if text.is_empty() {
@@ -3970,12 +4303,9 @@ async fn route_acp_stream(
                     thought_acc.push_str(&text);
                     thought_open = true;
                     let tid = format!("{THOUGHT_ID}-{thought_seq}");
-                    let _ = ui_tx_clone.send(ui_tool_input(
-                        &tid,
-                        "Thinking",
-                        &serde_json::json!({ "thought": thought_acc }),
-                        false,
-                    ));
+                    let thought_input = serde_json::json!({ "thought": thought_acc });
+                    emit!(ui_tool_input(&tid, "Thinking", &thought_input, false));
+                    acc.tool_input(&tid, "Thinking", &thought_input, false);
                 }
                 acp::AcpEvent::Plan(entries) => {
                     close_thought!();
@@ -3983,18 +4313,16 @@ async fn route_acp_stream(
                     plan_open = true;
                     // Full snapshot each time, same part id: the desktop's Todo
                     // checklist updates in place as entries change status.
-                    let _ = ui_tx_clone.send(ui_tool_input(
-                        PLAN_TOOL_ID,
-                        "TodoWrite",
-                        &serde_json::json!({ "todos": entries }),
-                        false,
-                    ));
+                    let plan_input = serde_json::json!({ "todos": entries });
+                    emit!(ui_tool_input(PLAN_TOOL_ID, "TodoWrite", &plan_input, false));
+                    acc.tool_input(PLAN_TOOL_ID, "TodoWrite", &plan_input, false);
                 }
                 acp::AcpEvent::ToolCall {
                     id,
                     title,
                     kind,
                     input,
+                    locations,
                 } => {
                     acp::record_observed_tool(&agent_id, &title, &kind);
                     close_thought!();
@@ -4003,7 +4331,32 @@ async fn route_acp_stream(
                     // Bind the ACP call to the desktop's rich tool UI when the
                     // kind/input shape matches a known tool (Bash terminal,
                     // Edit diff, Read, search, …); otherwise generic dynamic row.
-                    let (tool_name, dynamic) = acp_tool_ui_name(&kind, &title, &input_value);
+                    let (mut tool_name, mut dynamic) =
+                        acp_tool_ui_name(&kind, &title, &input_value);
+                    // A structured "ask the user" call (Claude's AskUserQuestion or
+                    // any ACP agent's question tool): reshape it into the desktop's
+                    // Question card. Guarded — only overrides when the reshape yields
+                    // a well-formed question, so unrelated tools are untouched.
+                    let mut emit_input = input_value.clone();
+                    if let Some(question) = acp_question_input(&title, &input_value) {
+                        tool_name = "Question".to_owned();
+                        dynamic = false;
+                        emit_input = question;
+                    }
+                    // Carry the ACP tool-call `locations` ([{path, line?}]) into the
+                    // part's input under a namespaced key so the desktop can show
+                    // which files/lines the tool touched. Namespaced (`_ryuLocations`)
+                    // so it never collides with a real tool input field.
+                    if !locations.is_empty() {
+                        if let Value::Object(ref mut map) = emit_input {
+                            map.insert(
+                                "_ryuLocations".to_owned(),
+                                Value::Array(locations.clone()),
+                            );
+                        } else if emit_input.is_null() {
+                            emit_input = serde_json::json!({ "_ryuLocations": locations });
+                        }
+                    }
                     tool_dynamic.insert(id.clone(), dynamic);
                     // Open a tool-call span in the trace store (no-op when no conv id).
                     if let Some(ref conv_id) = conversation_id {
@@ -4018,7 +4371,8 @@ async fn route_acp_stream(
                             Err(e) => tracing::warn!("trace open_span failed: {e:#}"),
                         }
                     }
-                    let _ = ui_tx_clone.send(ui_tool_input(&id, &tool_name, &input_value, dynamic));
+                    emit!(ui_tool_input(&id, &tool_name, &emit_input, dynamic));
+                    acc.tool_input(&id, &tool_name, &input_value, dynamic);
                 }
                 acp::AcpEvent::ToolResult { id, status, output } => {
                     close_thought!();
@@ -4035,11 +4389,15 @@ async fn route_acp_stream(
                         }
                     }
                     let dynamic = tool_dynamic.remove(&id).unwrap_or(true);
+                    // Capture the terminal state before `status` is moved into the
+                    // payload, so the persisted part records success vs error.
+                    let is_err = status == "error" || status == "failed";
                     let payload = serde_json::json!({
                         "status": status,
                         "output": output.unwrap_or(Value::Null),
                     });
-                    let _ = ui_tx_clone.send(ui_tool_output(&id, &payload, dynamic));
+                    emit!(ui_tool_output(&id, &payload, dynamic));
+                    acc.tool_output(&id, &payload, is_err);
                 }
                 acp::AcpEvent::Media { mime, data } => {
                     // A non-text assistant content block (inline image/audio).
@@ -4048,7 +4406,8 @@ async fn route_acp_stream(
                     // thought first for clean part ordering.
                     close_thought!();
                     let url = format!("data:{mime};base64,{data}");
-                    let _ = ui_tx_clone.send(ui_chunk(&serde_json::json!({
+                    acc.file(&mime, &url);
+                    emit!(ui_chunk(&serde_json::json!({
                         "type": "file",
                         "mediaType": mime,
                         "url": url,
@@ -4057,7 +4416,7 @@ async fn route_acp_stream(
                 acp::AcpEvent::ModeChanged(mode_id) => {
                     // Agent-initiated mode switch; forward so the desktop's mode
                     // picker reflects the new active mode.
-                    let _ = ui_tx_clone.send(ui_data(
+                    emit!(ui_data(
                         "ryu-acp-mode",
                         &serde_json::json!({ "currentModeId": mode_id }),
                     ));
@@ -4071,7 +4430,7 @@ async fn route_acp_stream(
                     // pick) was not accepted by the agent. Forward as a data part
                     // so the UI can react — e.g. clear a model pick the agent never
                     // applied — instead of silently misleading the user (QA B2).
-                    let _ = ui_tx_clone.send(ui_data(
+                    emit!(ui_data(
                         "ryu-acp-config-warning",
                         &serde_json::json!({
                             "field": field,
@@ -4083,7 +4442,7 @@ async fn route_acp_stream(
                 acp::AcpEvent::AvailableCommands(commands) => {
                     // Agent published its slash commands; forward the full list so
                     // the desktop replaces its cached set and renders the `/` popover.
-                    let _ = ui_tx_clone.send(ui_data(
+                    emit!(ui_data(
                         "ryu-acp-commands",
                         &serde_json::json!({ "commands": commands }),
                     ));
@@ -4139,7 +4498,7 @@ async fn route_acp_stream(
                     stats.insert("tokensPerSecond".into(), serde_json::json!(tokens_per_second));
                     stats.insert("durationMs".into(), serde_json::json!(duration_ms));
                     stats.insert("done".into(), serde_json::json!(done));
-                    let _ = ui_tx_clone.send(ui_data("acp-usage", &Value::Object(stats)));
+                    emit!(ui_data("acp-usage", &Value::Object(stats)));
                 }
                 acp::AcpEvent::PermissionRequest {
                     request_id,
@@ -4152,7 +4511,7 @@ async fn route_acp_stream(
                     // option id to /api/chat/permission to unblock the agent.
                     close_thought!();
                     close_text!();
-                    let _ = ui_tx_clone.send(ui_data(
+                    emit!(ui_data(
                         "ryu-permission",
                         &serde_json::json!({
                             "requestId": request_id,
@@ -4167,14 +4526,15 @@ async fn route_acp_stream(
                         let _ = traces.close_span(&span_id, Some("agent error")).await;
                     }
                     // Final persistence on error: update the existing row or
-                    // create one if we never received text.
+                    // create one if we never received text (a tool-only turn that
+                    // errored still persists its parts).
                     if let Some(ref conv_id) = persist_conversation_id {
                         if let Some(ref mid) = persisted_msg_id {
                             let _ = persist_store
                                 .update_message_content(mid, &reply)
                                 .await;
-                        } else if !reply.is_empty() {
-                            let _ = persist_store
+                        } else if !reply.is_empty() || !acc.is_empty() {
+                            match persist_store
                                 .append_message(
                                     conv_id,
                                     "assistant",
@@ -4183,7 +4543,13 @@ async fn route_acp_stream(
                                     None,
                                     None,
                                 )
-                                .await;
+                                .await
+                            {
+                                Ok(mid) => persisted_msg_id = Some(mid),
+                                Err(e) => tracing::warn!(
+                                    "failed to persist assistant message on error: {e:#}"
+                                ),
+                            }
                         }
                         let _ = persist_store
                             .set_run_status(conv_id, "failed")
@@ -4191,18 +4557,32 @@ async fn route_acp_stream(
                     }
                     close_thought!();
                     if plan_open {
-                        let _ = ui_tx_clone.send(ui_tool_output(
-                            PLAN_TOOL_ID,
-                            &serde_json::json!({ "done": true }),
-                            false,
-                        ));
+                        let plan_done = serde_json::json!({ "done": true });
+                        emit!(ui_tool_output(PLAN_TOOL_ID, &plan_done, false));
+                        acc.tool_output(PLAN_TOOL_ID, &plan_done, false);
                     }
                     if text_open {
                         let tid = format!("{TEXT_ID}-{text_seq}");
-                        let _ = ui_tx_clone.send(ui_text_end(&tid));
+                        emit!(ui_text_end(&tid));
+                    }
+                    // Persist structured parts after the close-outs (terminal tool
+                    // states captured), so even a failed turn's tool rows + cowork
+                    // context survive a reload. Best-effort.
+                    if let Some(ref mid) = persisted_msg_id {
+                        if !acc.is_empty() {
+                            if let Err(e) =
+                                persist_store.update_message_parts(mid, &acc.to_json()).await
+                            {
+                                tracing::warn!("failed to persist message parts on error: {e:#}");
+                            }
+                        }
                     }
                     for line in error_ui_lines(&msg) {
-                        let _ = ui_tx_clone.send(line);
+                        emit!(line);
+                    }
+                    // Clean up the live stream on error exit.
+                    if let Some(ref cid) = live_conv_id_for_cleanup {
+                        unregister_live_stream(cid);
                     }
                     return; // guard drops here on error path — worktree removed
                 }
@@ -4216,9 +4596,11 @@ async fn route_acp_stream(
                 let _ = persist_store
                     .update_message_content(mid, &reply)
                     .await;
-            } else if !reply.is_empty() {
-                // No text chunks arrived yet (edge case) — persist now.
-                let _ = persist_store
+            } else if !reply.is_empty() || !acc.is_empty() {
+                // No row yet — create one now. A turn that only ran tools (no text)
+                // still needs a row so its structured parts (and thus the cowork
+                // context) survive a reload.
+                match persist_store
                     .append_message(
                         conv_id,
                         "assistant",
@@ -4227,7 +4609,13 @@ async fn route_acp_stream(
                         None,
                         None,
                     )
-                    .await;
+                    .await
+                {
+                    Ok(mid) => persisted_msg_id = Some(mid),
+                    Err(e) => {
+                        tracing::warn!("failed to persist final assistant message: {e:#}")
+                    }
+                }
             }
             let _ = persist_store
                 .set_run_status(conv_id, "completed")
@@ -4235,15 +4623,26 @@ async fn route_acp_stream(
         }
         close_thought!();
         if plan_open {
-            let _ = ui_tx_clone.send(ui_tool_output(
-                PLAN_TOOL_ID,
-                &serde_json::json!({ "done": true }),
-                false,
-            ));
+            let plan_done = serde_json::json!({ "done": true });
+            emit!(ui_tool_output(PLAN_TOOL_ID, &plan_done, false));
+            acc.tool_output(PLAN_TOOL_ID, &plan_done, false);
         }
         if text_open {
             let tid = format!("{TEXT_ID}-{text_seq}");
-            let _ = ui_tx_clone.send(ui_text_end(&tid));
+            emit!(ui_text_end(&tid));
+        }
+
+        // Persist the structured render parts now that the close-out frames have
+        // recorded terminal tool states (TodoWrite / Thinking "done"). Independent
+        // of and after the text flush above; best-effort — a failure just falls the
+        // reload back to text-only. This is what restores the transcript's tool
+        // rows + the cowork context (Progress / Sources / Subagents) on reload.
+        if let Some(ref mid) = persisted_msg_id {
+            if !acc.is_empty() {
+                if let Err(e) = persist_store.update_message_parts(mid, &acc.to_json()).await {
+                    tracing::warn!("failed to persist message parts: {e:#}");
+                }
+            }
         }
 
         // Capture the worktree diff and store it together with the live guard.
@@ -4266,8 +4665,12 @@ async fn route_acp_stream(
             );
         }
 
-        let _ = ui_tx_clone.send(ui_finish());
-        let _ = ui_tx_clone.send(DONE_SSE_LINE.as_bytes().to_vec());
+        emit!(ui_finish());
+        emit!(DONE_SSE_LINE.as_bytes().to_vec());
+        // Clean up the live stream on normal completion.
+        if let Some(ref cid) = live_conv_id_for_cleanup {
+            unregister_live_stream(cid);
+        }
         // _guard drops here — worktree removed after diff captured
     });
 

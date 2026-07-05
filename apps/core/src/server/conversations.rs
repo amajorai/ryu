@@ -47,6 +47,15 @@ pub struct StoredMessage {
     /// can show and reason about who said what. None for 1:1 / anonymous turns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author_name: Option<String>,
+    /// Structured render parts (AI SDK reduced UIMessage `parts` array: text /
+    /// tool / file), captured server-side as the turn streams. This is what lets a
+    /// reloaded conversation re-render its tool-call rows and the cowork context
+    /// (Progress / Sources / Subagents) instead of collapsing to flat `content`
+    /// text. `None` for messages persisted before parts capture existed (they fall
+    /// back to a single text part built from `content` on the client) and for user
+    /// turns (which are plain text). Sealed at rest like `content`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parts: Option<serde_json::Value>,
     /// Unix milliseconds.
     pub created_at: i64,
 }
@@ -510,6 +519,16 @@ impl ConversationStore {
                 .context("adding author_name column to messages")?;
         }
 
+        // Additive migration: structured render parts (AI SDK reduced UIMessage
+        // `parts` array) captured server-side as an assistant turn streams, so a
+        // reloaded conversation re-renders its tool rows + cowork context instead
+        // of flattening to text-only. Nullable, sealed at rest like `content`;
+        // existing rows carry NULL and fall back to a text part on the client.
+        if !existing_msg_columns.contains("parts") {
+            conn.execute_batch("ALTER TABLE messages ADD COLUMN parts TEXT")
+                .context("adding parts column to messages")?;
+        }
+
         Ok(())
     }
 
@@ -908,6 +927,23 @@ impl ConversationStore {
         Ok(())
     }
 
+    /// Store the structured render `parts` (a serialized AI SDK UIMessage `parts`
+    /// array) for an existing message, sealed at rest like `content`. Written once
+    /// at turn end (after the close-out frames, so terminal tool states are
+    /// captured) by the streaming loop so a reloaded conversation re-renders its
+    /// tool rows + cowork context. Best-effort: a failure here never fails the turn
+    /// (the flat `content` text is still persisted independently).
+    pub async fn update_message_parts(&self, message_id: &str, parts_json: &str) -> Result<()> {
+        let sealed = self.cipher.seal(parts_json)?;
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE messages SET parts = ?1 WHERE id = ?2",
+            params![sealed, message_id],
+        )
+        .context("updating message parts")?;
+        Ok(())
+    }
+
     /// List conversations, most-recently-updated first.
     pub async fn list_conversations(&self) -> Result<Vec<ConversationSummary>> {
         let conn = self.conn.lock().await;
@@ -1016,30 +1052,49 @@ impl ConversationStore {
         })
     }
 
+    /// Decrypt + parse an optional stored `parts` column into a JSON value (the AI
+    /// SDK `parts` array). A row that fails to decrypt or parse (corrupt / wrong
+    /// key / legacy garbage) degrades to `None` so the client falls back to a text
+    /// part from `content` — never failing the whole conversation load.
+    fn open_parts(&self, stored: Option<String>) -> Option<serde_json::Value> {
+        let sealed = stored?;
+        let plaintext = self.cipher.open(&sealed).ok()?;
+        serde_json::from_str(&plaintext).ok()
+    }
+
     /// Fetch all messages of a conversation in chronological order.
     pub async fn get_messages(&self, conversation_id: &str) -> Result<Vec<StoredMessage>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT id, role, content, agent_id, created_at, author_user_id, author_name
+            "SELECT id, role, content, agent_id, created_at, author_user_id, author_name, parts
              FROM messages
              WHERE conversation_id = ?1
              ORDER BY created_at ASC, rowid ASC",
         )?;
+        // The raw sealed `parts` blob is carried on `StoredMessage.parts` as a
+        // JSON string temporarily, then decrypted + parsed below (outside the DB
+        // lock, like `content`/`title`).
         let rows = stmt.query_map([conversation_id], |row| {
-            Ok(StoredMessage {
-                id: row.get(0)?,
-                role: row.get(1)?,
-                content: row.get(2)?,
-                agent_id: row.get(3)?,
-                created_at: row.get(4)?,
-                author_user_id: row.get(5)?,
-                author_name: row.get(6)?,
-            })
+            let sealed_parts: Option<String> = row.get(7)?;
+            Ok((
+                StoredMessage {
+                    id: row.get(0)?,
+                    role: row.get(1)?,
+                    content: row.get(2)?,
+                    agent_id: row.get(3)?,
+                    author_user_id: row.get(5)?,
+                    author_name: row.get(6)?,
+                    parts: None,
+                    created_at: row.get(4)?,
+                },
+                sealed_parts,
+            ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let mut msg = row?;
+            let (mut msg, sealed_parts) = row?;
             msg.content = self.open_content(std::mem::take(&mut msg.content));
+            msg.parts = self.open_parts(sealed_parts);
             out.push(msg);
         }
         Ok(out)
@@ -1293,6 +1348,10 @@ impl ConversationStore {
                 role: row.get(1)?,
                 content: row.get(2)?,
                 agent_id: row.get(3)?,
+                // Short-term-memory context assembly (the sole caller) feeds the
+                // model plain text, so the structured parts are intentionally not
+                // read here — only `get_messages` (the reload path) decodes them.
+                parts: None,
                 created_at: row.get(4)?,
                 author_user_id: row.get(5)?,
                 author_name: row.get(6)?,

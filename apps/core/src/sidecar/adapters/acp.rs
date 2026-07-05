@@ -5,17 +5,17 @@ use std::sync::{Arc, Mutex, OnceLock};
 use agent_client_protocol::schema::{
     AuthMethodId, AuthenticateRequest, AvailableCommandInput, CancelNotification,
     ClientCapabilities, CloseSessionRequest, ContentBlock, CreateTerminalRequest,
-    CreateTerminalResponse, EmbeddedResource, FileSystemCapabilities, ImageContent,
-    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    KillTerminalRequest, KillTerminalResponse, NewSessionRequest,
+    CreateTerminalResponse, EmbeddedResourceResource, FileSystemCapabilities,
+    ImageContent, InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    KillTerminalRequest, KillTerminalResponse, LoadSessionRequest, LogoutRequest, NewSessionRequest,
     NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion, ReadTextFileRequest,
     ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, TerminalId,
-    TerminalOutputRequest, TerminalOutputResponse, ToolCall, ToolCallContent, ToolCallStatus,
-    ToolCallUpdate, ToolKind, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-    WriteTextFileRequest, WriteTextFileResponse,
+    TerminalOutputRequest, TerminalOutputResponse, ToolCall, ToolCallContent, ToolCallLocation,
+    ToolCallStatus, ToolCallUpdate, ToolKind, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::{Agent, Client, ConnectionTo, SessionMessage};
@@ -41,6 +41,12 @@ use crate::sidecar::BoxFuture;
 pub enum AcpEvent {
     /// A chunk of the assistant's streamed text response.
     Text(String),
+    /// A chunk of a USER message the agent is (re)playing back — ACP
+    /// `user_message_chunk`. Emitted chiefly when replaying a resumed session's
+    /// history (`session/load`), where the agent streams the prior user turns
+    /// before the assistant ones. Surfaced (not dropped) so a loaded conversation
+    /// can show its user turns; on a live turn it's the user's own echoed input.
+    UserText(String),
     /// A chunk of the agent's internal reasoning (extended thinking) stream.
     Thought(String),
     /// The agent's current execution plan: a full snapshot of its entries
@@ -55,6 +61,10 @@ pub enum AcpEvent {
         kind: String,
         /// Raw input parameters the agent sent to the tool, if any.
         input: Option<serde_json::Value>,
+        /// The file locations this call touches (ACP `ToolCall.locations`):
+        /// `[{ path, line? }, …]`. Surfaced so the client can show which files /
+        /// lines a tool acted on (previously the field was never read).
+        locations: Vec<serde_json::Value>,
     },
     /// An update on an in-flight or finished tool call (status and/or result).
     ToolResult {
@@ -146,17 +156,6 @@ fn tool_kind_str(kind: &ToolKind) -> String {
         .unwrap_or_else(|| "other".to_owned())
 }
 
-/// Extract the text of an embedded resource (ACP `Content` → `Resource`), when it
-/// carries a text (not binary blob) payload. `None` for binary resources.
-fn embedded_resource_text(res: &EmbeddedResource) -> Option<String> {
-    serde_json::to_value(&res.resource)
-        .ok()?
-        .get("text")
-        .and_then(|t| t.as_str())
-        .map(str::to_owned)
-        .filter(|s| !s.is_empty())
-}
-
 /// Serialize an ACP `ToolCallStatus` to its snake_case wire form.
 fn tool_status_str(status: &ToolCallStatus) -> String {
     serde_json::to_value(status)
@@ -187,6 +186,55 @@ fn ryu_initialize_request() -> InitializeRequest {
     let mut init = InitializeRequest::new(ProtocolVersion::V1);
     init.client_capabilities = ryu_client_capabilities();
     init
+}
+
+/// The agent's own capabilities, read from its `initialize` response
+/// (`agentCapabilities`). Ryu previously ignored these entirely — sending images
+/// unconditionally and never attempting `session/load`. Now they gate content
+/// (only send image/audio blocks the agent advertised support for) and features
+/// (`session/load` warm-resume, MCP transport selection).
+#[derive(Debug, Clone, Copy, Default)]
+struct AcpCaps {
+    /// Agent can resume a prior session via `session/load` (`loadSession`).
+    load_session: bool,
+    /// `promptCapabilities.image` — agent accepts `ContentBlock::Image` prompts.
+    prompt_image: bool,
+    /// `promptCapabilities.audio` — agent accepts `ContentBlock::Audio` prompts.
+    prompt_audio: bool,
+    /// `promptCapabilities.embeddedContext` — agent accepts embedded resources.
+    prompt_embedded_context: bool,
+    /// `mcpCapabilities.http` — agent can connect to HTTP MCP servers.
+    mcp_http: bool,
+    /// `mcpCapabilities.sse` — agent can connect to SSE MCP servers.
+    mcp_sse: bool,
+}
+
+/// Extract the agent's advertised capabilities from its `initialize` response.
+fn read_agent_caps(init: &InitializeResponse) -> AcpCaps {
+    let caps = &init.agent_capabilities;
+    AcpCaps {
+        load_session: caps.load_session,
+        prompt_image: caps.prompt_capabilities.image,
+        prompt_audio: caps.prompt_capabilities.audio,
+        prompt_embedded_context: caps.prompt_capabilities.embedded_context,
+        mcp_http: caps.mcp_capabilities.http,
+        mcp_sse: caps.mcp_capabilities.sse,
+    }
+}
+
+/// Serialize the agent's capabilities for the desktop (surfaced by the config
+/// probe as `agentCapabilities`), so clients can reflect what the agent supports
+/// (e.g. show a "Resume" affordance only when `loadSession` is true).
+fn agent_caps_json(caps: &AcpCaps) -> serde_json::Value {
+    serde_json::json!({
+        "loadSession": caps.load_session,
+        "promptCapabilities": {
+            "image": caps.prompt_image,
+            "audio": caps.prompt_audio,
+            "embeddedContext": caps.prompt_embedded_context,
+        },
+        "mcpCapabilities": { "http": caps.mcp_http, "sse": caps.mcp_sse },
+    })
 }
 
 // ── Client-hosted terminals (ACP `terminal/*`) ──────────────────────────────────
@@ -714,6 +762,10 @@ pub async fn probe_acp_config(
                         .send_request(InitializeRequest::new(ProtocolVersion::V1))
                         .block_task()
                         .await?;
+                    // Consume the agent's advertised capabilities (loadSession,
+                    // promptCapabilities, mcpCapabilities) so the desktop can react
+                    // (e.g. offer resume only when supported); previously ignored.
+                    let caps = read_agent_caps(&init);
                     let resp: NewSessionResponse = cx
                         .send_request(NewSessionRequest::new(cwd))
                         .block_task()
@@ -723,6 +775,7 @@ pub async fn probe_acp_config(
                         "models": resp.models,
                         "configOptions": resp.config_options,
                         "authMethods": init.auth_methods,
+                        "agentCapabilities": agent_caps_json(&caps),
                     }))
                 }
             }),
@@ -781,6 +834,96 @@ pub async fn authenticate_acp(spawn_cmd: String, method_id: String) -> anyhow::R
         m.remove(&cache_key);
     }
     Ok(())
+}
+
+/// End an ACP agent's authenticated session (ACP `logout`). The inverse of
+/// [`authenticate_acp`]: agents that support the `logout` capability
+/// (`agentCapabilities.auth.logout`) drop their stored credentials, so the next
+/// `session/new` requires re-authentication. Best-effort with a short ceiling;
+/// invalidates the probe cache so the desktop re-reads the now-unauthenticated
+/// auth state. A no-op error surfaces to the caller for agents that don't
+/// implement it.
+pub async fn logout_acp(spawn_cmd: String) -> anyhow::Result<()> {
+    let agent =
+        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let cache_key = spawn_cmd.clone();
+    tokio::time::timeout(
+        ACP_PROBE_TIMEOUT,
+        Client
+            .builder()
+            .connect_with(agent, move |cx: ConnectionTo<Agent>| async move {
+                cx.send_request(ryu_initialize_request())
+                    .block_task()
+                    .await?;
+                cx.send_request(LogoutRequest::new()).block_task().await?;
+                Ok(())
+            }),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("ACP logout timed out"))?
+    .map_err(|e| anyhow::anyhow!("ACP logout: {e}"))?;
+    // Auth state changed; drop the cached probe so the next read reflects it.
+    if let Ok(mut m) = config_cache().lock() {
+        m.remove(&cache_key);
+    }
+    Ok(())
+}
+
+/// Resume an ACP agent's own prior session (ACP `session/load`) — warm-reconnect
+/// to a session the agent still retains so its context is restored without
+/// replaying the transcript as a fresh prompt. Gated on the agent advertising the
+/// `loadSession` capability (returned as `{ supported: false }` otherwise, not an
+/// error). On success returns the resumed session's advertised state
+/// (`{ modes, models, configOptions }`) so the desktop can reflect it.
+///
+/// `session_id` is the agent-native session id (e.g. a Claude Code / Codex
+/// session id, as persisted on import); `cwd` is the workspace the session ran in.
+pub async fn load_acp_session(
+    spawn_cmd: String,
+    session_id: String,
+    cwd: PathBuf,
+) -> anyhow::Result<serde_json::Value> {
+    let agent =
+        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let value = tokio::time::timeout(
+        ACP_PROBE_TIMEOUT,
+        Client
+            .builder()
+            .connect_with(agent, move |cx: ConnectionTo<Agent>| {
+                let session_id = session_id.clone();
+                let cwd = cwd.clone();
+                async move {
+                    let init: InitializeResponse = cx
+                        .send_request(ryu_initialize_request())
+                        .block_task()
+                        .await?;
+                    // Only attempt load when the agent advertises the capability;
+                    // calling it on an agent that lacks it would just error.
+                    if !read_agent_caps(&init).load_session {
+                        return Ok(serde_json::json!({ "supported": false }));
+                    }
+                    let resp = cx
+                        .send_request(LoadSessionRequest::new(
+                            SessionId::new(session_id.as_str()),
+                            cwd,
+                        ))
+                        .block_task()
+                        .await?;
+                    let resp: agent_client_protocol::schema::LoadSessionResponse = resp;
+                    Ok(serde_json::json!({
+                        "supported": true,
+                        "sessionId": session_id,
+                        "modes": resp.modes,
+                        "models": resp.models,
+                        "configOptions": resp.config_options,
+                    }))
+                }
+            }),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("ACP session/load timed out"))?
+    .map_err(|e| anyhow::anyhow!("ACP session/load: {e}"))?;
+    Ok(value)
 }
 
 /// List the sessions an ACP agent is tracking (ACP `session/list`). Best-effort:
@@ -1113,13 +1256,14 @@ impl AgentAdapter for AcpAdapter {
                         title,
                         kind,
                         input,
+                        locations,
                     } => {
                         record_observed_tool(&agent_id, &title, &kind);
                         chunks.push(ChatChunk {
                             delta: None,
                             done: false,
                             metadata: Some(serde_json::json!({
-                                "toolCall": { "id": id, "title": title, "kind": kind, "input": input }
+                                "toolCall": { "id": id, "title": title, "kind": kind, "input": input, "locations": locations }
                             })),
                         });
                     }
@@ -1144,6 +1288,7 @@ impl AgentAdapter for AcpAdapter {
                     // streaming path (route_acp_stream); this legacy collect path
                     // returns final text + tool metadata and runs non-interactively.
                     AcpEvent::Text(_)
+                    | AcpEvent::UserText(_)
                     | AcpEvent::Thought(_)
                     | AcpEvent::Plan(_)
                     | AcpEvent::Media { .. }
@@ -1324,10 +1469,13 @@ pub async fn run_acp_instance(
                 let mut turns_rx = turns_rx;
                 // Advertise Ryu's full client capabilities (fs + terminal) so the
                 // agent routes file reads/writes and command execution through the
-                // handlers in the dispatch chain below.
-                cx.send_request(ryu_initialize_request())
-                    .block_task()
-                    .await?;
+                // handlers in the dispatch chain below. Capture the agent's OWN
+                // capabilities from the response (previously discarded) so we can
+                // gate prompt content (image/audio) and features (session/load) on
+                // what it actually advertised.
+                let init_resp: InitializeResponse =
+                    cx.send_request(ryu_initialize_request()).block_task().await?;
+                let agent_caps = read_agent_caps(&init_resp);
 
                 // Peek the FIRST turn (it carries the params the bridge + session
                 // are built from). If none arrives within the idle TTL, this chat
@@ -1506,11 +1654,25 @@ pub async fn run_acp_instance(
                         Arc::new(Mutex::new(None));
                     let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
                     let mut blocks: Vec<ContentBlock> = vec![turn_text.into()];
-                    for img in &images {
-                        blocks.push(ContentBlock::Image(ImageContent::new(
-                            img.data.clone(),
-                            img.mime_type.clone(),
-                        )));
+                    // Only attach image blocks when the agent advertised
+                    // `promptCapabilities.image`; sending them to an agent that
+                    // doesn't accept them can error or be silently dropped, so gate
+                    // on the negotiated capability (was previously unconditional).
+                    if !images.is_empty() {
+                        if agent_caps.prompt_image {
+                            for img in &images {
+                                blocks.push(ContentBlock::Image(ImageContent::new(
+                                    img.data.clone(),
+                                    img.mime_type.clone(),
+                                )));
+                            }
+                        } else {
+                            tracing::info!(
+                                "ACP agent does not advertise promptCapabilities.image; \
+                                 dropping {} image attachment(s) from the prompt",
+                                images.len()
+                            );
+                        }
                     }
                     let usage_capture = Arc::clone(&turn_usage);
                     session
@@ -1620,10 +1782,33 @@ pub async fn run_acp_instance(
                                                     )));
                                                 }
                                                 ContentBlock::Resource(res) => {
-                                                    if let Some(text) = embedded_resource_text(&res)
-                                                    {
-                                                        let _ =
-                                                            tx_chunk.send(AcpEvent::Text(text));
+                                                    // Embedded resource: surface text
+                                                    // inline, and binary blobs as Media
+                                                    // (→ AI-SDK `file` part) instead of
+                                                    // dropping them as before.
+                                                    match &res.resource {
+                                                        EmbeddedResourceResource::TextResourceContents(t)
+                                                            if !t.text.is_empty() =>
+                                                        {
+                                                            let _ = tx_chunk
+                                                                .send(AcpEvent::Text(t.text.clone()));
+                                                        }
+                                                        EmbeddedResourceResource::BlobResourceContents(b)
+                                                            if !b.blob.is_empty() =>
+                                                        {
+                                                            let mime = b
+                                                                .mime_type
+                                                                .clone()
+                                                                .unwrap_or_else(|| {
+                                                                    "application/octet-stream"
+                                                                        .to_owned()
+                                                                });
+                                                            let _ = tx_chunk.send(AcpEvent::Media {
+                                                                mime,
+                                                                data: b.blob.clone(),
+                                                            });
+                                                        }
+                                                        _ => {}
                                                     }
                                                 }
                                                 // `ContentBlock` is #[non_exhaustive].
@@ -1696,6 +1881,17 @@ pub async fn run_acp_instance(
                                                     "done": false,
                                                 }),
                                             ));
+                                        }
+                                        SessionUpdate::UserMessageChunk(chunk) => {
+                                            // The agent replayed a user message chunk
+                                            // (mainly during a session/load history
+                                            // replay). Forward text so it isn't
+                                            // silently dropped; mod.rs surfaces it as a
+                                            // user-echo data part.
+                                            if let ContentBlock::Text(t) = chunk.content {
+                                                let _ = tx_chunk
+                                                    .send(AcpEvent::UserText(t.text));
+                                            }
                                         }
                                         _ => {}
                                     }
@@ -2003,6 +2199,20 @@ async fn acp_exec_scan_verdict(tool_call: &serde_json::Value, agent: &str) -> Ex
     }
 }
 
+/// Serialize ACP `ToolCallLocation`s to `[{ path, line? }, …]` for the client.
+fn locations_json(locations: &[ToolCallLocation]) -> Vec<serde_json::Value> {
+    locations
+        .iter()
+        .map(|loc| {
+            let mut obj = serde_json::json!({ "path": loc.path.display().to_string() });
+            if let Some(line) = loc.line {
+                obj["line"] = serde_json::json!(line);
+            }
+            obj
+        })
+        .collect()
+}
+
 /// Build a `ToolCall` event from an ACP `ToolCall` notification.
 fn tool_call_event(call: &ToolCall) -> AcpEvent {
     AcpEvent::ToolCall {
@@ -2010,6 +2220,7 @@ fn tool_call_event(call: &ToolCall) -> AcpEvent {
         title: call.title.clone(),
         kind: tool_kind_str(&call.kind),
         input: call.raw_input.clone(),
+        locations: locations_json(&call.locations),
     }
 }
 

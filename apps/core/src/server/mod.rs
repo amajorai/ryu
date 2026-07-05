@@ -833,10 +833,15 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         //    config options like reasoning effort), Zed-style ──
         .route("/api/agents/:id/acp-config", get(acp_config))
         .route("/api/agents/:id/authenticate", post(acp_authenticate))
+        .route("/api/agents/:id/logout", post(acp_logout))
         .route("/api/agents/:id/sessions", get(list_acp_sessions_handler))
         .route(
             "/api/agents/:id/sessions/:sid",
             delete(delete_acp_session_handler),
+        )
+        .route(
+            "/api/agents/:id/sessions/:sid/load",
+            post(load_acp_session_handler),
         )
         .route("/api/agents/:id/update-check", get(agent_update_check))
         .route("/api/agents/:id/update", post(agent_update))
@@ -931,6 +936,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ACP agent (the desktop echoes the chosen option id here to unblock it).
         .route("/api/chat/permission", post(chat_permission))
         .route("/api/chat/cancel", post(chat_cancel))
+        // Resume a running chat stream (reconnect to an in-flight ACP turn).
+        .route("/api/chat/stream/resume/:conversation_id", get(chat_stream_resume))
         // Next-prompt suggestions (ChatGPT-style follow-up chips) for a turn.
         .route(
             "/api/chat/suggestions",
@@ -2401,6 +2408,45 @@ async fn acp_authenticate(
     }
 }
 
+/// `POST /api/agents/:id/logout` — end an ACP agent's authenticated session (ACP
+/// `logout`). Inverse of `authenticate`: the agent drops its credentials so the
+/// next `session/new` requires re-login. Best-effort; agents that don't support
+/// the `logout` capability return an error.
+#[utoipa::path(
+    post,
+    path = "/api/agents/{id}/logout",
+    tag = "Agents",
+    summary = "Log out of an ACP agent",
+    params(("id" = String, Path, description = "Agent id")),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn acp_logout(
+    State(state): State<ServerState>,
+    Path(agent_id): Path<String>,
+) -> axum::response::Response {
+    let Some(spawn_cmd) = crate::sidecar::adapters::resolve_acp_spawn_cmd(
+        &agent_id,
+        &state.agents,
+        &state.agent_store,
+    )
+    .await
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "not an ACP agent" })),
+        )
+            .into_response();
+    };
+    match crate::sidecar::adapters::acp::logout_acp(spawn_cmd).await {
+        Ok(()) => Json(serde_json::json!({ "loggedOut": true })).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "loggedOut": false, "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 /// `GET /api/agents/:id/sessions` — the sessions an ACP agent is tracking (ACP
 /// `session/list`). Best-effort: agents that don't implement it (the flagship pi)
 /// return `{ sessions: [] }`.
@@ -2470,6 +2516,63 @@ async fn delete_acp_session_handler(
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             Json(serde_json::json!({ "deleted": false, "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Optional body for `POST /api/agents/:id/sessions/:sid/load`.
+#[derive(serde::Deserialize, Default)]
+struct LoadSessionBody {
+    /// Workspace the session ran in. Falls back to the server's cwd when absent.
+    #[serde(default)]
+    cwd: Option<String>,
+}
+
+/// `POST /api/agents/:id/sessions/:sid/load` — warm-resume an ACP agent's own
+/// prior session (ACP `session/load`), restoring its context. Returns
+/// `{ supported, modes, models, configOptions }`; `supported: false` for agents
+/// that don't advertise the `loadSession` capability.
+#[utoipa::path(
+    post,
+    path = "/api/agents/{id}/sessions/{sid}/load",
+    tag = "Agents",
+    summary = "Resume an ACP agent session (session/load)",
+    params(
+        ("id" = String, Path, description = "Agent id"),
+        ("sid" = String, Path, description = "Session id")
+    ),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn load_acp_session_handler(
+    State(state): State<ServerState>,
+    Path((agent_id, sid)): Path<(String, String)>,
+    body: Option<Json<LoadSessionBody>>,
+) -> axum::response::Response {
+    let Some(spawn_cmd) = crate::sidecar::adapters::resolve_acp_spawn_cmd(
+        &agent_id,
+        &state.agents,
+        &state.agent_store,
+    )
+    .await
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "not an ACP agent" })),
+        )
+            .into_response();
+    };
+    let cwd = body
+        .and_then(|b| b.0.cwd)
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_default();
+    match crate::sidecar::adapters::acp::load_acp_session(spawn_cmd, sid, cwd).await {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "supported": false, "error": e.to_string() })),
         )
             .into_response(),
     }
@@ -2742,6 +2845,30 @@ struct CancelRequest {
 async fn chat_cancel(Json(body): Json<CancelRequest>) -> Json<serde_json::Value> {
     let cancelled = crate::sidecar::adapters::acp::request_cancel(&body.conversation_id);
     Json(serde_json::json!({ "cancelled": cancelled }))
+}
+
+/// `GET /api/chat/stream/resume/:conversation_id` — reconnect to an in-flight
+/// ACP turn's live UI frame stream. Returns the accumulated reply text as a
+/// synthetic replay, then forwards live frames until the turn completes.
+/// Returns 404 when no turn is running for the conversation.
+async fn chat_stream_resume(
+    axum::extract::Path(conversation_id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    match crate::sidecar::adapters::subscribe_live_stream(&conversation_id) {
+        Some(stream) => {
+            crate::sidecar::adapters::sse_response(axum::body::Body::from_stream(stream))
+        }
+        None => {
+            // No live turn — return 404 so the client knows not to wait.
+            axum::response::Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .header("Content-Type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({ "error": "no running turn" }).to_string(),
+                ))
+                .unwrap_or_default()
+        }
+    }
 }
 
 // ── Channel bot run endpoint (M11 / #226) ────────────────────────────────────
@@ -6656,6 +6783,7 @@ async fn import_agent_thread_handler(
                     "message_count": imported.messages.len(),
                     "truncated": imported.truncated,
                     "title": imported.thread.title,
+                    "cwd": imported.thread.cwd,
                     "already_imported": true,
                 }))
                 .into_response();
@@ -6680,6 +6808,25 @@ async fn import_agent_thread_handler(
             .await
         {
             return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+        }
+    }
+    // Group the imported conversation under the workspace folder the thread ran
+    // in (Claude Code / Codex both record a `cwd`), plus its git branch. Without
+    // this the chat lands loose in "Chats" instead of nested under its project —
+    // the sidebar buckets conversations by `folder_path`, so stamping it here is
+    // what makes an imported (or auto-imported) thread appear in the right folder.
+    if imported.thread.cwd.is_some() || imported.thread.git_branch.is_some() {
+        if let Err(e) = state
+            .conversations
+            .set_run_metadata(
+                &conversation_id,
+                imported.thread.cwd.as_deref(),
+                imported.thread.git_branch.as_deref(),
+                None,
+            )
+            .await
+        {
+            tracing::warn!("import: failed to set folder for {conversation_id}: {e:#}");
         }
     }
     if let Err(e) = state
@@ -6711,6 +6858,8 @@ async fn import_agent_thread_handler(
         "message_count": imported.messages.len(),
         "truncated": imported.truncated,
         "title": imported.thread.title,
+        "cwd": imported.thread.cwd,
+        "already_imported": false,
     }))
     .into_response()
 }

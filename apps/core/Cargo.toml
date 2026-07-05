@@ -91,6 +91,12 @@ agent-client-protocol = { version = "=0.11.1", features = [
     "unstable_session_usage",
     # session/close for ACP Session Delete (session/list is stable).
     "unstable_session_close",
+    # session/load warm-resume of an agent's own retained session (loadSession
+    # capability) so an imported/prior thread reconnects to the agent's context
+    # instead of replaying history as a fresh prompt.
+    "unstable_session_resume",
+    # logout: end an authenticated agent session (agentCapabilities.auth.logout).
+    "unstable_logout",
 ] }
 agent-client-protocol-tokio = "=0.11.1"
 rmcp = { version = "1", features = ["server", "transport-io"] }
