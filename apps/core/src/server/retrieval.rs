@@ -335,6 +335,99 @@ impl Reranker {
         }
     }
 
+    /// Build a reranker that targets the local `llamacpp-rerank` server (the bge
+    /// cross-encoder) — used by Spaces RAG. Unlike [`from_registry`], this always
+    /// returns a server-backed reranker pointing at `registry.reranker_base_url`.
+    /// The Spaces search path lazily starts that server and falls open to the
+    /// vector order whenever it is not reachable, so this is safe to construct
+    /// even before the server (or its model) exists. `RYU_RERANKER_BASE_URL` +
+    /// `RYU_RERANKER_API_KEY` still override to point at a remote endpoint.
+    pub fn local_server(registry: &ModelRegistry) -> Self {
+        let base_url = std::env::var("RYU_RERANKER_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| registry.reranker_base_url.clone());
+        let api_key = std::env::var("RYU_RERANKER_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
+        Self::Remote {
+            base_url,
+            model: registry.local_reranker_model.id.clone(),
+            api_key,
+        }
+    }
+
+    /// Score `documents` against `query`, returning `(original_index, score)`
+    /// pairs sorted best-first. A lower-level primitive for callers (e.g. Spaces
+    /// search) that hold their own chunk type rather than [`ScoredChunk`]. The
+    /// `Remote` branch reuses the same `/rerank` request/response contract as
+    /// [`remote_rerank`] (the bundled llama-server `--reranking` endpoint).
+    pub async fn rank_documents(
+        &self,
+        query: &str,
+        documents: &[String],
+    ) -> Result<Vec<(usize, f32)>> {
+        match self {
+            Self::Local => {
+                let query_tokens = token_set(query);
+                let mut ranked: Vec<(usize, f32)> = documents
+                    .iter()
+                    .enumerate()
+                    .map(|(i, doc)| (i, jaccard(&query_tokens, &token_set(doc))))
+                    .collect();
+                ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+                Ok(ranked)
+            }
+            Self::Remote {
+                base_url,
+                model,
+                api_key,
+            } => {
+                static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> =
+                    std::sync::OnceLock::new();
+                let client = HTTP_CLIENT.get_or_init(reqwest::Client::new);
+                let endpoint = format!("{}/rerank", base_url.trim_end_matches('/'));
+                let payload = serde_json::json!({
+                    "model": model,
+                    "query": query,
+                    "documents": documents,
+                });
+                let mut builder = client.post(endpoint).json(&payload);
+                if let Some(key) = api_key.as_deref().filter(|k| !k.is_empty()) {
+                    builder = builder.bearer_auth(key);
+                }
+                let resp = builder.send().await.context("reranking request failed")?;
+                if !resp.status().is_success() {
+                    anyhow::bail!("rerank endpoint returned HTTP {}", resp.status());
+                }
+                let body: serde_json::Value =
+                    resp.json().await.context("decoding rerank response")?;
+                let results = body
+                    .get("results")
+                    .and_then(|r| r.as_array())
+                    .context("rerank response missing 'results' array")?;
+                let mut ranked: Vec<(usize, f32)> = Vec::with_capacity(results.len());
+                for result in results {
+                    let idx = result
+                        .get("index")
+                        .and_then(serde_json::Value::as_u64)
+                        .context("rerank result missing 'index'")?
+                        as usize;
+                    let score = result
+                        .get("relevance_score")
+                        .and_then(serde_json::Value::as_f64)
+                        .context("rerank result missing 'relevance_score'")?
+                        as f32;
+                    if idx < documents.len() {
+                        ranked.push((idx, score));
+                    }
+                }
+                ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+                Ok(ranked)
+            }
+        }
+    }
+
     /// Returns the model identifier for this reranker.
     pub fn model_id<'a>(&'a self, registry: &'a ModelRegistry) -> &'a str {
         match self {

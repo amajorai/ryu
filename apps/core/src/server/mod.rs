@@ -16,6 +16,7 @@ use tower_http::cors::CorsLayer;
 pub mod activity_api;
 pub mod approvals_api;
 pub mod auto_title;
+pub mod chat_suggestions;
 pub mod conversations;
 pub mod dashboard_api;
 pub mod data_admin;
@@ -831,6 +832,14 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── ACP session config (agent-reported permission modes / models /
         //    config options like reasoning effort), Zed-style ──
         .route("/api/agents/:id/acp-config", get(acp_config))
+        .route("/api/agents/:id/authenticate", post(acp_authenticate))
+        .route("/api/agents/:id/sessions", get(list_acp_sessions_handler))
+        .route(
+            "/api/agents/:id/sessions/:sid",
+            delete(delete_acp_session_handler),
+        )
+        .route("/api/agents/:id/update-check", get(agent_update_check))
+        .route("/api/agents/:id/update", post(agent_update))
         // ── Per-agent subscription usage (5h + weekly rate-limit windows read
         //    from the CLI's own local OAuth token, à la CodexBar/openusage).
         //    Backs the chat "usage bar"; Claude + Codex in v1. ──
@@ -844,6 +853,9 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── Ryu-managed Pi config (isolated model/provider config) ──
         .route("/api/pi-config", get(get_pi_config).put(put_pi_config))
         .route("/api/pi-config/catalog", get(get_pi_config_catalog))
+        .route("/api/pi-config/providers", post(configure_pi_provider))
+        .route("/api/pi-config/providers/:id", delete(delete_pi_provider))
+        .route("/api/pi-config/discover-models", post(discover_pi_models))
         // ── Agent teams (collections of agents + a coordination strategy) ──
         .route("/api/teams", get(list_teams).post(create_team))
         .route(
@@ -918,6 +930,12 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // Resolve an interactive tool-permission prompt raised mid-turn by an
         // ACP agent (the desktop echoes the chosen option id here to unblock it).
         .route("/api/chat/permission", post(chat_permission))
+        .route("/api/chat/cancel", post(chat_cancel))
+        // Next-prompt suggestions (ChatGPT-style follow-up chips) for a turn.
+        .route(
+            "/api/chat/suggestions",
+            post(chat_suggestions::chat_suggestions),
+        )
         // ── Channel bot run endpoint (M11 / #226) ───────────────────────────
         // Channel bots (Telegram, Slack, etc.) call this to turn a single inbound
         // text message into an assembled reply, using the Core session/memory path
@@ -1124,6 +1142,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── Git branch list + switch (composer branch selector) ─────────────
         .route("/api/git/branches", get(git::git_branches))
         .route("/api/git/checkout", post(git::git_checkout))
+        .route("/api/git/create-branch", post(git::git_create_branch))
         // ── Git commit + push (pinned-summary "commit & push" button) ───────
         .route("/api/git/commit-push", post(git::git_commit_push))
         // ── Create a new project folder ("Start from scratch") ──────────────
@@ -2333,6 +2352,225 @@ async fn acp_config(
     }
 }
 
+/// Body for `POST /api/agents/:id/authenticate`.
+#[derive(serde::Deserialize)]
+struct AcpAuthRequest {
+    /// One of the `authMethods[].id` values from the agent's `acp-config`.
+    method_id: String,
+}
+
+/// `POST /api/agents/:id/authenticate` — run the ACP Authentication flow for an
+/// agent using one of the methods it advertised (e.g. a subscription/OAuth
+/// login). The agent subprocess owns the login UX; this issues the ACP
+/// `authenticate` request and waits for completion, then invalidates the cached
+/// `acp-config` so the now-unlocked session config is re-read.
+#[utoipa::path(
+    post,
+    path = "/api/agents/{id}/authenticate",
+    tag = "Agents",
+    summary = "Authenticate to an ACP agent (login)",
+    params(("id" = String, Path, description = "Agent id")),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn acp_authenticate(
+    State(state): State<ServerState>,
+    Path(agent_id): Path<String>,
+    Json(body): Json<AcpAuthRequest>,
+) -> axum::response::Response {
+    let Some(spawn_cmd) = crate::sidecar::adapters::resolve_acp_spawn_cmd(
+        &agent_id,
+        &state.agents,
+        &state.agent_store,
+    )
+    .await
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "not an ACP agent" })),
+        )
+            .into_response();
+    };
+    match crate::sidecar::adapters::acp::authenticate_acp(spawn_cmd, body.method_id).await {
+        Ok(()) => Json(serde_json::json!({ "authenticated": true })).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "authenticated": false, "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `GET /api/agents/:id/sessions` — the sessions an ACP agent is tracking (ACP
+/// `session/list`). Best-effort: agents that don't implement it (the flagship pi)
+/// return `{ sessions: [] }`.
+#[utoipa::path(
+    get,
+    path = "/api/agents/{id}/sessions",
+    tag = "Agents",
+    summary = "List an ACP agent's sessions",
+    params(("id" = String, Path, description = "Agent id")),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn list_acp_sessions_handler(
+    State(state): State<ServerState>,
+    Path(agent_id): Path<String>,
+) -> axum::response::Response {
+    let Some(spawn_cmd) = crate::sidecar::adapters::resolve_acp_spawn_cmd(
+        &agent_id,
+        &state.agents,
+        &state.agent_store,
+    )
+    .await
+    else {
+        return Json(serde_json::json!({ "sessions": [] })).into_response();
+    };
+    match crate::sidecar::adapters::acp::list_acp_sessions(spawn_cmd).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "sessions": [], "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `DELETE /api/agents/:id/sessions/:sid` — delete an ACP agent session (ACP
+/// `session/close`).
+#[utoipa::path(
+    delete,
+    path = "/api/agents/{id}/sessions/{sid}",
+    tag = "Agents",
+    summary = "Delete an ACP agent session",
+    params(
+        ("id" = String, Path, description = "Agent id"),
+        ("sid" = String, Path, description = "Session id")
+    ),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn delete_acp_session_handler(
+    State(state): State<ServerState>,
+    Path((agent_id, sid)): Path<(String, String)>,
+) -> axum::response::Response {
+    let Some(spawn_cmd) = crate::sidecar::adapters::resolve_acp_spawn_cmd(
+        &agent_id,
+        &state.agents,
+        &state.agent_store,
+    )
+    .await
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "not an ACP agent" })),
+        )
+            .into_response();
+    };
+    match crate::sidecar::adapters::acp::close_acp_session(spawn_cmd, sid).await {
+        Ok(()) => Json(serde_json::json!({ "deleted": true })).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "deleted": false, "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Resolve the npm package that backs an agent (for version/update checks). The
+/// flagship `ryu` agent's runtime is the managed Pi engine; every other ACP agent
+/// self-fetches via `npx -y <pkg>`, so the package is parsed from its spawn cmd.
+async fn agent_npm_package(state: &ServerState, agent_id: &str) -> Option<String> {
+    if agent_id == "ryu" {
+        return Some(crate::sidecar::adapters::acp::PI_ENGINE_NPM.to_owned());
+    }
+    let spawn_cmd = crate::sidecar::adapters::resolve_acp_spawn_cmd(
+        agent_id,
+        &state.agents,
+        &state.agent_store,
+    )
+    .await?;
+    npx_package_of(&spawn_cmd)
+}
+
+/// `GET /api/agents/:id/update-check` — the agent runtime's installed vs latest
+/// version, mirroring the engine catalog's update check but per agent. Installed
+/// version is tracked for the managed Pi (`ryu`); npx-fetched agents report a
+/// latest only (npx caches globally, so there is no persisted installed version).
+#[utoipa::path(
+    get,
+    path = "/api/agents/{id}/update-check",
+    tag = "Agents",
+    summary = "Check an agent runtime for updates",
+    params(("id" = String, Path, description = "Agent id")),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn agent_update_check(
+    State(state): State<ServerState>,
+    Path(agent_id): Path<String>,
+) -> Json<serde_json::Value> {
+    let npm_package = agent_npm_package(&state, &agent_id).await;
+    let installed = if agent_id == "ryu" {
+        crate::sidecar::adapters::acp::read_managed_pi_version()
+    } else {
+        None
+    };
+    let latest = match &npm_package {
+        Some(pkg) => crate::catalog::npm::fetch_latest_version(&reqwest::Client::new(), pkg)
+            .await
+            .ok(),
+        None => None,
+    };
+    let update_available = matches!((&installed, &latest), (Some(i), Some(l)) if i != l);
+    Json(json!({
+        "id": agent_id,
+        "npmPackage": npm_package,
+        "installedVersion": installed,
+        "latestVersion": latest,
+        "updateAvailable": update_available,
+    }))
+}
+
+/// `POST /api/agents/:id/update` — update the agent runtime to the latest version.
+/// For the managed Pi (`ryu`) this re-installs `@earendil-works/pi-coding-agent@latest`;
+/// for npx agents it re-warms the npx cache (which pulls the latest on fetch).
+#[utoipa::path(
+    post,
+    path = "/api/agents/{id}/update",
+    tag = "Agents",
+    summary = "Update an agent runtime to the latest version",
+    params(("id" = String, Path, description = "Agent id")),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn agent_update(
+    State(state): State<ServerState>,
+    Path(agent_id): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if agent_id == "ryu" {
+        return match crate::sidecar::adapters::acp::update_managed_pi().await {
+            Ok(()) => {
+                let version = crate::sidecar::adapters::acp::read_managed_pi_version();
+                (
+                    StatusCode::OK,
+                    Json(json!({ "updated": true, "installedVersion": version })),
+                )
+            }
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "updated": false, "error": e.to_string() })),
+            ),
+        };
+    }
+    match agent_npm_package(&state, &agent_id).await {
+        Some(pkg) => {
+            warm_npx_package(&pkg).await;
+            (StatusCode::OK, Json(json!({ "updated": true })))
+        }
+        None => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "updated": false, "error": "no updatable runtime for this agent" })),
+        ),
+    }
+}
+
 /// `GET /api/agents/:id/capabilities` — the agent's effective tool / reasoning /
 /// vision capabilities, Jan-style.
 ///
@@ -2480,6 +2718,30 @@ async fn chat_permission(Json(body): Json<PermissionDecision>) -> Json<serde_jso
     let resolved =
         crate::sidecar::adapters::acp::resolve_permission(&body.request_id, body.option_id);
     Json(serde_json::json!({ "resolved": resolved }))
+}
+
+/// Body for `POST /api/chat/cancel`.
+#[derive(serde::Deserialize)]
+struct CancelRequest {
+    /// The conversation id whose in-flight ACP turn should be cancelled.
+    conversation_id: String,
+}
+
+/// `POST /api/chat/cancel` — explicitly stop a conversation's in-flight ACP turn.
+/// Unlike a mere SSE disconnect (which Core lets finish so the assistant message
+/// persists), this propagates an ACP `session/cancel` to the agent so it actually
+/// stops. `cancelled` is `false` when no live turn was found for the conversation.
+#[utoipa::path(
+    post,
+    path = "/api/chat/cancel",
+    tag = "Chat",
+    summary = "Cancel a conversation's in-flight ACP turn",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn chat_cancel(Json(body): Json<CancelRequest>) -> Json<serde_json::Value> {
+    let cancelled = crate::sidecar::adapters::acp::request_cancel(&body.conversation_id);
+    Json(serde_json::json!({ "cancelled": cancelled }))
 }
 
 // ── Channel bot run endpoint (M11 / #226) ────────────────────────────────────
@@ -4309,9 +4571,7 @@ async fn list_agents(State(state): State<ServerState>) -> Json<serde_json::Value
 
     match state.agent_store.list().await {
         Ok(records) => {
-            for record in records.into_iter().filter(|r| !r.built_in) {
-                let locked_flag = record.locked.then_some(true);
-                let enabled = (record.id == *default_agent_id).then_some(true);
+            for record in records {
                 // Surface the persona's custom avatar (a data URL) on the summary
                 // so the chat picker / transcript can render it without a second
                 // fetch of the full record.
@@ -4319,6 +4579,21 @@ async fn list_agents(State(state): State<ServerState>) -> Json<serde_json::Value
                     .persona
                     .as_ref()
                     .and_then(|p| p.avatar_url.clone());
+                // Built-in agents are sourced from the in-code registry above (which
+                // has no persona data), so their DB row is otherwise skipped. But a
+                // user can still set a custom avatar on a built-in (e.g. Claude Code),
+                // and it's persisted on that row — merge it onto the registry entry so
+                // the sidebar/chat render the custom image instead of the engine logo.
+                if record.built_in {
+                    if let Some(url) = avatar_url {
+                        if let Some(existing) = agents.iter_mut().find(|a| a.id == record.id) {
+                            existing.avatar_url = Some(url);
+                        }
+                    }
+                    continue;
+                }
+                let locked_flag = record.locked.then_some(true);
+                let enabled = (record.id == *default_agent_id).then_some(true);
                 agents.push(crate::sidecar::adapters::AgentInfo {
                     id: record.id,
                     name: record.name,
@@ -4727,6 +5002,65 @@ async fn put_pi_config(
             Json(json!({ "error": e.to_string() })),
         ),
     }
+}
+
+/// Configure a provider's credential / base URL / routing **without** activating
+/// it (the Zed-style "set up many, activate one" flow). Returns the refreshed
+/// catalog.
+#[utoipa::path(
+    post,
+    path = "/api/pi-config/providers",
+    tag = "Agents",
+    summary = "Configure a Pi provider without activating it",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn configure_pi_provider(
+    Json(input): Json<crate::pi_config::ProviderConfigInput>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::pi_config::configure_provider(input) {
+        Ok(catalog) => (StatusCode::OK, Json(catalog)),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+/// Remove a provider's stored credential (and, for custom providers, its entry).
+#[utoipa::path(
+    delete,
+    path = "/api/pi-config/providers/{id}",
+    tag = "Agents",
+    summary = "Remove a Pi provider's stored credential",
+    params(("id" = String, Path, description = "Provider id")),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn delete_pi_provider(Path(id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::pi_config::remove_provider(&id) {
+        Ok(catalog) => (StatusCode::OK, Json(catalog)),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+/// Discover a provider's live model list via its OpenAI-compatible `GET /models`,
+/// falling back to the provider's static suggestions when discovery is
+/// unavailable. Runs server-side so keys never reach the browser.
+#[utoipa::path(
+    post,
+    path = "/api/pi-config/discover-models",
+    tag = "Agents",
+    summary = "Discover a provider's models (with static fallback)",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn discover_pi_models(
+    Json(input): Json<crate::pi_config::DiscoverInput>,
+) -> Json<serde_json::Value> {
+    Json(crate::pi_config::discover_models(input).await)
 }
 
 // ── Agent teams CRUD ──────────────────────────────────────────────────────────
@@ -7643,6 +7977,17 @@ async fn search_space(
     Json(body): Json<SearchBody>,
 ) -> axum::response::Response {
     let limit = body.limit.clamp(1, 50);
+    // Lazily start the (off-by-default) reranker server so Spaces RAG can neural-
+    // rerank. Fire-and-forget: the current search fails open to the vector order
+    // if the server isn't warm yet; subsequent searches rerank once it is up.
+    {
+        let manager = state.manager.clone();
+        tokio::spawn(async move {
+            if let Err(e) = manager.start_sidecar("llamacpp-rerank").await {
+                tracing::debug!("llamacpp-rerank lazy start skipped: {e:#}");
+            }
+        });
+    }
     match state.spaces.search(&id, &body.query, limit).await {
         Ok(matches) => Json(json!({ "space_id": id, "matches": matches })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),

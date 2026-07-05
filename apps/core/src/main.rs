@@ -78,7 +78,8 @@ use sidecar::{
     install_state::InstallStatusStore,
     onboarding::SetupManager,
     providers::{
-        llamacpp::LlamaCppEmbedManager, llamacpp::LlamaCppManager, mlx::MlxManager,
+        llamacpp::LlamaCppEmbedManager, llamacpp::LlamaCppManager,
+        llamacpp::LlamaCppRerankManager, mlx::MlxManager,
         mlx_vlm::MlxVlmManager, ollama::OllamaManager, omlx::OmlxManager, outetts::OuteTtsManager,
         parakeet::ParakeetManager, ryutts::RyuTtsManager, sdcpp::StableDiffusionManager,
         sglang::SglangManager, unsloth::UnslothManager, vllm::VllmManager,
@@ -222,6 +223,11 @@ async fn main() {
         // Dedicated embeddings server (runs alongside the chat engine) — serves
         // the nomic GGUF for real semantic RAG with zero setup.
         Arc::new(LlamaCppEmbedManager::new().with_downloads(download_center.clone())),
+        // Dedicated reranker server — serves the bge cross-encoder GGUF for
+        // neural reranking of Spaces RAG. Off by default (NOT in startup_order):
+        // lazily started by the Spaces search path on first use. The model is
+        // still auto-downloaded during onboarding.
+        Arc::new(LlamaCppRerankManager::new().with_downloads(download_center.clone())),
         Arc::new(OllamaManager::new().with_downloads(download_center.clone())),
         Arc::new(VllmManager::new()),
         Arc::new(SglangManager::new()),

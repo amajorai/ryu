@@ -1,10 +1,12 @@
 pub mod downloader;
 pub mod embed;
 pub mod process;
+pub mod rerank;
 
 pub use downloader::LlamaCppDownloader;
 pub use embed::LlamaCppEmbedManager;
 pub use process::LlamaCppProcess;
+pub use rerank::LlamaCppRerankManager;
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -194,6 +196,7 @@ impl Sidecar for LlamaCppManager {
                 mmproj_path,
                 ctx_size: 0,
                 embeddings: false,
+                reranking: false,
                 launch,
             };
             proc.start_with(opts)

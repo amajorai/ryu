@@ -55,7 +55,7 @@ use crate::server::preferences::PreferencesStore;
 // Space's markdown pages get the same real semantic embeddings (the local
 // `llamacpp-embed` nomic server by default) the retrieval store uses, and a
 // single swap changes the model everywhere.
-use crate::server::retrieval::Embedder;
+use crate::server::retrieval::{Embedder, Reranker};
 
 /// Maximum characters per chunk before the ingestion pipeline splits.
 const CHUNK_CHAR_SIZE: usize = 1_000;
@@ -329,6 +329,11 @@ pub struct SpaceStore {
     /// Graph extraction model id (from registry; informational — the local
     /// extractor always runs offline; a remote id here is a future hook).
     graph_extraction_model: String,
+    /// Neural reranker for Spaces RAG (the bge cross-encoder served by the
+    /// lazily-started `llamacpp-rerank` server). `search` over-fetches candidates
+    /// and re-scores them with this before truncating to the requested limit;
+    /// reranking fails open to the vector order whenever the server is unreachable.
+    reranker: Reranker,
     /// Background re-index coordination (single-run guard + last error).
     reindex: Arc<Mutex<ReindexInner>>,
 }
@@ -358,7 +363,8 @@ impl SpaceStore {
         let embedder = Embedder::from_registry(&registry);
         let dims = embedder.dims();
         let extraction_model = registry.graph_extraction_model.clone();
-        Self::open_inner(default_db_path(), embedder, dims, extraction_model)
+        let reranker = Reranker::local_server(&registry);
+        Self::open_inner(default_db_path(), embedder, dims, extraction_model, reranker)
     }
 
     /// Open (or create) the store at a specific path with a chosen embedder and
@@ -369,7 +375,8 @@ impl SpaceStore {
     pub fn open(path: PathBuf, embedder: Embedder, embed_dims: usize) -> Result<Self> {
         let registry = ModelRegistry::from_env();
         let extraction_model = registry.graph_extraction_model.clone();
-        Self::open_inner(path, embedder, embed_dims, extraction_model)
+        let reranker = Reranker::local_server(&registry);
+        Self::open_inner(path, embedder, embed_dims, extraction_model, reranker)
     }
 
     fn open_inner(
@@ -377,6 +384,7 @@ impl SpaceStore {
         embedder: Embedder,
         embed_dims: usize,
         graph_extraction_model: String,
+        reranker: Reranker,
     ) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -390,6 +398,7 @@ impl SpaceStore {
             embedder: Arc::new(Mutex::new(embedder)),
             vec_dims: Arc::new(AtomicUsize::new(embed_dims)),
             graph_extraction_model,
+            reranker,
             reindex: Arc::new(Mutex::new(ReindexInner::default())),
         })
     }
@@ -405,6 +414,10 @@ impl SpaceStore {
             embedder: Arc::new(Mutex::new(Embedder::Local { dims })),
             vec_dims: Arc::new(AtomicUsize::new(dims)),
             graph_extraction_model: crate::registry::DEFAULT_GRAPH_EXTRACTION_MODEL.to_owned(),
+            // Test helper: the local (server-backed, fail-open) reranker needs no
+            // registry — mirrors `Embedder::Local` above. Completes the field the
+            // in-progress SpaceStore.reranker change left off in this cfg(test) ctor.
+            reranker: Reranker::Local,
             reindex: Arc::new(Mutex::new(ReindexInner::default())),
         })
     }
@@ -973,9 +986,59 @@ impl SpaceStore {
         limit: usize,
     ) -> Result<Vec<ChunkMatch>> {
         let mode = self.space_mode(space_id).await?;
-        match mode {
-            RetrievalMode::Vector => self.vector_search(space_id, query, limit).await,
-            RetrievalMode::Graph => self.graph_search(space_id, query, limit).await,
+        // Over-fetch candidates so the neural reranker (bge cross-encoder, served
+        // by the lazily-started `llamacpp-rerank` sidecar) has a fuller set to
+        // re-score. Capped so we never balloon the KNN/graph query.
+        const RERANK_FANOUT: usize = 4;
+        const RERANK_MAX_CANDIDATES: usize = 50;
+        let candidate_limit = limit
+            .saturating_mul(RERANK_FANOUT)
+            .clamp(limit, RERANK_MAX_CANDIDATES);
+        let candidates = match mode {
+            RetrievalMode::Vector => {
+                self.vector_search(space_id, query, candidate_limit).await?
+            }
+            RetrievalMode::Graph => self.graph_search(space_id, query, candidate_limit).await?,
+        };
+        Ok(self.apply_reranking(query, candidates, limit).await)
+    }
+
+    /// Re-score retrieval `candidates` with the neural reranker and truncate to
+    /// `limit`. Fails open: any reranker error (server not started yet, HTTP
+    /// failure) preserves the original retrieval order. Neural reranking of Spaces
+    /// RAG is the reason the bge cross-encoder is bundled; the `llamacpp-rerank`
+    /// server is started lazily by the search HTTP handler, so the first search
+    /// after boot may fall open to the vector order before the server warms.
+    async fn apply_reranking(
+        &self,
+        query: &str,
+        candidates: Vec<ChunkMatch>,
+        limit: usize,
+    ) -> Vec<ChunkMatch> {
+        if candidates.len() <= 1 {
+            return candidates.into_iter().take(limit).collect();
+        }
+        let docs: Vec<String> = candidates.iter().map(|c| c.content.clone()).collect();
+        match self.reranker.rank_documents(query, &docs).await {
+            Ok(ranked) => {
+                let mut reordered = Vec::with_capacity(limit.min(ranked.len()));
+                for (idx, _score) in ranked.into_iter().take(limit) {
+                    if let Some(chunk) = candidates.get(idx) {
+                        reordered.push(chunk.clone());
+                    }
+                }
+                // Defensive: an empty/degenerate rerank result must not drop all
+                // hits — fall back to the original order.
+                if reordered.is_empty() {
+                    candidates.into_iter().take(limit).collect()
+                } else {
+                    reordered
+                }
+            }
+            Err(e) => {
+                tracing::debug!("Spaces reranking unavailable ({e:#}); using vector order");
+                candidates.into_iter().take(limit).collect()
+            }
         }
     }
 

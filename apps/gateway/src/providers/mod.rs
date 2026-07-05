@@ -189,6 +189,41 @@ pub(super) fn chat_completions_url(base_url: &str) -> String {
     format!("{}/chat/completions", base_url.trim_end_matches('/'))
 }
 
+/// Fetch `GET {base}/models` from an OpenAI-compatible endpoint and return its
+/// `data[]` model objects. `api_key` may be empty (e.g. a local Ollama server).
+/// Discovery-only: a short 6 s timeout and any error / timeout / non-2xx /
+/// empty result yields `None` so the caller falls back to the static list. Never
+/// panics or propagates an error — `/v1/models` must stay infallible.
+pub(super) async fn discover_openai_models(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+) -> Option<Value> {
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let mut req = client.get(&url).timeout(Duration::from_secs(6));
+    if !api_key.is_empty() {
+        req = req.bearer_auth(api_key);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    Some(resp.json::<Value>().await.ok()?)
+}
+
+/// Turn a `GET /models` response body into its `data[]` model objects with an
+/// `id`, dropping malformed entries. Returns `None` when nothing usable is found
+/// so discovery is treated as a miss (fall back to the static list).
+pub(super) fn models_from_response(json: Value) -> Option<Vec<Value>> {
+    let data = json.get("data")?.as_array()?;
+    let models: Vec<Value> = data
+        .iter()
+        .filter(|m| m.get("id").and_then(Value::as_str).is_some())
+        .cloned()
+        .collect();
+    (!models.is_empty()).then_some(models)
+}
+
 /// Check a streaming response for a non-2xx status and return an error.
 pub(super) async fn check_stream_status(
     resp: reqwest::Response,
@@ -280,6 +315,18 @@ pub(super) async fn send_with_retry(
 /// Common interface implemented by every backend provider.
 pub trait Provider: Send + Sync {
     fn name(&self) -> &'static str;
+
+    /// Discover available models via an OpenAI-compatible `GET {base}/models`.
+    /// Returns the upstream `data[]` model objects on success, or `None` when the
+    /// provider exposes no such endpoint or the call errors/times out — in which
+    /// case `/v1/models` falls back to the static builtin list for it. The
+    /// default is `None`; only OpenAI-compat providers override it. Uses a short
+    /// per-request timeout so a slow upstream never stalls the endpoint.
+    fn discover_models<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn std::future::Future<Output = Option<Vec<Value>>> + Send + 'a>> {
+        Box::pin(async { None })
+    }
 
     /// Non-streaming completion. Returns the full response JSON.
     fn complete<'a>(

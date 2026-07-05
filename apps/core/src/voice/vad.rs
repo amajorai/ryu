@@ -136,17 +136,20 @@ impl VadGate {
 enum SpeechProbe {
     /// Normalized-RMS energy heuristic (no model). Always available.
     Energy,
-    /// TEN VAD ONNX model (feature `voice-vad`). See [`tenvad`].
+    /// Silero VAD ONNX model (feature `voice-vad`). See [`silero`].
     #[cfg(feature = "voice-vad")]
-    TenVad(tenvad::TenVadModel),
+    Silero(silero::SileroModel),
 }
 
 impl SpeechProbe {
     fn probability(&mut self, hop: &[i16]) -> f32 {
         match self {
             SpeechProbe::Energy => energy_probability(hop),
+            // Any inference error (bad frame, model quirk) falls back per-hop to
+            // the always-available energy heuristic, so voice mode is never worse
+            // off than without the model.
             #[cfg(feature = "voice-vad")]
-            SpeechProbe::TenVad(model) => model
+            SpeechProbe::Silero(model) => model
                 .probability(hop)
                 .unwrap_or_else(|_| energy_probability(hop)),
         }
@@ -156,7 +159,7 @@ impl SpeechProbe {
         match self {
             SpeechProbe::Energy => "energy",
             #[cfg(feature = "voice-vad")]
-            SpeechProbe::TenVad(_) => "ten-vad",
+            SpeechProbe::Silero(_) => "silero",
         }
     }
 }
@@ -187,8 +190,8 @@ pub struct Vad {
 }
 
 impl Vad {
-    /// Build the VAD, preferring TEN VAD when built + present, else the energy
-    /// backend. Never fails — degradation is silent (logged once).
+    /// Build the VAD, preferring Silero when built + the model is present, else the
+    /// energy backend. Never fails — degradation is silent (logged once).
     pub fn new() -> Self {
         let probe = Self::best_probe();
         tracing::info!("voice VAD backend: {}", probe.label());
@@ -201,12 +204,12 @@ impl Vad {
 
     #[cfg(feature = "voice-vad")]
     fn best_probe() -> SpeechProbe {
-        match tenvad::TenVadModel::load() {
-            Ok(model) => SpeechProbe::TenVad(model),
+        match silero::SileroModel::load() {
+            Ok(model) => SpeechProbe::Silero(model),
             Err(e) => {
                 tracing::warn!(
-                    "TEN VAD model unavailable ({e:#}); falling back to energy VAD. \
-                     Install the TEN VAD model to enable noise-robust detection."
+                    "Silero VAD model unavailable ({e:#}); falling back to energy VAD. \
+                     The model is fetched by default during onboarding."
                 );
                 SpeechProbe::Energy
             }
@@ -256,37 +259,116 @@ impl Default for Vad {
     }
 }
 
-/// TEN VAD ONNX backend (feature `voice-vad`).
-///
-/// SEAM: TEN VAD ships an open-source ONNX model + preprocessing, but the exact
-/// tensor I/O (feature preprocessing + whether hidden state is threaded across
-/// frames) is model-file specific and must be wired against the real
-/// `ten-vad.onnx` in hand — do NOT guess the tensor layout. Until then `load`
-/// returns an error, so [`Vad`] transparently uses the energy backend. When
-/// wiring: load via `ort` (the same runtime `voice-parakeet` pulls), fetch the
-/// model through a downloader mirroring
-/// `crate::sidecar::providers::parakeet::downloader`, and implement
-/// `probability` = preprocess(hop) → run → read the speech-prob output.
-#[cfg(feature = "voice-vad")]
-pub mod tenvad {
-    use anyhow::{bail, Result};
+// ── Silero VAD model download (always compiled) ───────────────────────────────
+//
+// The model bytes are fetched by onboarding regardless of the `voice-vad` build
+// feature (mirrors parakeet: the download + path are always present; only the
+// ONNX inference is gated). Originally this seam targeted TEN VAD, but that
+// model's ONNX is not usable standalone (its feature extraction lives in a closed
+// precompiled native lib), so Silero VAD (fully open) is used instead.
 
-    pub struct TenVadModel {
-        // ort::Session + carried state go here once wired.
-        _private: (),
+/// Filename of the Silero VAD ONNX model in `~/.ryu/models/`.
+pub const SILERO_MODEL_FILE: &str = "silero_vad_v4.onnx";
+
+/// Default Silero VAD v4 model URL (snakers4/silero-vad, MIT/Apache). This is the
+/// LSTM (`input`/`sr`/`h`/`c` → `output`/`hn`/`cn`) variant `transcribe_rs::vad::
+/// SileroVad` expects. Override via `RYU_SILERO_VAD_MODEL_URL`.
+pub const SILERO_MODEL_URL: &str =
+    "https://github.com/snakers4/silero-vad/raw/v4.0/files/silero_vad.onnx";
+
+/// SHA-256 of the default Silero VAD model. Override via
+/// `RYU_SILERO_VAD_MODEL_SHA256` (empty string skips verification).
+pub const SILERO_MODEL_SHA256: &str =
+    "a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5af28";
+
+/// Resolved path of the Silero VAD model on disk (`~/.ryu/models/…`).
+pub fn silero_model_path() -> std::path::PathBuf {
+    crate::paths::ryu_dir()
+        .join("models")
+        .join(SILERO_MODEL_FILE)
+}
+
+/// Download spec for the Silero VAD model (used by onboarding). Honors the
+/// `RYU_SILERO_VAD_MODEL_URL` / `RYU_SILERO_VAD_MODEL_SHA256` overrides.
+pub fn silero_download_spec() -> crate::downloads::DownloadSpec {
+    let url = std::env::var("RYU_SILERO_VAD_MODEL_URL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| SILERO_MODEL_URL.to_string());
+    let sha = std::env::var("RYU_SILERO_VAD_MODEL_SHA256")
+        .ok()
+        .unwrap_or_else(|| SILERO_MODEL_SHA256.to_string());
+    crate::downloads::DownloadSpec {
+        kind: crate::downloads::DownloadKind::Voice,
+        label: "Silero VAD model".to_string(),
+        url,
+        dest: silero_model_path(),
+        sha256: (!sha.is_empty()).then_some(sha),
+        version_record: Some(crate::downloads::VersionRecord {
+            store_key: "vad-model:silero-v4".to_string(),
+            version: SILERO_MODEL_FILE.to_string(),
+        }),
+    }
+}
+
+/// Number of samples per Silero VAD frame (30 ms @ 16 kHz). transcribe-rs's
+/// `SileroVad::speech_probability` requires exactly this many samples per call.
+#[cfg(feature = "voice-vad")]
+const SILERO_FRAME_SAMPLES: usize = 480;
+
+/// Silero VAD ONNX backend (feature `voice-vad`), via transcribe-rs's tested
+/// `SileroVad`. Our gate feeds 256-sample hops but Silero needs 480-sample
+/// windows, so we buffer hops into windows and cache the last windowed
+/// probability for the hops in between.
+#[cfg(feature = "voice-vad")]
+pub mod silero {
+    use anyhow::{Context, Result};
+    use transcribe_rs::vad::SileroVad;
+
+    use super::{silero_model_path, SILERO_FRAME_SAMPLES};
+
+    pub struct SileroModel {
+        vad: SileroVad,
+        /// f32 samples pending until a full 480-sample window is available.
+        buf: Vec<f32>,
+        /// Most recent windowed probability, returned for hops that do not yet
+        /// complete a new window (0.0 until the first window fills).
+        last_prob: f32,
     }
 
-    impl TenVadModel {
+    impl SileroModel {
+        /// Load the model from `~/.ryu/models/silero_vad_v4.onnx`. Errors (missing
+        /// file, bad model) propagate so [`super::Vad`] falls back to energy.
         pub fn load() -> Result<Self> {
-            bail!(
-                "TEN VAD ONNX inference is not yet wired (needs the model file to fix \
-                 preprocessing + tensor I/O); using the energy VAD fallback"
-            )
+            let path = silero_model_path();
+            if !path.exists() {
+                anyhow::bail!("silero VAD model not present at {}", path.display());
+            }
+            let vad = SileroVad::new(&path, 0.5)
+                .map_err(|e| anyhow::anyhow!("{e}"))
+                .context("loading silero VAD onnx model")?;
+            Ok(Self {
+                vad,
+                buf: Vec::with_capacity(SILERO_FRAME_SAMPLES * 2),
+                last_prob: 0.0,
+            })
         }
 
-        /// One hop (256 × i16 @ 16 kHz) → speech probability `0.0..=1.0`.
-        pub fn probability(&mut self, _hop: &[i16]) -> Result<f32> {
-            bail!("TEN VAD model not wired")
+        /// One hop (256 × i16 @ 16 kHz) → speech probability `0.0..=1.0`. Buffers
+        /// into Silero's 480-sample window and runs inference once a window fills,
+        /// returning the most recent windowed probability.
+        pub fn probability(&mut self, hop: &[i16]) -> Result<f32> {
+            for &s in hop {
+                self.buf.push(f32::from(s) / 32768.0);
+            }
+            while self.buf.len() >= SILERO_FRAME_SAMPLES {
+                let frame: Vec<f32> = self.buf.drain(0..SILERO_FRAME_SAMPLES).collect();
+                self.last_prob = self
+                    .vad
+                    .speech_probability(&frame)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+            }
+            Ok(self.last_prob)
         }
     }
 }

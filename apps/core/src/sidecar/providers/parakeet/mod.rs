@@ -176,8 +176,9 @@ mod engine {
 
     use anyhow::{Context, Result};
     use once_cell::sync::Lazy;
-    use transcribe_rs::engines::parakeet::{ParakeetModel, ParakeetModelParams};
-    use transcribe_rs::SpeechModel;
+    use transcribe_rs::onnx::parakeet::ParakeetModel;
+    use transcribe_rs::onnx::Quantization;
+    use transcribe_rs::{SpeechModel, TranscribeOptions};
 
     use super::downloader::model_dir;
 
@@ -185,15 +186,15 @@ mod engine {
     /// (`&mut self`), so it is guarded by a Mutex and reused across requests.
     static MODEL: Lazy<Mutex<Option<ParakeetModel>>> = Lazy::new(|| Mutex::new(None));
 
-    /// Load the model into memory if not already loaded.
+    /// Load the model into memory if not already loaded. `ParakeetModel::load`
+    /// both constructs and loads from the downloaded int8 model directory.
     pub fn preload() -> Result<()> {
         let mut guard = MODEL.lock().expect("parakeet model mutex");
         if guard.is_some() {
             return Ok(());
         }
-        let mut model = ParakeetModel::new();
-        model
-            .load_model_with_params(&model_dir(), ParakeetModelParams::int8())
+        let model = ParakeetModel::load(&model_dir(), &Quantization::Int8)
+            .map_err(|e| anyhow::anyhow!("{e}"))
             .context("loading parakeet ONNX model")?;
         *guard = Some(model);
         Ok(())
@@ -223,7 +224,8 @@ mod engine {
         let path = tmp.path().to_path_buf();
 
         let result = model
-            .transcribe_file(&path, &Default::default())
+            .transcribe_file(&path, &TranscribeOptions::default())
+            .map_err(|e| anyhow::anyhow!("{e}"))
             .context("parakeet transcription failed")?;
         Ok(result.text.trim().to_string())
     }

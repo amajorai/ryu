@@ -67,6 +67,31 @@ pub const DEFAULT_LOCAL_EMBED_MODEL_SHA256: &str =
 pub const DEFAULT_RERANKER_MODEL: &str = "BAAI/bge-reranker";
 /// Last-resort fallback: reranker output dimensionality (scalar → 1).
 pub const DEFAULT_RERANKER_DIMS: usize = 1;
+
+/// Base URL of the local reranker server. A dedicated llama.cpp instance runs
+/// with `--reranking` on this loopback port (distinct from the chat engine's
+/// 8080 and the embeddings server's 8081) and exposes a `/rerank` endpoint whose
+/// `{results:[{index, relevance_score}]}` shape matches what `remote_rerank`
+/// already parses. Spaces RAG points here for neural reranking. This server is
+/// *not* auto-started (off by default); it is lazily started on first Space
+/// search. Override via `RYU_RERANKER_BASE_URL`.
+pub const DEFAULT_RERANKER_BASE_URL: &str = "http://127.0.0.1:8082";
+
+/// Default local reranker model id (storage key + filename stem in `~/.ryu/models/`).
+///
+/// BAAI bge-reranker-v2-m3, Q4_K_M (via the gpustack GGUF conversion) — a
+/// multilingual cross-encoder reranker, ~438 MB, CPU-friendly and publicly
+/// reachable without HF authentication. Served by the `llamacpp-rerank` sidecar.
+pub const DEFAULT_LOCAL_RERANKER_MODEL_ID: &str = "bge-reranker-v2-m3.Q4_K_M";
+
+/// Default local reranker weight URL. Override via `RYU_LOCAL_RERANKER_MODEL_URL`.
+pub const DEFAULT_LOCAL_RERANKER_MODEL_URL: &str =
+    "https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q4_K_M.gguf";
+
+/// SHA-256 of the default reranker GGUF (from the HF LFS oid / `x-linked-etag`).
+/// Override via `RYU_LOCAL_RERANKER_MODEL_SHA256` (empty string skips verification).
+pub const DEFAULT_LOCAL_RERANKER_MODEL_SHA256: &str =
+    "e186a244ed455b4ab66ec64339ce7427a6ae13f5c0b5e544de96e50f0f8b3673";
 /// Last-resort fallback: default chat provider base URL.
 pub const DEFAULT_LLM_BASE_URL: &str = "https://api.openai.com";
 /// Last-resort fallback: default chat model id.
@@ -201,6 +226,18 @@ struct RegistryFile {
     /// Reranker model id (overridden by `RYU_RERANKER_MODEL`).
     #[serde(default)]
     reranker_model: Option<String>,
+    /// Reranker endpoint base URL (overridden by `RYU_RERANKER_BASE_URL`).
+    #[serde(default)]
+    reranker_base_url: Option<String>,
+    /// Local reranker model id for the bundled GGUF (overridden by `RYU_LOCAL_RERANKER_MODEL_ID`).
+    #[serde(default)]
+    local_reranker_model_id: Option<String>,
+    /// Local reranker model weight URL (overridden by `RYU_LOCAL_RERANKER_MODEL_URL`).
+    #[serde(default)]
+    local_reranker_model_url: Option<String>,
+    /// Local reranker model SHA-256 (overridden by `RYU_LOCAL_RERANKER_MODEL_SHA256`).
+    #[serde(default)]
+    local_reranker_model_sha256: Option<String>,
     /// Default RAG strategy: "vector" | "graph". Overridden by `RYU_RAG_STRATEGY`.
     /// Per-Space `retrieval_mode` column takes precedence over this global default.
     #[serde(default)]
@@ -276,6 +313,14 @@ pub struct ProviderRegistry {
     pub local_embed_model: LocalModelEntry,
     /// Reranker model used to re-score top-K retrieval candidates.
     pub reranker: ModelEntry,
+    /// Base URL of the OpenAI-compatible reranker endpoint (no `/v1` suffix).
+    /// Defaults to the local `llamacpp-rerank` server; `RYU_RERANKER_BASE_URL`
+    /// overrides to point at a remote cross-encoder scoring endpoint.
+    pub reranker_base_url: String,
+    /// Local reranker model: the GGUF cross-encoder served by the dedicated
+    /// llama.cpp `--reranking` instance for zero-setup neural reranking of Spaces
+    /// RAG. Swappable via env or `registry.json` like the embedding model.
+    pub local_reranker_model: LocalModelEntry,
     /// Default RAG strategy for Spaces that have no per-Space `retrieval_mode`
     /// set. One of `"vector"` or `"graph"`. Defaults to `"vector"`.
     pub rag_strategy: String,
@@ -372,6 +417,25 @@ impl ProviderRegistry {
             file.reranker_model,
             DEFAULT_RERANKER_MODEL,
         );
+        let reranker_base_url = env_or_file_or_literal(
+            "RYU_RERANKER_BASE_URL",
+            file.reranker_base_url,
+            DEFAULT_RERANKER_BASE_URL,
+        );
+        let reranker_model_id = env_or_file_or_literal(
+            "RYU_LOCAL_RERANKER_MODEL_ID",
+            file.local_reranker_model_id,
+            DEFAULT_LOCAL_RERANKER_MODEL_ID,
+        );
+        let reranker_model_url = env_or_file_or_literal(
+            "RYU_LOCAL_RERANKER_MODEL_URL",
+            file.local_reranker_model_url,
+            DEFAULT_LOCAL_RERANKER_MODEL_URL,
+        );
+        let reranker_model_sha256 = std::env::var("RYU_LOCAL_RERANKER_MODEL_SHA256")
+            .ok()
+            .or(file.local_reranker_model_sha256)
+            .unwrap_or_else(|| DEFAULT_LOCAL_RERANKER_MODEL_SHA256.to_owned());
         let rag_strategy =
             env_or_file_or_literal("RYU_RAG_STRATEGY", file.rag_strategy, DEFAULT_RAG_STRATEGY);
         let graph_extraction_model = env_or_file_or_literal(
@@ -416,6 +480,12 @@ impl ProviderRegistry {
             reranker: ModelEntry {
                 id: reranker_id,
                 dims: DEFAULT_RERANKER_DIMS,
+            },
+            reranker_base_url,
+            local_reranker_model: LocalModelEntry {
+                id: reranker_model_id,
+                weight_url: reranker_model_url,
+                sha256: reranker_model_sha256,
             },
             rag_strategy,
             graph_extraction_model,
@@ -512,6 +582,12 @@ impl Default for ProviderRegistry {
             reranker: ModelEntry {
                 id: DEFAULT_RERANKER_MODEL.to_owned(),
                 dims: DEFAULT_RERANKER_DIMS,
+            },
+            reranker_base_url: DEFAULT_RERANKER_BASE_URL.to_owned(),
+            local_reranker_model: LocalModelEntry {
+                id: DEFAULT_LOCAL_RERANKER_MODEL_ID.to_owned(),
+                weight_url: DEFAULT_LOCAL_RERANKER_MODEL_URL.to_owned(),
+                sha256: DEFAULT_LOCAL_RERANKER_MODEL_SHA256.to_owned(),
             },
             rag_strategy: DEFAULT_RAG_STRATEGY.to_owned(),
             graph_extraction_model: DEFAULT_GRAPH_EXTRACTION_MODEL.to_owned(),

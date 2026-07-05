@@ -37,15 +37,23 @@ if (process.platform === "win32") {
 	} catch {}
 }
 
-// Ship the default WASM sandbox (wasmtime) in the running binary. The Cargo
-// `default` feature set stays lean (so `cargo test`/CI don't pay the wasmtime +
-// cranelift compile cost per spike 0188), but the dev and release binaries the
-// user actually runs must have it compiled in — otherwise `detect_backend`
-// reports wasmtime unavailable and the Store shows the default sandbox as
-// not-ready. See apps/core/package.json `build` for the release counterpart.
-const child = spawn("cargo", ["run", "--features", "sandbox-wasmtime"], {
-	stdio: "inherit",
-	env: process.env,
-	shell: false,
-});
+// Ship the running-binary defaults that the lean Cargo `default` set omits (so
+// `cargo test`/CI don't pay their compile cost per spike 0188), but the dev and
+// release binaries the user actually runs must have compiled in:
+//   - `sandbox-wasmtime`: the default WASM sandbox — otherwise `detect_backend`
+//     reports wasmtime unavailable and the Store shows it as not-ready.
+//   - `voice-parakeet`: the default STT engine (parakeet v3 ONNX inference) —
+//     otherwise `default_stt_engine()` falls back to whisper.cpp.
+//   - `voice-vad`: the default neural VAD (Silero ONNX) for voice mode —
+//     otherwise the voice gate falls back to the energy heuristic.
+// See apps/core/package.json `build` for the release counterpart.
+const child = spawn(
+	"cargo",
+	["run", "--features", "sandbox-wasmtime,voice-parakeet,voice-vad"],
+	{
+		stdio: "inherit",
+		env: process.env,
+		shell: false,
+	}
+);
 child.on("exit", (code) => process.exit(code ?? 0));

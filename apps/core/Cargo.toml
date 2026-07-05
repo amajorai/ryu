@@ -3,11 +3,11 @@ name = "ryu-core"
 version = "0.0.1"
 edition = "2021"
 
-# `voice-parakeet` is an opt-in feature whose deps are commented in [features]
-# (see the parakeet note below). Tell the compiler the cfg value is expected so
-# the dormant gated code doesn't trip the unexpected_cfgs lint in default builds.
+# `voice-parakeet` / `voice-vad` are opt-in features (see the [features] section).
+# Tell the compiler the cfg values are expected so the dormant gated code doesn't
+# trip the unexpected_cfgs lint in default builds that omit them.
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("voice-parakeet"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("voice-parakeet", "voice-vad"))'] }
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -89,6 +89,8 @@ png = "0.17"
 agent-client-protocol = { version = "=0.11.1", features = [
     "unstable_session_model",
     "unstable_session_usage",
+    # session/close for ACP Session Delete (session/list is stable).
+    "unstable_session_close",
 ] }
 agent-client-protocol-tokio = "=0.11.1"
 rmcp = { version = "1", features = ["server", "transport-io"] }
@@ -135,6 +137,20 @@ tracing-opentelemetry = "0.33"
 # transport matches the tree's existing reqwest (no second TLS stack pulled).
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "native-tls"] }
 
+# Parakeet v3 STT (ONNX) inference — the default STT engine (feature
+# `voice-parakeet`). transcribe-rs is git-only and pulls a heavy native ONNX
+# Runtime through `ort`. Cross-platform (macOS/Windows/Linux), so — exactly like
+# `wasmtime` below — these MUST live in the main [dependencies] table, NOT under a
+# per-OS [target...] block, or `dep:transcribe-rs` resolves to nothing off that OS
+# and the feature fails to compile there. The model download, catalog, lifecycle,
+# and /api/voice/transcribe routing are always compiled in; only the ONNX
+# inference (src/sidecar/providers/parakeet engine module) is behind the feature.
+# Lean builds without the feature fall back to whisper.cpp (see
+# `server::voice::default_stt_engine`). `tempfile` (also used by the engine
+# module) is already a non-optional dependency above, so it is not re-declared.
+transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "d97ae65debaa9bacd5d56aa7d308d13df43c97ec", default-features = false, features = ["onnx"], optional = true }
+once_cell = { version = "1", optional = true }
+
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal"] }
 
@@ -160,20 +176,9 @@ keyring = { version = "3", features = ["apple-native"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
-# ── Parakeet v3 STT (ONNX) — opt-in, off by default ──────────────────────────
-# Parakeet inference runs in-process via transcribe-rs (git-only, pulls a heavy
-# native ONNX Runtime through `ort`). To keep the default Core build lean and
-# network-independent, the dependency and its feature are NOT enabled by default.
-# To build a Core with parakeet STT, UNCOMMENT the three deps below and the
-# `voice-parakeet` feature, then build with `--features voice-parakeet`:
-#
-#   transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "d97ae65debaa9bacd5d56aa7d308d13df43c97ec", default-features = false, features = ["onnx"], optional = true }
-#   once_cell = { version = "1", optional = true }
-#   tempfile = { version = "3", optional = true }
-#
-# The model download, catalog entry, lifecycle, and /api/voice/transcribe routing
-# are always compiled in; only the ONNX inference (src/sidecar/providers/parakeet
-# engine module) is gated behind `voice-parakeet`.
+# (Parakeet v3 STT optional deps — transcribe-rs + once_cell — live in the main
+# [dependencies] table above, NOT here: they are cross-platform and must not be
+# gated to this linux-only target block. See the comment beside them.)
 
 [features]
 # Programmatic tool calling (PTC, #476). `tool-exec-deno` is the default
@@ -194,15 +199,22 @@ tool-exec-justbash = []
 # `dev:watch`/`build` scripts in apps/core/package.json — so the shipped app has
 # the default WASM sandbox compiled in and `detect_backend("wasmtime")` is true.
 sandbox-wasmtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
-# Parakeet STT inference. Requires the commented transcribe-rs/once_cell/tempfile
-# optional deps above to be uncommented first:
-#   voice-parakeet = ["dep:transcribe-rs", "dep:once_cell", "dep:tempfile"]
-# TEN VAD ONNX inference for voice mode. The endpointing/barge-in state machine +
-# an energy-based probability backend are always compiled (voice mode works
-# without this); enabling `voice-vad` swaps in the noise-robust TEN VAD ONNX model.
-# Wiring the ONNX runner needs the model file in hand (preprocessing + tensor I/O),
-# at which point add its `dep:ort`/downloader deps here — see `voice::vad::tenvad`.
-voice-vad = []
+# Parakeet STT inference (the default STT engine). Pulls the transcribe-rs/
+# once_cell/tempfile optional deps above. Off in Cargo `default` on purpose (keep
+# `cargo test`/CI lean, same posture as `sandbox-wasmtime`); the shipped dev/
+# release binaries enable it via the package.json scripts.
+voice-parakeet = ["dep:transcribe-rs", "dep:once_cell"]
+# Neural VAD for voice mode (the default). The endpointing/barge-in state machine
+# + an energy-based probability backend are always compiled (voice mode works
+# without this); enabling `voice-vad` swaps in the noise-robust Silero VAD ONNX
+# model via transcribe-rs's tested `SileroVad` (we already depend on transcribe-rs
+# for parakeet). NOTE: the original plan was TEN VAD, but its ONNX model is not
+# usable standalone — its feature extraction lives in a closed precompiled native
+# lib — so Silero (fully open) is used instead. Off in Cargo `default` on purpose
+# (keep `cargo test`/CI lean, same posture as `sandbox-wasmtime`/`voice-parakeet`);
+# the shipped dev/release binaries enable it via the package.json scripts. Any
+# inference error falls back per-hop to the always-compiled energy VAD.
+voice-vad = ["dep:transcribe-rs", "transcribe-rs/vad-silero"]
 
 [dev-dependencies]
 tempfile = "3"

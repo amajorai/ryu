@@ -38,6 +38,12 @@ pub struct LocalStackStatus {
     /// chat model) so the `llamacpp-embed` engine can serve it for real semantic
     /// RAG; the engine never downloads it itself.
     pub embed_gguf_installed: bool,
+    /// True if the bge reranker GGUF is present. Downloaded here (like the
+    /// embedding model) so the `llamacpp-rerank` server can serve it for neural
+    /// reranking of Spaces RAG; the server never downloads it itself. The server
+    /// stays off by default (not in `startup_order`) — lazily started on first
+    /// Space search — so this reflects "downloaded and ready", not "running".
+    pub reranker_gguf_installed: bool,
     /// True if the whisper.cpp voice (STT) engine + its default GGML model are
     /// present. Voice is an opt-in sidecar (not in `startup_order`), so this
     /// reflects "downloaded and ready to start", not "running".
@@ -45,6 +51,10 @@ pub struct LocalStackStatus {
     /// True if the parakeet v3 ONNX speech model is present. Downloaded here by
     /// default (like the other models); the parakeet engine only serves it.
     pub parakeet_installed: bool,
+    /// True if the Silero VAD ONNX model is present. Downloaded here by default so
+    /// voice mode's neural endpointing works with no setup; VAD *inference* is
+    /// gated behind the `voice-vad` build feature and falls back to energy VAD.
+    pub vad_installed: bool,
     /// True if the OuteTTS (text-to-speech) binary + GGUF models are present.
     /// Downloaded here by default so spoken replies (e.g. the island companion's
     /// speak-aloud) work with no setup; the engine only renders, it never
@@ -55,6 +65,13 @@ pub struct LocalStackStatus {
     /// here by default — like the Gemma chat GGUF — so the default voice works with
     /// no setup; the Python TTS sidecar's `kokoro-onnx` backend only serves them.
     pub kokoro_installed: bool,
+    /// True if the stable-diffusion.cpp image engine (server binary + default
+    /// diffusion model) is present. Downloaded here by default so text-to-image
+    /// works with no setup on platforms with a prebuilt server (Windows x64,
+    /// macOS arm64, Linux x86_64); the sidecar stays opt-in to *run* (lazily
+    /// started on the first `/api/images/generate`). Heaviest bundled default
+    /// (~1.76 GB model), so its failure is non-fatal and never blocks anything.
+    pub sdcpp_installed: bool,
     /// Non-fatal warning messages surfaced to the UI (e.g. download failed).
     pub warnings: Vec<String>,
 }
@@ -530,6 +547,56 @@ impl SetupManager {
             false
         };
 
+        // Step 3.5 — bge reranker GGUF (downloaded here, like the embedding model).
+        //
+        // Auto-downloaded so Spaces RAG can neural-rerank with zero setup. The
+        // `llamacpp-rerank` server only *serves* this file (it never downloads),
+        // and stays off by default (not in `startup_order`) — the Spaces search
+        // path lazily starts it on first use. Non-fatal: a failure degrades Spaces
+        // reranking to the vector order (fail-open) and never blocks chat or RAG.
+        let reranker_gguf_installed = if llamacpp_installed {
+            let id = registry.local_reranker_model.id.clone();
+            match downloads
+                .download_blocking(crate::model_catalog::gguf_download_spec(
+                    &registry.local_reranker_model,
+                    &format!("{id} (reranker model)"),
+                ))
+                .await
+            {
+                Ok(path) => {
+                    self.mark_installed(&format!("gguf:{id}")).await;
+                    if let Err(e) = crate::model_catalog::record_default_download(
+                        &id,
+                        &registry.local_reranker_model.weight_url,
+                        None,
+                        None,
+                    ) {
+                        tracing::warn!("recording reranker model provenance failed: {e:#}");
+                    }
+                    tracing::info!(
+                        "onboarding: reranker GGUF {} installed at {}",
+                        id,
+                        path.display()
+                    );
+                    true
+                }
+                Err(e) => {
+                    let msg = format!(
+                        "reranker GGUF {id} download failed (Spaces RAG will skip reranking): {e:#}"
+                    );
+                    tracing::warn!("{}", msg);
+                    warnings.push(msg);
+                    false
+                }
+            }
+        } else {
+            warnings.push(
+                "reranker GGUF download skipped because llama.cpp binary was not installed"
+                    .to_owned(),
+            );
+            false
+        };
+
         // Step 4 — whisper.cpp voice (STT) engine + default GGML model.
         //
         // Bundled-by-default extra: a fresh install can transcribe audio with no
@@ -584,6 +651,30 @@ impl SetupManager {
                     false
                 }
             };
+
+        // Step 5.5 — Silero VAD ONNX model (downloaded here by default).
+        //
+        // Bundled up front so voice mode's noise-robust neural endpointing works
+        // with zero setup. Like parakeet, VAD *inference* is gated behind the
+        // `voice-vad` build feature; this model download is independent so the
+        // bits are in place when a feature build runs. Tiny (~1.8 MB) and non-fatal
+        // — a failure degrades voice mode to the always-compiled energy VAD.
+        let vad_installed = match downloads
+            .download_blocking(crate::voice::vad::silero_download_spec())
+            .await
+        {
+            Ok(path) => {
+                self.mark_installed("vad-model:silero-v4").await;
+                tracing::info!("onboarding: Silero VAD model installed at {}", path.display());
+                true
+            }
+            Err(e) => {
+                let msg = format!("Silero VAD model download failed (voice uses energy VAD): {e:#}");
+                tracing::warn!("{}", msg);
+                warnings.push(msg);
+                false
+            }
+        };
 
         // Step 6 — OuteTTS (text-to-speech) binary + GGUF models.
         //
@@ -669,14 +760,43 @@ impl SetupManager {
                 }
             };
 
+        // Step 8 — stable-diffusion.cpp image engine (server binary + default model).
+        //
+        // Bundled-by-default so text-to-image works zero-setup, mirroring the STT/
+        // TTS engines. `ensure_installed` fetches the prebuilt sd-server binary for
+        // the platform (Windows x64 / macOS arm64 / Linux x86_64) plus the default
+        // SD v1.4 Q8_0 GGUF (~1.76 GB). Non-fatal and independent of everything
+        // else — on a platform with no prebuilt server (Intel mac, arm Linux) it
+        // warns and never blocks. The engine stays opt-in to *run* (not in
+        // `startup_order`); the `/api/images/generate` route lazily starts it.
+        let sdcpp_installed = match crate::sidecar::providers::sdcpp::StableDiffusionDownloader::new()
+            .ensure_installed(downloads)
+            .await
+        {
+            Ok(_version) => {
+                self.mark_installed("sdcpp").await;
+                tracing::info!("onboarding: stable-diffusion.cpp image engine installed");
+                true
+            }
+            Err(e) => {
+                let msg = format!("image engine (sdcpp) install skipped/failed: {e:#}");
+                tracing::warn!("{}", msg);
+                warnings.push(msg);
+                false
+            }
+        };
+
         let status = LocalStackStatus {
             llamacpp_installed,
             gguf_installed,
             embed_gguf_installed,
+            reranker_gguf_installed,
             whisper_installed,
             parakeet_installed,
+            vad_installed,
             outetts_installed,
             kokoro_installed,
+            sdcpp_installed,
             warnings,
         };
 

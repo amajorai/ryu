@@ -26,9 +26,35 @@ use super::ServerState;
 /// Optional `?engine=` selector for the transcription engine.
 #[derive(Debug, Deserialize)]
 pub struct TranscribeQuery {
-    /// `"whisper"` (default) or `"parakeet"`. When omitted, whisper is used.
+    /// `"parakeet"` (default) or `"whisper"`. When omitted, the cross-surface
+    /// default from [`default_stt_engine`] is used.
     #[serde(default)]
     pub engine: Option<String>,
+}
+
+/// The cross-surface default STT engine, resolved as a swappable default (never
+/// a hardcoded literal). Parakeet v3 (in-process ONNX) is the default whenever
+/// this Core build compiled the `voice-parakeet` feature — the shipped dev and
+/// release binaries do (see `apps/core/package.json` + `scripts/dev.js`), so the
+/// installed app transcribes with parakeet out of the box. Lean CI/`cargo test`
+/// builds omit the feature and fall back to whisper.cpp so transcription still
+/// works there. `RYU_STT_ENGINE` overrides both, so one env var re-points every
+/// surface (mirrors [`crate::sidecar::providers::ryutts::default_tts_engine`]).
+pub fn default_stt_engine() -> String {
+    if let Ok(env_engine) = std::env::var("RYU_STT_ENGINE") {
+        let trimmed = env_engine.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    #[cfg(feature = "voice-parakeet")]
+    {
+        "parakeet".to_string()
+    }
+    #[cfg(not(feature = "voice-parakeet"))]
+    {
+        "whisper".to_string()
+    }
 }
 
 /// Request body for text-to-speech synthesis.
@@ -268,7 +294,8 @@ pub async fn tts_models_install(
 }
 
 /// Transcribe raw audio bytes to text. Routes to the in-process parakeet engine
-/// (`engine == Some("parakeet")`) or the whisper.cpp voice server (default).
+/// (the default — see [`default_stt_engine`]) or the whisper.cpp voice server
+/// (`engine == Some("whisper")`).
 ///
 /// This is the reusable core of [`transcribe`], factored out so other Core
 /// callers (e.g. the meetings pipeline) can transcribe a WAV chunk without going
@@ -280,8 +307,16 @@ pub async fn transcribe_wav(
     filename: String,
     engine: Option<&str>,
 ) -> Result<String, String> {
-    // Route to the parakeet engine when explicitly requested.
-    if engine == Some("parakeet") {
+    // Resolve the engine: an explicit non-empty selector wins; otherwise fall
+    // back to the swappable cross-surface default (parakeet where compiled in).
+    let engine = engine
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(default_stt_engine);
+
+    // Route to the in-process parakeet engine (default).
+    if engine == "parakeet" {
         return crate::sidecar::providers::parakeet::transcribe(bytes, filename)
             .await
             .map_err(|e| format!("parakeet transcription failed: {e:#}"));
@@ -326,8 +361,8 @@ pub async fn transcribe_wav(
         .to_string())
 }
 
-/// Transcribe an uploaded audio file. Routes to the whisper.cpp voice server
-/// (HTTP proxy, default) or the in-process parakeet engine (`?engine=parakeet`).
+/// Transcribe an uploaded audio file. Routes to the in-process parakeet engine
+/// (default) or the whisper.cpp voice server (`?engine=whisper`, HTTP proxy).
 pub async fn transcribe(
     State(state): State<ServerState>,
     Query(query): Query<TranscribeQuery>,

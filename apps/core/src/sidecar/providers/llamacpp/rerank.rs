@@ -1,19 +1,20 @@
-//! Local embeddings server — a dedicated llama.cpp `--embeddings` instance.
+//! Local reranker server — a dedicated llama.cpp `--reranking` instance.
 //!
-//! Unlike the chat `LlamaCppManager` (port 8080, mutually-exclusive resident
-//! chat engine), this runs a **second** llama-server on port 8081 serving the
-//! nomic embedding GGUF, exposing an OpenAI-compatible `/v1/embeddings` endpoint.
-//! It runs *alongside* the chat engine so RAG (Spaces + retrieval) gets real
-//! semantic embeddings on install with zero setup — `Embedder::from_registry`
-//! defaults its base URL here.
+//! Mirrors the embeddings sidecar (`embed.rs`) but serves the bge cross-encoder
+//! GGUF on port 8082, exposing llama-server's `/rerank` endpoint (whose
+//! `{results:[{index, relevance_score}]}` shape matches what
+//! `server::retrieval::remote_rerank` already parses). Spaces RAG points here for
+//! neural reranking of top-K candidates.
 //!
-//! Placement (Core vs Gateway, CLAUDE.md §1): deciding *which* model serves
-//! embeddings is "what runs" → Core. The model + URL are swappable registry
-//! defaults (`local_embed_model`), never hardcoded.
+//! Placement (Core vs Gateway, CLAUDE.md §1): deciding *which* model reranks is
+//! "what runs" → Core. The model + URL are swappable registry defaults
+//! (`local_reranker_model`), never hardcoded.
 //!
-//! Lifecycle mirrors the chat engine: ensure the llama.cpp binary + nomic GGUF
-//! are present, then spawn `llama-server --embeddings`. If something is already
-//! answering on the port we adopt it rather than fighting for the bind.
+//! Unlike the embeddings server, this sidecar is **off by default** — it is NOT
+//! in `startup_order`, so it consumes no memory until something needs it. The
+//! Spaces search path lazily starts it on first use (`SidecarManager::
+//! start_sidecar("llamacpp-rerank")`) and reranking fails open (returns the
+//! vector order) whenever the server is not yet reachable.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,16 +27,16 @@ use crate::sidecar::providers::llamacpp::{
 };
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 
-/// Loopback port the embeddings server binds to. Distinct from the chat engine's
-/// 8080 so both run together.
-pub const EMBED_PORT: u16 = 8081;
-const EMBED_ADDR: &str = "127.0.0.1:8081";
+/// Loopback port the reranker server binds to. Distinct from the chat engine's
+/// 8080 and the embeddings server's 8081 so all three can run together.
+pub const RERANK_PORT: u16 = 8082;
+const RERANK_ADDR: &str = "127.0.0.1:8082";
 
-/// Lifecycle manager for the dedicated llama.cpp embeddings sidecar.
-pub struct LlamaCppEmbedManager {
+/// Lifecycle manager for the dedicated llama.cpp reranking sidecar.
+pub struct LlamaCppRerankManager {
     running: Arc<AtomicBool>,
     process: Arc<Mutex<Option<LlamaCppProcess>>>,
-    /// `true` when an embeddings server was already running before we tried to
+    /// `true` when a reranker server was already running before we tried to
     /// start it (adopted external). We don't own it, so `stop` leaves it alone.
     adopted_external: Arc<AtomicBool>,
     client: reqwest::Client,
@@ -43,7 +44,7 @@ pub struct LlamaCppEmbedManager {
     downloads: Option<crate::downloads::DownloadCenter>,
 }
 
-impl LlamaCppEmbedManager {
+impl LlamaCppRerankManager {
     pub fn new() -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
@@ -73,10 +74,10 @@ impl LlamaCppEmbedManager {
         crate::paths::ryu_dir().join("bin").join(name)
     }
 
-    /// `true` if an embeddings server already answers on the port.
+    /// `true` if a reranker server already answers on the port.
     async fn server_reachable(client: &reqwest::Client) -> bool {
         client
-            .get(format!("http://{EMBED_ADDR}/health"))
+            .get(format!("http://{RERANK_ADDR}/health"))
             .send()
             .await
             .map(|r| r.status().is_success())
@@ -84,15 +85,15 @@ impl LlamaCppEmbedManager {
     }
 }
 
-impl Default for LlamaCppEmbedManager {
+impl Default for LlamaCppRerankManager {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Sidecar for LlamaCppEmbedManager {
+impl Sidecar for LlamaCppRerankManager {
     fn name(&self) -> &'static str {
-        "llamacpp-embed"
+        "llamacpp-rerank"
     }
 
     fn is_required(&self) -> bool {
@@ -106,13 +107,13 @@ impl Sidecar for LlamaCppEmbedManager {
         let client = self.client.clone();
         let downloads = self.downloads.clone();
         Box::pin(async move {
-            // Adopt an already-running embeddings server (e.g. user-managed) rather
-            // than spawning a competing process that would fail to bind the port.
+            // Adopt an already-running reranker server rather than spawning a
+            // competing process that would fail to bind the port.
             if Self::server_reachable(&client).await {
                 adopted_external.store(true, Ordering::Relaxed);
                 running.store(true, Ordering::Relaxed);
                 tracing::info!(
-                    "embeddings server already running on {EMBED_ADDR} — adopting existing server"
+                    "reranker server already running on {RERANK_ADDR} — adopting existing server"
                 );
                 return Ok(());
             }
@@ -120,45 +121,39 @@ impl Sidecar for LlamaCppEmbedManager {
 
             // Ensure the llama.cpp binary is installed (shared with the chat engine).
             let downloads =
-                downloads.expect("llamacpp-embed manager: download center not wired (main.rs)");
+                downloads.expect("llamacpp-rerank manager: download center not wired (main.rs)");
             LlamaCppDownloader::new()
                 .ensure_installed(&downloads)
                 .await
-                .context("installing llama.cpp for embeddings server")?;
+                .context("installing llama.cpp for reranker server")?;
 
-            // Serve the embedding GGUF downloaded by onboarding. This engine does
-            // NOT download the model itself — onboarding (`install_local_stack`)
-            // is the single owner of model downloads (mirrors the chat engine,
-            // which also resolves a pre-downloaded weight). That avoids a
-            // concurrent double-download race against onboarding on first boot.
+            // Serve the reranker GGUF downloaded by onboarding. Like the embeddings
+            // server, this engine does NOT download the model itself — onboarding
+            // (`install_local_stack`) is the single owner of model downloads.
             let registry = crate::registry::ModelRegistry::from_env();
-            let model_path = registry.local_embed_model.weight_path();
+            let model_path = registry.local_reranker_model.weight_path();
             if !model_path.exists() {
                 anyhow::bail!(
-                    "embedding model not found at {} — onboarding may still be downloading it, \
-                     or the download failed. The embeddings server will start once the model is \
+                    "reranker model not found at {} — onboarding may still be downloading it, \
+                     or the download failed. The reranker server will start once the model is \
                      present (it is fetched by default during onboarding).",
                     model_path.display()
                 );
             }
-            tracing::info!(
-                "embeddings server will serve model: {}",
-                model_path.display()
-            );
+            tracing::info!("reranker server will serve model: {}", model_path.display());
 
-            tracing::info!("llamacpp-embed sidecar starting on {EMBED_ADDR}");
+            tracing::info!("llamacpp-rerank sidecar starting on {RERANK_ADDR}");
             let mut proc = LlamaCppProcess::new(Self::binary_path());
             let opts = LlamaCppStartOptions {
-                port: EMBED_PORT,
+                port: RERANK_PORT,
                 model_path: Some(model_path),
-                // The embedding model is text-only — no vision adapter.
+                // The reranker model is text-only — no vision adapter.
                 mmproj_path: None,
-                // nomic-embed-text supports 8192-token inputs; set ctx + both
-                // batch knobs to match so long messages don't get HTTP 500
-                // "input too large" from the default 512-token physical batch.
+                // bge-reranker-v2-m3 supports 8192-token inputs; match ctx + batch
+                // knobs so long (query, document) pairs aren't truncated/rejected.
                 ctx_size: 8192,
-                embeddings: true,
-                reranking: false,
+                embeddings: false,
+                reranking: true,
                 launch: crate::inference::LaunchConfig {
                     batch_size: Some(8192),
                     ubatch_size: Some(8192),
@@ -167,24 +162,24 @@ impl Sidecar for LlamaCppEmbedManager {
             };
             proc.start_with(opts)
                 .await
-                .context("spawning llama-server (embeddings)")?;
+                .context("spawning llama-server (reranking)")?;
             *process.lock().unwrap() = Some(proc);
 
-            // Wait for the HTTP port to accept connections (model load can take
-            // a few seconds even for the small nomic GGUF).
+            // Wait for the HTTP port to accept connections (model load takes a few
+            // seconds even for the ~438 MB reranker GGUF).
             tokio::time::timeout(std::time::Duration::from_secs(120), async {
                 loop {
-                    if tokio::net::TcpStream::connect(EMBED_ADDR).await.is_ok() {
+                    if tokio::net::TcpStream::connect(RERANK_ADDR).await.is_ok() {
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
             })
             .await
-            .context("llamacpp-embed did not start within 120s")?;
+            .context("llamacpp-rerank did not start within 120s")?;
 
             running.store(true, Ordering::Relaxed);
-            tracing::info!("llamacpp-embed sidecar started on {EMBED_ADDR}");
+            tracing::info!("llamacpp-rerank sidecar started on {RERANK_ADDR}");
             Ok(())
         })
     }
@@ -196,13 +191,13 @@ impl Sidecar for LlamaCppEmbedManager {
         Box::pin(async move {
             running.store(false, Ordering::Relaxed);
             if adopted_external.swap(false, Ordering::Relaxed) {
-                tracing::info!("embeddings server was adopted external — leaving it running");
+                tracing::info!("reranker server was adopted external — leaving it running");
                 return Ok(());
             }
             let proc = process.lock().unwrap().take();
             if let Some(mut p) = proc {
                 if let Err(e) = p.stop().await {
-                    tracing::warn!("llamacpp-embed stop error: {e}");
+                    tracing::warn!("llamacpp-rerank stop error: {e}");
                 }
             }
             Ok(())
@@ -214,10 +209,10 @@ impl Sidecar for LlamaCppEmbedManager {
         let client = self.client.clone();
         Box::pin(async move {
             if !running.load(Ordering::Relaxed) {
-                return HealthStatus::Unhealthy("embeddings process not running".into());
+                return HealthStatus::Unhealthy("reranker process not running".into());
             }
             match client
-                .get(format!("http://{EMBED_ADDR}/health"))
+                .get(format!("http://{RERANK_ADDR}/health"))
                 .send()
                 .await
             {
@@ -239,18 +234,17 @@ impl Sidecar for LlamaCppEmbedManager {
     }
 
     fn pid(&self) -> Option<u32> {
-        // `None` when we adopted an external embeddings server we don't own.
+        // `None` when we adopted an external reranker server we don't own.
         self.process.lock().unwrap().as_ref().and_then(|p| p.pid())
     }
 
     fn uninstall(&self, _delete_data: bool) -> BoxFuture<anyhow::Result<()>> {
         Box::pin(async move {
             // The binary is shared with the chat engine — do NOT remove it here.
-            // Only drop the version-store marker for this sidecar. The embedding
-            // GGUF lives under ~/.ryu/models and is left intact (chat GGUFs share
-            // the directory; per-file deletion is out of scope).
-            crate::sidecar::remove_from_version_store("llamacpp-embed");
-            tracing::info!("llamacpp-embed uninstalled (shared binary + models left intact)");
+            // Only drop the version-store marker for this sidecar. The reranker
+            // GGUF under ~/.ryu/models is left intact.
+            crate::sidecar::remove_from_version_store("llamacpp-rerank");
+            tracing::info!("llamacpp-rerank uninstalled (shared binary + models left intact)");
             Ok(())
         })
     }

@@ -26,6 +26,11 @@ pub struct LlamaCppStartOptions {
     /// enables the OpenAI-compatible `/v1/embeddings` endpoint. Used by the
     /// dedicated `llamacpp-embed` sidecar that serves the nomic embedding model.
     pub embeddings: bool,
+    /// When `true`, start llama-server in reranking mode (`--reranking`, which
+    /// implies `--pooling rank`), enabling the cross-encoder `/rerank` endpoint.
+    /// Used by the dedicated `llamacpp-rerank` sidecar that serves the bge
+    /// reranker for Spaces RAG. Mutually exclusive with `embeddings`.
+    pub reranking: bool,
     /// Advanced per-model launch config (context size, GPU layers, MoE offload,
     /// chat template, speculative draft model, ...). Translated to `llama-server`
     /// flags via `LaunchConfig::to_args(Engine::LlamaCpp)` and appended after the
@@ -56,6 +61,7 @@ impl Default for LlamaCppStartOptions {
             mmproj_path,
             ctx_size: 0,
             embeddings: false,
+            reranking: false,
             launch: crate::inference::LaunchConfig::default(),
         }
     }
@@ -105,6 +111,7 @@ impl LlamaCppProcess {
         let mmproj_path = options.mmproj_path.clone();
         let ctx_size = options.ctx_size;
         let embeddings = options.embeddings;
+        let reranking = options.reranking;
         // Advanced launch flags (-ngl, --cpu-moe, --chat-template-file,
         // --model-draft, ...). `to_args` emits `--ctx-size` itself when
         // `launch.ctx_size` is set, so we fall back to the plain `ctx_size`
@@ -140,6 +147,13 @@ impl LlamaCppProcess {
                 // Enable the /v1/embeddings endpoint. `--pooling mean` matches
                 // nomic-embed-text's training (mean pooling over token states).
                 cmd.arg("--embeddings").arg("--pooling").arg("mean");
+            }
+
+            if reranking {
+                // Enable the cross-encoder /rerank endpoint. llama-server's
+                // `--reranking` requires rank pooling; pass it explicitly so the
+                // bge cross-encoder scores (query, document) pairs correctly.
+                cmd.arg("--reranking").arg("--pooling").arg("rank");
             }
 
             // Advanced inference launch flags, appended last (research flags via

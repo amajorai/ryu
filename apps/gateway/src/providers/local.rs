@@ -7,7 +7,8 @@ use tracing::debug;
 use crate::error::GatewayError;
 
 use super::{
-    chat_completions_url, check_response_status, check_stream_status, send_with_retry, Provider,
+    chat_completions_url, check_response_status, check_stream_status, discover_openai_models,
+    models_from_response, send_with_retry, Provider,
 };
 
 /// Provider for locally-running OpenAI-compatible servers such as Ollama or llama.cpp.
@@ -25,6 +26,15 @@ impl LocalProvider {
 impl Provider for LocalProvider {
     fn name(&self) -> &'static str {
         "local"
+    }
+
+    fn discover_models<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn std::future::Future<Output = Option<Vec<Value>>> + Send + 'a>> {
+        Box::pin(async move {
+            let json = discover_openai_models(&self.client, &self.base_url, "").await?;
+            models_from_response(json)
+        })
     }
 
     fn complete<'a>(

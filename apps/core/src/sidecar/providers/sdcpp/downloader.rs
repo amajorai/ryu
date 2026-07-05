@@ -25,11 +25,20 @@ use crate::sidecar::download_manager::{
 /// Pinned stable-diffusion.cpp release that ships the Windows server asset.
 const TARGET_VERSION: &str = "master-700-c2df4e1";
 
-/// Windows CPU (AVX2) release asset name within [`TARGET_VERSION`]. The asset is
-/// named after the commit (`master-c2df4e1`), not the full tag, so it is pinned
-/// explicitly rather than derived.
+/// Prebuilt sd-server release asset within [`TARGET_VERSION`], per platform. The
+/// asset names embed the commit (`master-c2df4e1`), not the full tag, so they are
+/// pinned explicitly rather than derived. stable-diffusion.cpp ships prebuilt
+/// server binaries for Windows (x64 AVX2), macOS (Apple-Silicon arm64) and Linux
+/// (x86_64); each archive bundles `sd-server` alongside the shared library it
+/// links against, so the whole archive is extracted into ~/.ryu/bin together.
+/// Targets without a matching asset (Intel mac, non-x86_64 Linux) fall through to
+/// the build-from-source path in [`StableDiffusionDownloader::ensure_binary`].
 #[cfg(target_os = "windows")]
-const WINDOWS_ASSET: &str = "sd-master-c2df4e1-bin-win-avx2-x64.zip";
+const PLATFORM_ASSET: &str = "sd-master-c2df4e1-bin-win-avx2-x64.zip";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const PLATFORM_ASSET: &str = "sd-master-c2df4e1-bin-Darwin-macOS-15.7.7-arm64.zip";
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const PLATFORM_ASSET: &str = "sd-master-c2df4e1-bin-Linux-Ubuntu-24.04-x86_64.zip";
 
 /// Default diffusion model: Stable Diffusion v1.4, Q8_0-quantized GGUF (~1.76 GB).
 /// The smallest mainstream text-to-image checkpoint that runs on CPU — a sensible
@@ -53,12 +62,17 @@ pub fn default_model_path() -> PathBuf {
     ryu_dir().join("models").join(DEFAULT_MODEL_FILE)
 }
 
-/// stable-diffusion.cpp Windows release asset (CPU AVX2 build — no CUDA, so it
-/// runs without extra runtimes). GPU users can swap in the CUDA build manually.
-#[cfg(target_os = "windows")]
+/// URL of the prebuilt sd-server archive for this platform (CPU build — no CUDA,
+/// so it runs without extra runtimes). GPU users can swap in a CUDA/Metal build
+/// manually. Only compiled on targets that have a `PLATFORM_ASSET`.
+#[cfg(any(
+    target_os = "windows",
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
 fn archive_url() -> String {
     format!(
-        "https://github.com/leejet/stable-diffusion.cpp/releases/download/{TARGET_VERSION}/{WINDOWS_ASSET}"
+        "https://github.com/leejet/stable-diffusion.cpp/releases/download/{TARGET_VERSION}/{PLATFORM_ASSET}"
     )
 }
 
@@ -91,7 +105,11 @@ impl StableDiffusionDownloader {
         Ok(TARGET_VERSION.to_string())
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(
+        target_os = "windows",
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    ))]
     async fn ensure_binary(&self, downloads: &crate::downloads::DownloadCenter) -> Result<()> {
         let dest = server_binary_path();
         let store = VersionStore::load();
@@ -124,18 +142,43 @@ impl StableDiffusionDownloader {
             .await
             .context("reading downloaded stable-diffusion.cpp archive")?;
 
-        // Extract the whole archive — sd-server links against the sibling
-        // stable-diffusion.dll, so they must land in ~/.ryu/bin together.
+        // Extract the whole archive — sd-server links against a sibling shared
+        // library (Windows `stable-diffusion.dll`, macOS `.dylib`, Linux `.so`),
+        // so they must land in ~/.ryu/bin together.
         let bin = ryu_dir().join("bin");
         let written = tokio::task::spawn_blocking(move || extract_all_to_dir(&archive, &bin))
             .await
             .context("spawn_blocking for zip extraction")??;
 
-        if !written.iter().any(|f| f == "sd-server.exe") {
+        let server_name = server_binary_path()
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("sd-server")
+            .to_string();
+        if !written.iter().any(|f| f == &server_name) {
             anyhow::bail!(
-                "stable-diffusion.cpp archive did not contain sd-server.exe (got: {})",
+                "stable-diffusion.cpp archive did not contain {server_name} (got: {})",
                 written.join(", ")
             );
+        }
+
+        // The zip extractor does not preserve unix exec bits, so the extracted
+        // `sd-server` (and any sibling `sd-*` executables) would be non-runnable.
+        // Mark them executable on unix (mirrors how the whisper/llama binaries are
+        // chmod'd after extraction).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for f in &written {
+                if f.starts_with("sd-") && !f.contains('.') {
+                    let path = ryu_dir().join("bin").join(f);
+                    if let Ok(meta) = std::fs::metadata(&path) {
+                        let mut perms = meta.permissions();
+                        perms.set_mode(0o755);
+                        let _ = std::fs::set_permissions(&path, perms);
+                    }
+                }
+            }
         }
 
         VersionStore::set_version_persisted("sdcpp", TARGET_VERSION)
@@ -155,17 +198,21 @@ impl StableDiffusionDownloader {
         Ok(())
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(
+        target_os = "windows",
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    )))]
     async fn ensure_binary(&self, _downloads: &crate::downloads::DownloadCenter) -> Result<()> {
         let dest = server_binary_path();
         if dest.exists() {
             return Ok(());
         }
         anyhow::bail!(
-            "stable-diffusion.cpp publishes prebuilt server binaries for Windows only. On \
-             this platform, build it from source (e.g. `cmake -B build -DSD_BUILD_EXAMPLES=ON \
-             && cmake --build build --config Release`) and place the resulting `sd-server` \
-             binary at {}.",
+            "stable-diffusion.cpp has no prebuilt server binary for this platform \
+             (supported: Windows x64, macOS arm64, Linux x86_64). Build it from source \
+             (e.g. `cmake -B build -DSD_BUILD_EXAMPLES=ON && cmake --build build --config \
+             Release`) and place the resulting `sd-server` binary at {}.",
             dest.display()
         );
     }

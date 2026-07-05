@@ -2818,14 +2818,21 @@ pub async fn route_chat_stream(
     // Use effective_agent_id so the persisted assistant message is attributed to
     // the agent that actually handled the turn (target_agent_id if set, else primary).
     let persist_agent_id = effective_agent_id.clone();
-    let persist = move |reply: String, outcome: &'static str| {
-        persist_assistant_reply(
-            conversations.clone(),
-            conversation_id_for_persist,
-            persist_agent_id,
-            reply,
-            outcome,
-        )
+    // The ACP path uses incremental persistence (store + metadata passed
+    // directly); non-ACP paths still use the FnOnce closure.
+    let persist_store_for_acp = conversations.clone();
+    let persist = {
+        let conv_id = conversation_id_for_persist.clone();
+        let agent_id = persist_agent_id.clone();
+        move |reply: String, outcome: &'static str| {
+            persist_assistant_reply(
+                conversations.clone(),
+                conv_id,
+                agent_id,
+                reply,
+                outcome,
+            )
+        }
     };
 
     match route {
@@ -3000,7 +3007,9 @@ pub async fn route_chat_stream(
                 worktree_guard,
                 short_term,
                 long_term_system,
-                persist,
+                persist_store_for_acp,
+                conversation_id_for_persist,
+                persist_agent_id,
                 conversation_id,
                 worktree_diffs,
                 mcp,
@@ -3708,7 +3717,7 @@ fn build_acp_prompt(
 /// produces these; the SSE generator forwards them verbatim to the client.
 type UiFrame = Vec<u8>;
 
-async fn route_acp_stream<F, Fut>(
+async fn route_acp_stream(
     req: ChatStreamRequest,
     spawn_cmd: String,
     cwd: PathBuf,
@@ -3718,7 +3727,12 @@ async fn route_acp_stream<F, Fut>(
     worktree_guard: Option<WorktreeGuard>,
     short_term: Option<String>,
     long_term_system: Option<String>,
-    persist: F,
+    // Incremental persistence: the store + metadata replace the old FnOnce
+    // persist closure so the detached task can write partial replies that
+    // survive a client disconnect.
+    persist_store: ConversationStore,
+    persist_conversation_id: Option<String>,
+    persist_agent_id: Option<String>,
     // The conversation id used as the key in `worktree_diffs`. `None` when the
     // caller did not send a conversation id (diff will not be stored).
     conversation_id: Option<String>,
@@ -3735,9 +3749,6 @@ async fn route_acp_stream<F, Fut>(
     identity_profile_ids: Vec<String>,
     traces: TraceStore,
 ) -> Response
-where
-    F: FnOnce(String, &'static str) -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = ()> + Send + 'static,
 {
     let user_message = last_user_message(&req.messages);
     if user_message.is_empty() {
@@ -3821,7 +3832,15 @@ where
         let mut guard = worktree_guard;
 
         let mut reply = String::new();
-        let mut persist_opt = Some(persist);
+        // Incremental persistence: instead of a FnOnce that fires at the end,
+        // we create the assistant message row on the first text chunk and
+        // periodically update it as more text arrives. This way the reply
+        // survives in the DB even if the user navigates away mid-stream.
+        let mut persisted_msg_id: Option<String> = None;
+        // Debounce: only flush to DB every N bytes of new text to avoid
+        // excessive writes on fast token streams.
+        const INCREMENTAL_FLUSH_BYTES: usize = 512;
+        let mut bytes_since_flush: usize = 0;
         const TEXT_ID: &str = "0";
         const THOUGHT_ID: &str = "acp-thought";
         const PLAN_TOOL_ID: &str = "acp-plan";
@@ -3892,6 +3911,49 @@ where
                     }
                     close_thought!();
                     reply.push_str(&text);
+                    bytes_since_flush += text.len();
+
+                    // Incremental persistence: create the message row on the
+                    // first text chunk, then update it periodically so the
+                    // reply survives a client disconnect.
+                    if let Some(ref conv_id) = persist_conversation_id {
+                        if persisted_msg_id.is_none() {
+                            // First chunk — insert the row with whatever we have so far.
+                            match persist_store
+                                .append_message(
+                                    conv_id,
+                                    "assistant",
+                                    &reply,
+                                    persist_agent_id.as_deref(),
+                                    None,
+                                    None,
+                                )
+                                .await
+                            {
+                                Ok(mid) => {
+                                    persisted_msg_id = Some(mid);
+                                    bytes_since_flush = 0;
+                                }
+                                Err(e) => tracing::warn!(
+                                    "failed to create incremental assistant message: {e:#}"
+                                ),
+                            }
+                        } else if bytes_since_flush >= INCREMENTAL_FLUSH_BYTES {
+                            // Periodic flush — update the existing row.
+                            if let Some(ref mid) = persisted_msg_id {
+                                if let Err(e) = persist_store
+                                    .update_message_content(mid, &reply)
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        "failed to flush incremental reply: {e:#}"
+                                    );
+                                }
+                            }
+                            bytes_since_flush = 0;
+                        }
+                    }
+
                     if !text_open {
                         text_open = true;
                         let id = format!("{TEXT_ID}-{text_seq}");
@@ -3978,6 +4040,19 @@ where
                         "output": output.unwrap_or(Value::Null),
                     });
                     let _ = ui_tx_clone.send(ui_tool_output(&id, &payload, dynamic));
+                }
+                acp::AcpEvent::Media { mime, data } => {
+                    // A non-text assistant content block (inline image/audio).
+                    // Forward as an AI-SDK v6 `file` part carrying a data URL so the
+                    // desktop renders it inline (previously dropped). Close any open
+                    // thought first for clean part ordering.
+                    close_thought!();
+                    let url = format!("data:{mime};base64,{data}");
+                    let _ = ui_tx_clone.send(ui_chunk(&serde_json::json!({
+                        "type": "file",
+                        "mediaType": mime,
+                        "url": url,
+                    })));
                 }
                 acp::AcpEvent::ModeChanged(mode_id) => {
                     // Agent-initiated mode switch; forward so the desktop's mode
@@ -4091,8 +4166,28 @@ where
                     for (_tool_id, span_id) in open_spans.drain() {
                         let _ = traces.close_span(&span_id, Some("agent error")).await;
                     }
-                    if let Some(p) = persist_opt.take() {
-                        p(std::mem::take(&mut reply), "failed").await;
+                    // Final persistence on error: update the existing row or
+                    // create one if we never received text.
+                    if let Some(ref conv_id) = persist_conversation_id {
+                        if let Some(ref mid) = persisted_msg_id {
+                            let _ = persist_store
+                                .update_message_content(mid, &reply)
+                                .await;
+                        } else if !reply.is_empty() {
+                            let _ = persist_store
+                                .append_message(
+                                    conv_id,
+                                    "assistant",
+                                    &reply,
+                                    persist_agent_id.as_deref(),
+                                    None,
+                                    None,
+                                )
+                                .await;
+                        }
+                        let _ = persist_store
+                            .set_run_status(conv_id, "failed")
+                            .await;
                     }
                     close_thought!();
                     if plan_open {
@@ -4114,9 +4209,29 @@ where
             }
         }
 
-        // Normal completion: persist reply and update run_status.
-        if let Some(p) = persist_opt.take() {
-            p(std::mem::take(&mut reply), "completed").await;
+        // Normal completion: final flush of the reply text and mark completed.
+        if let Some(ref conv_id) = persist_conversation_id {
+            if let Some(ref mid) = persisted_msg_id {
+                // Update the existing row with the final full reply.
+                let _ = persist_store
+                    .update_message_content(mid, &reply)
+                    .await;
+            } else if !reply.is_empty() {
+                // No text chunks arrived yet (edge case) — persist now.
+                let _ = persist_store
+                    .append_message(
+                        conv_id,
+                        "assistant",
+                        &reply,
+                        persist_agent_id.as_deref(),
+                        None,
+                        None,
+                    )
+                    .await;
+            }
+            let _ = persist_store
+                .set_run_status(conv_id, "completed")
+                .await;
         }
         close_thought!();
         if plan_open {

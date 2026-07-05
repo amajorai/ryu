@@ -888,6 +888,26 @@ impl ConversationStore {
         Ok(message_id)
     }
 
+    /// Update the content of an existing message (by id) in place, re-sealing
+    /// the new content at rest.  Used for incremental persistence of ACP
+    /// streaming replies: the assistant message row is created early (possibly
+    /// with partial text) and updated as more text arrives, so the content
+    /// survives a client disconnect.
+    pub async fn update_message_content(
+        &self,
+        message_id: &str,
+        content: &str,
+    ) -> Result<()> {
+        let sealed = self.cipher.seal(content)?;
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE messages SET content = ?1 WHERE id = ?2",
+            params![sealed, message_id],
+        )
+        .context("updating message content")?;
+        Ok(())
+    }
+
     /// List conversations, most-recently-updated first.
     pub async fn list_conversations(&self) -> Result<Vec<ConversationSummary>> {
         let conn = self.conn.lock().await;

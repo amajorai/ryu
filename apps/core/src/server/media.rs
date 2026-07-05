@@ -348,7 +348,10 @@ async fn proxy(endpoint: &str, body: Value) -> (StatusCode, Json<Value>) {
 
 /// `POST /api/images/generate` — text-to-image via sd-server's OpenAI-compatible
 /// `/v1/images/generations`. Requires at least `{ "prompt": "..." }`.
-pub async fn generate_image(Json(mut body): Json<Value>) -> impl IntoResponse {
+pub async fn generate_image(
+    State(state): State<super::ServerState>,
+    Json(mut body): Json<Value>,
+) -> impl IntoResponse {
     if body
         .get("prompt")
         .and_then(Value::as_str)
@@ -368,6 +371,14 @@ pub async fn generate_image(Json(mut body): Json<Value>) -> impl IntoResponse {
     // Cloud provider selected → route through the Gateway; else the local engine.
     if let Some(provider) = cloud_provider(&body) {
         return forward_to_gateway("image", "/v1/images/generations", &provider, body).await;
+    }
+    // Lazily start the (off-by-default) image engine so text-to-image works
+    // out of the box once onboarding has installed the sd-server binary + model.
+    // `start_sidecar` adopts an already-running server (fast) or spawns it and
+    // waits for the port; on failure we fall through and `proxy` returns a clear
+    // "install from the Store first" error.
+    if let Err(e) = state.manager.start_sidecar("sdcpp").await {
+        tracing::debug!("sdcpp lazy start skipped: {e:#}");
     }
     proxy("/v1/images/generations", body).await
 }

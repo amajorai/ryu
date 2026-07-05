@@ -6,7 +6,10 @@ use tracing::debug;
 
 use crate::error::GatewayError;
 
-use super::{chat_completions_url, check_response_status, check_stream_status, Provider};
+use super::{
+    chat_completions_url, check_response_status, check_stream_status, discover_openai_models,
+    models_from_response, Provider,
+};
 
 /// Server-side options ryu injects into every OpenRouter request. These map to
 /// OpenRouter's own request fields (`provider`, `plugins`, `usage`) and let a
@@ -127,6 +130,15 @@ impl OpenRouterProvider {
 impl Provider for OpenRouterProvider {
     fn name(&self) -> &'static str {
         "openrouter"
+    }
+
+    fn discover_models<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn std::future::Future<Output = Option<Vec<Value>>> + Send + 'a>> {
+        Box::pin(async move {
+            let json = discover_openai_models(&self.client, &self.base_url, &self.api_key).await?;
+            models_from_response(json)
+        })
     }
 
     fn complete<'a>(

@@ -52,7 +52,8 @@ pub enum VoiceClientMsg {
         /// Route turns through a specific agent/persona; `None` = the default path.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<String>,
-        /// STT engine hint (`"whisper"` default | `"parakeet"`).
+        /// STT engine hint (`"parakeet"` default | `"whisper"`); `None` uses the
+        /// cross-surface default from `server::voice::default_stt_engine`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stt_engine: Option<String>,
         /// TTS engine hint forwarded to the synth path (`"outetts"` | a RyuTTS id).

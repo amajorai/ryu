@@ -300,6 +300,80 @@ fn checkout_branch(cwd: &str, branch: &str) -> Result<String, String> {
     }
 }
 
+/// `POST /api/git/create-branch` `{ cwd, branch }`
+///
+/// Create a new branch off the current HEAD and switch to it (`git switch -c`).
+/// The desktop only exposes this when the working tree is clean, but we re-check
+/// server-side: `git switch -c` refuses to carry a dirty index into a new branch
+/// only on conflict, so we guard explicitly and return the raw git stderr (HTTP
+/// 409) on any failure (e.g. the branch already exists) for the desktop to show.
+pub async fn git_create_branch(Json(body): Json<GitCheckoutBody>) -> axum::response::Response {
+    if body.cwd.is_empty() || body.branch.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "error": "cwd and branch are required" })),
+        )
+            .into_response();
+    }
+
+    let path = Path::new(&body.cwd);
+    if !path.is_dir() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "error": "cwd is not a directory" })),
+        )
+            .into_response();
+    }
+
+    let GitCheckoutBody { cwd, branch } = body;
+    let result = tokio::task::spawn_blocking(move || create_branch(&cwd, &branch)).await;
+
+    match result {
+        Ok(Ok(branch)) => Json(json!({ "success": true, "branch": branch })).into_response(),
+        Ok(Err(msg)) => (
+            StatusCode::CONFLICT,
+            Json(json!({ "success": false, "error": msg })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!("git_create_branch: join error: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": "internal error" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+fn create_branch(cwd: &str, branch: &str) -> Result<String, String> {
+    if !list_branches(cwd).is_repo {
+        return Err("not a git repository".to_string());
+    }
+    // Guard against argument injection (a name beginning with '-') and obvious bad
+    // input; git validates the full ref-name grammar itself and errors cleanly.
+    let name = branch.trim();
+    if name.is_empty()
+        || name.starts_with('-')
+        || name.contains("..")
+        || name.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(format!("'{branch}' is not a valid branch name"));
+    }
+
+    let out = Command::new("git")
+        .args(["switch", "-c", name])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+
+    if out.status.success() {
+        Ok(name.to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 /// `POST /api/git/commit-push` `{ cwd, message? }`
 ///
 /// Stages everything (`git add -A`), commits with the given message (defaulting

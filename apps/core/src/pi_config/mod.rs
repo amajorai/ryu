@@ -26,6 +26,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+/// models.dev-backed dynamic model catalog (replaces hardcoded model lists).
+pub(crate) mod models_dev;
+
 /// Ryu-namespaced settings key recording whether the managed Pi routes through
 /// the Gateway. Pi ignores unknown settings keys, so this rides along safely in
 /// `settings.json` and survives round-trips.
@@ -37,6 +40,28 @@ const ROUTING_DIRECT: &str = "direct";
 /// `defaultProvider: "openai"` on disk because the `OPENAI_BASE_URL` injection
 /// redirects Pi's built-in `openai` provider at the local Gateway.
 pub const GATEWAY_PROVIDER_ID: &str = "gateway";
+
+/// The managed subscription provider (Ryu-hosted OpenRouter). Always Gateway-
+/// routed: it reuses the `openai` pin so egress is governed and metered against
+/// the org's Ryu $ wallet (`apps/gateway/src/pipeline/mod.rs`), and the Gateway
+/// maps its default `openrouter/auto` model onto the OpenRouter provider. No BYOK.
+pub const MANAGED_OPENROUTER_ID: &str = "managed-openrouter";
+
+/// The Gateway's OpenRouter Auto Router model — routes each prompt to a good
+/// model at no extra fee. The zero-decision default for managed users.
+const MANAGED_DEFAULT_MODEL: &str = "openrouter/auto";
+
+/// Ryu-namespaced settings key holding the per-provider routing map
+/// (`{ "<providerId>": "gateway" | "direct" }`). Pi ignores unknown keys, so it
+/// survives round-trips. Lets each configured provider carry its own egress mode
+/// while `ROUTING_KEY` still records the *active* provider's mode for back-compat.
+const PROVIDER_ROUTING_KEY: &str = "x-ryu-provider-routing";
+
+/// Ryu-namespaced settings key recording the logical *active* provider id
+/// (`managed-openrouter` / `gateway` / a built-in / a custom id). Needed because
+/// several logical providers (gateway, managed-openrouter) both persist
+/// `defaultProvider: "openai"` on disk, so the logical id can't be derived from it.
+const ACTIVE_KEY: &str = "x-ryu-active-provider";
 
 // ── Paths ───────────────────────────────────────────────────────────────────
 
@@ -154,14 +179,100 @@ fn write_settings(settings: &PiSettings) -> Result<()> {
     fs::write(settings_path(), body).context("write settings.json")
 }
 
-/// Whether the managed Pi should route through the Gateway. Defaults to `true`
-/// (Gateway-routed) when no explicit choice has been persisted, preserving the
-/// pre-existing "Ryu = Pi + Gateway" behaviour.
+/// Whether the managed Pi should route the *active* provider through the Gateway.
+/// Defaults to `true` (Gateway-routed) when no explicit choice has been persisted,
+/// preserving the pre-existing "Ryu = Pi + Gateway" behaviour.
 pub fn is_gateway_routing() -> bool {
     let settings = read_settings();
     match settings.extra.get(ROUTING_KEY).and_then(Value::as_str) {
         Some(ROUTING_DIRECT) => false,
         _ => true,
+    }
+}
+
+/// Providers that are *always* Gateway-routed (managed subscription or the
+/// synthetic gateway provider) — their egress must stay governed/metered.
+fn is_managed_or_gateway(id: &str) -> bool {
+    id == GATEWAY_PROVIDER_ID || id == MANAGED_OPENROUTER_ID
+}
+
+/// The routing mode (`"gateway"` | `"direct"`) for a specific provider id.
+///
+/// Resolution order: managed/gateway providers are always `gateway`; otherwise the
+/// explicit per-provider `PROVIDER_ROUTING_KEY` entry wins; otherwise, for the
+/// *active* provider, fall back to the legacy global `ROUTING_KEY` (so pre-existing
+/// installs keep their mode); otherwise default `direct` (a BYOK provider the user
+/// added but never explicitly toggled routes directly to the vendor).
+fn provider_routing(id: &str) -> &'static str {
+    if is_managed_or_gateway(id) {
+        return ROUTING_GATEWAY;
+    }
+    let settings = read_settings();
+    if let Some(mode) = settings
+        .extra
+        .get(PROVIDER_ROUTING_KEY)
+        .and_then(Value::as_object)
+        .and_then(|m| m.get(id))
+        .and_then(Value::as_str)
+    {
+        return if mode == ROUTING_GATEWAY {
+            ROUTING_GATEWAY
+        } else {
+            ROUTING_DIRECT
+        };
+    }
+    // Legacy global marker only speaks for the active provider.
+    if active_provider_id_from(&settings).as_deref() == Some(id)
+        && settings.extra.get(ROUTING_KEY).and_then(Value::as_str) != Some(ROUTING_DIRECT)
+    {
+        return ROUTING_GATEWAY;
+    }
+    ROUTING_DIRECT
+}
+
+/// Persist the routing mode for a single provider in the per-provider map, without
+/// touching the active selection.
+fn set_provider_routing(id: &str, mode: &str) -> Result<()> {
+    if is_managed_or_gateway(id) {
+        return Ok(()); // Always gateway; ignore attempts to flip it.
+    }
+    let normalized = if mode == ROUTING_GATEWAY {
+        ROUTING_GATEWAY
+    } else {
+        ROUTING_DIRECT
+    };
+    let mut settings = read_settings();
+    let map = settings
+        .extra
+        .entry(PROVIDER_ROUTING_KEY.to_owned())
+        .or_insert_with(|| json!({}));
+    if !map.is_object() {
+        *map = json!({});
+    }
+    if let Some(obj) = map.as_object_mut() {
+        obj.insert(id.to_owned(), Value::String(normalized.to_owned()));
+    }
+    write_settings(&settings)
+}
+
+/// The logical active provider id from an already-read settings view. Prefers the
+/// explicit `ACTIVE_KEY`; otherwise derives it (gateway when gateway-routed, else
+/// the on-disk `defaultProvider`).
+fn active_provider_id_from(settings: &PiSettings) -> Option<String> {
+    if let Some(active) = settings
+        .extra
+        .get(ACTIVE_KEY)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Some(active.to_owned());
+    }
+    let gateway = settings.extra.get(ROUTING_KEY).and_then(Value::as_str) != Some(ROUTING_DIRECT);
+    if gateway {
+        Some(GATEWAY_PROVIDER_ID.to_owned())
+    } else {
+        settings.default_provider.clone()
     }
 }
 
@@ -445,12 +556,72 @@ fn set_auth_key(auth_key: &str, key: &str) -> Result<()> {
 }
 
 fn auth_has_key(auth_key: &str) -> bool {
+    auth_key_value(auth_key).is_some()
+}
+
+/// Read a stored api-key credential from `auth.json` (never surfaced to the
+/// desktop; used only for server-side model discovery).
+fn auth_key_value(auth_key: &str) -> Option<String> {
     read_auth()
         .get(auth_key)
         .and_then(|v| v.get("key"))
         .and_then(Value::as_str)
+        .map(str::to_owned)
+        .filter(|s| !s.is_empty())
+}
+
+/// Whether `auth.json` holds ANY usable credential for a provider — either an
+/// api-key (`{type:"api_key", key}`) or an OAuth/subscription login
+/// (`{type:"oauth", access, refresh, …}`, which has no `key`). Used for
+/// subscription providers (ChatGPT/Claude/Copilot) whose logged-in state Pi
+/// records as an oauth entry, so the plain `auth_has_key` (key-only) check would
+/// misreport them as unconfigured.
+fn auth_has_any(auth_key: &str) -> bool {
+    let Some(entry) = read_auth().get(auth_key).cloned() else {
+        return false;
+    };
+    // api-key shape.
+    if entry
+        .get("key")
+        .and_then(Value::as_str)
         .map(|s| !s.is_empty())
         .unwrap_or(false)
+    {
+        return true;
+    }
+    // oauth shape: an access or refresh token present.
+    for field in ["access", "refresh"] {
+        if entry
+            .get(field)
+            .and_then(Value::as_str)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Remove an api-key credential from `auth.json`.
+fn clear_auth_key(auth_key: &str) -> Result<()> {
+    let mut auth = read_auth();
+    if auth.remove(auth_key).is_some() {
+        let body = serde_json::to_string_pretty(&auth).context("serialize auth.json")?;
+        write_secret_file(&auth_path(), &body)?;
+    }
+    Ok(())
+}
+
+/// Remove a custom-provider entry from `models.json`.
+fn remove_models_provider(id: &str) -> Result<()> {
+    let mut models = read_models();
+    if let Some(obj) = models["providers"].as_object_mut() {
+        if obj.remove(id).is_some() {
+            write_models(&models)?;
+        }
+    }
+    Ok(())
 }
 
 // ── Provider catalog (the supported set, per pi.dev docs) ──────────────────────
@@ -471,11 +642,33 @@ pub struct ProviderMeta {
     /// "subscription" (OAuth via Pi `/login`), "api-key", or "none" (Gateway).
     pub auth_kind: &'static str,
     pub suggested_models: &'static [&'static str],
+    /// OpenAI-compatible `GET .../models` discovery URL, or `""` when the provider
+    /// exposes no such endpoint (discovery then falls back to `suggested_models`).
+    /// A relative-looking value is treated as absolute; custom providers use their
+    /// own `baseUrl` + `/models` instead of this field.
+    pub models_url: &'static str,
 }
 
 /// The built-in providers Pi ships, plus the synthetic "gateway" provider that
 /// keeps egress governed. Sourced from pi.dev `providers.md` / `models.md`.
 pub const PROVIDERS: &[ProviderMeta] = &[
+    ProviderMeta {
+        id: MANAGED_OPENROUTER_ID,
+        label: "Ryu (managed · included with your plan)",
+        api: "openai-completions",
+        auth_key: "",
+        auth_env: "",
+        // Subscription: no BYOK; billed against the plan's Ryu $ credits.
+        auth_kind: "subscription",
+        suggested_models: &[
+            "openrouter/auto",
+            "anthropic/claude-sonnet-4",
+            "openai/gpt-4o",
+        ],
+        // Discovery goes through the local Gateway (resolved at call time), so no
+        // static URL here.
+        models_url: "",
+    },
     ProviderMeta {
         id: GATEWAY_PROVIDER_ID,
         label: "Ryu Gateway (governed)",
@@ -484,6 +677,43 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         auth_env: "",
         auth_kind: "none",
         suggested_models: &[],
+        models_url: "",
+    },
+    // Subscription LOGIN providers (Pi's OAuth). No API key — the desktop shows a
+    // "Login" button that drives the ACP `authenticate` flow (probe authMethods →
+    // `POST /api/agents/:id/authenticate`); Pi stores the result as an oauth entry
+    // in auth.json (see `auth_has_any`). `auth_key` = Pi's own auth.json key for the
+    // provider. Models come from models.dev (mapped to the underlying vendor).
+    ProviderMeta {
+        id: "openai-codex",
+        label: "ChatGPT (Plus/Pro · login)",
+        api: "openai-completions",
+        auth_key: "openai-codex",
+        auth_env: "",
+        auth_kind: "subscription",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "claude-pro-max",
+        label: "Claude (Pro/Max · login)",
+        api: "anthropic-messages",
+        // Pi stores the Claude Pro/Max OAuth under the `anthropic` auth key.
+        auth_key: "anthropic",
+        auth_env: "",
+        auth_kind: "subscription",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "github-copilot",
+        label: "GitHub Copilot (login)",
+        api: "openai-responses",
+        auth_key: "github-copilot",
+        auth_env: "",
+        auth_kind: "subscription",
+        suggested_models: &[],
+        models_url: "",
     },
     ProviderMeta {
         id: "anthropic",
@@ -497,6 +727,7 @@ pub const PROVIDERS: &[ProviderMeta] = &[
             "claude-sonnet-4-20250514",
             "claude-3-5-haiku-20241022",
         ],
+        models_url: "https://api.anthropic.com/v1/models",
     },
     ProviderMeta {
         id: "openai",
@@ -506,6 +737,7 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         auth_env: "OPENAI_API_KEY",
         auth_kind: "api-key",
         suggested_models: &["gpt-4o", "gpt-4o-mini", "o3", "o4-mini"],
+        models_url: "https://api.openai.com/v1/models",
     },
     ProviderMeta {
         id: "google",
@@ -515,6 +747,8 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         auth_env: "GEMINI_API_KEY",
         auth_kind: "api-key",
         suggested_models: &["gemini-2.5-pro", "gemini-2.5-flash"],
+        // Google's model list uses a non-OpenAI shape; fall back to suggestions.
+        models_url: "",
     },
     ProviderMeta {
         id: "deepseek",
@@ -524,6 +758,7 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         auth_env: "DEEPSEEK_API_KEY",
         auth_kind: "api-key",
         suggested_models: &["deepseek-chat", "deepseek-reasoner"],
+        models_url: "https://api.deepseek.com/models",
     },
     ProviderMeta {
         id: "groq",
@@ -533,6 +768,7 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         auth_env: "GROQ_API_KEY",
         auth_kind: "api-key",
         suggested_models: &["llama-3.3-70b-versatile"],
+        models_url: "https://api.groq.com/openai/v1/models",
     },
     ProviderMeta {
         id: "mistral",
@@ -542,6 +778,7 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         auth_env: "MISTRAL_API_KEY",
         auth_kind: "api-key",
         suggested_models: &["mistral-large-latest"],
+        models_url: "https://api.mistral.ai/v1/models",
     },
     ProviderMeta {
         id: "xai",
@@ -551,22 +788,107 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         auth_env: "XAI_API_KEY",
         auth_kind: "api-key",
         suggested_models: &["grok-4", "grok-3"],
+        models_url: "https://api.x.ai/v1/models",
+    },
+    // Additional OpenAI-compatible providers Pi ships (ids match Pi's own provider
+    // table so its auth.json/models.json entries resolve). Suggestions are left thin
+    // — live `/v1/models` discovery populates them; free-text always works. The
+    // exotic/regional Pi providers (xiaomi, *-cn, ant-ling, opencode) stay reachable
+    // via the custom OpenAI-compatible entry.
+    ProviderMeta {
+        id: "cerebras",
+        label: "Cerebras",
+        api: "openai-completions",
+        auth_key: "cerebras",
+        auth_env: "CEREBRAS_API_KEY",
+        auth_kind: "api-key",
+        suggested_models: &[],
+        models_url: "https://api.cerebras.ai/v1/models",
+    },
+    ProviderMeta {
+        id: "fireworks",
+        label: "Fireworks AI",
+        api: "openai-completions",
+        auth_key: "fireworks",
+        auth_env: "FIREWORKS_API_KEY",
+        auth_kind: "api-key",
+        suggested_models: &[],
+        models_url: "https://api.fireworks.ai/inference/v1/models",
+    },
+    ProviderMeta {
+        id: "together",
+        label: "Together AI",
+        api: "openai-completions",
+        auth_key: "together",
+        auth_env: "TOGETHER_API_KEY",
+        auth_kind: "api-key",
+        suggested_models: &[],
+        models_url: "https://api.together.xyz/v1/models",
+    },
+    ProviderMeta {
+        id: "nvidia",
+        label: "NVIDIA NIM",
+        api: "openai-completions",
+        auth_key: "nvidia",
+        auth_env: "NVIDIA_API_KEY",
+        auth_kind: "api-key",
+        suggested_models: &[],
+        models_url: "https://integrate.api.nvidia.com/v1/models",
+    },
+    ProviderMeta {
+        id: "moonshotai",
+        label: "Moonshot (Kimi)",
+        api: "openai-completions",
+        auth_key: "moonshotai",
+        auth_env: "MOONSHOT_API_KEY",
+        auth_kind: "api-key",
+        suggested_models: &["kimi-k2-0711-preview"],
+        models_url: "https://api.moonshot.ai/v1/models",
+    },
+    ProviderMeta {
+        id: "zai",
+        label: "Z.ai (GLM)",
+        api: "openai-completions",
+        auth_key: "zai",
+        auth_env: "ZAI_API_KEY",
+        auth_kind: "api-key",
+        suggested_models: &["glm-4.6"],
+        // Z.ai's model list uses a non-standard path; rely on suggestions/free-text.
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "minimax",
+        label: "MiniMax",
+        api: "openai-completions",
+        auth_key: "minimax",
+        auth_env: "MINIMAX_API_KEY",
+        auth_kind: "api-key",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "huggingface",
+        label: "Hugging Face",
+        api: "openai-completions",
+        auth_key: "huggingface",
+        auth_env: "HF_TOKEN",
+        auth_kind: "api-key",
+        suggested_models: &[],
+        models_url: "https://router.huggingface.co/v1/models",
     },
     ProviderMeta {
         id: "openrouter",
-        label: "OpenRouter",
+        label: "OpenRouter (BYOK)",
         api: "openai-completions",
         auth_key: "openrouter",
         auth_env: "OPENROUTER_API_KEY",
         auth_kind: "api-key",
-        // `openrouter/auto` is OpenRouter's Auto Router: it picks the best model
-        // per prompt at no extra fee. Listed first so managed users get a
-        // zero-decision "just route it well" option.
         suggested_models: &[
             "openrouter/auto",
             "anthropic/claude-sonnet-4",
             "openai/gpt-4o",
         ],
+        models_url: "https://openrouter.ai/api/v1/models",
     },
 ];
 
@@ -580,8 +902,15 @@ fn provider_meta(id: &str) -> Option<&'static ProviderMeta> {
 /// Whether a provider has a usable credential (auth.json key, environment
 /// variable, or — for custom providers — an `apiKey` in models.json).
 fn provider_configured(meta: &ProviderMeta) -> bool {
-    if meta.auth_kind == "none" {
+    // "none" (gateway) needs no credential. The managed provider is a subscription
+    // gated server-side by the plan's wallet, so it is always usable here.
+    if meta.auth_kind == "none" || meta.id == MANAGED_OPENROUTER_ID {
         return true;
+    }
+    // Login-based subscription providers (ChatGPT/Claude/Copilot): "configured" =
+    // Pi has a stored OAuth login for them (auth.json `{type:"oauth", …}`).
+    if meta.auth_kind == "subscription" {
+        return !meta.auth_key.is_empty() && auth_has_any(meta.auth_key);
     }
     if !meta.auth_key.is_empty() && auth_has_key(meta.auth_key) {
         return true;
@@ -602,13 +931,18 @@ fn provider_configured(meta: &ProviderMeta) -> bool {
 /// secrets.
 #[derive(Debug, Serialize)]
 pub struct PiConfigView {
-    /// Logical provider id ("gateway" or a built-in/custom id).
+    /// Logical active provider id ("managed-openrouter" / "gateway" / a
+    /// built-in / a custom id).
     pub provider: String,
     pub model: Option<String>,
     #[serde(rename = "thinkingLevel")]
     pub thinking_level: Option<String>,
-    /// "gateway" | "direct".
+    /// The active provider's routing: "gateway" | "direct".
     pub routing: String,
+    /// Per-provider routing map for every configured provider, so the desktop can
+    /// render each provider's toggle without a round-trip.
+    #[serde(rename = "providerRouting")]
+    pub provider_routing: Map<String, Value>,
     #[serde(rename = "configDir")]
     pub config_dir: String,
 }
@@ -616,24 +950,29 @@ pub struct PiConfigView {
 /// Read the current configuration.
 pub fn current() -> PiConfigView {
     let settings = read_settings();
-    let gateway = is_gateway_routing();
-    let provider = if gateway {
-        GATEWAY_PROVIDER_ID.to_owned()
-    } else {
-        settings
-            .default_provider
-            .clone()
-            .unwrap_or_else(|| GATEWAY_PROVIDER_ID.to_owned())
-    };
+    let provider = active_provider_id_from(&settings).unwrap_or_else(|| GATEWAY_PROVIDER_ID.to_owned());
+    let routing = provider_routing(&provider).to_owned();
+
+    // Surface routing for every provider that is either built-in or configured.
+    let mut routing_map = Map::new();
+    for meta in PROVIDERS {
+        routing_map.insert(
+            meta.id.to_owned(),
+            Value::String(provider_routing(meta.id).to_owned()),
+        );
+    }
+    for id in custom_provider_ids() {
+        routing_map
+            .entry(id.clone())
+            .or_insert_with(|| Value::String(provider_routing(&id).to_owned()));
+    }
+
     PiConfigView {
         provider,
-        model: settings.default_model,
-        thinking_level: settings.default_thinking_level,
-        routing: if gateway {
-            ROUTING_GATEWAY.to_owned()
-        } else {
-            ROUTING_DIRECT.to_owned()
-        },
+        model: settings.default_model.clone(),
+        thinking_level: settings.default_thinking_level.clone(),
+        routing,
+        provider_routing: routing_map,
         config_dir: config_dir().to_string_lossy().into_owned(),
     }
 }
@@ -642,6 +981,8 @@ pub fn current() -> PiConfigView {
 /// `configured` and `suggestedModels` so the desktop can render a picker.
 pub fn catalog() -> Value {
     let custom_ids = custom_provider_ids();
+    let active = active_provider_id_from(&read_settings());
+    let is_active = |id: &str| active.as_deref() == Some(id);
     let mut providers: Vec<Value> = PROVIDERS
         .iter()
         .map(|p| {
@@ -651,10 +992,15 @@ pub fn catalog() -> Value {
                 "api": p.api,
                 "authKind": p.auth_kind,
                 "authEnv": p.auth_env,
-                "routing": if p.id == GATEWAY_PROVIDER_ID { ROUTING_GATEWAY } else { ROUTING_DIRECT },
+                "routing": provider_routing(p.id),
+                // Managed/gateway providers can't be flipped off Gateway routing.
+                "routingLocked": is_managed_or_gateway(p.id),
+                "managed": p.id == MANAGED_OPENROUTER_ID,
                 "configured": provider_configured(p),
+                "active": is_active(p.id),
                 "custom": false,
                 "suggestedModels": p.suggested_models,
+                "supportsDiscovery": !p.models_url.is_empty(),
             })
         })
         .collect();
@@ -671,10 +1017,15 @@ pub fn catalog() -> Value {
             "api": "openai-completions",
             "authKind": "api-key",
             "authEnv": "",
-            "routing": ROUTING_DIRECT,
+            "routing": provider_routing(&id),
+            "routingLocked": false,
+            "managed": false,
             "configured": custom_provider_has_key(&id),
+            "active": is_active(&id),
             "custom": true,
             "suggestedModels": [],
+            // Custom providers discover against their own baseUrl + /models.
+            "supportsDiscovery": true,
         }));
     }
 
@@ -736,7 +1087,10 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
         }
     }
 
-    let gateway = provider == GATEWAY_PROVIDER_ID;
+    // managed-openrouter and the synthetic gateway provider both route through the
+    // local Gateway via the built-in `openai` pin, so egress stays governed.
+    let gateway = is_managed_or_gateway(&provider);
+    let managed = provider == MANAGED_OPENROUTER_ID;
     let base_url = non_empty(&input.base_url);
     let api_key = non_empty(&input.api_key);
     let custom_api = non_empty(&input.api);
@@ -753,17 +1107,27 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
         );
     }
 
-    // 1) settings.json — defaultProvider/defaultModel/thinking + routing marker.
+    // Managed users get OpenRouter's Auto Router by default (zero decisions); the
+    // Gateway maps `openrouter/auto` onto the OpenRouter provider + credits wallet.
+    let effective_model = if managed && model.is_none() {
+        Some(MANAGED_DEFAULT_MODEL.to_owned())
+    } else {
+        model.clone()
+    };
+
+    // 1) settings.json — defaultProvider/defaultModel/thinking + routing markers +
+    //    the logical active-provider id.
     let mut settings = read_settings();
     // In gateway mode, `defaultProvider` is the built-in `openai` provider that
-    // the OPENAI_BASE_URL injection redirects at the local Gateway.
+    // the models.json pin redirects at the local Gateway.
     settings.default_provider = Some(if gateway {
         "openai".to_owned()
     } else {
         provider.clone()
     });
-    settings.default_model = model.clone();
+    settings.default_model = effective_model.clone();
     settings.default_thinking_level = thinking.clone();
+    // Legacy global marker: records the *active* provider's mode for back-compat.
     settings.extra.insert(
         ROUTING_KEY.to_owned(),
         Value::String(
@@ -775,14 +1139,24 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
             .to_owned(),
         ),
     );
+    // Remember the logical active provider so `current()` can report
+    // managed-openrouter vs gateway (both persist `openai` on disk).
+    settings
+        .extra
+        .insert(ACTIVE_KEY.to_owned(), Value::String(provider.clone()));
     write_settings(&settings)?;
+
+    // Mirror the active provider's mode into the per-provider map too.
+    if !is_managed_or_gateway(&provider) {
+        set_provider_routing(&provider, ROUTING_DIRECT)?;
+    }
 
     if gateway {
         // Pin Pi's built-in `openai` provider at the Gateway in models.json — the
         // `OPENAI_BASE_URL` env injection alone is ignored by Pi (see
         // `gateway_openai_patch`). Declare the chosen model so Pi sends it (not its
         // built-in `gpt-5.4` default) over chat-completions.
-        upsert_provider("openai", gateway_openai_patch(model.as_deref()))?;
+        upsert_provider("openai", gateway_openai_patch(effective_model.as_deref()))?;
         return Ok(current());
     }
 
@@ -809,6 +1183,300 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
     }
 
     Ok(current())
+}
+
+// ── Multi-provider config (Zed-style: configure many, activate one) ─────────────
+
+/// Configure a provider's credential / base URL / routing **without** activating
+/// it. This is the Zed-style flow: many providers can be set up side by side, and
+/// `apply()` (activate) picks which one the agent uses. Returns the refreshed
+/// catalog so the desktop re-renders every provider's `configured`/`routing` state.
+#[derive(Debug, Deserialize)]
+pub struct ProviderConfigInput {
+    /// Provider id (built-in id, or a new custom id when `base_url` is set).
+    pub provider: String,
+    #[serde(rename = "apiKey", default)]
+    pub api_key: Option<String>,
+    #[serde(rename = "baseUrl", default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api: Option<String>,
+    /// Optional per-provider routing override ("gateway" | "direct").
+    #[serde(default)]
+    pub routing: Option<String>,
+}
+
+/// Persist a provider's credentials + routing without changing the active
+/// selection. See [`ProviderConfigInput`].
+pub fn configure_provider(input: ProviderConfigInput) -> Result<Value> {
+    let provider = input.provider.trim().to_owned();
+    if provider.is_empty() {
+        anyhow::bail!("provider is required");
+    }
+    if is_managed_or_gateway(&provider) {
+        // Managed/gateway providers carry no BYOK credential; only routing (locked
+        // to gateway) — nothing to configure. Activation is the only action.
+        anyhow::bail!("provider '{provider}' needs no configuration; activate it instead");
+    }
+
+    let base_url = non_empty(&input.base_url);
+    let api_key = non_empty(&input.api_key);
+    let custom_api = non_empty(&input.api);
+    let is_builtin = provider_meta(&provider).is_some();
+
+    if !is_builtin && base_url.is_none() && !custom_provider_ids().contains(&provider) {
+        anyhow::bail!("unknown provider '{provider}'; supply a baseUrl to define a custom provider");
+    }
+
+    if let Some(url) = &base_url {
+        // Custom OpenAI-compatible provider → models.json entry.
+        let mut patch = Map::new();
+        patch.insert("baseUrl".to_owned(), Value::String(url.clone()));
+        patch.insert(
+            "api".to_owned(),
+            Value::String(custom_api.unwrap_or_else(|| "openai-completions".to_owned())),
+        );
+        if let Some(key) = &api_key {
+            patch.insert("apiKey".to_owned(), Value::String(key.clone()));
+        }
+        upsert_provider(&provider, patch)?;
+    } else if let (Some(meta), Some(key)) = (provider_meta(&provider), &api_key) {
+        if !meta.auth_key.is_empty() {
+            set_auth_key(meta.auth_key, key)?;
+        }
+    }
+
+    if let Some(mode) = non_empty(&input.routing) {
+        set_provider_routing(&provider, &mode)?;
+    }
+
+    Ok(catalog())
+}
+
+/// Remove a provider's stored credential (and, for custom providers, its whole
+/// entry) and its routing override. If it was the active provider, the active
+/// selection falls back to the managed/gateway default. Returns the refreshed
+/// catalog.
+pub fn remove_provider(id: &str) -> Result<Value> {
+    let id = id.trim();
+    if id.is_empty() {
+        anyhow::bail!("provider id is required");
+    }
+    if is_managed_or_gateway(id) {
+        anyhow::bail!("the managed/gateway provider cannot be removed");
+    }
+
+    if let Some(meta) = provider_meta(id) {
+        if !meta.auth_key.is_empty() {
+            clear_auth_key(meta.auth_key)?;
+        }
+    }
+    remove_models_provider(id)?;
+
+    // Drop its routing override.
+    let mut settings = read_settings();
+    let mut dirty = false;
+    if let Some(map) = settings
+        .extra
+        .get_mut(PROVIDER_ROUTING_KEY)
+        .and_then(Value::as_object_mut)
+    {
+        if map.remove(id).is_some() {
+            dirty = true;
+        }
+    }
+    // If we just removed the active provider, revert to the managed default.
+    if active_provider_id_from(&settings).as_deref() == Some(id) {
+        settings
+            .extra
+            .insert(ACTIVE_KEY.to_owned(), Value::String(GATEWAY_PROVIDER_ID.to_owned()));
+        settings
+            .extra
+            .insert(ROUTING_KEY.to_owned(), Value::String(ROUTING_GATEWAY.to_owned()));
+        settings.default_provider = Some("openai".to_owned());
+        dirty = true;
+    }
+    if dirty {
+        write_settings(&settings)?;
+    }
+    Ok(catalog())
+}
+
+// ── Model discovery (OpenAI-compatible `GET /models`, static fallback) ──────────
+
+/// Request to discover a provider's live model list.
+#[derive(Debug, Deserialize)]
+pub struct DiscoverInput {
+    /// A known/custom provider id to resolve the URL + key from stored config.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// An explicit base URL (e.g. a not-yet-saved custom provider being tested).
+    #[serde(rename = "baseUrl", default)]
+    pub base_url: Option<String>,
+    /// An explicit key to try (never persisted here; used only for the probe).
+    #[serde(rename = "apiKey", default)]
+    pub api_key: Option<String>,
+}
+
+/// How a discovery request authenticates to the upstream `GET /models`.
+enum DiscoveryAuth {
+    Bearer(String),
+    /// Anthropic uses `x-api-key` + `anthropic-version` rather than a bearer token.
+    Anthropic(String),
+    None,
+}
+
+/// Build the `.../models` URL from a base URL, tolerating trailing slashes and an
+/// already-appended `/models`.
+fn models_url_from_base(base: &str) -> String {
+    let trimmed = base.trim().trim_end_matches('/');
+    if trimmed.ends_with("/models") {
+        trimmed.to_owned()
+    } else {
+        format!("{trimmed}/models")
+    }
+}
+
+/// Discover a provider's models via its OpenAI-compatible `GET /models` endpoint,
+/// falling back to the provider's static `suggested_models` when discovery is
+/// unavailable or errors. Returns `{ models: [{id}], source: "discovery" |
+/// "fallback" }`. Runs server-side so keys never reach the browser.
+pub async fn discover_models(input: DiscoverInput) -> Value {
+    let provider_id = non_empty(&input.provider);
+    let explicit_base = non_empty(&input.base_url);
+    let explicit_key = non_empty(&input.api_key);
+
+    // Resolve (url, auth) for the probe.
+    let resolved: Option<(String, DiscoveryAuth)> = if let Some(base) = &explicit_base {
+        let auth = explicit_key
+            .clone()
+            .map(DiscoveryAuth::Bearer)
+            .unwrap_or(DiscoveryAuth::None);
+        Some((models_url_from_base(base), auth))
+    } else if let Some(id) = &provider_id {
+        resolve_provider_discovery(id, explicit_key.clone())
+    } else {
+        None
+    };
+
+    // Tier 1 — a live provider `GET /v1/models` (freshest, provider-authoritative).
+    if let Some((url, auth)) = resolved {
+        if let Ok(models) = fetch_models(&url, auth).await {
+            if !models.is_empty() {
+                return json!({ "models": models, "source": "discovery" });
+            }
+        }
+    }
+
+    // Tier 2 — models.dev, the upstream registry Pi's own table is generated from
+    // (covers providers without a live key or without an OpenAI `/v1/models`, e.g.
+    // Google and the subscription providers).
+    if let Some(id) = &provider_id {
+        let md = models_dev::models_for(id).await;
+        if !md.is_empty() {
+            return json!({ "models": md, "source": "models.dev" });
+        }
+    }
+
+    // Tier 3 — the tiny static seed (offline, unknown provider). Free-text entry in
+    // the UI always works regardless.
+    let seed: Vec<Value> = provider_id
+        .as_deref()
+        .and_then(provider_meta)
+        .map(|m| m.suggested_models)
+        .unwrap_or(&[])
+        .iter()
+        .map(|id| json!({ "id": id }))
+        .collect();
+    json!({ "models": seed, "source": "fallback" })
+}
+
+/// Resolve the discovery URL + auth for a known/custom provider id from stored
+/// config. Returns `None` when the provider has no discoverable endpoint (e.g.
+/// Google's non-OpenAI shape), so the caller falls back to suggestions.
+fn resolve_provider_discovery(id: &str, explicit_key: Option<String>) -> Option<(String, DiscoveryAuth)> {
+    // Managed/gateway → the local Gateway's own /v1/models.
+    if is_managed_or_gateway(id) {
+        let base = crate::sidecar::gateway::gateway_url();
+        let url = format!("{}/v1/models", base.trim_end_matches('/'));
+        let token = crate::sidecar::gateway::gateway_token().unwrap_or_else(|| "ryu-local".to_owned());
+        return Some((url, DiscoveryAuth::Bearer(token)));
+    }
+
+    if let Some(meta) = provider_meta(id) {
+        if meta.models_url.is_empty() {
+            return None; // No OpenAI-style discovery (e.g. Google).
+        }
+        let key = explicit_key
+            .or_else(|| auth_key_value(meta.auth_key))
+            .or_else(|| std::env::var(meta.auth_env).ok().filter(|s| !s.is_empty()));
+        let auth = match key {
+            Some(k) if id == "anthropic" => DiscoveryAuth::Anthropic(k),
+            Some(k) => DiscoveryAuth::Bearer(k),
+            None => DiscoveryAuth::None,
+        };
+        return Some((meta.models_url.to_owned(), auth));
+    }
+
+    // Custom provider defined in models.json → its baseUrl + /models.
+    let entry = read_models()["providers"].get(id)?.clone();
+    let base = entry.get("baseUrl").and_then(Value::as_str)?;
+    let key = explicit_key.or_else(|| {
+        entry
+            .get("apiKey")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .filter(|s| !s.is_empty())
+    });
+    let auth = key.map(DiscoveryAuth::Bearer).unwrap_or(DiscoveryAuth::None);
+    Some((models_url_from_base(base), auth))
+}
+
+/// GET the `/models` endpoint and parse the OpenAI/Anthropic `{ data: [{id,…}] }`
+/// shape into `[{id}]`. Short timeout so a dead endpoint fails fast to fallback.
+async fn fetch_models(url: &str, auth: DiscoveryAuth) -> Result<Vec<Value>> {
+    let client = reqwest::Client::new();
+    let mut req = client
+        .get(url)
+        .timeout(std::time::Duration::from_secs(8));
+    match auth {
+        DiscoveryAuth::Bearer(token) => req = req.bearer_auth(token),
+        DiscoveryAuth::Anthropic(key) => {
+            req = req
+                .header("x-api-key", key)
+                .header("anthropic-version", "2023-06-01");
+        }
+        DiscoveryAuth::None => {}
+    }
+    let resp = req.send().await.context("discover models request")?;
+    if !resp.status().is_success() {
+        anyhow::bail!("discovery endpoint returned {}", resp.status());
+    }
+    let body: Value = resp.json().await.context("parse discovery response")?;
+    // OpenAI + Anthropic both use `{ data: [ { id, ... } ] }`; OpenRouter too.
+    let items = body
+        .get("data")
+        .and_then(Value::as_array)
+        .or_else(|| body.get("models").and_then(Value::as_array))
+        .cloned()
+        .unwrap_or_default();
+    let models: Vec<Value> = items
+        .into_iter()
+        .filter_map(|m| {
+            let id = m
+                .get("id")
+                .or_else(|| m.get("name"))
+                .and_then(Value::as_str)?
+                .to_owned();
+            let mut out = Map::new();
+            out.insert("id".to_owned(), Value::String(id));
+            if let Some(name) = m.get("display_name").and_then(Value::as_str) {
+                out.insert("name".to_owned(), Value::String(name.to_owned()));
+            }
+            Some(Value::Object(out))
+        })
+        .collect();
+    Ok(models)
 }
 
 #[cfg(test)]
@@ -1027,6 +1695,157 @@ mod tests {
             // Both picks stay declared so the user can switch back.
             assert!(declared.iter().any(|id| id == "model-a"));
             assert!(declared.iter().any(|id| id == "model-b"));
+        });
+    }
+
+    #[test]
+    fn managed_openrouter_activation_pins_gateway_and_defaults_auto() {
+        with_temp_dir(|| {
+            let view = apply(PiConfigInput {
+                provider: MANAGED_OPENROUTER_ID.to_owned(),
+                model: None,
+                thinking_level: None,
+                api_key: None,
+                base_url: None,
+                api: None,
+            })
+            .unwrap();
+            // Logical active provider is reported as managed (not raw "openai").
+            assert_eq!(view.provider, MANAGED_OPENROUTER_ID);
+            assert_eq!(view.routing, "gateway");
+            // Managed users default to the Auto Router.
+            assert_eq!(view.model.as_deref(), Some(MANAGED_DEFAULT_MODEL));
+            assert!(is_gateway_routing());
+            // On disk it rides the openai gateway pin so egress is governed.
+            let settings = read_settings();
+            assert_eq!(settings.default_provider.as_deref(), Some("openai"));
+            let models = read_models();
+            assert!(models["providers"]["openai"]["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["id"] == json!(MANAGED_DEFAULT_MODEL)));
+        });
+    }
+
+    #[test]
+    fn configure_provider_stores_key_without_activating() {
+        with_temp_dir(|| {
+            // Fresh install is gateway-routed; configuring a BYOK provider must not
+            // steal the active selection.
+            let catalog = configure_provider(ProviderConfigInput {
+                provider: "anthropic".to_owned(),
+                api_key: Some("sk-ant-test".to_owned()),
+                base_url: None,
+                api: None,
+                routing: None,
+            })
+            .unwrap();
+            // Still gateway-active.
+            assert!(is_gateway_routing());
+            assert_eq!(current().provider, GATEWAY_PROVIDER_ID);
+            // Key is stored + surfaced as configured, but not active.
+            assert!(auth_has_key("anthropic"));
+            let anthropic = catalog["providers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["id"] == "anthropic")
+                .unwrap();
+            assert_eq!(anthropic["configured"], json!(true));
+            assert_eq!(anthropic["active"], json!(false));
+        });
+    }
+
+    #[test]
+    fn per_provider_routing_toggle_persists() {
+        with_temp_dir(|| {
+            configure_provider(ProviderConfigInput {
+                provider: "openai".to_owned(),
+                api_key: Some("sk-test".to_owned()),
+                base_url: None,
+                api: None,
+                routing: Some("gateway".to_owned()),
+            })
+            .unwrap();
+            assert_eq!(provider_routing("openai"), "gateway");
+            configure_provider(ProviderConfigInput {
+                provider: "openai".to_owned(),
+                api_key: None,
+                base_url: None,
+                api: None,
+                routing: Some("direct".to_owned()),
+            })
+            .unwrap();
+            assert_eq!(provider_routing("openai"), "direct");
+        });
+    }
+
+    #[test]
+    fn managed_and_gateway_routing_cannot_be_flipped() {
+        with_temp_dir(|| {
+            // set_provider_routing is a no-op for locked providers.
+            set_provider_routing(MANAGED_OPENROUTER_ID, "direct").unwrap();
+            assert_eq!(provider_routing(MANAGED_OPENROUTER_ID), "gateway");
+            assert_eq!(provider_routing(GATEWAY_PROVIDER_ID), "gateway");
+        });
+    }
+
+    #[test]
+    fn remove_provider_clears_key_and_reverts_active() {
+        with_temp_dir(|| {
+            apply(PiConfigInput {
+                provider: "anthropic".to_owned(),
+                model: Some("claude-sonnet-4-20250514".to_owned()),
+                thinking_level: None,
+                api_key: Some("sk-ant-test".to_owned()),
+                base_url: None,
+                api: None,
+            })
+            .unwrap();
+            assert_eq!(current().provider, "anthropic");
+            assert!(auth_has_key("anthropic"));
+
+            remove_provider("anthropic").unwrap();
+            // Key gone, active reverts to the managed/gateway default.
+            assert!(!auth_has_key("anthropic"));
+            assert_eq!(current().provider, GATEWAY_PROVIDER_ID);
+            assert!(is_gateway_routing());
+        });
+    }
+
+    #[test]
+    fn managed_provider_cannot_be_configured_or_removed() {
+        with_temp_dir(|| {
+            assert!(configure_provider(ProviderConfigInput {
+                provider: MANAGED_OPENROUTER_ID.to_owned(),
+                api_key: Some("nope".to_owned()),
+                base_url: None,
+                api: None,
+                routing: None,
+            })
+            .is_err());
+            assert!(remove_provider(GATEWAY_PROVIDER_ID).is_err());
+        });
+    }
+
+    #[test]
+    fn discover_models_falls_back_when_provider_unknown_and_registry_offline() {
+        // An unknown provider with the models.dev registry pointed at an
+        // unreachable host: tier-1 (no url) and tier-2 (not in registry) both yield
+        // nothing, so we get the tier-3 fallback with an empty model list. Free-text
+        // entry covers this case in the UI. Deterministic + offline.
+        with_temp_dir(|| {
+            std::env::set_var("RYU_MODELS_DEV_URL", "http://127.0.0.1:1/none");
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let out = rt.block_on(discover_models(DiscoverInput {
+                provider: Some("definitely-not-a-provider-xyz".to_owned()),
+                base_url: None,
+                api_key: None,
+            }));
+            std::env::remove_var("RYU_MODELS_DEV_URL");
+            assert_eq!(out["source"], "fallback");
+            assert_eq!(out["models"].as_array().unwrap().len(), 0);
         });
     }
 

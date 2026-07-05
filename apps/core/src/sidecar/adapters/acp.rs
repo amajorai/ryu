@@ -3,12 +3,19 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use agent_client_protocol::schema::{
-    AvailableCommandInput, ContentBlock, ImageContent, InitializeRequest, NewSessionRequest,
-    NewSessionResponse,
-    PromptRequest, PromptResponse, ProtocolVersion, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionId,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    SetSessionModelRequest, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
+    AuthMethodId, AuthenticateRequest, AvailableCommandInput, CancelNotification,
+    ClientCapabilities, CloseSessionRequest, ContentBlock, CreateTerminalRequest,
+    CreateTerminalResponse, EmbeddedResource, FileSystemCapabilities, ImageContent,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    KillTerminalRequest, KillTerminalResponse, NewSessionRequest,
+    NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, TerminalId,
+    TerminalOutputRequest, TerminalOutputResponse, ToolCall, ToolCallContent, ToolCallStatus,
+    ToolCallUpdate, ToolKind, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::{Agent, Client, ConnectionTo, SessionMessage};
@@ -57,6 +64,11 @@ pub enum AcpEvent {
         /// Raw output and/or rendered content produced by the tool.
         output: Option<serde_json::Value>,
     },
+    /// A non-text block in the assistant's message (ACP `Content`): an inline
+    /// image or audio clip the agent emitted. Carries the base64 `data` + its
+    /// `mime` so mod.rs can forward it as an AI-SDK `file` part (previously these
+    /// blocks were silently dropped — only text was surfaced).
+    Media { mime: String, data: String },
     /// The agent switched the active session mode itself (e.g. Claude Code
     /// leaving "plan" after presenting a plan). Carries the new mode id so the
     /// desktop's mode picker stays in sync. Agent-initiated, not user-driven.
@@ -134,12 +146,344 @@ fn tool_kind_str(kind: &ToolKind) -> String {
         .unwrap_or_else(|| "other".to_owned())
 }
 
+/// Extract the text of an embedded resource (ACP `Content` → `Resource`), when it
+/// carries a text (not binary blob) payload. `None` for binary resources.
+fn embedded_resource_text(res: &EmbeddedResource) -> Option<String> {
+    serde_json::to_value(&res.resource)
+        .ok()?
+        .get("text")
+        .and_then(|t| t.as_str())
+        .map(str::to_owned)
+        .filter(|s| !s.is_empty())
+}
+
 /// Serialize an ACP `ToolCallStatus` to its snake_case wire form.
 fn tool_status_str(status: &ToolCallStatus) -> String {
     serde_json::to_value(status)
         .ok()
         .and_then(|v| v.as_str().map(str::to_owned))
         .unwrap_or_else(|| "pending".to_owned())
+}
+
+/// The ACP client capabilities Ryu advertises in `initialize`. Ryu is a full
+/// client host: it serves the agent's `fs/*` (read/write text file) and
+/// `terminal/*` requests (handlers live in the session dispatch chain below), so
+/// ACP agents like Claude Code / Codex that mediate file edits and command
+/// execution *through the client* work against Ryu instead of silently having
+/// those requests dropped (the pre-2026-07 default sent `ClientCapabilities`
+/// with everything `false`).
+fn ryu_client_capabilities() -> ClientCapabilities {
+    // These schema structs are `#[non_exhaustive]`, so build from Default and set
+    // fields rather than a struct literal.
+    let mut caps = ClientCapabilities::default();
+    caps.fs.read_text_file = true;
+    caps.fs.write_text_file = true;
+    caps.terminal = true;
+    caps
+}
+
+/// `initialize` request carrying Ryu's full client capabilities (fs + terminal).
+fn ryu_initialize_request() -> InitializeRequest {
+    let mut init = InitializeRequest::new(ProtocolVersion::V1);
+    init.client_capabilities = ryu_client_capabilities();
+    init
+}
+
+// ── Client-hosted terminals (ACP `terminal/*`) ──────────────────────────────────
+//
+// ACP agents that don't run their own shell ask the *client* to spawn commands
+// and stream their output back (`terminal/create|output|wait_for_exit|kill|
+// release`). Ryu hosts these: each `terminal/create` spawns a real child process
+// whose merged stdout+stderr is buffered (byte-capped, truncated from the front),
+// and a per-terminal task owns the child so `kill` can race `wait` without a lock
+// deadlock. The registry is per ACP instance (one chat), cleaned up on `release`.
+
+/// One live client-hosted terminal.
+struct TerminalEntry {
+    /// Merged stdout+stderr captured so far.
+    output: Arc<Mutex<String>>,
+    /// Set once the output buffer hit `output_byte_limit` and was truncated.
+    truncated: Arc<std::sync::atomic::AtomicBool>,
+    /// The process exit status once it has exited: `(exit_code, signal)`.
+    exit: Arc<tokio::sync::Mutex<Option<(Option<u32>, Option<String>)>>>,
+    /// Notified when `exit` transitions to `Some` (wakes `wait_for_exit`).
+    exit_notify: Arc<tokio::sync::Notify>,
+    /// Send `()` to request the child be killed (drives the owner task's select).
+    kill_tx: tokio::sync::mpsc::Sender<()>,
+}
+
+/// Per-ACP-instance terminal registry, keyed by the `terminal_id` string.
+type TerminalRegistry = Arc<tokio::sync::Mutex<BTreeMap<String, TerminalEntry>>>;
+
+/// Append `chunk` to a byte-capped buffer, truncating from the FRONT (oldest
+/// output) on overflow to stay within `limit` at a char boundary (per the ACP
+/// spec). Sets `truncated` when it trims.
+fn append_capped(
+    buf: &Arc<Mutex<String>>,
+    truncated: &Arc<std::sync::atomic::AtomicBool>,
+    chunk: &str,
+    limit: Option<u64>,
+) {
+    let Ok(mut out) = buf.lock() else { return };
+    out.push_str(chunk);
+    if let Some(limit) = limit {
+        let limit = limit as usize;
+        if out.len() > limit {
+            // Trim from the front to a char boundary.
+            let mut cut = out.len() - limit;
+            while cut < out.len() && !out.is_char_boundary(cut) {
+                cut += 1;
+            }
+            *out = out.split_off(cut);
+            truncated.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+/// Spawn a child process for `terminal/create` and register it. Returns the new
+/// terminal id, or an error if the process could not be spawned.
+async fn terminal_create(
+    registry: &TerminalRegistry,
+    req: &CreateTerminalRequest,
+    session_cwd: &std::path::Path,
+) -> anyhow::Result<String> {
+    use std::process::Stdio;
+
+    let mut cmd = tokio::process::Command::new(&req.command);
+    cmd.args(&req.args);
+    for env in &req.env {
+        cmd.env(&env.name, &env.value);
+    }
+    cmd.current_dir(req.cwd.clone().unwrap_or_else(|| session_cwd.to_path_buf()));
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .with_context_msg(|| format!("spawn terminal command '{}'", req.command))?;
+
+    let output = Arc::new(Mutex::new(String::new()));
+    let truncated = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let exit = Arc::new(tokio::sync::Mutex::new(None));
+    let exit_notify = Arc::new(tokio::sync::Notify::new());
+    let (kill_tx, mut kill_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let limit = req.output_byte_limit;
+
+    // Merge stdout + stderr into the one buffer as they arrive. They are distinct
+    // reader types, so pump each with its own task via a small generic helper.
+    async fn pump<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
+        mut reader: R,
+        buf: Arc<Mutex<String>>,
+        trunc: Arc<std::sync::atomic::AtomicBool>,
+        limit: Option<u64>,
+    ) {
+        use tokio::io::AsyncReadExt as _;
+        let mut chunk = [0u8; 4096];
+        loop {
+            match reader.read(&mut chunk).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let text = String::from_utf8_lossy(&chunk[..n]);
+                    append_capped(&buf, &trunc, &text, limit);
+                }
+            }
+        }
+    }
+    if let Some(out_pipe) = child.stdout.take() {
+        tokio::spawn(pump(out_pipe, Arc::clone(&output), Arc::clone(&truncated), limit));
+    }
+    if let Some(err_pipe) = child.stderr.take() {
+        tokio::spawn(pump(err_pipe, Arc::clone(&output), Arc::clone(&truncated), limit));
+    }
+
+    // Owner task: race the process's own exit against a kill request so `kill`
+    // never deadlocks against a `wait_for_exit` holding a lock.
+    let exit_owner = Arc::clone(&exit);
+    let notify_owner = Arc::clone(&exit_notify);
+    tokio::spawn(async move {
+        let status = tokio::select! {
+            s = child.wait() => s,
+            _ = kill_rx.recv() => {
+                let _ = child.start_kill();
+                child.wait().await
+            }
+        };
+        let (code, signal) = match status {
+            Ok(st) => {
+                #[cfg(unix)]
+                let signal = {
+                    use std::os::unix::process::ExitStatusExt as _;
+                    st.signal().map(|s| s.to_string())
+                };
+                #[cfg(not(unix))]
+                let signal = None;
+                (st.code().map(|c| c as u32), signal)
+            }
+            Err(_) => (None, None),
+        };
+        if let Ok(mut slot) = exit_owner.try_lock() {
+            *slot = Some((code, signal));
+        } else {
+            *exit_owner.lock().await = Some((code, signal));
+        }
+        notify_owner.notify_waiters();
+    });
+
+    // Terminal ids are unique within an instance; a monotonic counter suffices.
+    let id = next_terminal_id();
+    registry.lock().await.insert(
+        id.clone(),
+        TerminalEntry {
+            output,
+            truncated,
+            exit,
+            exit_notify,
+            kill_tx,
+        },
+    );
+    Ok(id)
+}
+
+/// Process-global monotonic terminal-id source (`term-<n>`).
+fn next_terminal_id() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("term-{n}")
+}
+
+// ── Turn cancellation (ACP `session/cancel`) ────────────────────────────────────
+//
+// The desktop Stop button aborts the SSE, but Core's completion task deliberately
+// runs the ACP turn to completion after a client *disconnect* (so the assistant
+// message still persists). An *explicit* stop is different: the user wants the
+// agent to actually stop. `POST /api/chat/cancel` → [`request_cancel`] sets the
+// active turn's flag; the turn loop then sends an ACP `CancelNotification`
+// (`session/cancel`) to the agent and ends the turn.
+
+/// A single in-flight turn's cancellation signal, keyed by conversation id.
+#[derive(Default)]
+struct TurnCancel {
+    flag: std::sync::atomic::AtomicBool,
+    notify: tokio::sync::Notify,
+}
+
+fn cancel_registry() -> &'static Mutex<BTreeMap<String, Arc<TurnCancel>>> {
+    static REG: OnceLock<Mutex<BTreeMap<String, Arc<TurnCancel>>>> = OnceLock::new();
+    REG.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+/// Register the active turn's cancel handle for a conversation (replaces any
+/// stale entry from a prior turn on the same conversation).
+fn set_cancel(conversation: &str, cancel: Arc<TurnCancel>) {
+    if let Ok(mut reg) = cancel_registry().lock() {
+        reg.insert(conversation.to_owned(), cancel);
+    }
+}
+
+/// Remove a conversation's cancel handle (turn ended).
+fn clear_cancel(conversation: &str) {
+    if let Ok(mut reg) = cancel_registry().lock() {
+        reg.remove(conversation);
+    }
+}
+
+/// Request cancellation of a conversation's in-flight ACP turn. Returns `true`
+/// if a live turn was signalled. Called by the chat-cancel HTTP handler.
+pub fn request_cancel(conversation: &str) -> bool {
+    let handle = cancel_registry()
+        .lock()
+        .ok()
+        .and_then(|reg| reg.get(conversation).cloned());
+    if let Some(cancel) = handle {
+        cancel.flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        cancel.notify.notify_waiters();
+        true
+    } else {
+        false
+    }
+}
+
+/// Build a `TerminalExitStatus` JSON value from the stored `(code, signal)`.
+fn exit_status_value(code: Option<u32>, signal: Option<String>) -> serde_json::Value {
+    serde_json::json!({ "exitCode": code, "signal": signal })
+}
+
+/// Small extension so terminal spawn errors carry context without pulling the
+/// whole `anyhow::Context` trait into scope for a `std::io::Result`.
+trait WithContextMsg<T> {
+    fn with_context_msg<F: FnOnce() -> String>(self, f: F) -> anyhow::Result<T>;
+}
+impl<T, E: std::fmt::Display> WithContextMsg<T> for Result<T, E> {
+    fn with_context_msg<F: FnOnce() -> String>(self, f: F) -> anyhow::Result<T> {
+        self.map_err(|e| anyhow::anyhow!("{}: {e}", f()))
+    }
+}
+
+// ── Client-hosted file system (ACP `fs/read_text_file`, `fs/write_text_file`) ────
+//
+// ACP agents (Claude Code / Codex) route file reads and edits through the *client*
+// rather than touching disk directly, so the client is the single mediation point.
+// Ryu serves these directly against the local filesystem — ACP agents are first-
+// party binaries running as the user (SECURITY.md), so this is parity, not a new
+// trust boundary. Read honours ACP's 1-based `line` + `limit` window.
+
+/// Serve `fs/read_text_file`, applying the optional 1-based `line` offset and
+/// `limit`. Returns `""` on any read error (the ACP response carries only
+/// `content`; a missing file degrades to empty rather than failing the turn).
+fn read_text_file_scoped(req: &ReadTextFileRequest) -> String {
+    let Ok(content) = std::fs::read_to_string(&req.path) else {
+        return String::new();
+    };
+    if req.line.is_none() && req.limit.is_none() {
+        return content;
+    }
+    let lines: Vec<&str> = content.lines().collect();
+    let start = req.line.unwrap_or(1).saturating_sub(1) as usize;
+    if start >= lines.len() {
+        return String::new();
+    }
+    let end = req
+        .limit
+        .map(|l| (start + l as usize).min(lines.len()))
+        .unwrap_or(lines.len());
+    lines[start..end].join("\n")
+}
+
+/// Serve `fs/write_text_file`, creating parent directories as needed.
+fn write_text_file_scoped(req: &WriteTextFileRequest) -> anyhow::Result<()> {
+    if let Some(parent) = req.path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&req.path, &req.content)
+        .with_context_msg(|| format!("write {}", req.path.display()))
+}
+
+/// Await a client-hosted terminal's exit, returning `(exit_code, signal)`.
+/// Wakes promptly on the owner task's notify, with a 250ms poll fallback so a
+/// narrowly-missed notification can never hang the agent. Returns `(None, None)`
+/// if the terminal id is unknown (already released).
+async fn terminal_wait_for_exit(
+    registry: &TerminalRegistry,
+    id: &str,
+) -> (Option<u32>, Option<String>) {
+    loop {
+        let (exit_arc, notify) = {
+            let reg = registry.lock().await;
+            let Some(entry) = reg.get(id) else {
+                return (None, None);
+            };
+            (Arc::clone(&entry.exit), Arc::clone(&entry.exit_notify))
+        };
+        if let Some(status) = exit_arc.lock().await.clone() {
+            return status;
+        }
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            notify.notified(),
+        )
+        .await;
+    }
 }
 
 /// Collapse a tool call's `content` blocks (text/diff/terminal) into a JSON
@@ -363,7 +707,11 @@ pub async fn probe_acp_config(
             .connect_with(agent, move |cx: ConnectionTo<Agent>| {
                 let cwd = cwd.clone();
                 async move {
-                    cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                    // Capture the agent's advertised auth methods (ACP
+                    // Authentication) so the desktop can offer "Login with …" for
+                    // agents that require it (e.g. a subscription/OAuth login).
+                    let init: InitializeResponse = cx
+                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
                         .block_task()
                         .await?;
                     let resp: NewSessionResponse = cx
@@ -374,6 +722,7 @@ pub async fn probe_acp_config(
                         "modes": resp.modes,
                         "models": resp.models,
                         "configOptions": resp.config_options,
+                        "authMethods": init.auth_methods,
                     }))
                 }
             }),
@@ -390,6 +739,110 @@ pub async fn probe_acp_config(
         m.insert(probe_cmd, value.clone());
     }
     Ok(value)
+}
+
+/// Authenticate to an ACP agent with one of the methods it advertised in its
+/// `initialize` response (`auth_methods`, surfaced by [`probe_acp_config`] as
+/// `authMethods`). This drives the ACP Authentication flow — e.g. a subscription
+/// / OAuth "login" — so agents that gate `session/new` behind auth become usable.
+/// The agent subprocess owns the actual login UX (opening a browser, etc.); this
+/// just issues the `authenticate` request and waits for it to complete.
+///
+/// Invalidates the probe cache for this spawn command on success so the next
+/// `acp-config` read reflects the now-authenticated state.
+pub async fn authenticate_acp(spawn_cmd: String, method_id: String) -> anyhow::Result<()> {
+    let agent =
+        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let cache_key = spawn_cmd.clone();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        Client
+            .builder()
+            .connect_with(agent, move |cx: ConnectionTo<Agent>| {
+                let method_id = method_id.clone();
+                async move {
+                    cx.send_request(ryu_initialize_request())
+                        .block_task()
+                        .await?;
+                    cx.send_request(AuthenticateRequest::new(AuthMethodId::new(
+                        method_id.as_str(),
+                    )))
+                    .block_task()
+                    .await?;
+                    Ok(())
+                }
+            }),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("ACP authenticate timed out after 300s"))?
+    .map_err(|e| anyhow::anyhow!("ACP authenticate: {e}"))?;
+    // The agent's config may now differ (auth unlocked session/new); drop the cache.
+    if let Ok(mut m) = config_cache().lock() {
+        m.remove(&cache_key);
+    }
+    Ok(())
+}
+
+/// List the sessions an ACP agent is tracking (ACP `session/list`). Best-effort:
+/// an agent that doesn't implement it (the flagship pi spawns fresh per
+/// `session/new`) returns `{ sessions: [], unsupported: true }` rather than an
+/// error. Returns `{ sessions: [...], nextCursor? }` on success.
+pub async fn list_acp_sessions(spawn_cmd: String) -> anyhow::Result<serde_json::Value> {
+    let agent =
+        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let value = tokio::time::timeout(
+        ACP_PROBE_TIMEOUT,
+        Client
+            .builder()
+            .connect_with(agent, move |cx: ConnectionTo<Agent>| async move {
+                cx.send_request(ryu_initialize_request())
+                    .block_task()
+                    .await?;
+                match cx.send_request(ListSessionsRequest::new()).block_task().await {
+                    Ok(resp) => {
+                        let resp: ListSessionsResponse = resp;
+                        Ok(serde_json::json!({
+                            "sessions": resp.sessions,
+                            "nextCursor": resp.next_cursor,
+                        }))
+                    }
+                    // Method-not-found / unsupported → empty, not an error.
+                    Err(_) => Ok(serde_json::json!({ "sessions": [], "unsupported": true })),
+                }
+            }),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("ACP session/list timed out"))?
+    .map_err(|e| anyhow::anyhow!("ACP session/list: {e}"))?;
+    Ok(value)
+}
+
+/// Delete/close an ACP agent session (ACP `session/close`). Best-effort — an
+/// agent that doesn't implement it returns an error the caller can surface.
+pub async fn close_acp_session(spawn_cmd: String, session_id: String) -> anyhow::Result<()> {
+    let agent =
+        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    tokio::time::timeout(
+        ACP_PROBE_TIMEOUT,
+        Client
+            .builder()
+            .connect_with(agent, move |cx: ConnectionTo<Agent>| {
+                let session_id = session_id.clone();
+                async move {
+                    cx.send_request(ryu_initialize_request())
+                        .block_task()
+                        .await?;
+                    cx.send_request(CloseSessionRequest::new(SessionId::new(session_id.as_str())))
+                        .block_task()
+                        .await?;
+                    Ok(())
+                }
+            }),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("ACP session/close timed out"))?
+    .map_err(|e| anyhow::anyhow!("ACP session/close: {e}"))?;
+    Ok(())
 }
 
 /// The conventional ACP session-config-option id for model selection. Agents
@@ -693,6 +1146,7 @@ impl AgentAdapter for AcpAdapter {
                     AcpEvent::Text(_)
                     | AcpEvent::Thought(_)
                     | AcpEvent::Plan(_)
+                    | AcpEvent::Media { .. }
                     | AcpEvent::ModeChanged(_)
                     | AcpEvent::ConfigWarning { .. }
                     | AcpEvent::AvailableCommands(_)
@@ -868,7 +1322,10 @@ pub async fn run_acp_instance(
         .connect_with(agent, move |cx: ConnectionTo<Agent>| {
             async move {
                 let mut turns_rx = turns_rx;
-                cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                // Advertise Ryu's full client capabilities (fs + terminal) so the
+                // agent routes file reads/writes and command execution through the
+                // handlers in the dispatch chain below.
+                cx.send_request(ryu_initialize_request())
                     .block_task()
                     .await?;
 
@@ -884,6 +1341,11 @@ pub async fn run_acp_instance(
                 // The ACP permission seam labels its command-approval scans with the
                 // agent id; stable for the whole chat, so take it from the first turn.
                 let scan_agent = first_turn.agent_id.clone();
+                // Conversation id (Ryu's cancel/permission scope), stable for the
+                // instance. Empty for an ephemeral (no-conversation) instance, which
+                // the desktop can't target for cancellation anyway.
+                let instance_conversation =
+                    first_turn.permission_scope_id.clone().unwrap_or_default();
 
                 // Persistent per-instance permission channel + a swappable sink. The
                 // Ryu MCP bridge is built ONCE (below) with `instance_tx` as its
@@ -939,6 +1401,12 @@ pub async fn run_acp_instance(
 
                 let session_cwd = cwd.clone();
                 tracing::info!(cwd = %session_cwd.display(), "ACP build_session");
+
+                // Per-instance client-hosted terminal registry (serves the agent's
+                // `terminal/*` requests) + the default cwd for spawned commands.
+                let terminals: TerminalRegistry =
+                    Arc::new(tokio::sync::Mutex::new(BTreeMap::new()));
+                let terminal_cwd = cwd.clone();
 
                 // Build the ACP session ONCE for the whole chat, injecting Ryu's
                 // registered tools via the SDK's `with_mcp_server` mechanism. The
@@ -1067,7 +1535,27 @@ pub async fn run_acp_instance(
                             Ok(())
                         })?;
 
+                    // Register this turn's cancel handle so an explicit user Stop
+                    // (`POST /api/chat/cancel` → `request_cancel`) can end it.
+                    let cancel = Arc::new(TurnCancel::default());
+                    if !instance_conversation.is_empty() {
+                        set_cancel(&instance_conversation, Arc::clone(&cancel));
+                    }
+                    // True once we've told the agent to cancel, so end-of-turn
+                    // handling can note the turn was user-interrupted.
+                    let mut cancelled = false;
+
                 loop {
+                    // Explicit cancellation requested between updates: tell the agent
+                    // to stop (ACP `session/cancel`) and end the turn.
+                    if cancel.flag.load(std::sync::atomic::Ordering::SeqCst) {
+                        let _ = session.connection().send_notification_to(
+                            Agent,
+                            CancelNotification::new(session.session_id().clone()),
+                        );
+                        cancelled = true;
+                        break;
+                    }
                     // `biased` + the `stop_rx` branch coming second guarantees every
                     // buffered update is drained before end-of-turn breaks the loop:
                     // `read_update` is polled first and only yields to `stop_rx` when
@@ -1080,6 +1568,9 @@ pub async fn run_acp_instance(
                         // `Err` means the prompt callback errored and dropped the
                         // sender; either way the turn is over.
                         _ = &mut stop_rx => break,
+                        // Woken by an explicit cancel; loop back to the flag check
+                        // above (which sends `session/cancel` and breaks).
+                        _ = cancel.notify.notified() => continue,
                     };
                     match message {
                         SessionMessage::SessionMessage(message) => {
@@ -1087,12 +1578,56 @@ pub async fn run_acp_instance(
                             let tx_perm = tx.clone();
                             let interactive = turn.interactive;
                             let scan_agent = scan_agent.clone();
+                            // Per-message handles for the fs/terminal request handlers.
+                            let terms_read = Arc::clone(&terminals);
+                            let terms_out = Arc::clone(&terminals);
+                            let terms_wait = Arc::clone(&terminals);
+                            let terms_kill = Arc::clone(&terminals);
+                            let terms_release = Arc::clone(&terminals);
+                            let term_cwd = terminal_cwd.clone();
                             MatchDispatch::new(message)
                                 .if_notification(async move |notification: SessionNotification| {
                                     match notification.update {
                                         SessionUpdate::AgentMessageChunk(chunk) => {
-                                            if let ContentBlock::Text(t) = chunk.content {
-                                                let _ = tx_chunk.send(AcpEvent::Text(t.text));
+                                            // Surface every content block, not just
+                                            // text: inline images/audio become `Media`
+                                            // (→ AI-SDK `file` part); resource links
+                                            // and embedded text resources become text.
+                                            match chunk.content {
+                                                ContentBlock::Text(t) => {
+                                                    let _ = tx_chunk.send(AcpEvent::Text(t.text));
+                                                }
+                                                ContentBlock::Image(img) => {
+                                                    let _ = tx_chunk.send(AcpEvent::Media {
+                                                        mime: img.mime_type,
+                                                        data: img.data,
+                                                    });
+                                                }
+                                                ContentBlock::Audio(a) => {
+                                                    let _ = tx_chunk.send(AcpEvent::Media {
+                                                        mime: a.mime_type,
+                                                        data: a.data,
+                                                    });
+                                                }
+                                                ContentBlock::ResourceLink(r) => {
+                                                    let label = r
+                                                        .title
+                                                        .filter(|s| !s.is_empty())
+                                                        .unwrap_or(r.name);
+                                                    let _ = tx_chunk.send(AcpEvent::Text(format!(
+                                                        "\n[{label}]({})\n",
+                                                        r.uri
+                                                    )));
+                                                }
+                                                ContentBlock::Resource(res) => {
+                                                    if let Some(text) = embedded_resource_text(&res)
+                                                    {
+                                                        let _ =
+                                                            tx_chunk.send(AcpEvent::Text(text));
+                                                    }
+                                                }
+                                                // `ContentBlock` is #[non_exhaustive].
+                                                _ => {}
                                             }
                                         }
                                         SessionUpdate::AgentThoughtChunk(chunk) => {
@@ -1249,12 +1784,130 @@ pub async fn run_acp_instance(
                                     },
                                 )
                                 .await
+                                // ── fs/read_text_file ──────────────────────────
+                                .if_request(async move |req: ReadTextFileRequest, responder| {
+                                    let text = read_text_file_scoped(&req);
+                                    responder.respond(ReadTextFileResponse::new(text))?;
+                                    Ok(())
+                                })
+                                .await
+                                // ── fs/write_text_file ─────────────────────────
+                                .if_request(async move |req: WriteTextFileRequest, responder| {
+                                    let _ = write_text_file_scoped(&req);
+                                    responder.respond(WriteTextFileResponse::new())?;
+                                    Ok(())
+                                })
+                                .await
+                                // ── terminal/create ────────────────────────────
+                                .if_request(async move |req: CreateTerminalRequest, responder| {
+                                    match terminal_create(&terms_read, &req, &term_cwd).await {
+                                        Ok(id) => {
+                                            responder.respond(CreateTerminalResponse::new(
+                                                TerminalId::new(id.as_str()),
+                                            ))?;
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("terminal/create failed: {e}");
+                                            // Report a terminal id so the agent doesn't hang;
+                                            // its output/exit lookups return empty/none.
+                                            responder.respond(CreateTerminalResponse::new(
+                                                TerminalId::new("term-error"),
+                                            ))?;
+                                        }
+                                    }
+                                    Ok(())
+                                })
+                                .await
+                                // ── terminal/output ────────────────────────────
+                                .if_request(async move |req: TerminalOutputRequest, responder| {
+                                    let id = req.terminal_id.0.to_string();
+                                    let (out, truncated, exit) = {
+                                        let reg = terms_out.lock().await;
+                                        match reg.get(&id) {
+                                            Some(entry) => {
+                                                let out = entry
+                                                    .output
+                                                    .lock()
+                                                    .map(|g| g.clone())
+                                                    .unwrap_or_default();
+                                                let trunc = entry.truncated.load(
+                                                    std::sync::atomic::Ordering::Relaxed,
+                                                );
+                                                let exit = entry.exit.lock().await.clone();
+                                                (out, trunc, exit)
+                                            }
+                                            None => (String::new(), false, None),
+                                        }
+                                    };
+                                    let mut resp = TerminalOutputResponse::new(out, truncated);
+                                    if let Some((code, signal)) = exit {
+                                        resp.exit_status = serde_json::from_value(
+                                            exit_status_value(code, signal),
+                                        )
+                                        .ok();
+                                    }
+                                    responder.respond(resp)?;
+                                    Ok(())
+                                })
+                                .await
+                                // ── terminal/wait_for_exit ─────────────────────
+                                .if_request(
+                                    async move |req: WaitForTerminalExitRequest, responder| {
+                                        let id = req.terminal_id.0.to_string();
+                                        let status =
+                                            terminal_wait_for_exit(&terms_wait, &id).await;
+                                        let resp: WaitForTerminalExitResponse =
+                                            serde_json::from_value(serde_json::json!({
+                                                "exitCode": status.0,
+                                                "signal": status.1,
+                                            }))
+                                            .unwrap_or_else(|_| {
+                                                serde_json::from_value(serde_json::json!({
+                                                    "exitCode": serde_json::Value::Null,
+                                                    "signal": serde_json::Value::Null,
+                                                }))
+                                                .expect("exit status")
+                                            });
+                                        responder.respond(resp)?;
+                                        Ok(())
+                                    },
+                                )
+                                .await
+                                // ── terminal/kill ──────────────────────────────
+                                .if_request(async move |req: KillTerminalRequest, responder| {
+                                    let id = req.terminal_id.0.to_string();
+                                    if let Some(entry) = terms_kill.lock().await.get(&id) {
+                                        let _ = entry.kill_tx.send(()).await;
+                                    }
+                                    responder.respond(KillTerminalResponse::new())?;
+                                    Ok(())
+                                })
+                                .await
+                                // ── terminal/release ───────────────────────────
+                                .if_request(async move |req: ReleaseTerminalRequest, responder| {
+                                    let id = req.terminal_id.0.to_string();
+                                    if let Some(entry) = terms_release.lock().await.remove(&id) {
+                                        // Best-effort kill on release so no child leaks.
+                                        let _ = entry.kill_tx.send(()).await;
+                                    }
+                                    responder.respond(ReleaseTerminalResponse::new())?;
+                                    Ok(())
+                                })
+                                .await
                                 .otherwise_ignore()?;
                         }
                         SessionMessage::StopReason(_) => break,
                         _ => {}
                     }
                 }
+
+                    // Turn over: drop this turn's cancel handle so a later
+                    // `request_cancel` for the same conversation can't hit a stale
+                    // turn. `cancelled` is set when the user explicitly interrupted.
+                    if !instance_conversation.is_empty() {
+                        clear_cancel(&instance_conversation);
+                    }
+                    let _ = cancelled;
 
                     // Final usage frame for the turn (`done: true`). Carries the
                     // turn's token totals when the agent reported them
@@ -1523,6 +2176,65 @@ pub fn managed_pi_binary() -> PathBuf {
         } else {
             "pi"
         })
+}
+
+/// The npm package that IS the managed Pi engine (the flagship `ryu` agent's
+/// runtime). Update checks compare the installed copy under [`managed_pi_dir`]
+/// against this package's `latest` on the npm registry.
+pub const PI_ENGINE_NPM: &str = "@earendil-works/pi-coding-agent";
+
+/// Read the installed version of the managed Pi engine from its `package.json`
+/// under [`managed_pi_dir`]. `None` when it isn't installed yet.
+pub fn read_managed_pi_version() -> Option<String> {
+    let pkg_json = managed_pi_dir()
+        .join("node_modules")
+        .join("@earendil-works")
+        .join("pi-coding-agent")
+        .join("package.json");
+    let raw = std::fs::read_to_string(pkg_json).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    value
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+}
+
+/// Update the managed Pi engine to the latest published version by re-running the
+/// package install with an explicit `@latest` tag (mirrors
+/// `onboarding::ensure_ryu_managed_pi`, but forces an upgrade instead of the
+/// existence-only skip). Best-effort; returns an error if the package manager
+/// exits non-zero.
+pub async fn update_managed_pi() -> anyhow::Result<()> {
+    let pi_dir = managed_pi_dir();
+    std::fs::create_dir_all(&pi_dir).ok();
+    let spec = format!("{PI_ENGINE_NPM}@latest");
+
+    #[cfg(target_os = "windows")]
+    let (prog, args): (&str, Vec<&str>) = ("cmd", vec!["/c", "bun", "add", spec.as_str()]);
+    #[cfg(not(target_os = "windows"))]
+    let (prog, args): (&str, Vec<&str>) = ("bun", vec!["add", spec.as_str()]);
+
+    let status = tokio::process::Command::new(prog)
+        .args(&args)
+        .current_dir(&pi_dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn bun add: {e}"))?;
+    if !status.success() {
+        anyhow::bail!("bun add {spec} exited with {status}");
+    }
+
+    // Re-assert the Windows `.cmd` shim (see `managed_pi_binary`).
+    #[cfg(target_os = "windows")]
+    {
+        let bin_dir = pi_dir.join("node_modules").join(".bin");
+        if bin_dir.join("pi.exe").exists() {
+            let _ = std::fs::write(bin_dir.join("pi.cmd"), "@\"%~dp0pi.exe\" %*\r\n");
+        }
+    }
+    Ok(())
 }
 
 /// Build the ACP spawn command for the `ryu` flagship agent using Core's
@@ -2397,6 +3109,68 @@ mod tests {
 
     fn pi_acp_cmd_gated() -> String {
         pi_acp_cmd()
+    }
+
+    #[test]
+    fn append_capped_truncates_from_front_at_char_boundary() {
+        let buf = Arc::new(Mutex::new(String::new()));
+        let trunc = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        append_capped(&buf, &trunc, "hello", Some(10));
+        assert!(!trunc.load(std::sync::atomic::Ordering::Relaxed));
+        // Overflow: keep only the last 10 bytes, oldest trimmed.
+        append_capped(&buf, &trunc, "world12345", Some(10));
+        let out = buf.lock().unwrap().clone();
+        assert_eq!(out.len(), 10);
+        // "helloworld12345" (15) truncated to its last 10 bytes.
+        assert_eq!(out, "world12345");
+        assert!(trunc.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn read_text_file_scoped_applies_line_and_limit() {
+        let dir = std::env::temp_dir().join(format!("ryu-acp-fs-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("f.txt");
+        std::fs::write(&path, "l1\nl2\nl3\nl4\nl5").unwrap();
+
+        // These schema structs are `#[non_exhaustive]`, so build them from JSON.
+        let req = |extra: serde_json::Value| -> ReadTextFileRequest {
+            let mut obj = serde_json::json!({ "sessionId": "s" });
+            obj.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            serde_json::from_value(obj).expect("valid ReadTextFileRequest")
+        };
+
+        // Full read.
+        let full = req(serde_json::json!({ "path": path }));
+        assert_eq!(read_text_file_scoped(&full), "l1\nl2\nl3\nl4\nl5");
+
+        // 1-based line offset + limit window.
+        let windowed = req(serde_json::json!({ "path": path, "line": 2, "limit": 2 }));
+        assert_eq!(read_text_file_scoped(&windowed), "l2\nl3");
+
+        // Missing file → empty, never panics.
+        let missing = req(serde_json::json!({ "path": dir.join("nope.txt") }));
+        assert_eq!(read_text_file_scoped(&missing), "");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn request_cancel_is_false_without_a_live_turn() {
+        // No registered turn for this conversation → nothing to cancel.
+        assert!(!request_cancel("no-such-conversation-xyz"));
+    }
+
+    #[test]
+    fn request_cancel_signals_a_registered_turn() {
+        let conv = "conv-cancel-test";
+        let cancel = Arc::new(TurnCancel::default());
+        set_cancel(conv, Arc::clone(&cancel));
+        assert!(request_cancel(conv));
+        assert!(cancel.flag.load(std::sync::atomic::Ordering::SeqCst));
+        clear_cancel(conv);
+        assert!(!request_cancel(conv));
     }
 
     #[test]
