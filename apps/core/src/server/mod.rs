@@ -23,14 +23,14 @@ pub mod data_admin;
 pub mod finetune;
 pub mod git;
 pub mod hardware_api;
-pub mod learning;
 pub mod hardware_ws;
 pub mod identity_api;
+pub mod learning;
 pub mod media;
 pub mod meetings_api;
 pub mod memory;
-pub mod message_index;
 pub mod message_fts;
+pub mod message_index;
 pub mod monitors_api;
 pub mod openapi;
 pub mod predict_api;
@@ -129,6 +129,15 @@ pub struct ServerState {
     /// Discoverable via `GET /api/skills`. Instructions are injected
     /// into outgoing chat requests by [`route_chat_stream`].
     pub skills: SkillRegistry,
+    /// In-memory registry of runtime contributions from enabled plugins that Core
+    /// otherwise has no home for: engine bindings (`RunnableKind::Engine`), channel
+    /// adapters (`RunnableKind::Channel`), and companion surfaces
+    /// (`RunnableKind::Companion`). Populated by [`build_runnable_registry`]'s
+    /// per-kind handlers on plugin enable, drained on disable. Mirrors
+    /// `McpRegistry`'s in-memory `app_tools` bag; survives restart via the
+    /// `onStartup` re-run. Surfaced through `GET /api/engines` (engines) and
+    /// `GET /api/plugins/contributions` (channels + companions).
+    pub app_contrib: crate::plugins::app_contrib::AppContribRegistry,
     /// Per-run observability trace store (M4 / issue #178). Persists ordered
     /// spans (tool-call, model-call) keyed by `conversation_id`.
     pub traces: TraceStore,
@@ -789,10 +798,16 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/plugins/catalog", get(list_apps_catalog))
         .route("/api/plugins/install", post(install_app_from_url))
         .route("/api/plugins/reload", post(reload_app_manifests))
+        .route(
+            "/api/plugins/activation-event",
+            post(fire_activation_event_handler),
+        )
+        .route("/api/plugins/install-bundle", post(install_app_bundle))
         .route("/api/plugins/:id/install", post(install_app_handler))
         .route("/api/plugins/:id/enable", post(enable_app_handler))
         .route("/api/plugins/:id/disable", post(disable_app_handler))
         .route("/api/plugins/:id/update", post(update_app_handler))
+        .route("/api/plugins/:id/ui-bundle", get(plugin_ui_bundle))
         // ── DEPRECATED `/api/apps*` aliases (one-release back-compat for #457) ──
         // These point at the same handlers as `/api/plugins*` and exist only so
         // clients that have not yet migrated keep working. Remove after one
@@ -1183,10 +1198,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── Activity feed (unified cross-module timeline) ───────────────────
         // The SSE `stream` route is registered before the collection route (no
         // `:id` routes exist here, but the convention is preserved).
-        .route(
-            "/api/activity/stream",
-            get(activity_api::activity_stream),
-        )
+        .route("/api/activity/stream", get(activity_api::activity_stream))
         .route(
             "/api/activity",
             get(activity_api::list_activity).post(activity_api::create_activity),
@@ -2084,6 +2096,11 @@ async fn chat_stream(
     // anonymous). `author_user_id` is `#[serde(skip)]`, so this server-side write
     // is the ONLY source — a client request body can neither set nor spoof it.
     req.author_user_id = caller.as_ref().map(|c| c.user_id.clone());
+    // Wake any `onChat`-gated plugins the first time a chat turn is handled
+    // (once per process, off the hot path — see `fire_on_chat_once`). Cheap
+    // atomic on every subsequent request; covers both the single- and team-chat
+    // branches below because it fires before either dispatches.
+    fire_on_chat_once(&state);
     // Team turn: fan out to the team's members per its coordination strategy.
     if let Some(team_id) = req.team_id.clone() {
         let team = match state.teams.get(&team_id).await {
@@ -3803,6 +3820,166 @@ async fn install_app_from_url(
     .into_response()
 }
 
+/// `POST /api/plugins/install-bundle` — install a plugin from a LOCAL bundle
+/// (`{ ...manifest, ui_code? }`, the SDK `ryu pack` output). Unlike
+/// [`install_app_from_url`] this carries the plugin's bundled sandboxed-UI code
+/// alongside the manifest, storing it on the record so
+/// [`plugin_ui_bundle`] can serve it for an enabled plugin.
+///
+/// Trusted, local path: the bundle is provided directly by the caller (the
+/// desktop over the token'd Core API), so there is no SSRF surface. The manifest
+/// id is still validated before being used as a filesystem path component, and a
+/// duplicate id is rejected (never clobber an installed plugin).
+async fn install_app_bundle(
+    State(state): State<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> axum::response::Response {
+    // Split the bundle: `ui_code` is carriage, the rest is the manifest.
+    let ui_code = body
+        .get("ui_code")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+    let mut manifest_value = body.clone();
+    if let Some(obj) = manifest_value.as_object_mut() {
+        obj.remove("ui_code");
+    }
+
+    let manifest: crate::plugin_manifest::PluginManifest =
+        match serde_json::from_value(manifest_value.clone()) {
+            Ok(m) => m,
+            Err(e) => {
+                return json_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("Invalid manifest JSON: {e}"),
+                );
+            }
+        };
+
+    if let Err(e) = crate::plugin_manifest::validate_plugin_id(&manifest.id) {
+        return json_error(StatusCode::UNPROCESSABLE_ENTITY, e);
+    }
+    if semver::Version::parse(&manifest.version).is_err() {
+        return json_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "manifest version '{}' is not valid semver",
+                manifest.version
+            ),
+        );
+    }
+    for entry in &manifest.runnables {
+        if let Err(e) = crate::plugin_manifest::schema::validate_runnable(entry) {
+            return json_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("Invalid runnable '{}': {e}", entry.id),
+            );
+        }
+    }
+
+    // Cap the bundled code so a pathological bundle can't bloat the DB unbounded.
+    const MAX_UI_CODE_BYTES: usize = 4 * 1024 * 1024;
+    if let Some(code) = &ui_code {
+        if code.len() > MAX_UI_CODE_BYTES {
+            return json_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "ui_code bundle is too large".to_owned(),
+            );
+        }
+    }
+
+    {
+        let manifests = state.app_manifests.read().await;
+        if manifests.iter().any(|m| m.id == manifest.id) {
+            return json_error(
+                StatusCode::CONFLICT,
+                format!("Plugin '{}' is already installed", manifest.id),
+            );
+        }
+    }
+
+    // Persist the manifest to disk (same resolver the loader reads) WITHOUT the
+    // `ui_code` blob — the code lives on the lifecycle record, not the on-disk
+    // manifest (which is the loader's contract + keeps manifests small).
+    let plugin_dir = crate::plugin_manifest::PluginManifestLoader::plugins_dir().join(&manifest.id);
+    if let Err(e) = tokio::fs::create_dir_all(&plugin_dir).await {
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create plugin directory: {e}"),
+        );
+    }
+    let manifest_json = match serde_json::to_string_pretty(&manifest) {
+        Ok(s) => s,
+        Err(e) => {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to serialize manifest: {e}"),
+            );
+        }
+    };
+    if let Err(e) = tokio::fs::write(plugin_dir.join("plugin.json"), &manifest_json).await {
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to write manifest: {e}"),
+        );
+    }
+
+    reload_manifests_inner(&state).await;
+
+    // Create the lifecycle record (installed, disabled) and store the ui_code.
+    if let Err(e) = crate::plugins::lifecycle::install_app(&state.app_store, &manifest).await {
+        let msg = e.to_string();
+        let status = if msg.contains("UNIQUE constraint") || msg.contains("already") {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        return json_error(status, msg);
+    }
+    if let Some(code) = &ui_code {
+        if let Err(e) = state.app_store.set_ui_code(&manifest.id, Some(code)).await {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to store ui_code: {e}"),
+            );
+        }
+    }
+
+    Json(json!({
+        "success": true,
+        "app": { "id": manifest.id, "name": manifest.name, "version": manifest.version },
+        "has_ui": ui_code.is_some(),
+    }))
+    .into_response()
+}
+
+/// `GET /api/plugins/:id/ui-bundle` — serve an ENABLED plugin's bundled
+/// sandboxed-UI code. Returns `{ "code": "<module source>" }` for an enabled
+/// plugin that carries a bundle, else **404** (a disabled/unapproved plugin's
+/// code is never served, so an operator cannot be tricked into running the UI of
+/// a plugin whose grants the Gateway has not validated). The host base64-inlines
+/// the returned code into the null-origin iframe; the plugin never fetches this.
+async fn plugin_ui_bundle(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    // Enabled-state gate: only an ENABLED plugin's UI is served.
+    let enabled = match state.app_store.get(&id).await {
+        Ok(Some(rec)) => rec.enabled,
+        Ok(None) => false,
+        Err(e) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+        }
+    };
+    if !enabled {
+        return json_error(StatusCode::NOT_FOUND, "plugin not enabled".to_owned());
+    }
+    match state.app_store.get_ui_code(&id).await {
+        Ok(Some(code)) => Json(json!({ "code": code })).into_response(),
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "plugin has no UI bundle".to_owned()),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
 /// `POST /api/apps/reload` — re-scan built-ins + `~/.ryu/apps/*/ryu.json` and
 /// replace the in-memory manifest set. Idempotent.
 #[utoipa::path(
@@ -3815,6 +3992,35 @@ async fn install_app_from_url(
 async fn reload_app_manifests(State(state): State<ServerState>) -> Json<serde_json::Value> {
     reload_manifests_inner(&state).await;
     Json(json!({ "success": true }))
+}
+
+/// `POST /api/plugins/activation-event` — fire a command activation event so
+/// `onCommand:<id>`-gated plugins wake when the desktop command palette (WF2)
+/// invokes a plugin-contributed slash command.
+///
+/// Core today has **no** command-invocation endpoint of its own — plugin slash
+/// commands are surfaced read-only via `GET /api/plugins/contributions` and are
+/// dispatched from the desktop palette, a separate process that cannot call the
+/// in-process `fire_activation_event` fn across the boundary. This endpoint is
+/// that seam: the palette POSTs `{ "event": "onCommand:<id>" }` when it runs a
+/// command, and the gated plugins activate.
+///
+/// Scoped deliberately to the `onCommand:` prefix so it stays the onCommand
+/// seam and cannot be used to spoof `onStartup`/`onChat`/arbitrary events. The
+/// firing is awaited here (this is not the hot chat path) and is idempotent.
+async fn fire_activation_event_handler(
+    State(state): State<ServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let event = body.get("event").and_then(|v| v.as_str()).unwrap_or("");
+    if !event.starts_with("onCommand:") || event == "onCommand:" {
+        return Json(json!({
+            "success": false,
+            "error": "event must be of the form 'onCommand:<id>'",
+        }));
+    }
+    fire_activation_event(&state, event).await;
+    Json(json!({ "success": true, "event": event }))
 }
 
 /// Re-load all manifests from disk and swap the in-memory set. `load()` returns
@@ -4039,9 +4245,11 @@ async fn enable_app_handler(
     apply_policy(&state, &manifest, true).await;
 
     // Provision the plugin's declared external runtime (#449), if any. Gated on
-    // Core tier + best-effort + spawned so a slow pip install never blocks the
-    // enable response. The TTS sidecar precedent (a Python venv) is the shape.
-    provision_external_runtime(&manifest);
+    // tier + Gateway-approved grant (Core-tier auto-allowed; Community needs the
+    // approved `runtime:external` grant), best-effort + spawned so a slow asset
+    // fetch / pip install never blocks the enable response. The TTS sidecar
+    // precedent (a Python venv) is the shape.
+    provision_external_runtime(&manifest, &record.approved_grants, state.downloads.clone());
 
     // Collect per-Runnable outcomes for the response (success + failures both
     // surfaced so the caller can observe partial failures without silent drops).
@@ -4064,18 +4272,37 @@ async fn enable_app_handler(
 /// Build a [`crate::runnable::RunnableRegistry`] with default Core handlers
 /// wired to the live subsystem handles in `state`.
 ///
-/// Only Core-owned kinds receive built-in handlers:
+/// Every Core-owned kind receives a built-in handler:
 /// - **Agent** - upserts into [`AgentStore`] using the app-namespaced id.
 /// - **Workflow** - persists a skeleton workflow via the file-backed store.
 /// - **Tool** - registers an in-memory tool in [`McpRegistry`].
+/// - **Skill** - registers an in-memory skill in the [`SkillRegistry`]'s
+///   `app_skills` bag so it is listable + injectable like a first-party skill.
+/// - **Engine** - registers an engine binding in the [`app_contrib`] registry so
+///   it becomes selectable via `GET /api/engines`.
+/// - **Channel** - registers a channel adapter in the [`app_contrib`] registry so
+///   an enabled plugin's channel becomes a usable adapter.
+/// - **Companion** - registers the companion surface descriptor in the
+///   [`app_contrib`] registry so the desktop can render it (also already visible
+///   in the full manifest served by `GET /api/apps`).
 ///
-/// Kinds owned by the Gateway (Policy, Engine) and UI-only kinds (Companion,
-/// Channel, Skill) have no built-in handler, producing an observable
-/// "no handler" error in `register_all`. This is intentional — it keeps Core
-/// strictly on the "what runs" side of the Core-vs-Gateway rule.
+/// Each handler is idempotent (re-enable is a no-op) and returns `Err(String)`
+/// (never panics) so one failing entry never aborts the rest.
+///
+/// Only **Policy** has a validate-only handler: policy *enforcement* is a Gateway
+/// concern (the Core-vs-Gateway rule), so Core validates the declared policy but
+/// does no inline enforcement — the actual activation is done by the async
+/// [`apply_policy`] pass. Every kind now has a handler, so a plugin declaring any
+/// Runnable kind is no longer inert.
+///
+/// [`app_contrib`]: crate::plugins::app_contrib
 fn build_runnable_registry(state: &ServerState) -> crate::runnable::RunnableRegistry {
     use crate::agents::CreateAgent;
-    use crate::plugin_manifest::schema::{AgentConfig, PolicyConfig, ToolConfig, WorkflowConfig};
+    use crate::plugin_manifest::schema::{
+        AgentConfig, ChannelConfig, CompanionConfig, EngineConfig, PolicyConfig, SkillConfig,
+        ToolConfig, WorkflowConfig,
+    };
+    use crate::plugins::app_contrib::{AppChannel, AppCompanion, AppEngine};
     use crate::runnable::{RunnableHandler, RunnableRegistry};
 
     let mut registry = RunnableRegistry::new();
@@ -4186,6 +4413,125 @@ fn build_runnable_registry(state: &ServerState) -> crate::runnable::RunnableRegi
         );
     }
 
+    // ── Skill handler ────────────────────────────────────────────────────────
+    // Registers the plugin's declared skill into the SkillRegistry's `app_skills`
+    // bag under an `app__<skill_id>` id, so it is listable + injectable like a
+    // first-party skill (the SkillConfig is `skill_id`-only, mirroring how the
+    // Tool handler registers a slug with no executable body).
+    {
+        let skills = state.skills.clone();
+        registry.register_handler(
+            crate::runnable::RunnableKind::Skill,
+            Box::new(
+                move |entry: &crate::plugin_manifest::schema::RunnableEntry| {
+                    let cfg: SkillConfig = entry
+                        .config
+                        .as_ref()
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .ok_or_else(|| {
+                            format!("skill '{}': missing or invalid config", entry.id)
+                        })?;
+                    let id = format!("app__{}", cfg.skill_id);
+                    skills.register_app_skill(
+                        id,
+                        entry.name.clone(),
+                        Some(format!("App-registered skill (skill_id: {})", cfg.skill_id)),
+                    );
+                    Ok(())
+                },
+            ) as RunnableHandler,
+        );
+    }
+
+    // ── Engine handler ───────────────────────────────────────────────────────
+    // Registers the plugin's declared engine binding into the app-contrib
+    // registry so it becomes selectable via `GET /api/engines`. Every model call
+    // an engine ultimately makes still routes through the Gateway — this only
+    // exposes the engine as a choice (what Core runs), not a policy decision.
+    {
+        let app_contrib = state.app_contrib.clone();
+        registry.register_handler(
+            crate::runnable::RunnableKind::Engine,
+            Box::new(
+                move |entry: &crate::plugin_manifest::schema::RunnableEntry| {
+                    let cfg: EngineConfig = entry
+                        .config
+                        .as_ref()
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .ok_or_else(|| {
+                            format!("engine '{}': missing or invalid config", entry.id)
+                        })?;
+                    app_contrib.register_engine(AppEngine {
+                        id: format!("app__{}", entry.id),
+                        name: entry.name.clone(),
+                        engine_type: cfg.engine_type,
+                        base_url: cfg.base_url,
+                    });
+                    Ok(())
+                },
+            ) as RunnableHandler,
+        );
+    }
+
+    // ── Channel handler ──────────────────────────────────────────────────────
+    // Registers the plugin's declared channel adapter into the app-contrib
+    // registry so an enabled plugin's channel becomes a usable adapter, surfaced
+    // via `GET /api/plugins/contributions`.
+    {
+        let app_contrib = state.app_contrib.clone();
+        registry.register_handler(
+            crate::runnable::RunnableKind::Channel,
+            Box::new(
+                move |entry: &crate::plugin_manifest::schema::RunnableEntry| {
+                    let cfg: ChannelConfig = entry
+                        .config
+                        .as_ref()
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .ok_or_else(|| {
+                            format!("channel '{}': missing or invalid config", entry.id)
+                        })?;
+                    app_contrib.register_channel(AppChannel {
+                        id: format!("app__{}", entry.id),
+                        name: entry.name.clone(),
+                        platform: cfg.platform,
+                    });
+                    Ok(())
+                },
+            ) as RunnableHandler,
+        );
+    }
+
+    // ── Companion handler ────────────────────────────────────────────────────
+    // Registers the plugin's declared companion surface descriptor into the
+    // app-contrib registry so the desktop can render it (also visible in the full
+    // manifest served by `GET /api/apps`); surfaced via
+    // `GET /api/plugins/contributions`.
+    {
+        let app_contrib = state.app_contrib.clone();
+        registry.register_handler(
+            crate::runnable::RunnableKind::Companion,
+            Box::new(
+                move |entry: &crate::plugin_manifest::schema::RunnableEntry| {
+                    let cfg: CompanionConfig = entry
+                        .config
+                        .as_ref()
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .ok_or_else(|| {
+                            format!("companion '{}': missing or invalid config", entry.id)
+                        })?;
+                    app_contrib.register_companion(AppCompanion {
+                        id: format!("app__{}", entry.id),
+                        name: entry.name.clone(),
+                        label: cfg.label,
+                        icon: cfg.icon,
+                        shortcut: cfg.shortcut,
+                    });
+                    Ok(())
+                },
+            ) as RunnableHandler,
+        );
+    }
+
     // ── Policy handler ───────────────────────────────────────────────────────
     // Policy enforcement is a Gateway concern (Core-vs-Gateway rule), so this
     // handler does NO inline enforcement and NO I/O: it only validates the
@@ -4264,6 +4610,37 @@ pub async fn fire_activation_event(state: &ServerState, event: &str) {
     }
 }
 
+/// Fire the `onChat` activation event exactly once per process, off the hot
+/// chat path.
+///
+/// Called from the `chat_stream` handler on every request, but guarded by a
+/// process-global atomic so the expensive part (`fire_activation_event` lists
+/// plugins, builds the runnable registry, and runs the register loop) happens
+/// only on the very first chat turn. Concurrent first requests all race the
+/// `swap`, and exactly one wins — the rest return immediately, so we never
+/// rebuild the registry per-request (let alone per-chunk).
+///
+/// The winning firing is spawned, not awaited: the chat path must never block
+/// streaming to wake activation-gated plugins. A plugin gated on `onChat`
+/// therefore activates just after the first turn begins, not before it — an
+/// intentional trade in favor of latency (the task's "never block streaming").
+///
+/// Note: turns initiated off the HTTP entry (e.g. the voice loop calling
+/// `route_chat_stream` directly in `voice/session.rs`) bypass this and do not
+/// fire `onChat`. The HTTP chat entry is the canonical trigger.
+fn fire_on_chat_once(state: &ServerState) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static ON_CHAT_FIRED: AtomicBool = AtomicBool::new(false);
+    // `swap` returns the previous value: `true` means someone already fired.
+    if ON_CHAT_FIRED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        fire_activation_event(&state, "onChat").await;
+    });
+}
+
 /// Collect the `policy_type` of every `Policy` runnable in a manifest.
 fn manifest_policy_types(manifest: &crate::plugin_manifest::PluginManifest) -> Vec<String> {
     manifest_policies(manifest)
@@ -4279,16 +4656,21 @@ fn manifest_policy_types(manifest: &crate::plugin_manifest::PluginManifest) -> V
 /// This is what lets a plugin like double-check/goal contribute its composer
 /// toggle / slash command without editing the closed desktop source.
 async fn plugin_contributions(State(state): State<ServerState>) -> axum::response::Response {
-    let enabled_ids: std::collections::HashSet<String> = match state.app_store.list().await {
-        Ok(records) => records
-            .into_iter()
-            .filter(|r| r.enabled)
-            .map(|r| r.id)
-            .collect(),
-        Err(e) => {
-            return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
-        }
-    };
+    // Keep the full enabled records (not just ids): the companions payload maps
+    // each enabled plugin's companion to that plugin's GATEWAY-APPROVED grants,
+    // which live on the record (never the manifest's `permission_grants` claim).
+    let enabled_records: std::collections::HashMap<String, crate::plugins::PluginRecord> =
+        match state.app_store.list().await {
+            Ok(records) => records
+                .into_iter()
+                .filter(|r| r.enabled)
+                .map(|r| (r.id.clone(), r))
+                .collect(),
+            Err(e) => {
+                return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+            }
+        };
+    let enabled_ids: std::collections::HashSet<String> = enabled_records.keys().cloned().collect();
     let mut composer_controls = Vec::new();
     let mut settings_tabs = Vec::new();
     let mut slash_commands = Vec::new();
@@ -4319,11 +4701,58 @@ async fn plugin_contributions(State(state): State<ServerState>) -> axum::respons
                 .map(|h| serde_json::json!({ "plugin": manifest.id, "id": h.id, "on": h.on })),
         );
     }
+    // Channel adapters contributed by enabled plugins (`RunnableKind::Channel`),
+    // registered into the app-contrib registry by the enable handlers.
+    let channels = state.app_contrib.channels();
+
+    // Companion surfaces, built from the enabled manifests' `Companion` runnables
+    // so each entry carries its owning `plugin_id`, that plugin's GATEWAY-APPROVED
+    // grants, and a `has_ui` flag (whether a sandboxed-UI bundle is stored). The
+    // desktop reads `approved_grants` (NOT the manifest claim) to build the host
+    // capability set, and only mounts third-party code when `has_ui` is true and
+    // the experimental flag is on.
+    let mut companions: Vec<serde_json::Value> = Vec::new();
+    for manifest in manifests.iter() {
+        let Some(record) = enabled_records.get(&manifest.id) else {
+            continue;
+        };
+        let has_ui = state
+            .app_store
+            .has_ui_code(&manifest.id)
+            .await
+            .unwrap_or(false);
+        for entry in &manifest.runnables {
+            if entry.kind != crate::runnable::RunnableKind::Companion {
+                continue;
+            }
+            let cfg: crate::plugin_manifest::schema::CompanionConfig = match entry
+                .config
+                .as_ref()
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+            {
+                Some(c) => c,
+                None => continue,
+            };
+            companions.push(json!({
+                "id": format!("app__{}", entry.id),
+                "name": entry.name,
+                "label": cfg.label,
+                "icon": cfg.icon,
+                "shortcut": cfg.shortcut,
+                "plugin_id": manifest.id,
+                "approved_grants": record.approved_grants,
+                "has_ui": has_ui && cfg.ui_entry.is_some(),
+            }));
+        }
+    }
+
     Json(json!({
         "composer_controls": composer_controls,
         "settings_tabs": settings_tabs,
         "slash_commands": slash_commands,
         "turn_hooks": turn_hooks,
+        "channels": channels,
+        "companions": companions,
     }))
     .into_response()
 }
@@ -4459,31 +4888,40 @@ fn plugin_runtime_dir(plugin_id: &str) -> std::path::PathBuf {
 /// Provision a plugin's declared external runtime (#449) — the live call path for
 /// [`crate::sidecar::external_runtime::provision`].
 ///
-/// Gated on the plugin's **Core tier** (per the module's security note: running
-/// `pip install` from a manifest is a network + code surface a Community plugin
-/// must not reach without a Gateway grant — that grant path is the documented
-/// follow-on, so for now only first-party Core-tier plugins provision). The work
-/// is **spawned** and **best-effort**: a missing Python interpreter or a failed
-/// pip install is logged, never fatal, and never blocks the enable response —
-/// exactly the graceful-degrade contract the `RyuTtsManager` venv path follows.
-fn provision_external_runtime(manifest: &crate::plugin_manifest::PluginManifest) {
+/// Gated by [`crate::sidecar::external_runtime::may_provision`]: a **Core-tier**
+/// (first-party) plugin is auto-allowed; a **Community-tier** plugin may provision
+/// IFF the Gateway approved the `runtime:external` grant — read from the plugin's
+/// *approved* grants (`approved_grants`, post-Gateway-validation at enable), never
+/// the manifest's declared, unvalidated `permission_grants`. Fail-closed: an
+/// un-granted Community plugin does not provision (and enable itself already fails
+/// closed with 403/503 upstream if the Gateway denied / was unreachable).
+///
+/// The work is **spawned** and **best-effort**: a rejected asset, missing Python
+/// interpreter, or a failed pip install is logged, never fatal, and never blocks
+/// the enable response — the graceful-degrade contract the `RyuTtsManager` venv
+/// path follows.
+fn provision_external_runtime(
+    manifest: &crate::plugin_manifest::PluginManifest,
+    approved_grants: &[String],
+    downloads: crate::downloads::DownloadCenter,
+) {
     let Some(runtime) = manifest.runtime.clone() else {
         return;
     };
-    // Tier gate: only Core-tier (first-party) plugins may auto-provision today.
-    if crate::plugins::builtins::tier_for(&manifest.id) != crate::plugin_manifest::PluginTier::Core
-    {
+    let tier = crate::plugins::builtins::tier_for(&manifest.id);
+    if !crate::sidecar::external_runtime::may_provision(tier, approved_grants) {
         tracing::info!(
-            "plugin '{}' declares an external runtime but is Community-tier; \
-             auto-provision is gated to Core-tier (needs a Gateway grant)",
-            manifest.id
+            "plugin '{}' declares an external runtime but is Community-tier without an \
+             approved '{}' Gateway grant; provisioning is skipped (fail-closed)",
+            manifest.id,
+            crate::sidecar::external_runtime::GRANT_EXTERNAL_RUNTIME
         );
         return;
     }
     let dir = plugin_runtime_dir(&manifest.id);
     let plugin_id = manifest.id.clone();
     tokio::spawn(async move {
-        match crate::sidecar::external_runtime::provision(&runtime, &dir).await {
+        match crate::sidecar::external_runtime::provision(&runtime, &dir, &downloads).await {
             Ok(python) => tracing::info!(
                 "plugin '{plugin_id}': external runtime provisioned at {}",
                 python.display()
@@ -4549,10 +4987,37 @@ async fn disable_app_handler(
                                 );
                             }
                         }
-                        // Skill / Companion / Channel / Engine: no Core-side
-                        // registration on enable today, so nothing to tear down.
+                        crate::runnable::RunnableKind::Skill => {
+                            // Skill ids use `app__<skill_id>` (from SkillConfig),
+                            // not `app__<entry.id>`, so resolve the skill_id.
+                            if let Some(cfg) = entry.config.as_ref().and_then(|v| {
+                                serde_json::from_value::<
+                                    crate::plugin_manifest::schema::SkillConfig,
+                                >(v.clone())
+                                .ok()
+                            }) {
+                                state
+                                    .skills
+                                    .unregister_app_skill(&format!("app__{}", cfg.skill_id));
+                            }
+                        }
+                        crate::runnable::RunnableKind::Engine => {
+                            state
+                                .app_contrib
+                                .unregister_engine(&format!("app__{}", entry.id));
+                        }
+                        crate::runnable::RunnableKind::Channel => {
+                            state
+                                .app_contrib
+                                .unregister_channel(&format!("app__{}", entry.id));
+                        }
+                        crate::runnable::RunnableKind::Companion => {
+                            state
+                                .app_contrib
+                                .unregister_companion(&format!("app__{}", entry.id));
+                        }
                         // Policy is handled by apply_policy below (one batched pass).
-                        _ => {}
+                        crate::runnable::RunnableKind::Policy => {}
                     }
                 }
                 // Symmetric to enable: each Policy runnable (compression / firewall
@@ -4648,7 +5113,39 @@ async fn update_app_handler(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn list_engines(State(state): State<ServerState>) -> Json<serde_json::Value> {
-    Json(json!({ "engines": state.agents.list_infos() }))
+    // Built-in engine runtimes plus any engine bindings contributed by enabled
+    // plugins (`RunnableKind::Engine`, held in the app-contrib registry). App
+    // engines are rendered in the same `AgentInfo` shape so every client shows one
+    // uniform list; `transport` labels the binding and `engine`/`model` carry the
+    // engine type so the picker can offer it without a special case.
+    let mut engines = state.agents.list_infos();
+    for e in state.app_contrib.engines() {
+        engines.push(crate::sidecar::adapters::AgentInfo {
+            id: e.id,
+            name: e.name,
+            description: Some(format!("Plugin-contributed engine ({})", e.engine_type)),
+            install_hint: None,
+            installed: None,
+            model: None,
+            system_prompt: None,
+            created_at: None,
+            engine: Some(e.engine_type),
+            transport: e
+                .base_url
+                .as_ref()
+                .map(|_| "openai_compat".to_owned())
+                .or_else(|| Some("acp".to_owned())),
+            recommended: None,
+            version: None,
+            latest_version: None,
+            version_status: None,
+            locked: None,
+            enabled: None,
+            gateway_bypass: None,
+            avatar_url: None,
+        });
+    }
+    Json(json!({ "engines": engines }))
 }
 
 /// Per-engine chat-model options, keyed by engine id (e.g. `claude` →
@@ -4734,6 +5231,8 @@ async fn list_agents(State(state): State<ServerState>) -> Json<serde_json::Value
                     transport: None,
                     recommended: None,
                     version: Some(record.version),
+                    latest_version: None,
+                    version_status: None,
                     locked: locked_flag,
                     enabled,
                     // Custom agents from the DB don't carry bypass metadata — they
@@ -4767,28 +5266,92 @@ async fn list_agents(State(state): State<ServerState>) -> Json<serde_json::Value
 async fn list_agent_catalog(State(state): State<ServerState>) -> Json<serde_json::Value> {
     let registry = crate::registry::ProviderRegistry::load();
     let installed_set = state.agent_store.installed_ids().await.unwrap_or_default();
-    let agents: Vec<_> = state
+    let tasks = state
         .agents
         .list_infos_with_default(&registry.default_agent_id)
         .into_iter()
         .map(|i| {
             let added = i.id == "ryu" || installed_set.contains(&i.id);
-            json!({
-                "id": i.id,
-                "name": i.name,
-                "description": i.description,
-                "install_hint": i.install_hint,
-                "recommended": i.recommended,
-                // `installed` from list_infos = binary detected on PATH.
-                "detected": i.installed,
-                "added": added,
-                "gateway_bypass": i.gateway_bypass,
-                "engine": i.engine,
-                "transport": i.transport,
+            let version_probe = state
+                .agents
+                .find_by_prefix(&i.id)
+                .and_then(|entry| entry.version_probe.clone());
+            tokio::spawn(async move {
+                let (installed_version, latest_version) = match version_probe {
+                    Some(probe) if i.installed == Some(true) => {
+                        let current =
+                            crate::sidecar::adapters::acp::probe_cli_version(probe.binary);
+                        let latest = resolve_npm_latest_for_agent(probe.npm_package);
+                        tokio::join!(current, latest)
+                    }
+                    Some(probe) => (None, resolve_npm_latest_for_agent(probe.npm_package).await),
+                    None => (None, None),
+                };
+                let version_status =
+                    agent_version_status(installed_version.as_deref(), latest_version.as_deref());
+                json!({
+                    "id": i.id,
+                    "name": i.name,
+                    "description": i.description,
+                    "install_hint": i.install_hint,
+                    "recommended": i.recommended,
+                    // `installed` from list_infos = binary detected on PATH.
+                    "detected": i.installed,
+                    "added": added,
+                    "gateway_bypass": i.gateway_bypass,
+                    "engine": i.engine,
+                    "transport": i.transport,
+                    "installed_version": installed_version,
+                    "latest_version": latest_version,
+                    "version_status": version_status,
+                })
             })
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let mut agents = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        if let Ok(agent) = task.await {
+            agents.push(agent);
+        }
+    }
     Json(json!({ "agents": agents }))
+}
+
+fn agent_version_status(current: Option<&str>, latest: Option<&str>) -> Option<&'static str> {
+    let (Some(current), Some(latest)) = (current, latest) else {
+        return current.or(latest).map(|_| "unknown");
+    };
+    let current = semver::Version::parse(current).ok()?;
+    let latest = semver::Version::parse(latest).ok()?;
+    Some(if current < latest {
+        "behind_latest"
+    } else {
+        "current"
+    })
+}
+
+async fn resolve_npm_latest_for_agent(package: &str) -> Option<String> {
+    let mut cache = crate::catalog::cache::VersionCache::load();
+    let key = format!("agent:npm:{package}");
+    if cache.is_fresh() {
+        if let Some(version) = cache.get(&key) {
+            return Some(version.clone());
+        }
+    }
+    let client = reqwest::Client::new();
+    let latest = tokio::time::timeout(
+        std::time::Duration::from_secs(4),
+        crate::catalog::npm::fetch_latest_version(&client, package),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok);
+    if let Some(version) = latest.as_ref() {
+        cache.set(key, version.clone());
+        cache.mark_fresh();
+        let _ = cache.save();
+    }
+    latest
 }
 
 #[derive(serde::Deserialize)]
@@ -12919,6 +13482,9 @@ struct DelegateBody {
     /// The sibling delegates to fan out (run concurrently, bounded by caps).
     #[serde(default)]
     delegates: Vec<crate::workflow::delegation::DelegateSpec>,
+    /// Parent conversation to list completed subagent children under.
+    #[serde(default)]
+    conversation_id: Option<String>,
     /// Optional caps override; concurrency is clamped to the hard maximum.
     #[serde(default)]
     caps: Option<crate::workflow::delegation::DelegationCaps>,
@@ -12944,14 +13510,20 @@ fn default_delegate_depth() -> usize {
     request_body = serde_json::Value,
     responses((status = 200, description = "Server-Sent Events stream"))
 )]
-async fn delegate_stream(body: Option<Json<DelegateBody>>) -> axum::response::Response {
+async fn delegate_stream(
+    State(state): State<ServerState>,
+    body: Option<Json<DelegateBody>>,
+) -> axum::response::Response {
     use crate::sidecar::adapters::sse_response;
     use crate::workflow::delegation;
 
     let body = body.map(|b| b.0).unwrap_or_default();
     let caps = body.caps.unwrap_or_default();
     let depth = body.depth;
+    let parent_conversation_id = body.conversation_id.filter(|s| !s.is_empty());
     let delegates = body.delegates;
+    let delegates_for_persist = delegates.clone();
+    let conversations = state.conversations.clone();
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<delegation::DelegateProgress>();
 
@@ -12969,7 +13541,18 @@ async fn delegate_stream(body: Option<Json<DelegateBody>>) -> axum::response::Re
         }
 
         let terminal = match fanout.await {
-            Ok(Ok(results)) => json!({ "event": "done", "results": results }),
+            Ok(Ok(results)) => {
+                if let Some(parent_id) = parent_conversation_id.as_deref() {
+                    persist_delegate_children(
+                        &conversations,
+                        parent_id,
+                        &delegates_for_persist,
+                        &results,
+                    )
+                    .await;
+                }
+                json!({ "event": "done", "results": results })
+            },
             Ok(Err(e)) => json!({ "event": "error", "error": e.to_string() }),
             Err(e) => json!({ "event": "error", "error": format!("delegation task failed: {e}") }),
         };
@@ -12979,6 +13562,45 @@ async fn delegate_stream(body: Option<Json<DelegateBody>>) -> axum::response::Re
     };
 
     sse_response(axum::body::Body::from_stream(stream))
+}
+
+async fn persist_delegate_children(
+    conversations: &ConversationStore,
+    parent_conversation_id: &str,
+    delegates: &[crate::workflow::delegation::DelegateSpec],
+    results: &[crate::workflow::delegation::DelegateResult],
+) {
+    let specs_by_id: std::collections::HashMap<&str, &crate::workflow::delegation::DelegateSpec> =
+        delegates
+            .iter()
+            .map(|spec| (spec.id.as_str(), spec))
+            .collect();
+    for result in results {
+        let Some(spec) = specs_by_id.get(result.id.as_str()) else {
+            continue;
+        };
+        let answer = result
+            .output
+            .as_deref()
+            .or(result.error.as_deref())
+            .unwrap_or("");
+        let preset = serde_json::to_value(result.preset)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned));
+        if let Err(e) = conversations
+            .append_subagent_child(
+                parent_conversation_id,
+                &spec.task,
+                answer,
+                spec.agent_id.as_deref(),
+                preset.as_deref(),
+                result.child_conversation_id.as_deref(),
+            )
+            .await
+        {
+            tracing::warn!("failed to persist subagent child entry: {e:#}");
+        }
+    }
 }
 
 // ── Scheduled-job handlers (heartbeat) ──────────────────────────────────────
@@ -14015,7 +14637,10 @@ mod ssrf_host_guard_tests {
         assert!(screen_guarded_hostname("examp\u{200d}le.com").is_err());
         assert!(screen_guarded_hostname("ex\u{202e}ample.com").is_err());
         // Raw unicode label.
-        assert!(screen_guarded_hostname("\u{043f}\u{0440}\u{0438}\u{043c}\u{0435}\u{0440}.\u{0440}\u{0444}").is_err());
+        assert!(screen_guarded_hostname(
+            "\u{043f}\u{0440}\u{0438}\u{043c}\u{0435}\u{0440}.\u{0440}\u{0444}"
+        )
+        .is_err());
     }
 
     #[test]

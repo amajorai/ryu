@@ -31,6 +31,7 @@ pub mod device;
 pub mod gguf;
 pub mod installed;
 pub mod llmfit;
+pub mod models_dev;
 
 use anyhow::{Context, Result};
 use serde::Serialize;

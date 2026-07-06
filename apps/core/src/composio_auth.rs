@@ -65,6 +65,11 @@ mod tests {
 
     #[test]
     fn set_then_clear_key() {
+        // The auth key cache + RYU_COMPOSIO_API_KEY/COMPOSIO_API_KEY env are
+        // process-global and touched by tests in other modules (gateway
+        // managed-node, mcp catalog/composio); serialize on the shared lock so
+        // none reads another's transient value.
+        let _lock = crate::sidecar::gateway::lock_managed_node_env();
         set_key("  comp_abc123  ");
         assert_eq!(key().as_deref(), Some("comp_abc123"));
         set_key("   ");

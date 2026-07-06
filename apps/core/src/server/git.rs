@@ -28,6 +28,16 @@ pub struct GitCommitPushBody {
     /// Commit message. Defaults to "Update via Ryu" when empty/omitted.
     #[serde(default)]
     message: Option<String>,
+    /// Action to run: "commit", "commit-push", or "push".
+    #[serde(default)]
+    action: Option<String>,
+    /// Whether to stage unstaged changes before committing.
+    #[serde(default = "default_include_unstaged")]
+    include_unstaged: bool,
+}
+
+fn default_include_unstaged() -> bool {
+    true
 }
 
 /// `GET /api/git/status?cwd=<path>`
@@ -374,15 +384,12 @@ fn create_branch(cwd: &str, branch: &str) -> Result<String, String> {
     }
 }
 
-/// `POST /api/git/commit-push` `{ cwd, message? }`
+/// `POST /api/git/commit-push` `{ cwd, message?, action?, include_unstaged? }`
 ///
-/// Stages everything (`git add -A`), commits with the given message (defaulting
-/// to "Update via Ryu"), and pushes to the tracking remote. This is Core (it
-/// runs what the user asked; the Gateway is not on the raw-git path). Returns
-/// `{ success, committed, pushed, commit, error? }` so the desktop pinned-summary
-/// button can report exactly what happened — a no-op commit (nothing staged)
-/// still pushes any unpushed commits, and a push with no upstream surfaces the
-/// raw git stderr (HTTP 409) rather than failing silently.
+/// Commits, pushes, or does both. This is Core (it runs what the user asked; the
+/// Gateway is not on the raw-git path). Returns `{ success, committed, pushed,
+/// commit, error? }` so the desktop pinned-summary popover can report exactly
+/// what happened.
 pub async fn git_commit_push(Json(body): Json<GitCommitPushBody>) -> axum::response::Response {
     if body.cwd.is_empty() {
         return (
@@ -401,13 +408,29 @@ pub async fn git_commit_push(Json(body): Json<GitCommitPushBody>) -> axum::respo
             .into_response();
     }
 
-    let GitCommitPushBody { cwd, message } = body;
+    let GitCommitPushBody {
+        cwd,
+        message,
+        action,
+        include_unstaged,
+    } = body;
+    let action = action.unwrap_or_else(|| "commit-push".to_string());
+    if !matches!(action.as_str(), "commit" | "commit-push" | "push") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "error": "invalid git action" })),
+        )
+            .into_response();
+    }
     let message = message
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| "Update via Ryu".to_string());
 
-    let result = tokio::task::spawn_blocking(move || commit_and_push(&cwd, &message)).await;
+    let result = tokio::task::spawn_blocking(move || {
+        run_git_action(&cwd, &message, &action, include_unstaged)
+    })
+    .await;
 
     match result {
         Ok(Ok(outcome)) => Json(json!(outcome)).into_response(),
@@ -435,52 +458,70 @@ struct CommitPushOutcome {
     commit: Option<String>,
 }
 
-fn commit_and_push(cwd: &str, message: &str) -> Result<CommitPushOutcome, String> {
+fn run_git_action(
+    cwd: &str,
+    message: &str,
+    action: &str,
+    include_unstaged: bool,
+) -> Result<CommitPushOutcome, String> {
     // Confirm this is a git repo before touching the working tree.
     if run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).is_none() {
         return Err("not a git repository".to_string());
     }
 
-    // Stage everything. A failure here is fatal (e.g. corrupt index).
-    let add = Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-    if !add.status.success() {
-        return Err(String::from_utf8_lossy(&add.stderr).trim().to_string());
+    if action != "push" && include_unstaged {
+        // Stage everything. A failure here is fatal (e.g. corrupt index).
+        let add = Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(cwd)
+            .output()
+            .map_err(|e| format!("failed to run git: {e}"))?;
+        if !add.status.success() {
+            return Err(String::from_utf8_lossy(&add.stderr).trim().to_string());
+        }
     }
 
-    // Commit. "nothing to commit" is not an error — we may still have local
-    // commits to push — so only a genuine failure (other than a clean tree)
-    // aborts. Detect the clean-tree case by re-checking porcelain output.
-    let has_staged = run_git(cwd, &["status", "--porcelain"])
-        .map(|s| s.lines().any(|l| !l.trim().is_empty()))
-        .unwrap_or(false);
-
     let mut committed = false;
-    if has_staged {
+    if action != "push" {
+        let staged_args = ["diff", "--cached", "--name-only"];
+        let has_staged = run_git(cwd, &staged_args)
+            .map(|s| s.lines().any(|l| !l.trim().is_empty()))
+            .unwrap_or(false);
+
+        if !has_staged && include_unstaged {
+            let has_changes = run_git(cwd, &["status", "--porcelain"])
+                .map(|s| s.lines().any(|l| !l.trim().is_empty()))
+                .unwrap_or(false);
+            if has_changes {
+                return Err("no staged changes to commit".to_string());
+            }
+        }
+
         let commit = Command::new("git")
             .args(["commit", "-m", message])
             .current_dir(cwd)
             .output()
             .map_err(|e| format!("failed to run git: {e}"))?;
-        if commit.status.success() {
+        if has_staged && commit.status.success() {
             committed = true;
-        } else {
+        } else if has_staged {
             return Err(String::from_utf8_lossy(&commit.stderr).trim().to_string());
         }
     }
 
-    // Push to the configured upstream. When there is no tracking branch git
-    // exits non-zero with a helpful message — surface it verbatim.
-    let push = Command::new("git")
-        .args(["push"])
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-    if !push.status.success() {
-        return Err(String::from_utf8_lossy(&push.stderr).trim().to_string());
+    let mut pushed = false;
+    if action != "commit" {
+        // Push to the configured upstream. When there is no tracking branch git
+        // exits non-zero with a helpful message — surface it verbatim.
+        let push = Command::new("git")
+            .args(["push"])
+            .current_dir(cwd)
+            .output()
+            .map_err(|e| format!("failed to run git: {e}"))?;
+        if !push.status.success() {
+            return Err(String::from_utf8_lossy(&push.stderr).trim().to_string());
+        }
+        pushed = true;
     }
 
     let commit = run_git(cwd, &["rev-parse", "--short", "HEAD"]);
@@ -488,7 +529,7 @@ fn commit_and_push(cwd: &str, message: &str) -> Result<CommitPushOutcome, String
     Ok(CommitPushOutcome {
         success: true,
         committed,
-        pushed: true,
+        pushed,
         commit,
     })
 }

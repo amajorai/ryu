@@ -89,6 +89,8 @@ export const DEFAULT_CAPS: DelegationCaps = {
 
 /** Outcome of a single delegate (carried in `finished` and `done`). */
 export interface DelegateResult {
+	/** Conversation id used by a registered/ACP child agent, when Core has one. */
+	child_conversation_id?: string | null;
 	/** Error message, when the delegate failed (including cap violations). */
 	error: string | null;
 	id: string;
@@ -107,6 +109,8 @@ export type DelegateEvent =
 /** Body for `POST /api/delegate/stream`. */
 export interface DelegateRequest {
 	caps?: DelegationCaps;
+	/** Parent conversation to list completed sub-agent children under. */
+	conversation_id?: string | null;
 	delegates: DelegateSpec[];
 	/** Depth of these delegates (top-level parent delegating is depth 1). */
 	depth?: number;

@@ -12,14 +12,16 @@
 //! - `crates/ryu-sdk-ffi`   — raw C-ABI (hand-written; cgo-consumed Go today).
 //! - `crates/ryu-sdk-uniffi` (this) — the generated multi-language path.
 //!
-//! ## Scope: the BLOCKING surface only
+//! ## Scope: the blocking surface + streaming via a callback interface
 //!
 //! UniFFI has no closure type (`crates/ryu-sdk/SPIKE-napi-closure-boundary.md`,
-//! section (a)). Every export here is **blocking, value-in / value-out**, so it
-//! maps onto UniFFI's IDL with zero callback machinery. Streaming chat
-//! (`ModelClient::stream`) is **deliberately omitted**: it requires a
+//! section (a)), so the bulk of the surface is **blocking, value-in / value-out**
+//! and maps onto UniFFI's IDL with zero callback machinery. Streaming chat
+//! (`ModelClient::stream`) is the one exception: it is surfaced through the
 //! `#[uniffi::export(callback_interface)] ChatSink { on_delta / on_error /
-//! on_done }`, the deferred slice the spike predicted. See
+//! on_done }` the spike predicted, with a blocking `ModelClient::stream(messages,
+//! sink)` that drives the underlying async `ryu_sdk` stream on the shared runtime
+//! and pumps deltas into the foreign sink. See
 //! `docs/multi-language-bindings-spec.md` for the full streaming design.
 
 // Namespace = the generated foreign module name. We set it to `ryu_sdk` (NOT the
@@ -123,12 +125,51 @@ pub struct Usage {
     pub total_tokens: i64,
 }
 
-/// A non-streaming chat completion result.
+/// A non-streaming chat completion result. Also delivered to
+/// [`ChatSink::on_done`] as the accumulated terminal result of a stream (with the
+/// joined content + finish reason; `usage` is `None` on the streaming path because
+/// the gateway's SSE frames carry no usage — see `ryu_sdk::model`).
 #[derive(uniffi::Record)]
 pub struct ChatResult {
     pub content: String,
     pub finish_reason: Option<String>,
     pub usage: Option<Usage>,
+}
+
+/// A streaming chat completion delta, delivered to [`ChatSink::on_delta`] as the
+/// gateway's OpenAI-compat SSE frames arrive. `content` is the incremental text
+/// fragment (may be empty on role-only chunks); `finish_reason` is set on the
+/// final chunk.
+#[derive(uniffi::Record)]
+pub struct ChatDelta {
+    pub content: String,
+    pub finish_reason: Option<String>,
+}
+
+/// A foreign-implemented sink that receives streaming chat events. This is the
+/// callback-interface path UniFFI requires for streaming (it has no closure type):
+/// a Python/Swift/Kotlin/C#/Go caller implements the three methods and passes an
+/// instance to [`ModelClient::stream`]. The Rust side drives the underlying
+/// gateway-validated stream and invokes these in order — zero or more `on_delta`,
+/// then exactly one terminal `on_done` (success) **or** `on_error` (failure).
+///
+/// **Re-entrancy:** these callbacks run on the runtime driver thread while
+/// [`ModelClient::stream`] holds a `block_on`. An implementation MUST NOT call
+/// back into another blocking SDK method (`chat` / `embed` / `stream`) from
+/// inside a callback — each of those opens its own `block_on`, and starting a
+/// runtime from within a runtime panics (`Cannot start a runtime from within a
+/// runtime`), aborting the FFI process. To chain a follow-up completion, return
+/// from the callback first and issue it from your own thread.
+#[uniffi::export(callback_interface)]
+pub trait ChatSink: Send + Sync {
+    /// One incremental delta from the stream.
+    fn on_delta(&self, delta: ChatDelta);
+    /// A terminal error; no further callbacks follow. `message` is the underlying
+    /// `ryu_sdk` error text (transport, HTTP status, or blocked egress).
+    fn on_error(&self, message: String);
+    /// Terminal success. `result` is the accumulated reply (joined content +
+    /// finish reason); no further callbacks follow.
+    fn on_done(&self, result: ChatResult);
 }
 
 /// A gateway-mandatory model client. Every call routes through the Ryu gateway;
@@ -153,10 +194,8 @@ impl ModelClient {
         Ok(std::sync::Arc::new(Self { inner }))
     }
 
-    /// Blocking non-streaming chat completion. Returns the full reply.
-    ///
-    /// (Streaming is the deferred `ChatSink` callback-interface slice — see the
-    /// crate docs and `docs/multi-language-bindings-spec.md`.)
+    /// Blocking non-streaming chat completion. Returns the full reply. For
+    /// incremental deltas, use [`ModelClient::stream`] with a [`ChatSink`].
     pub fn chat(&self, messages: Vec<ChatMessage>) -> Result<ChatResult, RyuError> {
         let msgs: Vec<ryu_sdk::ChatMessage> = messages
             .into_iter()
@@ -174,6 +213,46 @@ impl ModelClient {
                 total_tokens: u.total_tokens as i64,
             }),
         })
+    }
+
+    /// Blocking streaming chat completion. Drives the **same** gateway-validated
+    /// `ryu_sdk::ModelClient::stream` on the shared runtime and pumps each delta
+    /// into `sink`, so the egress invariant holds identically to `chat` (a
+    /// direct-provider client cannot be constructed in the first place). Returns
+    /// when the stream ends: every delta is delivered via `sink.on_delta`, then
+    /// exactly one `sink.on_done` (success) or `sink.on_error` (failure).
+    pub fn stream(&self, messages: Vec<ChatMessage>, sink: Box<dyn ChatSink>) {
+        use futures_util::StreamExt;
+
+        let msgs: Vec<ryu_sdk::ChatMessage> = messages
+            .into_iter()
+            .map(|m| ryu_sdk::ChatMessage { role: m.role, content: m.content })
+            .collect();
+        runtime().block_on(async {
+            let stream = self.inner.stream(&msgs);
+            futures_util::pin_mut!(stream);
+            let mut content = String::new();
+            let mut finish_reason: Option<String> = None;
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(delta) => {
+                        content.push_str(&delta.content);
+                        if delta.finish_reason.is_some() {
+                            finish_reason.clone_from(&delta.finish_reason);
+                        }
+                        sink.on_delta(ChatDelta {
+                            content: delta.content,
+                            finish_reason: delta.finish_reason,
+                        });
+                    }
+                    Err(e) => {
+                        sink.on_error(e.to_string());
+                        return;
+                    }
+                }
+            }
+            sink.on_done(ChatResult { content, finish_reason, usage: None });
+        });
     }
 }
 

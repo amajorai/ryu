@@ -307,6 +307,15 @@ pub fn sdk_app_package(agent_id: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
+    /// Serializes the two tests that mutate the process-global SDK app URL/port
+    /// env vars (`RYU_SDK_APP_URL` / `RYU_SDK_APP_PORT`); without it one can set
+    /// the URL while the other has cleared it and is asserting the port path.
+    /// Poison-tolerant.
+    static SDK_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_sdk_env() -> std::sync::MutexGuard<'static, ()> {
+        SDK_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     // ── URL resolution ──────────────────────────────────────────────────────
 
     #[test]
@@ -317,6 +326,7 @@ mod tests {
 
     #[test]
     fn env_port_override_is_applied() {
+        let _lock = lock_sdk_env();
         let prev_url = std::env::var(ENV_SDK_APP_URL).ok();
         let prev_port = std::env::var(ENV_SDK_APP_PORT).ok();
         std::env::remove_var(ENV_SDK_APP_URL);
@@ -335,6 +345,7 @@ mod tests {
 
     #[test]
     fn env_url_override_takes_precedence() {
+        let _lock = lock_sdk_env();
         let prev = std::env::var(ENV_SDK_APP_URL).ok();
         std::env::set_var(ENV_SDK_APP_URL, "http://192.168.1.50:9090");
         let url = sdk_app_base_url();

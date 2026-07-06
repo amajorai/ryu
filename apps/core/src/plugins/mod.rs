@@ -17,6 +17,7 @@
 //! [`PluginStore::update`] compares the new manifest version against the installed
 //! version and refuses a downgrade unless `force = true`.
 
+pub mod app_contrib;
 pub mod builtins;
 pub mod catalog;
 pub mod lifecycle;
@@ -125,6 +126,18 @@ impl PluginStore {
             );",
         )
         .context("running apps schema migration")?;
+
+        // Additive column for the third-party plugin runtime slice: the plugin's
+        // bundled sandboxed-UI code, stored at (local) install and served ONLY for
+        // an enabled plugin over `GET /api/plugins/:id/ui-bundle`. `ALTER TABLE ADD
+        // COLUMN` errors if the column already exists, so tolerate that one error
+        // and surface any other (keeps the migration idempotent across restarts).
+        if let Err(e) = conn.execute("ALTER TABLE apps ADD COLUMN ui_code TEXT", []) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column name") {
+                return Err(e).context("adding apps.ui_code column");
+            }
+        }
         Ok(())
     }
 
@@ -236,6 +249,47 @@ impl PluginStore {
         let conn = self.conn.lock().await;
         let n = conn.execute("DELETE FROM apps WHERE id = ?1", params![id])?;
         Ok(n > 0)
+    }
+
+    /// Store (or clear) the plugin's bundled sandboxed-UI code on its record.
+    /// Called at (local) install carriage. Returns `false` when no such record
+    /// exists (install must precede setting code).
+    pub async fn set_ui_code(&self, id: &str, ui_code: Option<&str>) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let n = conn.execute(
+            "UPDATE apps SET ui_code = ?2 WHERE id = ?1",
+            params![id, ui_code],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Fetch the plugin's bundled UI code, if any. Served ONLY for an enabled
+    /// plugin by the `ui-bundle` endpoint (enabled-state gating is the caller's
+    /// responsibility, kept next to the token/loopback checks).
+    pub async fn get_ui_code(&self, id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let code: Option<Option<String>> = conn
+            .query_row(
+                "SELECT ui_code FROM apps WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?;
+        Ok(code.flatten())
+    }
+
+    /// Whether the plugin has a stored UI bundle (cheap presence check for the
+    /// contributions payload's `has_ui` flag — avoids loading the whole blob).
+    pub async fn has_ui_code(&self, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let present: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM apps WHERE id = ?1 AND ui_code IS NOT NULL",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(present.is_some())
     }
 }
 
@@ -362,5 +416,32 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         PluginStore::migrate(&conn).unwrap();
         PluginStore::migrate(&conn).unwrap();
+    }
+
+    #[tokio::test]
+    async fn ui_code_roundtrip_and_presence() {
+        let s = store();
+        s.insert("com.test.ui", "1.0.0").await.unwrap();
+        // No code yet.
+        assert!(s.get_ui_code("com.test.ui").await.unwrap().is_none());
+        assert!(!s.has_ui_code("com.test.ui").await.unwrap());
+
+        // Store and read back.
+        assert!(s
+            .set_ui_code("com.test.ui", Some("export function activate(){}"))
+            .await
+            .unwrap());
+        assert_eq!(
+            s.get_ui_code("com.test.ui").await.unwrap().as_deref(),
+            Some("export function activate(){}")
+        );
+        assert!(s.has_ui_code("com.test.ui").await.unwrap());
+
+        // Clearing it (disable/uninstall carriage) drops presence.
+        assert!(s.set_ui_code("com.test.ui", None).await.unwrap());
+        assert!(!s.has_ui_code("com.test.ui").await.unwrap());
+
+        // Setting code on a missing record is a no-op (install must precede it).
+        assert!(!s.set_ui_code("does.not.exist", Some("x")).await.unwrap());
     }
 }

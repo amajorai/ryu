@@ -411,10 +411,12 @@ mod tests {
     #[test]
     fn registry_has_correct_count() {
         let r = static_registry();
-        // 26 base entries + 4 sandbox backends (wasmtime, docker, microsandbox,
-        // opensandbox). NOTE: this is a global count over a shared tree — if a
-        // concurrent feature adds a catalog row, rebase this number with it.
-        assert_eq!(r.len(), 30);
+        // 20 base entries + 4 sandbox backends (wasmtime, docker, microsandbox,
+        // opensandbox). The nano/pico/nemo/iron-claw + temporal + qmd rows were
+        // dropped and unsloth/docker-model-runner added since the old count of 30.
+        // NOTE: this is a global count over a shared tree — if a concurrent feature
+        // adds a catalog row, rebase this number with it.
+        assert_eq!(r.len(), 24);
     }
 
     #[test]

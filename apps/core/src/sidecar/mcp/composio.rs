@@ -332,6 +332,9 @@ mod tests {
 
     #[test]
     fn is_configured_false_without_key() {
+        // Serialize against every test that mutates the composio auth cache / key
+        // env (process-global) so the "no key" state holds for this body.
+        let _lock = crate::sidecar::gateway::lock_managed_node_env();
         crate::composio_auth::set_key("");
         clear_key_env();
         assert!(!is_configured());

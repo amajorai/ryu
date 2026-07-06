@@ -624,6 +624,55 @@ impl ProviderRegistry {
 mod tests {
     use super::*;
 
+    /// Serializes every test that reads or mutates the process-global registry
+    /// env vars (all consumed by `ProviderRegistry::from_env`). cargo runs tests
+    /// in one process in parallel, so two `from_env` tests can otherwise read each
+    /// other's transient overrides. Poison-tolerant.
+    static REGISTRY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_registry_env() -> std::sync::MutexGuard<'static, ()> {
+        REGISTRY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    const REGISTRY_ENV: &[&str] = &[
+        "RYU_EMBED_MODEL",
+        "RYU_EMBED_DIMS",
+        "RYU_RERANKER_MODEL",
+        "RYU_DEFAULT_LLM_BASE_URL",
+        "RYU_DEFAULT_LLM_MODEL",
+        "RYU_LOCAL_CHAT_MODEL_ID",
+        "RYU_LOCAL_CHAT_MODEL_URL",
+        "RYU_LOCAL_CHAT_MODEL_SHA256",
+        "RYU_DEFAULT_AGENT",
+    ];
+
+    /// Snapshot + clear the registry env vars, restoring them on drop so a test
+    /// that mutates process env never leaks into the others.
+    struct RegistryEnvGuard {
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+    impl RegistryEnvGuard {
+        fn capture() -> Self {
+            let saved = REGISTRY_ENV
+                .iter()
+                .map(|n| (*n, std::env::var(n).ok()))
+                .collect();
+            for n in REGISTRY_ENV {
+                std::env::remove_var(n);
+            }
+            Self { saved }
+        }
+    }
+    impl Drop for RegistryEnvGuard {
+        fn drop(&mut self) {
+            for (n, v) in &self.saved {
+                match v {
+                    Some(val) => std::env::set_var(n, val),
+                    None => std::env::remove_var(n),
+                }
+            }
+        }
+    }
+
     #[test]
     fn defaults_are_spec_models() {
         let reg = ProviderRegistry::default();
@@ -657,14 +706,9 @@ mod tests {
 
     #[test]
     fn from_env_falls_back_to_defaults_when_unset() {
-        std::env::remove_var("RYU_EMBED_MODEL");
-        std::env::remove_var("RYU_EMBED_DIMS");
-        std::env::remove_var("RYU_RERANKER_MODEL");
-        std::env::remove_var("RYU_DEFAULT_LLM_BASE_URL");
-        std::env::remove_var("RYU_DEFAULT_LLM_MODEL");
-        std::env::remove_var("RYU_LOCAL_CHAT_MODEL_ID");
-        std::env::remove_var("RYU_LOCAL_CHAT_MODEL_URL");
-        std::env::remove_var("RYU_LOCAL_CHAT_MODEL_SHA256");
+        let _lock = lock_registry_env();
+        // Guard clears all registry env vars (the "unset" baseline) and restores.
+        let _g = RegistryEnvGuard::capture();
         let reg = ProviderRegistry::from_env();
         assert_eq!(reg.embedder.id, DEFAULT_EMBED_MODEL);
         assert_eq!(reg.embedder.dims, DEFAULT_EMBED_DIMS);
@@ -681,6 +725,9 @@ mod tests {
 
     #[test]
     fn from_env_reads_overrides() {
+        let _lock = lock_registry_env();
+        // Guard restores every registry env var on exit (no manual cleanup leak).
+        let _g = RegistryEnvGuard::capture();
         std::env::set_var("RYU_EMBED_MODEL", "custom/embed-model");
         std::env::set_var("RYU_EMBED_DIMS", "512");
         std::env::set_var("RYU_RERANKER_MODEL", "custom/reranker");
@@ -697,13 +744,6 @@ mod tests {
             "https://example.com/model.gguf"
         );
         assert_eq!(reg.local_chat_model.sha256, "abc123");
-        // Clean up.
-        std::env::remove_var("RYU_EMBED_MODEL");
-        std::env::remove_var("RYU_EMBED_DIMS");
-        std::env::remove_var("RYU_RERANKER_MODEL");
-        std::env::remove_var("RYU_LOCAL_CHAT_MODEL_ID");
-        std::env::remove_var("RYU_LOCAL_CHAT_MODEL_URL");
-        std::env::remove_var("RYU_LOCAL_CHAT_MODEL_SHA256");
     }
 
     #[test]
@@ -720,6 +760,10 @@ mod tests {
 
     #[test]
     fn from_file_reads_chat_model_override() {
+        // env > file precedence, so clear the registry env and serialize against
+        // the other from_env/from_file tests to keep the file values authoritative.
+        let _lock = lock_registry_env();
+        let _g = RegistryEnvGuard::capture();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("registry.json");
         std::fs::write(
@@ -737,6 +781,8 @@ mod tests {
 
     #[test]
     fn from_file_reads_embed_model_override() {
+        let _lock = lock_registry_env();
+        let _g = RegistryEnvGuard::capture();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("registry.json");
         std::fs::write(
@@ -752,6 +798,8 @@ mod tests {
 
     #[test]
     fn from_file_reads_local_chat_model_override() {
+        let _lock = lock_registry_env();
+        let _g = RegistryEnvGuard::capture();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("registry.json");
         std::fs::write(
@@ -770,6 +818,10 @@ mod tests {
 
     #[test]
     fn from_file_handles_absent_file_gracefully() {
+        // from_file falls back to env-derived defaults (env > file > literal), so
+        // clear the registry env and serialize against the other from_env tests.
+        let _lock = lock_registry_env();
+        let _g = RegistryEnvGuard::capture();
         let reg =
             ProviderRegistry::from_file(std::path::Path::new("/nonexistent/path/registry.json"));
         // Must not panic; returns built-in defaults.
@@ -779,6 +831,9 @@ mod tests {
 
     #[test]
     fn from_file_handles_malformed_json_gracefully() {
+        // Reads the env-overridable default_llm_model; clear env + serialize.
+        let _lock = lock_registry_env();
+        let _g = RegistryEnvGuard::capture();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("registry.json");
         std::fs::write(&path, "not-valid-json").unwrap();
@@ -813,6 +868,8 @@ mod tests {
         // AC4: the literal default must be "ryu" when no env var / file sets it.
         // Only the flagship Ryu agent is installed by default; all other
         // built-ins are opt-in via the agents catalog.
+        let _lock = lock_registry_env();
+        let _g = RegistryEnvGuard::capture();
         std::env::remove_var("RYU_DEFAULT_AGENT");
         let reg = ProviderRegistry::from_env();
         assert_eq!(reg.default_agent_id, DEFAULT_AGENT_ID);
@@ -822,15 +879,18 @@ mod tests {
     #[test]
     fn default_agent_id_respects_env_var() {
         // AC4: RYU_DEFAULT_AGENT overrides the built-in literal.
+        let _lock = lock_registry_env();
+        let _g = RegistryEnvGuard::capture();
         std::env::set_var("RYU_DEFAULT_AGENT", "acp:claude");
         let reg = ProviderRegistry::from_env();
-        std::env::remove_var("RYU_DEFAULT_AGENT");
         assert_eq!(reg.default_agent_id, "acp:claude");
     }
 
     #[test]
     fn default_agent_id_reads_from_file() {
         // AC4: registry.json `default_agent_id` field is honoured.
+        let _lock = lock_registry_env();
+        let _g = RegistryEnvGuard::capture();
         std::env::remove_var("RYU_DEFAULT_AGENT");
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("registry.json");

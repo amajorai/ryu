@@ -199,6 +199,9 @@ pub struct DelegateResult {
     pub output: Option<String>,
     /// Error message, if the delegate failed (including cap violations).
     pub error: Option<String>,
+    /// Conversation id used by a registered agent/ACP delegate, when one exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_conversation_id: Option<String>,
 }
 
 impl DelegateResult {
@@ -208,6 +211,7 @@ impl DelegateResult {
             preset,
             output: Some(output),
             error: None,
+            child_conversation_id: None,
         }
     }
 
@@ -217,7 +221,13 @@ impl DelegateResult {
             preset,
             output: None,
             error: Some(error),
+            child_conversation_id: None,
         }
+    }
+
+    fn with_child_conversation_id(mut self, child_conversation_id: Option<String>) -> Self {
+        self.child_conversation_id = child_conversation_id;
+        self
     }
 }
 
@@ -506,8 +516,10 @@ async fn run_one(spec: &DelegateSpec, caps: &DelegationCaps) -> DelegateResult {
     let fut = call_sub_agent(spec, caps.max_tokens);
 
     match tokio::time::timeout(wall_time, fut).await {
-        Ok(Ok(text)) => DelegateResult::ok(spec.id.clone(), spec.preset, text),
-        Ok(Err(e)) => DelegateResult::failed(spec.id.clone(), spec.preset, e),
+        Ok(Ok(call)) => DelegateResult::ok(spec.id.clone(), spec.preset, call.text)
+            .with_child_conversation_id(call.child_conversation_id),
+        Ok(Err(e)) => DelegateResult::failed(spec.id.clone(), spec.preset, e.message)
+            .with_child_conversation_id(e.child_conversation_id),
         Err(_) => DelegateResult::failed(
             spec.id.clone(),
             spec.preset,
@@ -524,7 +536,36 @@ async fn run_one(spec: &DelegateSpec, caps: &DelegationCaps) -> DelegateResult {
 /// Fail-closed: if the gateway URL resolves to the default and is unreachable,
 /// the call returns an error (matching the hard constraint for `via_gateway=true`).
 /// Set `RYU_ALLOW_GATEWAY_FALLBACK=1` to opt in to provider-direct fallback.
-async fn call_sub_agent(spec: &DelegateSpec, max_tokens: u32) -> Result<String, String> {
+struct SubAgentCall {
+    text: String,
+    child_conversation_id: Option<String>,
+}
+
+struct SubAgentError {
+    message: String,
+    child_conversation_id: Option<String>,
+}
+
+impl SubAgentError {
+    fn new(message: String) -> Self {
+        Self {
+            message,
+            child_conversation_id: None,
+        }
+    }
+
+    fn with_child(message: String, child_conversation_id: String) -> Self {
+        Self {
+            message,
+            child_conversation_id: Some(child_conversation_id),
+        }
+    }
+}
+
+async fn call_sub_agent(
+    spec: &DelegateSpec,
+    max_tokens: u32,
+) -> Result<SubAgentCall, SubAgentError> {
     // A configured delegate agent + an available runner: invoke the real agent
     // through the chat path so its own engine binding, gateway routing, tools, and
     // system prompt govern the sub-task. The per-delegate `max_tokens` cap and the
@@ -541,10 +582,23 @@ async fn call_sub_agent(spec: &DelegateSpec, max_tokens: u32) -> Result<String, 
         if let Some(id) = spec.agent_id.as_deref().filter(|s| !s.is_empty()) {
             if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
                 let conversation_id = format!("delegate-{}", uuid::Uuid::new_v4().simple());
-                return runner
-                    .run(Some(id.to_string()), conversation_id, spec.task.clone())
+                let text = runner
+                    .run(
+                        Some(id.to_string()),
+                        conversation_id.clone(),
+                        spec.task.clone(),
+                    )
                     .await
-                    .map_err(|e| format!("delegate '{id}' failed: {e}"));
+                    .map_err(|e| {
+                        SubAgentError::with_child(
+                            format!("delegate '{id}' failed: {e}"),
+                            conversation_id.clone(),
+                        )
+                    })?;
+                return Ok(SubAgentCall {
+                    text,
+                    child_conversation_id: Some(conversation_id),
+                });
             }
         }
     }
@@ -623,26 +677,34 @@ async fn call_sub_agent(spec: &DelegateSpec, max_tokens: u32) -> Result<String, 
                 .unwrap_or(false);
             if allow_fallback {
                 // Opt-in: fall back to direct provider POST using the legacy env vars.
-                call_sub_agent_direct(spec, max_tokens, &payload).await
+                call_sub_agent_direct(spec, max_tokens, &payload)
+                    .await
+                    .map(|text| SubAgentCall {
+                        text,
+                        child_conversation_id: None,
+                    })
+                    .map_err(SubAgentError::new)
             } else {
-                Err(format!(
+                Err(SubAgentError::new(format!(
                     "sub-agent: fail-closed — gateway unreachable at {gw_url} \
                      and RYU_ALLOW_GATEWAY_FALLBACK is not set: {e}"
-                ))
+                )))
             }
         }
         Ok(resp) => {
             if !resp.status().is_success() {
-                return Err(format!(
+                return Err(SubAgentError::new(format!(
                     "sub-agent: gateway returned HTTP {}",
                     resp.status()
-                ));
+                )));
             }
-            let body: serde_json::Value = resp
-                .json()
-                .await
-                .map_err(|e| format!("sub-agent: invalid gateway response: {e}"))?;
-            Ok(extract_completion_text(&body))
+            let body: serde_json::Value = resp.json().await.map_err(|e| {
+                SubAgentError::new(format!("sub-agent: invalid gateway response: {e}"))
+            })?;
+            Ok(SubAgentCall {
+                text: extract_completion_text(&body),
+                child_conversation_id: None,
+            })
         }
     }
 }
@@ -766,6 +828,10 @@ mod tests {
         // Point gateway at an unroutable address so the request hangs, then
         // assert the wall-time cap fires fast and yields a cap-violation error.
         // RYU_GATEWAY_URL is the gateway URL; fallback is disabled by default.
+        // Process-global var shared with other modules' tests: hold the gateway-env
+        // lock across the body and restore on exit.
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let prev_url = std::env::var("RYU_GATEWAY_URL").ok();
         unsafe {
             std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
         }
@@ -788,7 +854,10 @@ mod tests {
         assert!(results[0].error.is_some());
 
         unsafe {
-            std::env::remove_var("RYU_GATEWAY_URL");
+            match prev_url {
+                Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
+                None => std::env::remove_var("RYU_GATEWAY_URL"),
+            }
         }
     }
 
@@ -796,6 +865,8 @@ mod tests {
     async fn fanout_preserves_order_and_streams_progress() {
         // Three summarise delegates against an unreachable gateway: each fails
         // fast but ordering and progress events must still hold.
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let prev_url = std::env::var("RYU_GATEWAY_URL").ok();
         unsafe {
             std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
         }
@@ -836,7 +907,10 @@ mod tests {
         assert_eq!(finished, 3);
 
         unsafe {
-            std::env::remove_var("RYU_GATEWAY_URL");
+            match prev_url {
+                Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
+                None => std::env::remove_var("RYU_GATEWAY_URL"),
+            }
         }
     }
 
@@ -845,6 +919,8 @@ mod tests {
     #[tokio::test]
     async fn durable_fanout_skips_completed_delegates_on_resume() {
         // Point gateway at blackhole so any live call fails fast.
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let prev_url = std::env::var("RYU_GATEWAY_URL").ok();
         unsafe {
             std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
         }
@@ -904,7 +980,10 @@ mod tests {
         );
 
         unsafe {
-            std::env::remove_var("RYU_GATEWAY_URL");
+            match prev_url {
+                Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
+                None => std::env::remove_var("RYU_GATEWAY_URL"),
+            }
         }
     }
 
@@ -912,6 +991,9 @@ mod tests {
     /// opted in, the delegate error message mentions the gateway.
     #[tokio::test]
     async fn fail_closed_when_gateway_unreachable() {
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let prev_url = std::env::var("RYU_GATEWAY_URL").ok();
+        let prev_fb = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
         unsafe {
             std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
             std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
@@ -939,7 +1021,14 @@ mod tests {
         );
 
         unsafe {
-            std::env::remove_var("RYU_GATEWAY_URL");
+            match prev_url {
+                Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
+                None => std::env::remove_var("RYU_GATEWAY_URL"),
+            }
+            match prev_fb {
+                Some(v) => std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", v),
+                None => std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK"),
+            }
         }
     }
 
@@ -949,6 +1038,9 @@ mod tests {
         // the Gateway completion path — proven here by the fail-closed error when
         // the gateway is unreachable. This exercises the inline branch of
         // `call_sub_agent` end-to-end without a live gateway.
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let prev_url = std::env::var("RYU_GATEWAY_URL").ok();
+        let prev_fb = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
         unsafe {
             std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
             std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
@@ -981,7 +1073,14 @@ mod tests {
         );
 
         unsafe {
-            std::env::remove_var("RYU_GATEWAY_URL");
+            match prev_url {
+                Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
+                None => std::env::remove_var("RYU_GATEWAY_URL"),
+            }
+            match prev_fb {
+                Some(v) => std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", v),
+                None => std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK"),
+            }
         }
     }
 
@@ -991,6 +1090,9 @@ mod tests {
         // inline clean-context Gateway path uniformly (never the registered-agent
         // path), so behavior does not depend on whether a runner is live. With an
         // unreachable gateway this surfaces as the fail-closed gateway error.
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let prev_url = std::env::var("RYU_GATEWAY_URL").ok();
+        let prev_fb = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
         unsafe {
             std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
             std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
@@ -1024,7 +1126,14 @@ mod tests {
             "inline+agent_id must take the inline gateway path, got: {err}"
         );
         unsafe {
-            std::env::remove_var("RYU_GATEWAY_URL");
+            match prev_url {
+                Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
+                None => std::env::remove_var("RYU_GATEWAY_URL"),
+            }
+            match prev_fb {
+                Some(v) => std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", v),
+                None => std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK"),
+            }
         }
     }
 

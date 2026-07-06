@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use agent_client_protocol::schema::{
     AuthMethodId, AuthenticateRequest, AvailableCommandInput, CancelNotification,
@@ -1324,6 +1325,8 @@ impl AgentAdapter for AcpAdapter {
                 transport: Some("acp".into()),
                 recommended: None,
                 version: None,
+                latest_version: None,
+                version_status: None,
                 locked: None,
                 enabled: None,
                 gateway_bypass: None,
@@ -1347,6 +1350,8 @@ impl AgentAdapter for AcpAdapter {
                 transport: None,
                 recommended: None,
                 version: None,
+                latest_version: None,
+                version_status: None,
                 locked: None,
                 enabled: None,
                 gateway_bypass: None,
@@ -2304,6 +2309,57 @@ pub struct AcpAgentEntry {
     /// entry's `spawn_cmd` already points at that absolute binary path. `None`
     /// for self-fetching (npx/uvx) and always-available agents.
     pub archive_spec: Option<crate::sidecar::agents::archive_agent::ArchiveAgentSpec>,
+    /// Optional live version/update metadata for external CLIs. `binary` is
+    /// probed with `--version`; `npm_package` is checked against npm latest.
+    pub version_probe: Option<AgentVersionProbe>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentVersionProbe {
+    pub binary: &'static str,
+    pub npm_package: &'static str,
+}
+
+pub fn parse_cli_version(output: &str) -> Option<String> {
+    static VERSION_RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = VERSION_RE.get_or_init(|| {
+        regex::Regex::new(r"\bv?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b")
+            .expect("valid CLI version regex")
+    });
+    re.captures(output)
+        .and_then(|captures| captures.get(1))
+        .map(|m| m.as_str().to_owned())
+}
+
+pub async fn probe_cli_version(binary: &str) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut cmd = tokio::process::Command::new("cmd");
+        cmd.args(["/c", binary, "--version"]);
+        cmd
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut cmd = tokio::process::Command::new(binary);
+        cmd.arg("--version");
+        cmd
+    };
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(4),
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)?;
+
+    let mut combined = String::new();
+    combined.push_str(&String::from_utf8_lossy(&output.stdout));
+    combined.push('\n');
+    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    parse_cli_version(&combined)
 }
 
 /// Returns `true` if `binary` resolves to an executable file anywhere in `PATH`.
@@ -2771,6 +2827,7 @@ fn registry_acp_entry(
         recommended: false,
         gateway_bypass: true,
         archive_spec,
+        version_probe: None,
     }
 }
 
@@ -3018,6 +3075,7 @@ impl AcpAgentRegistry {
                     recommended: true,
                     gateway_bypass: false,
                     archive_spec: None,
+                    version_probe: None,
                 },
                 AcpAgentEntry {
                     id: "acp:claude".into(),
@@ -3034,6 +3092,10 @@ impl AcpAgentRegistry {
                     // residual bypass pending a translating ingress in the gateway.
                     gateway_bypass: true,
                     archive_spec: None,
+                    version_probe: Some(AgentVersionProbe {
+                        binary: "claude",
+                        npm_package: "@anthropic-ai/claude-code",
+                    }),
                 },
                 AcpAgentEntry {
                     id: "acp:codex".into(),
@@ -3059,6 +3121,10 @@ impl AcpAgentRegistry {
                     // crate::codex_config).
                     gateway_bypass: false,
                     archive_spec: None,
+                    version_probe: Some(AgentVersionProbe {
+                        binary: "codex",
+                        npm_package: "@openai/codex",
+                    }),
                 },
                 AcpAgentEntry {
                     id: "acp:gemini".into(),
@@ -3075,6 +3141,10 @@ impl AcpAgentRegistry {
                     // translating ingress. Residual bypass until that is built.
                     gateway_bypass: true,
                     archive_spec: None,
+                    version_probe: Some(AgentVersionProbe {
+                        binary: "gemini",
+                        npm_package: "@google/gemini-cli",
+                    }),
                 },
                 AcpAgentEntry {
                     id: "acp:pi".into(),
@@ -3092,6 +3162,10 @@ impl AcpAgentRegistry {
                     recommended: false,
                     gateway_bypass: false,
                     archive_spec: None,
+                    version_probe: Some(AgentVersionProbe {
+                        binary: "pi",
+                        npm_package: "pi-acp",
+                    }),
                 },
                 AcpAgentEntry {
                     id: "openclaw".into(),
@@ -3111,6 +3185,7 @@ impl AcpAgentRegistry {
                     // OPENAI_BASE_URL, so its egress does not traverse Ryu's gateway.
                     gateway_bypass: true,
                     archive_spec: None,
+                    version_probe: None,
                 },
                 AcpAgentEntry {
                     id: "zeroclaw".into(),
@@ -3125,6 +3200,7 @@ impl AcpAgentRegistry {
                     recommended: false,
                     gateway_bypass: false,
                     archive_spec: None,
+                    version_probe: None,
                 },
                 AcpAgentEntry {
                     id: "hermes".into(),
@@ -3143,6 +3219,7 @@ impl AcpAgentRegistry {
                     // OPENAI_BASE_URL, so its egress does not traverse Ryu's gateway.
                     gateway_bypass: true,
                     archive_spec: None,
+                    version_probe: None,
                 },
             ];
             entries.extend(registry_acp_entries());
@@ -3298,6 +3375,8 @@ impl AcpAgentRegistry {
                     engine,
                     transport: Some(transport.to_owned()),
                     version: None,
+                    latest_version: None,
+                    version_status: None,
                     locked: None,
                     enabled,
                     gateway_bypass,

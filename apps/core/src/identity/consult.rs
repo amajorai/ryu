@@ -392,9 +392,7 @@ mod tests {
     async fn consult_authenticated_read_is_grant_gated_and_never_leaks() {
         ensure_test_cipher();
         // Serialize against other gateway-env-mutating tests (process-global vars).
-        let _env_guard = super::super::GATEWAY_ENV_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
         // Force fail-closed (an unreachable gateway) so the read is denied.
         let prev_fallback = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
         std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
@@ -448,9 +446,7 @@ mod tests {
     async fn consult_injects_credential_when_authenticated_and_consuming() {
         ensure_test_cipher();
         // Serialize against other gateway-env-mutating tests (process-global vars).
-        let _env_guard = super::super::GATEWAY_ENV_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
         // Fallback ON + an unreachable gateway → the grant check fails OPEN (Allow),
         // so the governed read succeeds without a live gateway.
         let prev_fallback = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();

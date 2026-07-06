@@ -695,6 +695,13 @@ mod tests {
         // guaranteed-unreachable gateway and enable the unreachable→allow
         // fallback (deterministic regardless of any gateway running locally); the
         // gate's deny behavior is covered by the gateway module's own tests.
+        // These are process-global vars other modules' tests also mutate, so hold
+        // the shared gateway-env lock across the whole body and restore on exit —
+        // otherwise a parallel test can strip RYU_ALLOW_GATEWAY_FALLBACK during
+        // the await and flip this into a fail-closed deny.
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let prev_url = std::env::var("RYU_GATEWAY_URL").ok();
+        let prev_fb = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
         std::env::set_var("RYU_GATEWAY_URL", "http://127.0.0.1:1");
         std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", "1");
         let out = resume_execution(
@@ -704,8 +711,14 @@ mod tests {
             serde_json::json!({}),
         )
         .await;
-        std::env::remove_var("RYU_GATEWAY_URL");
-        std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
+        match prev_url {
+            Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
+            None => std::env::remove_var("RYU_GATEWAY_URL"),
+        }
+        match prev_fb {
+            Some(v) => std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", v),
+            None => std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK"),
+        }
         match out {
             ExecOutcome::Completed {
                 is_error, error, ..

@@ -77,23 +77,46 @@ pub fn set_routing_enabled(active: bool) {
     routing_flag().store(active, Ordering::Relaxed);
 }
 
+/// Shared, poison-tolerant lock serializing EVERY test — in ANY module — that
+/// mutates or reads the process-global gateway-policy flags (firewall / routing
+/// here, plus `headroom::is_enabled` and `sandbox::is_enabled`, which
+/// `gateway_spawn_env` folds into the same surface). cargo runs tests in one
+/// process in parallel, so a test that flips a flag ON can be observed by another
+/// mid-assertion unless both hold this one lock.
+#[cfg(test)]
+pub(crate) static POLICY_FLAGS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Acquire [`POLICY_FLAGS_TEST_LOCK`], recovering a poisoned guard.
+#[cfg(test)]
+pub(crate) fn lock_policy_flags() -> std::sync::MutexGuard<'static, ()> {
+    POLICY_FLAGS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn firewall_flag_toggles() {
+        let _lock = lock_policy_flags();
+        let prev = firewall_enabled();
         set_firewall_enabled(true);
         assert!(firewall_enabled());
         set_firewall_enabled(false);
         assert!(!firewall_enabled());
+        set_firewall_enabled(prev);
     }
 
     #[test]
     fn routing_flag_toggles() {
+        let _lock = lock_policy_flags();
+        let prev = routing_enabled();
         set_routing_enabled(true);
         assert!(routing_enabled());
         set_routing_enabled(false);
         assert!(!routing_enabled());
+        set_routing_enabled(prev);
     }
 }

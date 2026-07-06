@@ -171,6 +171,8 @@ mod tests {
 
     #[test]
     fn passthrough_url_targets_openai_responses_path() {
+        // Serialize against every other RYU_GATEWAY_URL toucher (process-global).
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
         std::env::set_var("RYU_GATEWAY_URL", "http://test-gw.local:9999");
         let url = passthrough_base_url();
         assert_eq!(

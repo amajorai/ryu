@@ -99,9 +99,7 @@ mod tests {
     async fn read_is_denied_fail_closed_without_gateway() {
         ensure_test_cipher();
         // Serialize against other gateway-env-mutating tests (process-global vars).
-        let _env_guard = super::super::GATEWAY_ENV_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
         // Make sure fallback is OFF for this test (other tests may set it).
         let prev = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
         std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");

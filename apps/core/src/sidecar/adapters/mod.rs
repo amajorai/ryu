@@ -147,6 +147,14 @@ pub struct AgentInfo {
     /// are not versioned as app templates). Custom agents always carry a version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Latest upstream version discovered for an external agent runtime.
+    /// Omitted for custom agents and registry entries without update metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
+    /// Update status for an external agent runtime:
+    /// `"current" | "behind_latest" | "unknown"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_status: Option<String>,
     /// When `true` the agent is locked and cannot be edited via the API.
     /// Omitted from the response when `false`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -874,6 +882,20 @@ fn build_stats_part(
             .and_then(|u| u.get(key))
             .and_then(Value::as_u64)
     };
+    // Nested OpenAI usage details: cached prompt tokens live under
+    // `prompt_tokens_details.cached_tokens`, reasoning tokens under
+    // `completion_tokens_details.reasoning_tokens`. Providers that don't report
+    // them (llama.cpp, most local engines) simply omit the fields.
+    let usage_nested = |outer: &str, inner: &str| {
+        last_usage
+            .as_ref()
+            .and_then(|u| u.get(outer))
+            .and_then(|d| d.get(inner))
+            .and_then(Value::as_u64)
+    };
+
+    let cached_tokens = usage_nested("prompt_tokens_details", "cached_tokens");
+    let reasoning_tokens = usage_nested("completion_tokens_details", "reasoning_tokens");
 
     let prompt_tokens = timings_f("prompt_n")
         .map(|n| n as u64)
@@ -882,8 +904,8 @@ fn build_stats_part(
         .map(|n| n as u64)
         .or_else(|| usage_u("completion_tokens"))
         .unwrap_or(delta_count);
-    let total_tokens = usage_u("total_tokens")
-        .or_else(|| Some(prompt_tokens.unwrap_or(0) + completion_tokens));
+    let total_tokens =
+        usage_u("total_tokens").or_else(|| Some(prompt_tokens.unwrap_or(0) + completion_tokens));
 
     // Generation window: first content token → now. TTFT: stream open → first token.
     let duration_ms = first_token_at.map(|t| now.duration_since(t).as_millis() as u64);
@@ -909,13 +931,25 @@ fn build_stats_part(
     }
 
     let mut stats = serde_json::Map::new();
-    stats.insert("tokensPerSecond".into(), serde_json::json!(tokens_per_second));
+    stats.insert(
+        "tokensPerSecond".into(),
+        serde_json::json!(tokens_per_second),
+    );
     if let Some(pps) = prompt_per_second {
         stats.insert("promptPerSecond".into(), serde_json::json!(pps));
     }
-    stats.insert("completionTokens".into(), serde_json::json!(completion_tokens));
+    stats.insert(
+        "completionTokens".into(),
+        serde_json::json!(completion_tokens),
+    );
     if let Some(pt) = prompt_tokens {
         stats.insert("promptTokens".into(), serde_json::json!(pt));
+    }
+    if let Some(ct) = cached_tokens {
+        stats.insert("cachedTokens".into(), serde_json::json!(ct));
+    }
+    if let Some(rt) = reasoning_tokens {
+        stats.insert("reasoningTokens".into(), serde_json::json!(rt));
     }
     if let Some(tt) = total_tokens {
         stats.insert("totalTokens".into(), serde_json::json!(tt));
@@ -4495,7 +4529,10 @@ async fn route_acp_stream(
                     if let Some(v) = usage_total_tokens {
                         stats.insert("totalTokens".into(), serde_json::json!(v));
                     }
-                    stats.insert("tokensPerSecond".into(), serde_json::json!(tokens_per_second));
+                    stats.insert(
+                        "tokensPerSecond".into(),
+                        serde_json::json!(tokens_per_second),
+                    );
                     stats.insert("durationMs".into(), serde_json::json!(duration_ms));
                     stats.insert("done".into(), serde_json::json!(done));
                     emit!(ui_data("acp-usage", &Value::Object(stats)));
@@ -5798,10 +5835,42 @@ mod tests {
         let data = decode_stats(&part);
         // ~100 tokens / ~2s ≈ 50 tok/s (allow slack for scheduling jitter).
         let tps = data["tokensPerSecond"].as_f64().unwrap();
-        assert!((30.0..=60.0).contains(&tps), "tps {tps} not in expected band");
+        assert!(
+            (30.0..=60.0).contains(&tps),
+            "tps {tps} not in expected band"
+        );
         assert_eq!(data["completionTokens"], 100);
         assert_eq!(data["totalTokens"], 150);
         assert!(data.get("promptPerSecond").is_none());
+    }
+
+    #[test]
+    fn stats_surface_cached_and_reasoning_tokens() {
+        // Providers that report nested usage details (cached prompt tokens,
+        // reasoning tokens) get them surfaced as `cachedTokens`/`reasoningTokens`
+        // for the context-meter breakdown; llama.cpp/local (no details) omit them.
+        let usage = serde_json::json!({
+            "prompt_tokens": 200,
+            "completion_tokens": 80,
+            "total_tokens": 280,
+            "prompt_tokens_details": { "cached_tokens": 128 },
+            "completion_tokens_details": { "reasoning_tokens": 32 }
+        });
+        let open = std::time::Instant::now();
+        let first = Some(std::time::Instant::now() - std::time::Duration::from_secs(2));
+        let part = build_stats_part(open, first, 3, &None, &Some(usage))
+            .expect("usage produces a stats part");
+        let data = decode_stats(&part);
+        assert_eq!(data["cachedTokens"], 128);
+        assert_eq!(data["reasoningTokens"], 32);
+
+        // Absent details → fields omitted entirely (not zero).
+        let plain = serde_json::json!({ "prompt_tokens": 10, "completion_tokens": 5 });
+        let part = build_stats_part(open, first, 3, &None, &Some(plain))
+            .expect("plain usage still produces a part");
+        let data = decode_stats(&part);
+        assert!(data.get("cachedTokens").is_none());
+        assert!(data.get("reasoningTokens").is_none());
     }
 
     #[test]

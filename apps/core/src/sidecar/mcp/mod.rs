@@ -1549,6 +1549,13 @@ pub use crate::runnable::self_build::SERVER_NAME as SELF_BUILD_SERVER;
 mod tests {
     use super::*;
 
+    /// Serializes the tests that mutate the process-global `RYU_MCP_CONFIG` env
+    /// var (they point `load`/`reload` at different temp configs). Poison-tolerant.
+    static MCP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_mcp_env() -> std::sync::MutexGuard<'static, ()> {
+        MCP_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn sample_tool() -> RegistryTool {
         RegistryTool {
             id: "fs__read_file".into(),
@@ -1616,6 +1623,7 @@ mod tests {
 
     #[test]
     fn load_survives_missing_config_and_keeps_builtins() {
+        let _lock = lock_mcp_env();
         // Point at a path that cannot exist so `load()` takes the NotFound arm.
         let missing = std::env::temp_dir().join("ryu-mcp-does-not-exist-u14.json");
         let _ = std::fs::remove_file(&missing);
@@ -1655,10 +1663,12 @@ mod tests {
         assert!(!file.mcp_servers["git"].enabled);
         let reg = McpRegistry::from_servers(file.mcp_servers);
         assert_eq!(reg.len(), 2);
-        // Two config servers plus the always-present built-in providers
-        // (Shadow, Spider, Exa, Sandbox, notify, channel, search_conversations).
+        // Two config servers plus the 14 always-present built-in providers
+        // (shadow, spider, exa, web_fetch, sandbox, notify, channel,
+        // search_conversations, threads, delegate, orchestrator, skills, advisor,
+        // ui) — all unconditionally listed by `server_summaries`.
         let summaries = reg.server_summaries();
-        assert_eq!(summaries.len(), 9);
+        assert_eq!(summaries.len(), 16);
         assert!(summaries.iter().any(|s| s.name == shadow::SERVER_NAME));
         assert!(summaries.iter().any(|s| s.name == spider::SERVER_NAME));
         assert!(summaries.iter().any(|s| s.name == exa::SERVER_NAME));
@@ -1705,6 +1715,7 @@ mod tests {
     fn reload_picks_up_written_entry() {
         use std::io::Write as _;
 
+        let _lock = lock_mcp_env();
         // Write a temp mcp.json with one user server.
         let dir = std::env::temp_dir().join(format!("ryu-mcp-reload-test-{}", uuid_simple()));
         std::fs::create_dir_all(&dir).unwrap();

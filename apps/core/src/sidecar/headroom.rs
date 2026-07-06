@@ -332,12 +332,16 @@ mod tests {
     fn set_enabled_drives_is_enabled() {
         // The plugin-driven flag is the source of truth: set_enabled flips what
         // is_enabled (and thus gateway_spawn_env) sees, deterministically and
-        // independent of the RYU_HEADROOM_ENABLED dev seed. This test is the only
-        // mutator of the process-global flag in the test binary.
+        // independent of the RYU_HEADROOM_ENABLED dev seed. The headroom flag is
+        // also read by gateway's `policy_flags_roundtrip`; serialize against it on
+        // the shared policy-flags lock and restore the prior value on exit.
+        let _flags = crate::sidecar::gateway_policy::lock_policy_flags();
+        let prev = is_enabled();
         set_enabled(true);
         assert!(is_enabled(), "set_enabled(true) → is_enabled() true");
         set_enabled(false);
         assert!(!is_enabled(), "set_enabled(false) → is_enabled() false");
+        set_enabled(prev);
     }
 
     #[test]

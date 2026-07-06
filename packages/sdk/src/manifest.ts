@@ -11,6 +11,7 @@
  * known provider literals.  A new provider must never require an SDK change.
  */
 
+// biome-ignore lint/performance/noNamespaceImport: the native UniFFI addon exposes a dynamic set of bindings resolved at runtime; a namespace import is the addon's supported entry shape.
 import * as nativeAddon from "@ryuhq/sdk-native";
 import { z } from "zod";
 
@@ -25,6 +26,12 @@ export const RunnableKindSchema = z.enum([
 	"workflow",
 	"tool",
 	"skill",
+	// A companion surface (in-desktop panel). Added so a packable plugin can
+	// declare a companion runnable that flows through Core's existing Companion
+	// handler → app_contrib → `GET /api/plugins/contributions` → the desktop
+	// `/plugin/<id>` route. Its `config.ui_entry` (see `CompanionRunnableConfigSchema`)
+	// is what `ryu pack` bundles into `ui_code`.
+	"companion",
 ]);
 
 export type RunnableKind = z.infer<typeof RunnableKindSchema>;
@@ -42,6 +49,18 @@ export const RunnableMetaSchema = z.object({
 	name: z.string().min(1),
 	/** Which kind of runnable this entry describes. */
 	kind: RunnableKindSchema,
+	/**
+	 * Optional per-kind config blob. Mirrors Core's `RunnableEntry.config`
+	 * (`Option<serde_json::Value>`) so a manifest authored here round-trips
+	 * through Core-strict validation. Left opaque (a record) at this authoring
+	 * layer; the per-kind shape is enforced by Core's `validate_runnable`.
+	 *
+	 * For a `companion` runnable, `config.ui_entry` names the plugin's UI entry
+	 * module (relative to the manifest dir). `ryu pack` bundles that entry into
+	 * the emitted `ui_code`; Core's `CompanionConfig.ui_entry` is the lockstep
+	 * field so a packed companion validates.
+	 */
+	config: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type RunnableMeta = z.infer<typeof RunnableMetaSchema>;

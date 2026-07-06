@@ -5,9 +5,10 @@
 //! lands in Core. Three discriminated kinds:
 //!   - `tool` (default) → forward to Core `POST /api/mcp/tools/call`, mapping
 //!     `{ok,output}` → `{ok,result}`.
-//!   - `execute` / `resume` → forward to Core's PTC endpoints (P4). Those Core
-//!     endpoints are not built yet (P4); this issue forwards them so the wire
-//!     contract compiles, returning a clear not-yet error when Core lacks them.
+//!   - `execute` / `resume` → forward to Core's PTC endpoints (`/api/tools/exec`
+//!     and `/api/tools/exec/resume`). Those Core endpoints are **built and live**
+//!     (real Deno-subprocess sandbox + parked-execution resume); the gateway is
+//!     purely the governance front and returns Core's outcome verbatim.
 //!
 //! Gating (Contract 2 / B-9): `(trusted_forwarder || master_key) &&
 //! !mesh_enabled()`. `agent_id` is logically required (Core is fail-closed and
@@ -140,9 +141,11 @@ async fn exec_kind_tool(
     }
 }
 
-/// `kind=execute|resume` → Core PTC endpoints (P4). Those endpoints are not
-/// built yet; forwarding them keeps the wire contract intact and surfaces a
-/// clear error if Core lacks the route.
+/// `kind=execute|resume` → Core PTC endpoints (`/api/tools/exec[/resume]`, live).
+/// The gateway is the governance front; Core runs the sandbox and returns the
+/// flat `ExecOutcome` envelope, which is relayed back verbatim as `result`. Any
+/// Core-side error (e.g. a `404 execution_not_found` on resume, a missing/unknown
+/// agent, or no backend built) is surfaced as-is.
 async fn exec_kind_forward(
     catalog: &dyn super::CoreCatalog,
     path: &str,
@@ -162,7 +165,7 @@ async fn exec_kind_forward(
     match catalog.forward_exec(path, forward).await {
         Ok(result) => Ok(Json(ExecToolResponse::ok(result))),
         Err(e) => Ok(Json(ExecToolResponse::err(format!(
-            "code execution not yet available (Phase 4): {e}"
+            "code execution failed: {e}"
         )))),
     }
 }

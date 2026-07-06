@@ -387,8 +387,20 @@ mod tests {
 
     // ── enable (stub mode) ─────────────────────────────────────────────────────
 
+    /// Serialize the tests that mutate the process-global `RYU_STUB_GRANT_VALIDATION`
+    /// env var. Rust runs tests in parallel, so without this they clobber each
+    /// other's save/restore and one sees the var cleared mid-flight — falling
+    /// through to a real Gateway call (127.0.0.1:7981) that is not running. The
+    /// function-local `static` is a single shared lock; hold the guard for the
+    /// whole test body (fine under the current-thread `#[tokio::test]` runtime).
+    fn stub_grants_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[tokio::test]
     async fn enable_in_stub_mode_allows_all_grants() {
+        let _env = stub_grants_guard();
         let prev = std::env::var(super::ENV_STUB_GRANTS).ok();
         std::env::set_var(super::ENV_STUB_GRANTS, "1");
 
@@ -411,6 +423,7 @@ mod tests {
 
     #[tokio::test]
     async fn enable_uninstalled_app_fails() {
+        let _env = stub_grants_guard();
         let prev = std::env::var(super::ENV_STUB_GRANTS).ok();
         std::env::set_var(super::ENV_STUB_GRANTS, "1");
 
@@ -430,6 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn disable_clears_state() {
+        let _env = stub_grants_guard();
         let prev = std::env::var(super::ENV_STUB_GRANTS).ok();
         std::env::set_var(super::ENV_STUB_GRANTS, "1");
 

@@ -523,6 +523,14 @@ fn migrate_legacy_skills() {
 #[derive(Clone)]
 pub struct SkillRegistry {
     inner: Arc<RwLock<Vec<SkillRecord>>>,
+    /// Skills contributed by **enabled plugins** (`RunnableKind::Skill`), kept in a
+    /// bag SEPARATE from `inner` so a disk [`Self::reload`] can never wipe them —
+    /// exactly mirroring `McpRegistry::register_app_tool`'s `app_tools`. Populated
+    /// by [`Self::register_app_skill`] on plugin enable, drained by
+    /// [`Self::unregister_app_skill`] on disable. In-memory only; survives restart
+    /// because `onStartup` re-runs every enabled plugin through the runnable
+    /// registry. Merged into [`Self::list_all`] and [`Self::enabled`].
+    app_skills: Arc<RwLock<Vec<SkillRecord>>>,
 }
 
 impl SkillRegistry {
@@ -530,6 +538,7 @@ impl SkillRegistry {
     pub fn empty() -> Self {
         Self {
             inner: Arc::new(RwLock::new(Vec::new())),
+            app_skills: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -598,32 +607,86 @@ impl SkillRegistry {
         *self.inner.write().expect("SkillRegistry lock poisoned") = skills;
     }
 
-    /// Return all installed skills (enabled and disabled), e.g. for listing.
-    pub fn list_all(&self) -> Vec<SkillRecord> {
-        self.inner
-            .read()
-            .expect("SkillRegistry lock poisoned")
-            .clone()
+    /// Register a skill contributed by an enabled plugin (`RunnableKind::Skill`).
+    ///
+    /// The mirror of `McpRegistry::register_app_tool`: the skill is added to the
+    /// `app_skills` bag so it is immediately listable ([`Self::list_all`]) and, when
+    /// `enabled`, injected ([`Self::enabled`]) exactly like a first-party skill —
+    /// without touching disk. Idempotent: re-registering the same id replaces the
+    /// existing entry, so re-enabling a plugin is a no-op. `id` uses the
+    /// `app__<skill_id>` convention every other app contribution shares.
+    pub fn register_app_skill(&self, id: String, name: String, description: Option<String>) {
+        let record = SkillRecord {
+            id: id.clone(),
+            name,
+            description,
+            // App-declared skills carry only identity metadata at this layer (the
+            // `SkillConfig` is `skill_id`-only), mirroring how `register_app_tool`
+            // registers a slug with no executable body. A real instruction body
+            // lands when the skill is materialised on disk.
+            instructions: String::new(),
+            allowed_tools: Vec::new(),
+            enabled: true,
+            always_on: false,
+        };
+        if let Ok(mut skills) = self.app_skills.write() {
+            skills.retain(|s| s.id != id);
+            skills.push(record);
+        }
     }
 
-    /// Return only the enabled skills.
+    /// Remove a plugin-registered skill by id. Called when a plugin is disabled so
+    /// its skill stops being listable and injectable. Idempotent: removing an id
+    /// that is not present is a no-op.
+    pub fn unregister_app_skill(&self, id: &str) {
+        if let Ok(mut skills) = self.app_skills.write() {
+            skills.retain(|s| s.id != id);
+        }
+    }
+
+    /// Snapshot of the plugin-contributed skills (the `app_skills` bag).
+    fn app_skills_snapshot(&self) -> Vec<SkillRecord> {
+        self.app_skills
+            .read()
+            .map(|v| v.clone())
+            .unwrap_or_default()
+    }
+
+    /// Return all installed skills (enabled and disabled), e.g. for listing.
+    /// Includes both disk-loaded skills and plugin-contributed `app_skills`.
+    pub fn list_all(&self) -> Vec<SkillRecord> {
+        let mut all = self
+            .inner
+            .read()
+            .expect("SkillRegistry lock poisoned")
+            .clone();
+        all.extend(self.app_skills_snapshot());
+        all
+    }
+
+    /// Return only the enabled skills (disk-loaded + plugin-contributed).
     pub fn enabled(&self) -> Vec<SkillRecord> {
-        self.inner
+        let mut enabled: Vec<SkillRecord> = self
+            .inner
             .read()
             .expect("SkillRegistry lock poisoned")
             .iter()
             .filter(|s| s.enabled)
             .cloned()
-            .collect()
+            .collect();
+        enabled.extend(self.app_skills_snapshot().into_iter().filter(|s| s.enabled));
+        enabled
     }
 
-    /// Return `true` when at least one skill is enabled.
+    /// Return `true` when at least one skill is enabled (disk-loaded or
+    /// plugin-contributed).
     pub fn has_enabled(&self) -> bool {
         self.inner
             .read()
             .expect("SkillRegistry lock poisoned")
             .iter()
             .any(|s| s.enabled)
+            || self.app_skills_snapshot().iter().any(|s| s.enabled)
     }
 
     /// Return the enabled skills permitted by a per-agent allowlist.
@@ -817,6 +880,63 @@ name: "Minimal Skill"
 ---
 Do something minimal.
 "#;
+
+    // ── App-contributed skills (plugin enable/disable) ───────────────────────────
+
+    #[test]
+    fn register_app_skill_is_listable_and_enabled() {
+        // Hold the env lock and point RYU_SKILLS_DIR at an empty tempdir so the
+        // `reload()` below reads zero disk skills (never the real ~/.claude/skills),
+        // leaving only the one app-contributed skill.
+        let _env = SKILLS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("RYU_SKILLS_DIR");
+        std::env::set_var("RYU_SKILLS_DIR", dir.path());
+
+        let reg = SkillRegistry::empty();
+        assert!(reg.list_all().is_empty());
+        assert!(!reg.has_enabled());
+
+        reg.register_app_skill(
+            "app__research".to_owned(),
+            "Research".to_owned(),
+            Some("App-registered skill".to_owned()),
+        );
+
+        assert_eq!(reg.list_all().len(), 1);
+        assert!(reg.has_enabled(), "app skill defaults to enabled");
+        assert_eq!(reg.enabled()[0].id, "app__research");
+        // A disk reload must NOT wipe the app_skills bag.
+        reg.reload();
+        assert_eq!(
+            reg.list_all().len(),
+            1,
+            "reload must not drop app-contributed skills"
+        );
+
+        match prev {
+            Some(v) => std::env::set_var("RYU_SKILLS_DIR", v),
+            None => std::env::remove_var("RYU_SKILLS_DIR"),
+        }
+    }
+
+    #[test]
+    fn register_app_skill_is_idempotent_and_unregister_is_symmetric() {
+        let reg = SkillRegistry::empty();
+        reg.register_app_skill("app__x".to_owned(), "X".to_owned(), None);
+        reg.register_app_skill("app__x".to_owned(), "X (v2)".to_owned(), None);
+        assert_eq!(
+            reg.list_all().len(),
+            1,
+            "re-register replaces, not duplicates"
+        );
+        assert_eq!(reg.list_all()[0].name, "X (v2)");
+
+        reg.unregister_app_skill("app__x");
+        assert!(reg.list_all().is_empty());
+        // Unregistering a missing id is a no-op.
+        reg.unregister_app_skill("app__missing");
+    }
 
     // ── Parser ─────────────────────────────────────────────────────────────────
 

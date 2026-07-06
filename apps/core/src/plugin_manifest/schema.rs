@@ -89,6 +89,15 @@ pub struct CompanionConfig {
     /// Keyboard shortcut string (e.g. `"ctrl+shift+r"`).
     #[serde(default)]
     pub shortcut: Option<String>,
+
+    /// Optional path (relative to the manifest) to the companion's sandboxed-UI
+    /// entry module. When present, the plugin bundle carries a `ui_code` blob
+    /// (built by `ryu pack` from this entry) that the desktop loads into the
+    /// null-origin extension-host iframe. Absent for a companion that only
+    /// declares a data-driven summary (no third-party code). Lockstep with the
+    /// SDK's `RunnableMeta.config.ui_entry`.
+    #[serde(default)]
+    pub ui_entry: Option<String>,
 }
 
 /// Config for a `kind: "channel"` Runnable.
@@ -176,14 +185,21 @@ pub struct ExternalRuntimeConfig {
 }
 
 /// A single asset an external runtime needs, fetched before first run. Either a
-/// direct https URL or an `hf:<owner>/<repo>` reference; `dest_under_ryu` is the
-/// relative path beneath `~/.ryu` where it lands (Core-owned).
+/// direct https URL or an `hf:<owner>/<repo>/<path>` reference; `dest_under_ryu`
+/// is the relative directory beneath `~/.ryu` where it lands (Core-owned) — the
+/// filename is derived from the source's last path segment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssetSpec {
-    /// A direct https URL or an `hf:<owner>/<repo>` reference.
+    /// A direct **https** URL, or an `hf:<owner>/<repo>/<path>` reference to a
+    /// single file on the Hub. A repo-only `hf:<owner>/<repo>` ref (no file path)
+    /// is **not** provisionable yet — full-repo snapshot needs Hub tree-listing
+    /// that is not wired into the provisioner. The provisioner
+    /// ([`crate::sidecar::external_runtime`]) rejects `http://` and other schemes.
     pub source: String,
 
-    /// Destination path relative to `~/.ryu` (e.g. `"models/hf"`).
+    /// Destination directory relative to `~/.ryu` (e.g. `"models/hf"`); the
+    /// fetched file lands at `~/.ryu/<dest_under_ryu>/<filename>`. Must be a
+    /// traversal-safe relative path (no `..`, not absolute).
     pub dest_under_ryu: String,
 
     /// Optional SHA-256 for checksum verification (direct-URL assets).

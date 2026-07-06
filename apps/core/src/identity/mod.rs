@@ -238,14 +238,6 @@ pub fn global() -> Option<&'static IdentityStore> {
     STORE.get()
 }
 
-/// Serializes tests that mutate the process-global gateway env
-/// (`RYU_GATEWAY_URL` / `RYU_ALLOW_GATEWAY_FALLBACK`). Those vars are shared by
-/// the whole process, so two such tests running in parallel can read each
-/// other's transient values. Both [`governed`] and [`consult`] grab this lock for
-/// the duration of their env mutation so they never interleave.
-#[cfg(test)]
-pub(crate) static GATEWAY_ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 #[cfg(test)]
 mod tests {
     use super::*;

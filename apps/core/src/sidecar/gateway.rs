@@ -1103,6 +1103,42 @@ async fn health_check(base_url: &str) -> bool {
     )
 }
 
+/// Shared, poison-tolerant lock serializing EVERY test — in ANY module — that
+/// mutates the process-global gateway env vars (`RYU_GATEWAY_URL`,
+/// `RYU_ALLOW_GATEWAY_FALLBACK`, and the scan gate's `RYU_EXEC_APPROVAL_MODE`),
+/// or that mutates ACP gateway-injection env (`RYU_ACP_GATEWAY_INJECT`) whose
+/// spawn commands read `gateway_url()`. cargo runs all tests in one process in
+/// parallel, so these globals are only race-free when every toucher holds the
+/// *same* lock. This module owns the env constants, so the canonical lock lives
+/// here; identity/tool_exec/acp/codex_config/delegate/delegation all grab it.
+#[cfg(test)]
+pub(crate) static GATEWAY_ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Acquire [`GATEWAY_ENV_TEST_LOCK`], recovering a poisoned guard so one
+/// panicking test never cascade-fails the rest.
+#[cfg(test)]
+pub(crate) fn lock_gateway_env() -> std::sync::MutexGuard<'static, ()> {
+    GATEWAY_ENV_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Shared, poison-tolerant lock serializing EVERY test — in ANY module — that
+/// touches the managed-node gate (`RYU_MANAGED_NODE`) or the process-global
+/// provider-auth key caches (`openrouter_auth` / `composio_auth`, plus their
+/// `RYU_*_API_KEY` env vars). These globals are entangled (the managed-node
+/// zero-setup test reads both), so a single lock guards them all.
+#[cfg(test)]
+pub(crate) static MANAGED_NODE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Acquire [`MANAGED_NODE_TEST_LOCK`], recovering a poisoned guard.
+#[cfg(test)]
+pub(crate) fn lock_managed_node_env() -> std::sync::MutexGuard<'static, ()> {
+    MANAGED_NODE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1304,6 +1340,7 @@ mod tests {
         // desktop UI), and the resolvers must pick them up so the gateway spawn
         // injects them with zero user setup. Pins the env-fallback contract both
         // `gateway_spawn_env` blocks depend on.
+        let _lock = super::lock_managed_node_env();
         let _g = EnvGuard::capture(&[
             ENV_MANAGED_NODE,
             "RYU_OPENROUTER_API_KEY",
@@ -1328,6 +1365,7 @@ mod tests {
 
     #[test]
     fn managed_node_defaults_off_and_reads_env() {
+        let _lock = super::lock_managed_node_env();
         let _g = EnvGuard::capture(&[ENV_MANAGED_NODE]);
         // Unset → not managed.
         assert!(!managed_node());
@@ -1350,6 +1388,14 @@ mod tests {
     /// `apply_policy` flips is observable end-to-end.
     #[test]
     fn policy_flags_roundtrip_into_their_surface() {
+        // These flip the process-global policy atomics (firewall / routing /
+        // headroom / sandbox); serialize against every other test that reads or
+        // writes them, and restore each to its prior value on exit.
+        let _flags = crate::sidecar::gateway_policy::lock_policy_flags();
+        let prev_firewall = crate::sidecar::gateway_policy::firewall_enabled();
+        let prev_routing = crate::sidecar::gateway_policy::routing_enabled();
+        let prev_headroom = crate::sidecar::headroom::is_enabled();
+        let prev_sandbox = crate::sidecar::mcp::sandbox::is_enabled();
         // The three gateway-env policies. Capture their dev-seed env so a stray
         // GATEWAY_* in the runner does not skew the OFF assertions.
         let _g = EnvGuard::capture(&[
@@ -1411,16 +1457,23 @@ mod tests {
             !crate::sidecar::mcp::sandbox::is_enabled(),
             "sandbox OFF must flip sandbox::is_enabled() back"
         );
+
+        // Restore the flags to their prior values so this test leaves no residue.
+        crate::sidecar::gateway_policy::set_firewall_enabled(prev_firewall);
+        crate::sidecar::gateway_policy::set_routing_enabled(prev_routing);
+        crate::sidecar::headroom::set_enabled(prev_headroom);
+        crate::sidecar::mcp::sandbox::set_enabled(prev_sandbox);
     }
 
     // ── Command-approval scan gate (check_exec_scan) ─────────────────────────
 
     /// Serializes the scan-gate tests: they mutate the process-global
     /// `RYU_EXEC_APPROVAL_MODE` / `RYU_GATEWAY_URL` / `RYU_ALLOW_GATEWAY_FALLBACK`
-    /// env vars, and cargo runs tests in one process in parallel. Poison-tolerant.
-    static SCAN_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// env vars. These are the SAME vars other modules' tests touch, so this
+    /// delegates to the one crate-wide [`super::GATEWAY_ENV_TEST_LOCK`] rather
+    /// than a second parallel lock (two locks on one global do not serialize).
     fn lock_scan_env() -> std::sync::MutexGuard<'static, ()> {
-        SCAN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+        super::lock_gateway_env()
     }
 
     const SCAN_ENV: &[&str] = &[

@@ -1,0 +1,52 @@
+# One-command binding generation for the ryu-sdk-uniffi cdylib.
+#
+# `ryu-sdk-uniffi` is a STANDALONE crate (its own Cargo.lock, no workspace), so
+# every recipe runs from THIS directory and `target/` lives here. Run from the
+# repo root as `just -f crates/ryu-sdk-uniffi/justfile <recipe>`, or `cd` in first.
+#
+# The native artifact is `ryu_sdk_uniffi.dll` on Windows (no `lib` prefix) and
+# `libryu_sdk_uniffi.so` / `.dylib` on Unix. The recipes below default to the
+# Windows name; override with `just LIB=libryu_sdk_uniffi.so <recipe>` on Unix.
+
+LIB := "ryu_sdk_uniffi.dll"
+
+# Build the cdylib the generators consume.
+build:
+    cargo build --release
+
+# ── Python (first-party generator, built into uniffi — always available) ────────
+# Emits bindings/python/ryu_sdk/ryu_sdk.py + copies the native lib beside it.
+gen-python: build
+    cargo run --release --bin uniffi-bindgen -- \
+      generate --library target/release/{{LIB}} \
+      --language python --out-dir ../../bindings/python/ryu_sdk
+    cp target/release/{{LIB}} ../../bindings/python/ryu_sdk/
+
+# Regenerate + run the Python smoke (proves the surface loads, incl. streaming).
+smoke-python: gen-python
+    cd ../../bindings/python && PYTHONPATH=. python smoke_test.py
+
+# ── C# (third-party generator; version-locked to uniffi 0.28.3) ─────────────────
+# One-time install of the version-matched generator:
+#   cargo install uniffi-bindgen-cs \
+#     --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.2+v0.28.3
+# Emits bindings/csharp/ryu_sdk.cs + copies the native lib beside it.
+gen-csharp: build
+    uniffi-bindgen-cs --library target/release/{{LIB}} \
+      --out-dir ../../bindings/csharp
+    cp target/release/{{LIB}} ../../bindings/csharp/
+
+# Regenerate + run the C# smoke (needs the .NET SDK, not just the runtime).
+smoke-csharp: gen-csharp
+    cd ../../bindings/csharp && dotnet run
+
+# ── Go (third-party generator; DEFERRED — cgo over the C-ABI stays primary) ─────
+# Per docs/multi-language-bindings-spec.md §4, the shipped Go path is cgo over
+# `crates/ryu-sdk-ffi` (bindings/go). This recipe is provided so a uniffi-bindgen-go
+# binding CAN be produced for parity, but it is NOT the maintained Go path.
+# One-time install of the version-matched generator:
+#   cargo install uniffi-bindgen-go \
+#     --git https://github.com/NordSecurity/uniffi-bindgen-go --tag v0.3.0+v0.28.3
+gen-go-uniffi: build
+    uniffi-bindgen-go --library target/release/{{LIB}} \
+      --out-dir ../../bindings/go-uniffi

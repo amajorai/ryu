@@ -67,6 +67,10 @@ mod tests {
 
     #[test]
     fn set_then_clear_key() {
+        // The auth key cache + RYU_OPENROUTER_API_KEY/OPENROUTER_API_KEY env are
+        // process-global and also touched by the gateway managed-node test;
+        // serialize on the shared lock so neither reads the other's value.
+        let _lock = crate::sidecar::gateway::lock_managed_node_env();
         set_key("  sk-or-abc123  ");
         assert_eq!(key().as_deref(), Some("sk-or-abc123"));
         set_key("   ");

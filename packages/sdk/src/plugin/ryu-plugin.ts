@@ -135,6 +135,11 @@ export interface RyuHostServices {
 			messages: { role: string; content: string }[]
 		): Promise<string>;
 	};
+	/** List the agents on the active node, PROJECTED to `{id,name}` only. The host
+	 *  holds the Core token and performs the fetch; the plugin never sees a token
+	 *  or any other agent field (invariant: no capability returns a secret). Gated
+	 *  by the `core:list_agents` grant. */
+	listAgents(): Promise<{ id: string; name: string }[]>;
 	/** Open a tab at a path (built-in or a route this plugin contributed). */
 	openTab(path: string): void;
 	/** Read/write the plugin's own Spaces docs (scoped by grant). */

@@ -550,6 +550,10 @@ mod tests {
 
     #[tokio::test]
     async fn missing_wasm_b64_is_an_error() {
+        // `dispatch` short-circuits to `unavailable` (Ok) when the sandbox is
+        // disabled, so serialize against every test that toggles the disabled
+        // flag (RYU_SANDBOX_DISABLED) — including gateway's policy_flags_roundtrip.
+        let _lock = crate::sidecar::gateway_policy::lock_policy_flags();
         std::env::remove_var(crate::sidecar::sandbox::ENV_SANDBOX_BACKEND);
         let err = dispatch("sandbox_exec", json!({})).await;
         assert!(err.is_err(), "missing wasm_b64 must be Err");
@@ -584,18 +588,27 @@ mod tests {
     #[tokio::test]
     async fn process_backend_missing_command_is_error() {
         // `command` is parsed before the budget gate, so this is gateway-free.
+        // Serialize against the sandbox disabled-flag toggles (see above).
+        let _lock = crate::sidecar::gateway_policy::lock_policy_flags();
         let err = dispatch("sandbox_exec", json!({ "backend": "docker" })).await;
         assert!(err.is_err(), "process backend without command must be Err");
     }
 
     #[tokio::test]
     async fn invalid_base64_is_an_error() {
+        // Serialize against the sandbox disabled-flag toggles (see above).
+        let _lock = crate::sidecar::gateway_policy::lock_policy_flags();
         let err = dispatch("sandbox_exec", json!({ "wasm_b64": "!!not-base64!!" })).await;
         assert!(err.is_err(), "invalid base64 must be Err");
     }
 
     #[tokio::test]
     async fn disabled_sandbox_returns_unavailable_not_error() {
+        // This flips the process-global RYU_SANDBOX_DISABLED; hold the shared
+        // policy-flags lock so it never clobbers a concurrent sandbox_exec test,
+        // and restore the flag on exit.
+        let _lock = crate::sidecar::gateway_policy::lock_policy_flags();
+        let prev = std::env::var(ENV_DISABLED).ok();
         // Temporarily disable via env var.
         unsafe { std::env::set_var(ENV_DISABLED, "1") };
         let result = dispatch(
@@ -609,6 +622,11 @@ mod tests {
             Some(false),
             "disabled result must have available=false"
         );
-        unsafe { std::env::remove_var(ENV_DISABLED) };
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var(ENV_DISABLED, v),
+                None => std::env::remove_var(ENV_DISABLED),
+            }
+        }
     }
 }

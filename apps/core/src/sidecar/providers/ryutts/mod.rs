@@ -102,7 +102,10 @@ pub async fn ensure_kokoro_runtime() -> anyhow::Result<bool> {
         pyproject_extra: Some("kokoro".to_owned()),
         ..Default::default()
     };
-    external_runtime::provision(&cfg, &dir)
+    // The bundled Kokoro sidecar declares no assets, so the DownloadCenter is
+    // never exercised for a transfer here; a default client suffices.
+    let downloads = crate::downloads::DownloadCenter::with_default_client();
+    external_runtime::provision(&cfg, &dir, &downloads)
         .await
         .map(|_| true)
         .map_err(|e| anyhow::anyhow!("provisioning the Kokoro TTS runtime failed: {e}"))

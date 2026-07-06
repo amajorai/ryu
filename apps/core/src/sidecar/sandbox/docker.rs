@@ -440,6 +440,14 @@ impl Sandbox for DockerSandbox {
 mod tests {
     use super::*;
 
+    /// Serializes the tests that override the process-global `RYU_SANDBOX_DOCKER_BINARY`
+    /// env var — otherwise one removing it mid-test can let the other resolve the
+    /// real docker binary and stop returning the expected Err. Poison-tolerant.
+    static DOCKER_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_docker_env() -> std::sync::MutexGuard<'static, ()> {
+        DOCKER_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// AC#4 — detection-only assertion: verify no install/pull path exists in
     /// this module. The real guard is code review; this test documents the
     /// invariant with a runtime-detectable check.
@@ -610,6 +618,7 @@ mod tests {
     /// nonexistent path so this test is deterministic even on Docker-equipped CI.
     #[tokio::test]
     async fn exec_with_missing_binary_returns_err() {
+        let _lock = lock_docker_env();
         // Override the binary to something that doesn't exist.
         unsafe { std::env::set_var(ENV_DOCKER_BINARY, "/nonexistent-docker-binary-ryu-test") };
         let sb = DockerSandbox::new();
@@ -622,6 +631,7 @@ mod tests {
     /// Workspace lifecycle with missing binary returns Err (parallel to exec test).
     #[tokio::test]
     async fn workspace_with_missing_binary_returns_err() {
+        let _lock = lock_docker_env();
         unsafe { std::env::set_var(ENV_DOCKER_BINARY, "/nonexistent-docker-binary-ryu-test") };
         let sb = DockerSandbox::new();
         let caps = SandboxCapabilities::default();

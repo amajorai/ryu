@@ -14,25 +14,29 @@
 //! shell `python -m pip install <pkg>` in their own `installer.rs`. This module
 //! is the **single declarative shape** those bespoke paths converge on.
 //!
-//! ## Scope (honest)
+//! ## Scope
 //!
-//! This is **scaffold-and-spec**: the config type, OS-correct path derivation,
-//! and a best-effort [`provision`] that creates the venv + pip-installs are real
-//! and unit-tested for the pure parts. The full asset-fetch wiring into the
-//! `DownloadCenter`, the per-plugin enable→provision→spawn flow, and migrating
-//! the four existing engine installers onto this are the documented follow-on.
-//! The working `RyuTtsManager` venv path is deliberately **left untouched** here
-//! (it is live runtime we must not regress) — it becomes the first consumer
-//! once provisioning is wired into the plugin enable lifecycle.
+//! The config type, OS-correct path derivation, and a best-effort [`provision`]
+//! that fetches declared assets, creates the venv, and pip-installs are all real.
+//! Assets are fetched through the shared [`crate::downloads::DownloadCenter`]
+//! (streaming `.part` + resume + checksum) — never a hand-rolled fetcher — with
+//! the source resolved by [`resolve_asset_url`] and the destination made
+//! traversal-safe by [`asset_dest`]. The pure parts (URL/dest resolution, the
+//! provisioning gate) are unit-tested. The working `RyuTtsManager` venv path is
+//! deliberately **left untouched** here (it is live runtime we must not regress).
 //!
 //! ## Security gate (Core-vs-Gateway)
 //!
-//! Running `pip install` from a manifest is a network + arbitrary-code surface.
-//! Provisioning MUST be gated on the plugin's **tier** (Core-tier only, per
-//! #444) plus a Gateway **grant** (e.g. a `runtime.provision` / `network.fetch`
-//! scope) before a Community plugin may install packages. That gate is the
-//! Gateway's call (what is *allowed*); this module only describes + performs the
-//! install once permitted. The gate is enforced by the caller, not here.
+//! Running `pip install` and fetching assets from a manifest is a network +
+//! arbitrary-code surface. Provisioning is gated by [`may_provision`]: a
+//! **Core-tier** (first-party) plugin is auto-allowed; a **Community-tier**
+//! plugin may provision IFF the Gateway approved the [`GRANT_EXTERNAL_RUNTIME`]
+//! (`runtime:external`) grant — read from the plugin's *approved* grants
+//! (`PluginRecord.approved_grants`, post-Gateway-validation), never the manifest's
+//! declared, unvalidated `permission_grants`. Deciding *what is allowed* is the
+//! Gateway's call; this module only describes the gate + performs the install
+//! once permitted. The gate is applied by the caller (see the enable path in
+//! `server::provision_external_runtime`).
 
 use std::path::{Path, PathBuf};
 
@@ -45,6 +49,33 @@ pub use crate::plugin_manifest::schema::{AssetSpec, ExternalRuntimeConfig};
 /// future `"node"`/`"deno"` runtime is a data change, not a code change —
 /// "nothing hardcoded". Only `"python"` is provisionable today.
 pub const RUNTIME_PYTHON: &str = "python";
+
+/// The Hugging Face Hub host `hf:` asset refs resolve against.
+const HF_RESOLVE_HOST: &str = "https://huggingface.co";
+
+/// The Gateway grant a Community-tier plugin must hold (approved) before it may
+/// provision an external runtime. Follows the existing `category:name` grant
+/// convention (`mcp:`, `hook:`, `storage:`). Core-tier plugins are auto-allowed
+/// and need no grant.
+pub const GRANT_EXTERNAL_RUNTIME: &str = "runtime:external";
+
+/// Whether a plugin of `tier` holding `approved_grants` may provision an external
+/// runtime. Core-tier (first-party) is always allowed; Community-tier is allowed
+/// IFF the Gateway approved the [`GRANT_EXTERNAL_RUNTIME`] grant.
+///
+/// `approved_grants` MUST be the Gateway-approved set
+/// (`crate::plugins::PluginRecord::approved_grants`), never the manifest's
+/// declared, unvalidated `permission_grants` — the latter would bypass the
+/// Gateway. Fail-closed: an unknown/Community plugin without the approved grant
+/// does not provision. Pure so the gate is unit-tested without a live enable.
+pub fn may_provision(tier: crate::plugin_manifest::PluginTier, approved_grants: &[String]) -> bool {
+    match tier {
+        crate::plugin_manifest::PluginTier::Core => true,
+        crate::plugin_manifest::PluginTier::Community => {
+            approved_grants.iter().any(|g| g == GRANT_EXTERNAL_RUNTIME)
+        }
+    }
+}
 
 /// The OS-correct path to the venv's Python interpreter under `dir`.
 ///
@@ -90,6 +121,15 @@ pub enum ProvisionError {
         status: i32,
         stderr: String,
     },
+    /// An asset `source` is neither an `https://` URL nor a resolvable
+    /// `hf:<owner>/<repo>/<path>` reference.
+    UnsupportedAssetSource(String),
+    /// An asset's resolved destination would escape `~/.ryu` (traversal / absolute
+    /// path in `dest_under_ryu` or an unsafe derived filename). Fail-closed.
+    UnsafeAssetPath(String),
+    /// Fetching a declared asset failed (SSRF screen rejected it, or the download
+    /// errored / mismatched its checksum).
+    AssetFetch { source: String, reason: String },
 }
 
 impl std::fmt::Display for ProvisionError {
@@ -108,6 +148,16 @@ impl std::fmt::Display for ProvisionError {
                 status,
                 stderr,
             } => write!(f, "'{cmd}' exited with status {status}: {stderr}"),
+            ProvisionError::UnsupportedAssetSource(s) => write!(
+                f,
+                "unsupported asset source '{s}' (need an https:// URL or hf:<owner>/<repo>/<path>)"
+            ),
+            ProvisionError::UnsafeAssetPath(s) => {
+                write!(f, "unsafe asset destination: {s}")
+            }
+            ProvisionError::AssetFetch { source, reason } => {
+                write!(f, "fetching asset '{source}' failed: {reason}")
+            }
         }
     }
 }
@@ -127,17 +177,182 @@ pub fn pip_install_args(cfg: &ExternalRuntimeConfig) -> Vec<String> {
     args
 }
 
-/// Provision a Python runtime for `cfg` under `dir`: create the venv (if absent)
-/// then pip-install the declared requirements/extra. Asset fetch is **not** done
-/// here yet (the documented follow-on wires it through `DownloadCenter`).
+/// Resolve an [`AssetSpec::source`] to a concrete https download URL.
 ///
-/// Best-effort and idempotent: an existing venv is reused. The caller is
-/// responsible for the tier + grant gate (see the module security note) BEFORE
-/// calling this — by the time we are here, provisioning is permitted.
-pub async fn provision(cfg: &ExternalRuntimeConfig, dir: &Path) -> Result<PathBuf, ProvisionError> {
+/// - `https://…` passes through unchanged (http and other schemes are rejected,
+///   matching the AssetSpec contract).
+/// - `hf:<owner>/<repo>/<path…>` maps to the Hub resolve URL
+///   `https://huggingface.co/<owner>/<repo>/resolve/main/<path…>`. A **file path**
+///   is required; a repo-only ref (`hf:<owner>/<repo>`) is rejected — full-repo
+///   snapshot needs Hub tree-listing that is not wired here.
+///
+/// Pure (no I/O), so it is unit-testable without a network.
+fn resolve_asset_url(source: &str) -> Result<String, ProvisionError> {
+    let s = source.trim();
+    if let Some(rest) = s.strip_prefix("hf:") {
+        let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+        if parts.len() < 3 {
+            return Err(ProvisionError::UnsupportedAssetSource(format!(
+                "{source} (hf refs need a file path: hf:<owner>/<repo>/<path>; \
+                 repo-only snapshot is not supported)"
+            )));
+        }
+        let owner = parts[0];
+        let repo = parts[1];
+        let file_path = parts[2..].join("/");
+        return Ok(format!(
+            "{HF_RESOLVE_HOST}/{owner}/{repo}/resolve/main/{file_path}"
+        ));
+    }
+    if s.starts_with("https://") {
+        return Ok(s.to_owned());
+    }
+    Err(ProvisionError::UnsupportedAssetSource(source.to_owned()))
+}
+
+/// A path component is a plain filename: non-empty, not `.`/`..`, and free of any
+/// path separators or NUL.
+fn is_safe_filename(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains('\0')
+}
+
+/// A relative dir is traversal-safe: not absolute, no drive/UNC prefix, and every
+/// component is a normal name (no `..`). `.` segments are tolerated.
+fn is_safe_rel_dir(rel: &Path) -> bool {
+    if rel.is_absolute() {
+        return false;
+    }
+    rel.components().all(|c| {
+        matches!(
+            c,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    })
+}
+
+/// Derive the destination path for an asset: `<ryu_dir>/<dest_under_ryu>/<file>`,
+/// where `<file>` is the last path segment of `url`. Rejects a traversing
+/// `dest_under_ryu` or an unsafe derived filename (fail-closed). Pure.
+fn asset_dest(ryu_dir: &Path, dest_under_ryu: &str, url: &str) -> Result<PathBuf, ProvisionError> {
+    let rel = Path::new(dest_under_ryu.trim());
+    if !is_safe_rel_dir(rel) {
+        return Err(ProvisionError::UnsafeAssetPath(format!(
+            "dest_under_ryu '{dest_under_ryu}' must be a traversal-safe relative path"
+        )));
+    }
+    let parsed = url::Url::parse(url)
+        .map_err(|e| ProvisionError::UnsupportedAssetSource(format!("{url} ({e})")))?;
+    let filename = parsed
+        .path_segments()
+        .and_then(|segs| segs.last())
+        .map(str::to_owned)
+        .unwrap_or_default();
+    if !is_safe_filename(&filename) {
+        return Err(ProvisionError::UnsafeAssetPath(format!(
+            "cannot derive a safe filename from '{url}'"
+        )));
+    }
+    Ok(ryu_dir.join(rel).join(filename))
+}
+
+/// Fetch every declared asset into `<ryu_dir>/<dest_under_ryu>/<file>` via the
+/// shared [`crate::downloads::DownloadCenter`] (streaming `.part` + resume +
+/// checksum). Runs BEFORE the venv/pip step. Fails closed on the first error.
+///
+/// Idempotent: a checksum-less asset already on disk is skipped (DownloadCenter's
+/// fast-path cannot skip without a checksum); a checksummed asset relies on that
+/// fast-path — it skips on a matching hash and re-downloads on a mismatch, so a
+/// tampered file is fail-closed rather than trusted.
+///
+/// Residual: the SSRF screen resolves the host but DownloadCenter re-resolves when
+/// it streams, so the connection is not IP-pinned (the same TOCTOU window as the
+/// shell-out crawler egress). Acceptable for provisioning; noted so it is not
+/// mistaken for a pinned fetch.
+async fn fetch_assets(
+    cfg: &ExternalRuntimeConfig,
+    ryu_dir: &Path,
+    downloads: &crate::downloads::DownloadCenter,
+) -> Result<(), ProvisionError> {
+    for asset in &cfg.assets {
+        let url = resolve_asset_url(&asset.source)?;
+        let dest = asset_dest(ryu_dir, &asset.dest_under_ryu, &url)?;
+        let sha = asset.sha256.clone().filter(|s| !s.is_empty());
+
+        // Idempotency: without a checksum, an already-present file is left as-is
+        // (DownloadCenter's fast-path can only skip when it has a checksum to
+        // compare). With a checksum, hand to DownloadCenter — it verifies the
+        // on-disk file and skips or re-downloads.
+        if sha.is_none() && dest.exists() {
+            tracing::info!(
+                "external-runtime asset already present, skipping: {}",
+                dest.display()
+            );
+            continue;
+        }
+
+        // SSRF screen for the (Community-plugin-controlled) URL, then require
+        // https per the AssetSpec contract (the screen also permits http).
+        let parsed = crate::server::screen_agent_egress_url(&url)
+            .await
+            .map_err(|e| ProvisionError::AssetFetch {
+                source: asset.source.clone(),
+                reason: e.to_string(),
+            })?;
+        if parsed.scheme() != "https" {
+            return Err(ProvisionError::AssetFetch {
+                source: asset.source.clone(),
+                reason: format!("asset URL must use https, got '{}'", parsed.scheme()),
+            });
+        }
+
+        let spec = crate::downloads::DownloadSpec {
+            kind: crate::downloads::DownloadKind::Other,
+            label: format!("plugin asset: {}", asset.source),
+            url: url.clone(),
+            dest: dest.clone(),
+            sha256: sha,
+            version_record: None,
+        };
+        downloads
+            .download_blocking(spec)
+            .await
+            .map_err(|e| ProvisionError::AssetFetch {
+                source: asset.source.clone(),
+                reason: e.to_string(),
+            })?;
+        tracing::info!(
+            "external-runtime asset fetched: {} -> {}",
+            asset.source,
+            dest.display()
+        );
+    }
+    Ok(())
+}
+
+/// Provision a Python runtime for `cfg` under `dir`: fetch declared assets (into
+/// `~/.ryu`), create the venv (if absent), then pip-install the declared
+/// requirements/extra.
+///
+/// Best-effort and idempotent: an existing venv is reused and an already-present
+/// asset is not re-fetched. The caller is responsible for the tier + grant gate
+/// ([`may_provision`], see the module security note) BEFORE calling this — by the
+/// time we are here, provisioning is permitted.
+pub async fn provision(
+    cfg: &ExternalRuntimeConfig,
+    dir: &Path,
+    downloads: &crate::downloads::DownloadCenter,
+) -> Result<PathBuf, ProvisionError> {
     if cfg.kind != RUNTIME_PYTHON {
         return Err(ProvisionError::UnsupportedKind(cfg.kind.clone()));
     }
+
+    // Fetch declared assets first (before pip/run), into `~/.ryu`.
+    fetch_assets(cfg, &crate::paths::ryu_dir(), downloads).await?;
 
     tokio::fs::create_dir_all(dir)
         .await
@@ -283,9 +498,109 @@ mod tests {
             entry: "x".to_owned(),
             ..Default::default()
         };
-        let err = provision(&cfg, Path::new("/tmp/does-not-matter"))
+        // The kind check returns before any download work, so a default
+        // DownloadCenter is never touched here.
+        let downloads = crate::downloads::DownloadCenter::with_default_client();
+        let err = provision(&cfg, Path::new("/tmp/does-not-matter"), &downloads)
             .await
             .unwrap_err();
         assert!(matches!(err, ProvisionError::UnsupportedKind(_)));
+    }
+
+    // ── provisioning gate (may_provision) ─────────────────────────────────────
+
+    #[test]
+    fn core_tier_always_provisions() {
+        use crate::plugin_manifest::PluginTier;
+        assert!(may_provision(PluginTier::Core, &[]));
+        assert!(may_provision(
+            PluginTier::Core,
+            &["something:else".to_owned()]
+        ));
+    }
+
+    #[test]
+    fn community_tier_needs_approved_grant() {
+        use crate::plugin_manifest::PluginTier;
+        // No grant → denied (fail-closed).
+        assert!(!may_provision(PluginTier::Community, &[]));
+        // Unrelated grant → still denied.
+        assert!(!may_provision(
+            PluginTier::Community,
+            &["mcp:web_search".to_owned()]
+        ));
+        // The external-runtime grant (Gateway-approved) → allowed.
+        assert!(may_provision(
+            PluginTier::Community,
+            &[GRANT_EXTERNAL_RUNTIME.to_owned()]
+        ));
+    }
+
+    // ── asset source resolution ───────────────────────────────────────────────
+
+    #[test]
+    fn resolve_hf_ref_with_file_path() {
+        let url = resolve_asset_url("hf:KittenML/kitten-tts/model.onnx").unwrap();
+        assert_eq!(
+            url,
+            "https://huggingface.co/KittenML/kitten-tts/resolve/main/model.onnx"
+        );
+    }
+
+    #[test]
+    fn resolve_hf_ref_with_nested_file_path() {
+        let url = resolve_asset_url("hf:owner/repo/sub/dir/weights.bin").unwrap();
+        assert_eq!(
+            url,
+            "https://huggingface.co/owner/repo/resolve/main/sub/dir/weights.bin"
+        );
+    }
+
+    #[test]
+    fn resolve_hf_repo_only_ref_is_rejected() {
+        let err = resolve_asset_url("hf:KittenML/kitten-tts").unwrap_err();
+        assert!(matches!(err, ProvisionError::UnsupportedAssetSource(_)));
+    }
+
+    #[test]
+    fn resolve_https_url_passes_through() {
+        let url = resolve_asset_url("https://example.com/a/model.gguf").unwrap();
+        assert_eq!(url, "https://example.com/a/model.gguf");
+    }
+
+    #[test]
+    fn resolve_http_url_is_rejected() {
+        let err = resolve_asset_url("http://example.com/x.bin").unwrap_err();
+        assert!(matches!(err, ProvisionError::UnsupportedAssetSource(_)));
+    }
+
+    // ── asset destination (traversal safety) ──────────────────────────────────
+
+    #[test]
+    fn asset_dest_joins_dir_and_filename() {
+        let base = Path::new("/ryu");
+        let dest = asset_dest(base, "models/hf", "https://example.com/a/model.gguf").unwrap();
+        assert_eq!(dest, Path::new("/ryu").join("models/hf").join("model.gguf"));
+    }
+
+    #[test]
+    fn asset_dest_rejects_parent_traversal() {
+        let base = Path::new("/ryu");
+        let err = asset_dest(base, "../../etc", "https://example.com/x.bin").unwrap_err();
+        assert!(matches!(err, ProvisionError::UnsafeAssetPath(_)));
+    }
+
+    #[test]
+    fn asset_dest_rejects_absolute_dest() {
+        let base = Path::new("/ryu");
+        let err = asset_dest(base, "/etc", "https://example.com/x.bin").unwrap_err();
+        assert!(matches!(err, ProvisionError::UnsafeAssetPath(_)));
+    }
+
+    #[test]
+    fn asset_dest_rejects_directory_url_with_no_filename() {
+        let base = Path::new("/ryu");
+        let err = asset_dest(base, "models", "https://example.com/dir/").unwrap_err();
+        assert!(matches!(err, ProvisionError::UnsafeAssetPath(_)));
     }
 }

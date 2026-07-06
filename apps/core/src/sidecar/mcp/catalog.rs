@@ -648,6 +648,9 @@ mod tests {
 
     #[tokio::test]
     async fn search_excludes_composio_without_key() {
+        // Serialize against every test that mutates the composio auth cache /
+        // key env (process-global), so the "no key" state holds for this body.
+        let _lock = crate::sidecar::gateway::lock_managed_node_env();
         crate::composio_auth::set_key("");
         std::env::remove_var("RYU_COMPOSIO_API_KEY");
         std::env::remove_var("COMPOSIO_API_KEY");

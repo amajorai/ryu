@@ -68,6 +68,15 @@ def main() -> int:
 
     ryu_sdk.ModelClient("gemma4", "http://127.0.0.1:7981", None)
 
+    # 5. Streaming surface is present: the ChatSink callback interface and the
+    #    ModelClient.stream(messages, sink) export both loaded. (No `.stream()`
+    #    call — that needs a live gateway; this only proves the export exists so a
+    #    foreign caller could implement ChatSink and drive it.)
+    assert hasattr(ryu_sdk, "ChatSink"), "ChatSink callback interface missing"
+    assert hasattr(ryu_sdk, "ChatDelta"), "ChatDelta record missing"
+    client = ryu_sdk.ModelClient("gemma4", "http://127.0.0.1:7981", None)
+    assert callable(getattr(client, "stream", None)), "ModelClient.stream missing"
+
     print("ryu_sdk Python binding smoke test: OK")
     return 0
 

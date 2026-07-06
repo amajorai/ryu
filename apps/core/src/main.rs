@@ -903,6 +903,7 @@ async fn main() {
         app_store,
         catalog_client: Arc::new(crate::plugins::catalog::PluginCatalogClient::new()),
         skills: skill_registry,
+        app_contrib: crate::plugins::app_contrib::AppContribRegistry::new(),
         traces,
         preferences,
         support_audit,

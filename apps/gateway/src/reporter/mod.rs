@@ -78,6 +78,11 @@ struct UserDailyBucket {
     predict_shown: u64,
     /// Per-model request counts.
     by_model: HashMap<String, u64>,
+    /// Per-skill request counts from `x-ryu-skill-ids`.
+    by_skill: HashMap<String, u64>,
+    /// Per-transport request counts. Gateway-observed rows are exact; ACP rows can
+    /// be added later by Core/app-observed usage events.
+    by_transport: HashMap<String, u64>,
 }
 
 impl UserDailyBucket {
@@ -88,6 +93,16 @@ impl UserDailyBucket {
         if entry.event_type == "model_call" {
             self.request_count = self.request_count.saturating_add(1);
             *self.by_model.entry(entry.model.clone()).or_insert(0) += 1;
+            *self.by_transport.entry("gateway".to_string()).or_insert(0) += 1;
+        }
+        if let Some(skill_ids) = &entry.skill_ids {
+            for skill in skill_ids
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                *self.by_skill.entry(skill.to_string()).or_insert(0) += 1;
+            }
         }
         if let Some(session) = &entry.session_id {
             self.sessions.insert(session.clone());
@@ -162,6 +177,8 @@ fn build_user_daily(state: &SharedState, entries: &[AuditEntry]) -> Vec<Value> {
                 "costMicroUsd": cost_micro_usd(state, bucket.input_tokens, bucket.output_tokens),
                 "byFeature": bucket.by_feature_json(),
                 "byModel": bucket.by_model,
+                "bySkill": bucket.by_skill,
+                "byTransport": bucket.by_transport,
             })
         })
         .collect()

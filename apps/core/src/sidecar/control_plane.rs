@@ -360,8 +360,14 @@ mod tests {
     fn register_skips_when_unmanaged() {
         // No RYU_MANAGED_NODE → register is a no-op (Ok(None)), never touching
         // the network. We assert the managed gate, not the HTTP call.
+        // Serialize against the gateway managed-node tests (shared process-global).
+        let _lock = crate::sidecar::gateway::lock_managed_node_env();
+        let prev = std::env::var("RYU_MANAGED_NODE").ok();
         std::env::remove_var("RYU_MANAGED_NODE");
         assert!(!is_managed_node());
+        if let Some(v) = prev {
+            std::env::set_var("RYU_MANAGED_NODE", v);
+        }
     }
 
     #[test]

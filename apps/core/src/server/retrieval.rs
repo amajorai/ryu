@@ -156,6 +156,13 @@ impl Embedder {
         }
     }
 
+    /// Returns `true` for the deterministic local hashing embedder (no network).
+    /// Callers use this to decide whether embedding work can run inline (local,
+    /// never blocks) or must be spawned off the request path (remote sidecar).
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local { .. })
+    }
+
     /// Returns the dimensionality this embedder produces.
     pub fn dims(&self) -> usize {
         match self {

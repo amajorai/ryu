@@ -79,9 +79,59 @@ function loadManifest(dir: string): LoadedManifest {
 
 // ── pack command ──────────────────────────────────────────────────────────────
 
-function commandPack(rawDir: string): void {
+// Find the first `companion` runnable that declares a `config.ui_entry`. That is
+// the plugin's sandboxed-UI entry module; `ryu pack` bundles it into `ui_code`.
+// Returns null for a manifest-only plugin (no companion / no ui_entry) — packing
+// stays backward-compatible in that case.
+function companionUiEntry(manifest: LoadedManifest): string | null {
+	for (const runnable of manifest.runnables) {
+		if (runnable.kind !== "companion") {
+			continue;
+		}
+		const entry = (runnable.config as Record<string, unknown> | undefined)
+			?.ui_entry;
+		if (typeof entry === "string" && entry.trim().length > 0) {
+			return entry;
+		}
+	}
+	return null;
+}
+
+// Bundle the plugin's UI entry into ONE self-contained browser ESM module string.
+// No external imports are emitted: the `RyuPlugin` API is INJECTED at runtime by
+// the host bootstrap (the plugin calls `activate(context)`), not imported, so the
+// bundle carries only the plugin's own code. Throws on a build error so `pack`
+// fails loudly rather than emitting a half-built bundle.
+async function bundleUiEntry(dir: string, uiEntry: string): Promise<string> {
+	const entryPath = resolve(dir, uiEntry);
+	if (!existsSync(entryPath)) {
+		exitError(`companion ui_entry not found: ${entryPath}`);
+	}
+	const result = await Bun.build({
+		entrypoints: [entryPath],
+		target: "browser",
+		format: "esm",
+		minify: false,
+	});
+	if (!result.success) {
+		const messages = result.logs.map((l) => String(l.message)).join("; ");
+		exitError(`failed to bundle ui_entry '${uiEntry}': ${messages}`);
+	}
+	const output = result.outputs[0];
+	if (!output) {
+		exitError(`bundling ui_entry '${uiEntry}' produced no output`);
+	}
+	return await output.text();
+}
+
+async function commandPack(rawDir: string): Promise<void> {
 	const dir = resolve(rawDir);
 	const manifest = loadManifest(dir);
+
+	// Bundle the companion UI entry, if any. Manifest-only plugins skip this and
+	// emit exactly the previous shape (no `ui_code`).
+	const uiEntry = companionUiEntry(manifest);
+	const uiCode = uiEntry ? await bundleUiEntry(dir, uiEntry) : null;
 
 	// Emit bundle into <dir>/dist/plugin.bundle.json
 	const outDir = join(dir, "dist");
@@ -89,19 +139,23 @@ function commandPack(rawDir: string): void {
 		mkdirSync(outDir, { recursive: true });
 	}
 	const outPath = join(outDir, "plugin.bundle.json");
-	writeFileSync(outPath, JSON.stringify(manifest, null, 2), "utf8");
+	const bundle = uiCode ? { ...manifest, ui_code: uiCode } : manifest;
+	writeFileSync(outPath, JSON.stringify(bundle, null, 2), "utf8");
 
+	const codeNote = uiCode ? ` (+${uiCode.length}B ui_code)` : "";
 	process.stdout.write(
-		`packed ${manifest.id}@${manifest.version} → ${outPath}\n`
+		`packed ${manifest.id}@${manifest.version}${codeNote} → ${outPath}\n`
 	);
 }
 
 // ── publish command ─────────────────────────────────────────────────────────
 
+const TRAILING_SLASHES = /\/+$/;
+
 // Resolve the publish base URL: env override, else the dev control-plane server.
 function publishBaseUrl(): string {
 	const raw = (process.env.RYU_MARKETPLACE_API_URL ?? "").trim();
-	return (raw || "http://localhost:3000").replace(/\/+$/, "");
+	return (raw || "http://localhost:3000").replace(TRAILING_SLASHES, "");
 }
 
 // Resolve the author's auth token: env (RYU_AUTH_TOKEN), sent as a Bearer token
@@ -180,7 +234,9 @@ if (command === "pack") {
 	if (!dir) {
 		exitError("pack requires a directory argument: bunx ryu pack <dir>");
 	}
-	commandPack(dir);
+	commandPack(dir).catch((err: unknown) => {
+		exitError(String(err));
+	});
 } else if (command === "publish") {
 	const dir = args[0];
 	if (!dir) {

@@ -620,6 +620,17 @@ async fn run_agent(agent_id: &str, prompt: &str) -> Result<String> {
 mod tests {
     use super::*;
 
+    /// Serializes the two tests that mutate the process-global
+    /// `COMPOSIO_WEBHOOK_SECRET` env var. cargo runs tests in one process in
+    /// parallel, so without this one can clear the secret while the other has set
+    /// it and is mid-verify. Poison-tolerant.
+    static WEBHOOK_SECRET_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_webhook_secret() -> std::sync::MutexGuard<'static, ()> {
+        WEBHOOK_SECRET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn hmac_matches_known_vector() {
         // RFC 4231 Test Case 2: key="Jefe", data="what do ya want for nothing?".
@@ -632,13 +643,22 @@ mod tests {
 
     #[test]
     fn verify_rejects_when_secret_unset() {
-        // SAFETY: single-threaded test; remove the var so the secret is unset.
+        // Serialize against the other webhook-secret test and restore on exit so
+        // neither reads the other's transient value.
+        let _lock = lock_webhook_secret();
+        let prev = std::env::var(WEBHOOK_SECRET_ENV).ok();
         std::env::remove_var(WEBHOOK_SECRET_ENV);
         assert!(!verify_webhook_signature(b"{}", Some("deadbeef")));
+        match prev {
+            Some(v) => std::env::set_var(WEBHOOK_SECRET_ENV, v),
+            None => std::env::remove_var(WEBHOOK_SECRET_ENV),
+        }
     }
 
     #[test]
     fn verify_accepts_valid_and_rejects_tampered() {
+        let _lock = lock_webhook_secret();
+        let prev = std::env::var(WEBHOOK_SECRET_ENV).ok();
         std::env::set_var(WEBHOOK_SECRET_ENV, "shhh");
         let body = br#"{"trigger_slug":"x"}"#;
         let sig = hmac_sha256_hex(b"shhh", body);
@@ -656,6 +676,9 @@ mod tests {
             br#"{"trigger_slug":"y"}"#,
             Some(&sig)
         ));
-        std::env::remove_var(WEBHOOK_SECRET_ENV);
+        match prev {
+            Some(v) => std::env::set_var(WEBHOOK_SECRET_ENV, v),
+            None => std::env::remove_var(WEBHOOK_SECRET_ENV),
+        }
     }
 }

@@ -129,13 +129,29 @@ pub struct ConversationDetail {
 pub struct BtwEntry {
     pub id: String,
     pub conversation_id: String,
+    /// `btw` for side questions; `subagent` for delegated child runs.
+    #[serde(default = "default_child_entry_kind")]
+    pub kind: String,
     pub question: String,
     pub answer: String,
     /// The model that produced the answer (None if unknown).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Registered agent id used by a subagent child, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// Permission preset attached to a subagent child, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    /// Full clean-context conversation id used by an ACP/registered child agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_conversation_id: Option<String>,
     /// Unix milliseconds.
     pub created_at: i64,
+}
+
+fn default_child_entry_kind() -> String {
+    "btw".to_owned()
 }
 
 /// The run status of a [`Session`]. Tracks the lifecycle of a single agent/workflow run.
@@ -383,9 +399,13 @@ impl ConversationStore {
              CREATE TABLE IF NOT EXISTS btw_entries (
                  id              TEXT PRIMARY KEY,
                  conversation_id TEXT NOT NULL,
+                 kind            TEXT NOT NULL DEFAULT 'btw',
                  question        TEXT NOT NULL,
                  answer          TEXT NOT NULL,
                  model           TEXT,
+                 agent_id        TEXT,
+                 preset          TEXT,
+                 child_conversation_id TEXT,
                  created_at      INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_btw_conversation
@@ -501,6 +521,34 @@ impl ConversationStore {
         if !existing_msg_columns.contains("agent_id") {
             conn.execute_batch("ALTER TABLE messages ADD COLUMN agent_id TEXT")
                 .context("adding agent_id column to messages")?;
+        }
+
+        // Additive migration: generalize side-chat rows so `/btw` asides and
+        // subagent child runs share the same parent-conversation list.
+        let existing_btw_columns: std::collections::HashSet<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(btw_entries)")?;
+            let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            names.filter_map(|r| r.ok()).collect()
+        };
+        for (col, ddl) in [
+            (
+                "kind",
+                "ALTER TABLE btw_entries ADD COLUMN kind TEXT NOT NULL DEFAULT 'btw'",
+            ),
+            (
+                "agent_id",
+                "ALTER TABLE btw_entries ADD COLUMN agent_id TEXT",
+            ),
+            ("preset", "ALTER TABLE btw_entries ADD COLUMN preset TEXT"),
+            (
+                "child_conversation_id",
+                "ALTER TABLE btw_entries ADD COLUMN child_conversation_id TEXT",
+            ),
+        ] {
+            if !existing_btw_columns.contains(col) {
+                conn.execute_batch(ddl)
+                    .with_context(|| format!("adding btw_entries column {col}"))?;
+            }
         }
 
         // Additive migration: the verified human author of a message (multi-user
@@ -1172,23 +1220,17 @@ impl ConversationStore {
             pending
         };
         if !unindexed.is_empty() {
-            let bg_index = index.clone();
-            tokio::spawn(async move {
-                let embedder = bg_index.embedder();
+            let embedder = index.embedder();
+            if embedder.is_local() {
+                // The local hashing embedder is network-free, so run the backfill
+                // INLINE (awaited) — like the FTS backfill below. This guarantees
+                // the very first search sees the just-embedded messages (there is
+                // no sidecar that could slow or hang it). Best-effort per message.
                 let model = embedder.model_id().to_string();
-                let mut consecutive_failures: u32 = 0;
                 for (id, conv, role, content, created) in unindexed {
-                    if consecutive_failures >= 3 {
-                        tracing::warn!(
-                            "backfill embed: aborting after {consecutive_failures} consecutive \
-                             failures — sidecar likely down, will retry on next search"
-                        );
-                        break;
-                    }
                     match embedder.embed(&content).await {
                         Ok(vec) => {
-                            consecutive_failures = 0;
-                            if let Err(e) = bg_index
+                            if let Err(e) = index
                                 .index_message(&id, &conv, &role, &vec, &model, created)
                                 .await
                             {
@@ -1196,12 +1238,48 @@ impl ConversationStore {
                             }
                         }
                         Err(e) => {
-                            consecutive_failures += 1;
-                            tracing::warn!("backfill embed failed for {id} (sidecar down?): {e:#}");
+                            tracing::warn!("backfill embed failed for {id}: {e:#}");
                         }
                     }
                 }
-            });
+            } else {
+                // A remote embed sidecar could be slow or down, so spawn the
+                // backfill off the request path — a search never blocks on it, and
+                // the just-added messages surface on a subsequent search once the
+                // background task has embedded them.
+                let bg_index = index.clone();
+                tokio::spawn(async move {
+                    let embedder = bg_index.embedder();
+                    let model = embedder.model_id().to_string();
+                    let mut consecutive_failures: u32 = 0;
+                    for (id, conv, role, content, created) in unindexed {
+                        if consecutive_failures >= 3 {
+                            tracing::warn!(
+                                "backfill embed: aborting after {consecutive_failures} consecutive \
+                                 failures — sidecar likely down, will retry on next search"
+                            );
+                            break;
+                        }
+                        match embedder.embed(&content).await {
+                            Ok(vec) => {
+                                consecutive_failures = 0;
+                                if let Err(e) = bg_index
+                                    .index_message(&id, &conv, &role, &vec, &model, created)
+                                    .await
+                                {
+                                    tracing::warn!("backfill index write failed for {id}: {e:#}");
+                                }
+                            }
+                            Err(e) => {
+                                consecutive_failures += 1;
+                                tracing::warn!(
+                                    "backfill embed failed for {id} (sidecar down?): {e:#}"
+                                );
+                            }
+                        }
+                    }
+                });
+            }
         }
 
         // ── KNN + snippet re-read ────────────────────────────────────────────
@@ -1750,26 +1828,81 @@ impl ConversationStore {
         let sealed_a = self.cipher.seal(answer)?;
         let conn = self.conn.lock().await;
         conn.execute(
-            "INSERT INTO btw_entries (id, conversation_id, question, answer, model, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO btw_entries (id, conversation_id, kind, question, answer, model, created_at)
+             VALUES (?1, ?2, 'btw', ?3, ?4, ?5, ?6)",
             params![id, conversation_id, sealed_q, sealed_a, model, now],
         )
         .context("persisting btw entry")?;
         Ok(BtwEntry {
             id,
             conversation_id: conversation_id.to_owned(),
+            kind: "btw".to_owned(),
             question: question.to_owned(),
             answer: answer.to_owned(),
             model: model.map(str::to_owned),
+            agent_id: None,
+            preset: None,
+            child_conversation_id: None,
             created_at: now,
         })
     }
 
-    /// All side questions for a conversation, newest first.
+    /// Persist a delegated subagent child under its parent conversation. The row
+    /// is intentionally summary-shaped: `question` is the task, `answer` is the
+    /// final output or error text, and `child_conversation_id` points at the full
+    /// clean-context ACP transcript when a registered agent produced one.
+    pub async fn append_subagent_child(
+        &self,
+        conversation_id: &str,
+        task: &str,
+        answer: &str,
+        agent_id: Option<&str>,
+        preset: Option<&str>,
+        child_conversation_id: Option<&str>,
+    ) -> Result<BtwEntry> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_millis();
+        let sealed_task = self.cipher.seal(task)?;
+        let sealed_answer = self.cipher.seal(answer)?;
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO btw_entries (
+                 id, conversation_id, kind, question, answer, model,
+                 agent_id, preset, child_conversation_id, created_at
+             )
+             VALUES (?1, ?2, 'subagent', ?3, ?4, NULL, ?5, ?6, ?7, ?8)",
+            params![
+                id,
+                conversation_id,
+                sealed_task,
+                sealed_answer,
+                agent_id,
+                preset,
+                child_conversation_id,
+                now
+            ],
+        )
+        .context("persisting subagent child entry")?;
+        Ok(BtwEntry {
+            id,
+            conversation_id: conversation_id.to_owned(),
+            kind: "subagent".to_owned(),
+            question: task.to_owned(),
+            answer: answer.to_owned(),
+            model: None,
+            agent_id: agent_id.map(str::to_owned),
+            preset: preset.map(str::to_owned),
+            child_conversation_id: child_conversation_id.map(str::to_owned),
+            created_at: now,
+        })
+    }
+
+    /// All child entries for a conversation, newest first.
     pub async fn list_btw(&self, conversation_id: &str) -> Result<Vec<BtwEntry>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT id, conversation_id, question, answer, model, created_at
+            "SELECT id, conversation_id, kind, question, answer, model,
+                    agent_id, preset, child_conversation_id, created_at
              FROM btw_entries
              WHERE conversation_id = ?1
              ORDER BY created_at DESC, rowid DESC",
@@ -1778,10 +1911,14 @@ impl ConversationStore {
             Ok(BtwEntry {
                 id: row.get(0)?,
                 conversation_id: row.get(1)?,
-                question: row.get(2)?,
-                answer: row.get(3)?,
-                model: row.get(4)?,
-                created_at: row.get(5)?,
+                kind: row.get(2)?,
+                question: row.get(3)?,
+                answer: row.get(4)?,
+                model: row.get(5)?,
+                agent_id: row.get(6)?,
+                preset: row.get(7)?,
+                child_conversation_id: row.get(8)?,
+                created_at: row.get(9)?,
             })
         })?;
         let mut out = Vec::new();

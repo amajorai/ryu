@@ -18,6 +18,9 @@ crate-type = ["cdylib", "staticlib", "lib"]
 # duplicates no logic, so the manifest rules + gateway egress blocklist + model
 # transport can never drift across languages.
 ryu-sdk = { path = "../ryu-sdk", version = "0.0.1" }
+# Consume the async `ModelClient::stream` (impl Stream) inside the blocking
+# `stream(messages, sink)` export, pumping each delta into the foreign ChatSink.
+futures-util = "0.3"
 serde_json = "1"
 # The `RyuError` enum derives `thiserror::Error` for the foreign-surfaced
 # message, matching how `ryu_sdk::ModelError` is built. Must be declared (the

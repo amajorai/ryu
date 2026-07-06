@@ -1201,6 +1201,7 @@ dependencies = [
 name = "ryu-sdk-uniffi"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "ryu-sdk",
  "serde_json",
  "thiserror 2.0.18",

@@ -290,6 +290,12 @@ mod tests {
         // it must run through the clean-context Gateway path (no registered agent),
         // so with an unreachable gateway it fails fast but the fan-out still
         // returns one result for it.
+        // These are process-global vars other modules' tests also mutate; hold the
+        // shared gateway-env lock across the body and restore on exit so this test
+        // neither reads nor writes them under another test's feet.
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let prev_url = std::env::var("RYU_GATEWAY_URL").ok();
+        let prev_fb = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
         unsafe {
             std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
             std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
@@ -317,7 +323,14 @@ mod tests {
             "inline delegate must carry a fail-closed gateway error"
         );
         unsafe {
-            std::env::remove_var("RYU_GATEWAY_URL");
+            match prev_url {
+                Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
+                None => std::env::remove_var("RYU_GATEWAY_URL"),
+            }
+            match prev_fb {
+                Some(v) => std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", v),
+                None => std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK"),
+            }
         }
     }
 
@@ -335,6 +348,10 @@ mod tests {
         // No agent runner is wired in the test context and the gateway is
         // unreachable, so each delegate fails fast — but the fan-out itself must
         // succeed and return one result per task, in order, with an error each.
+        // Serialize on the shared gateway-env lock and restore both vars on exit.
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let prev_url = std::env::var("RYU_GATEWAY_URL").ok();
+        let prev_fb = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
         unsafe {
             std::env::set_var("RYU_GATEWAY_URL", "http://10.255.255.1:1");
             std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
@@ -358,7 +375,14 @@ mod tests {
             assert!(r["error"].is_string(), "each delegate must carry an error");
         }
         unsafe {
-            std::env::remove_var("RYU_GATEWAY_URL");
+            match prev_url {
+                Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
+                None => std::env::remove_var("RYU_GATEWAY_URL"),
+            }
+            match prev_fb {
+                Some(v) => std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", v),
+                None => std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK"),
+            }
         }
     }
 }
