@@ -2,6 +2,7 @@
 name = "ryu-core"
 version = "0.0.1"
 edition = "2021"
+license = "Apache-2.0"
 
 # `voice-parakeet` / `voice-vad` are opt-in features (see the [features] section).
 # Tell the compiler the cfg values are expected so the dormant gated code doesn't
