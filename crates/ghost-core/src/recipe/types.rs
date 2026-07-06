@@ -1,8 +1,8 @@
 // Recipe v2 types — compatible with ghost-os schema.
 // Field names use snake_case JSON serialization to match ghost-os JSON files.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A Ghost recipe: parameterized, replayable workflow.
 #[derive(Debug, Clone, Serialize, Deserialize)]

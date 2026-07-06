@@ -85,7 +85,9 @@ pub fn resolve_gateway_token() -> Option<String> {
 pub fn assert_allowed_egress(base_url: &str) -> Result<(), EgressNotAllowed> {
     for pattern in blocked_patterns() {
         if pattern.is_match(base_url) {
-            return Err(EgressNotAllowed { url: base_url.to_string() });
+            return Err(EgressNotAllowed {
+                url: base_url.to_string(),
+            });
         }
     }
     Ok(())
@@ -104,7 +106,10 @@ mod tests {
             "https://openrouter.ai/api",
             "https://generativelanguage.googleapis.com",
         ] {
-            assert!(assert_allowed_egress(blocked).is_err(), "should block {blocked}");
+            assert!(
+                assert_allowed_egress(blocked).is_err(),
+                "should block {blocked}"
+            );
         }
     }
 

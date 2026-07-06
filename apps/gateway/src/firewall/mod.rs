@@ -767,7 +767,10 @@ mod tests {
     fn redact_outbound_masks_token_and_password_params() {
         let fw = default_scanner();
         let (out, hits) = fw.redact_outbound("?token=abcd1234efgh&password=hunter2secret");
-        assert!(!out.contains("abcd1234efgh"), "token= must be redacted: {out}");
+        assert!(
+            !out.contains("abcd1234efgh"),
+            "token= must be redacted: {out}"
+        );
         assert!(
             !out.contains("hunter2secret"),
             "password= must be redacted: {out}"

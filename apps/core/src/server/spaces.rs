@@ -364,7 +364,13 @@ impl SpaceStore {
         let dims = embedder.dims();
         let extraction_model = registry.graph_extraction_model.clone();
         let reranker = Reranker::local_server(&registry);
-        Self::open_inner(default_db_path(), embedder, dims, extraction_model, reranker)
+        Self::open_inner(
+            default_db_path(),
+            embedder,
+            dims,
+            extraction_model,
+            reranker,
+        )
     }
 
     /// Open (or create) the store at a specific path with a chosen embedder and
@@ -995,9 +1001,7 @@ impl SpaceStore {
             .saturating_mul(RERANK_FANOUT)
             .clamp(limit, RERANK_MAX_CANDIDATES);
         let candidates = match mode {
-            RetrievalMode::Vector => {
-                self.vector_search(space_id, query, candidate_limit).await?
-            }
+            RetrievalMode::Vector => self.vector_search(space_id, query, candidate_limit).await?,
             RetrievalMode::Graph => self.graph_search(space_id, query, candidate_limit).await?,
         };
         Ok(self.apply_reranking(query, candidates, limit).await)

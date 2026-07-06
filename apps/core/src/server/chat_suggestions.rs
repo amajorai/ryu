@@ -142,7 +142,14 @@ async fn local_generate(state: &ServerState, transcript: &str) -> Option<String>
     let model = served_model_id(state, base)
         .await
         .unwrap_or_else(|| engine.clone());
-    let body = post_completion(state, &format!("{base}/chat/completions"), &model, transcript, None).await?;
+    let body = post_completion(
+        state,
+        &format!("{base}/chat/completions"),
+        &model,
+        transcript,
+        None,
+    )
+    .await?;
     extract_content(&body)
 }
 
@@ -301,7 +308,10 @@ mod tests {
     #[test]
     fn caps_at_three_and_dedupes() {
         let raw = "Add tests\nAdd tests\nShip it\nDeploy\nExtra";
-        assert_eq!(parse_suggestions(raw), vec!["Add tests", "Ship it", "Deploy"]);
+        assert_eq!(
+            parse_suggestions(raw),
+            vec!["Add tests", "Ship it", "Deploy"]
+        );
     }
 
     #[test]

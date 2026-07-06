@@ -227,8 +227,7 @@ impl Channel for SlackChannel {
                     // Read frames, but wake every HEARTBEAT_INTERVAL even when idle
                     // to re-report `online` (the connection is still healthy).
                     loop {
-                        let next =
-                            tokio::time::timeout(HEARTBEAT_INTERVAL, ws.next()).await;
+                        let next = tokio::time::timeout(HEARTBEAT_INTERVAL, ws.next()).await;
                         let frame = match next {
                             Ok(Some(frame)) => frame,
                             Ok(None) => break,

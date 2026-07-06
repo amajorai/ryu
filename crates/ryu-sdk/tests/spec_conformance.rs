@@ -30,14 +30,14 @@ fn gateway_spec_describes_chat_completions_endpoint() {
     let post = spec
         .pointer("/paths/~1v1~1chat~1completions/post")
         .expect("gateway spec must define POST /v1/chat/completions");
-    assert!(post.is_object(), "POST /v1/chat/completions must be an operation object");
+    assert!(
+        post.is_object(),
+        "POST /v1/chat/completions must be an operation object"
+    );
 
     // The client sends model/messages/stream. The request body schema (or its
     // $ref target) must mention those fields somewhere — a cheap drift guard.
-    let body_blob = serde_json::to_string(
-        post.pointer("/requestBody").unwrap_or(post),
-    )
-    .unwrap();
+    let body_blob = serde_json::to_string(post.pointer("/requestBody").unwrap_or(post)).unwrap();
     // Fall back to scanning the whole spec when the body is a $ref.
     let haystack = if body_blob.contains("messages") {
         body_blob
@@ -65,7 +65,10 @@ fn gateway_spec_is_openapi_3_x() {
 #[test]
 fn core_spec_present_and_has_chat_path() {
     let spec = load_json("core-openapi.json");
-    let paths = spec.get("paths").and_then(|p| p.as_object()).expect("core spec has paths");
+    let paths = spec
+        .get("paths")
+        .and_then(|p| p.as_object())
+        .expect("core spec has paths");
     assert!(
         paths.keys().any(|k| k.contains("/chat/")),
         "core spec must expose a /chat/* path the SDK can target"

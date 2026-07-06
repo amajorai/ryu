@@ -334,10 +334,19 @@ mod tests {
 
     #[test]
     fn priority_header_parses_background_else_interactive() {
-        assert_eq!(Priority::from_header(Some("background")), Priority::Background);
+        assert_eq!(
+            Priority::from_header(Some("background")),
+            Priority::Background
+        );
         assert_eq!(Priority::from_header(Some(" LOW ")), Priority::Background);
-        assert_eq!(Priority::from_header(Some("interactive")), Priority::Interactive);
-        assert_eq!(Priority::from_header(Some("anything")), Priority::Interactive);
+        assert_eq!(
+            Priority::from_header(Some("interactive")),
+            Priority::Interactive
+        );
+        assert_eq!(
+            Priority::from_header(Some("anything")),
+            Priority::Interactive
+        );
         // Unlabelled ⇒ interactive (never penalise a request we can't classify).
         assert_eq!(Priority::from_header(None), Priority::Interactive);
     }
@@ -347,7 +356,10 @@ mod tests {
         let lim = ConcurrencyLimiter::new(&cfg(1, 0));
         // Many concurrent acquires on a non-local provider all succeed instantly.
         for _ in 0..10 {
-            let p = lim.acquire("openrouter", Priority::Background).await.unwrap();
+            let p = lim
+                .acquire("openrouter", Priority::Background)
+                .await
+                .unwrap();
             drop(p);
         }
         assert!(lim.snapshots().is_empty(), "no gate created for remote");
@@ -356,12 +368,20 @@ mod tests {
     #[tokio::test]
     async fn admits_up_to_slot_count_then_queues() {
         let lim = Arc::new(ConcurrencyLimiter::new(&cfg(2, 8)));
-        let p1 = lim.acquire(LOCAL_PROVIDER, Priority::Interactive).await.unwrap();
-        let p2 = lim.acquire(LOCAL_PROVIDER, Priority::Interactive).await.unwrap();
+        let p1 = lim
+            .acquire(LOCAL_PROVIDER, Priority::Interactive)
+            .await
+            .unwrap();
+        let p2 = lim
+            .acquire(LOCAL_PROVIDER, Priority::Interactive)
+            .await
+            .unwrap();
         // Two slots full; a third acquire must block until one frees.
         let lim2 = Arc::clone(&lim);
         let waiter = tokio::spawn(async move {
-            lim2.acquire(LOCAL_PROVIDER, Priority::Interactive).await.unwrap()
+            lim2.acquire(LOCAL_PROVIDER, Priority::Interactive)
+                .await
+                .unwrap()
         });
         // Give the waiter a chance to enqueue.
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -376,19 +396,28 @@ mod tests {
     async fn interactive_jumps_ahead_of_background() {
         let lim = Arc::new(ConcurrencyLimiter::new(&cfg(1, 8)));
         // Occupy the single slot.
-        let held = lim.acquire(LOCAL_PROVIDER, Priority::Interactive).await.unwrap();
+        let held = lim
+            .acquire(LOCAL_PROVIDER, Priority::Interactive)
+            .await
+            .unwrap();
 
         // Enqueue a background waiter first, then an interactive one.
         let order = Arc::new(Mutex::new(Vec::<&'static str>::new()));
         let (lb, oi) = (Arc::clone(&lim), Arc::clone(&order));
         let bg = tokio::spawn(async move {
-            let _p = lb.acquire(LOCAL_PROVIDER, Priority::Background).await.unwrap();
+            let _p = lb
+                .acquire(LOCAL_PROVIDER, Priority::Background)
+                .await
+                .unwrap();
             oi.lock().unwrap().push("background");
         });
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         let (li, oj) = (Arc::clone(&lim), Arc::clone(&order));
         let inter = tokio::spawn(async move {
-            let _p = li.acquire(LOCAL_PROVIDER, Priority::Interactive).await.unwrap();
+            let _p = li
+                .acquire(LOCAL_PROVIDER, Priority::Interactive)
+                .await
+                .unwrap();
             oj.lock().unwrap().push("interactive");
         });
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -404,12 +433,14 @@ mod tests {
     #[tokio::test]
     async fn rejects_when_queue_is_full() {
         let lim = Arc::new(ConcurrencyLimiter::new(&cfg(1, 1)));
-        let _held = lim.acquire(LOCAL_PROVIDER, Priority::Interactive).await.unwrap();
+        let _held = lim
+            .acquire(LOCAL_PROVIDER, Priority::Interactive)
+            .await
+            .unwrap();
         // One waiter fills the single queue slot.
         let lim2 = Arc::clone(&lim);
-        let _waiter = tokio::spawn(async move {
-            lim2.acquire(LOCAL_PROVIDER, Priority::Background).await
-        });
+        let _waiter =
+            tokio::spawn(async move { lim2.acquire(LOCAL_PROVIDER, Priority::Background).await });
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         // Next acquire overflows the queue → rejected.
         let err = lim.acquire(LOCAL_PROVIDER, Priority::Interactive).await;
@@ -419,7 +450,10 @@ mod tests {
     #[tokio::test]
     async fn snapshot_reports_in_flight_and_queue() {
         let lim = ConcurrencyLimiter::new(&cfg(1, 8));
-        let _p = lim.acquire(LOCAL_PROVIDER, Priority::Interactive).await.unwrap();
+        let _p = lim
+            .acquire(LOCAL_PROVIDER, Priority::Interactive)
+            .await
+            .unwrap();
         let snap = lim.snapshots();
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].in_flight, 1);

@@ -952,7 +952,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/chat/permission", post(chat_permission))
         .route("/api/chat/cancel", post(chat_cancel))
         // Resume a running chat stream (reconnect to an in-flight ACP turn).
-        .route("/api/chat/stream/resume/:conversation_id", get(chat_stream_resume))
+        .route(
+            "/api/chat/stream/resume/:conversation_id",
+            get(chat_stream_resume),
+        )
         // Next-prompt suggestions (ChatGPT-style follow-up chips) for a turn.
         .route(
             "/api/chat/suggestions",
@@ -1168,7 +1171,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── Git commit + push (pinned-summary "commit & push" button) ───────
         .route("/api/git/commit-push", post(git::git_commit_push))
         // ── Create a new project folder ("Start from scratch") ──────────────
-        .route("/api/workspace/new-folder", post(git::create_project_folder))
+        .route(
+            "/api/workspace/new-folder",
+            post(git::create_project_folder),
+        )
         // ── Worktree diff (read-only, Unit U011) ────────────────────────────
         .route("/api/worktree/:run_id/diff", get(worktree_diff_handler))
         // ── Worktree status (persistent-session: is a worktree live?) ───────
@@ -5199,10 +5205,7 @@ async fn list_agents(State(state): State<ServerState>) -> Json<serde_json::Value
                 // Surface the persona's custom avatar (a data URL) on the summary
                 // so the chat picker / transcript can render it without a second
                 // fetch of the full record.
-                let avatar_url = record
-                    .persona
-                    .as_ref()
-                    .and_then(|p| p.avatar_url.clone());
+                let avatar_url = record.persona.as_ref().and_then(|p| p.avatar_url.clone());
                 // Built-in agents are sourced from the in-code registry above (which
                 // has no persona data), so their DB row is otherwise skipped. But a
                 // user can still set a custom avatar on a built-in (e.g. Claude Code),
@@ -7237,7 +7240,14 @@ fn resolve_agent_engine(state: &ServerState, agent_id: &str) -> Option<String> {
         .into_iter()
         .find(|i| i.id == agent_id)
         .and_then(|i| i.engine)
-        .or_else(|| Some(agent_id.strip_prefix("acp:").unwrap_or(agent_id).to_string()))
+        .or_else(|| {
+            Some(
+                agent_id
+                    .strip_prefix("acp:")
+                    .unwrap_or(agent_id)
+                    .to_string(),
+            )
+        })
 }
 
 /// List the threads in an agent's own on-disk history store (Claude Code / Codex)
@@ -7266,7 +7276,10 @@ async fn list_agent_threads_handler(
             return Json(json!({ "agent_id": agent_id, "threads": [] })).into_response();
         }
     };
-    let cwd = params.get("cwd").map(String::as_str).filter(|s| !s.is_empty());
+    let cwd = params
+        .get("cwd")
+        .map(String::as_str)
+        .filter(|s| !s.is_empty());
     // Blocking filesystem scan — hop off the async runtime.
     let result = tokio::task::spawn_blocking({
         let engine = engine.clone();
@@ -7326,7 +7339,10 @@ async fn import_agent_thread_handler(
         Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     };
     if imported.messages.is_empty() {
-        return json_error(StatusCode::BAD_REQUEST, "thread has no messages".to_string());
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "thread has no messages".to_string(),
+        );
     }
 
     // Dedup: a repeat import of the same agent-native thread focuses the existing
@@ -7359,7 +7375,11 @@ async fn import_agent_thread_handler(
     let conversation_id = format!("conv_{}", uuid::Uuid::new_v4());
     if let Err(e) = state
         .conversations
-        .ensure_conversation(&conversation_id, Some(&agent_id), Some(&imported.thread.title))
+        .ensure_conversation(
+            &conversation_id,
+            Some(&agent_id),
+            Some(&imported.thread.title),
+        )
         .await
     {
         return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
@@ -7367,7 +7387,14 @@ async fn import_agent_thread_handler(
     for msg in &imported.messages {
         if let Err(e) = state
             .conversations
-            .append_message(&conversation_id, &msg.role, &msg.content, Some(&agent_id), None, None)
+            .append_message(
+                &conversation_id,
+                &msg.role,
+                &msg.content,
+                Some(&agent_id),
+                None,
+                None,
+            )
             .await
         {
             return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());

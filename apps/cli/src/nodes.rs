@@ -253,8 +253,18 @@ mod tests {
         NodesConfig {
             default: "local".into(),
             nodes: vec![
-                Node { name: "local".into(), url: "http://127.0.0.1:2049".into(), token: None, mesh: None },
-                Node { name: "pi".into(), url: "http://192.168.1.5:2049".into(), token: Some("ryu_abc".into()), mesh: None },
+                Node {
+                    name: "local".into(),
+                    url: "http://127.0.0.1:2049".into(),
+                    token: None,
+                    mesh: None,
+                },
+                Node {
+                    name: "pi".into(),
+                    url: "http://192.168.1.5:2049".into(),
+                    token: Some("ryu_abc".into()),
+                    mesh: None,
+                },
             ],
         }
     }
@@ -271,9 +281,12 @@ mod tests {
     fn active_node_falls_back_when_default_missing() {
         let config = NodesConfig {
             default: "nonexistent".into(),
-            nodes: vec![
-                Node { name: "local".into(), url: "http://127.0.0.1:2049".into(), token: None, mesh: None },
-            ],
+            nodes: vec![Node {
+                name: "local".into(),
+                url: "http://127.0.0.1:2049".into(),
+                token: None,
+                mesh: None,
+            }],
         };
         let node = resolve_active_node(&config);
         assert_eq!(node.name, "local");
@@ -305,8 +318,18 @@ mod tests {
     #[test]
     fn select_preferred_picks_reachable_remote() {
         let nodes = vec![
-            Node { name: "local".into(), url: "http://127.0.0.1:2049".into(), token: None, mesh: None },
-            Node { name: "pi".into(), url: "http://192.168.1.5:2049".into(), token: Some("tok".into()), mesh: None },
+            Node {
+                name: "local".into(),
+                url: "http://127.0.0.1:2049".into(),
+                token: None,
+                mesh: None,
+            },
+            Node {
+                name: "pi".into(),
+                url: "http://192.168.1.5:2049".into(),
+                token: Some("tok".into()),
+                mesh: None,
+            },
         ];
         // local unreachable, remote reachable
         let chosen = select_preferred(&nodes, &[false, true]);
@@ -316,8 +339,18 @@ mod tests {
     #[test]
     fn select_preferred_falls_back_to_local_when_no_remote_reachable() {
         let nodes = vec![
-            Node { name: "local".into(), url: "http://127.0.0.1:2049".into(), token: None, mesh: None },
-            Node { name: "pi".into(), url: "http://192.168.1.5:2049".into(), token: Some("tok".into()), mesh: None },
+            Node {
+                name: "local".into(),
+                url: "http://127.0.0.1:2049".into(),
+                token: None,
+                mesh: None,
+            },
+            Node {
+                name: "pi".into(),
+                url: "http://192.168.1.5:2049".into(),
+                token: Some("tok".into()),
+                mesh: None,
+            },
         ];
         // both unreachable — must fall back to local
         let chosen = select_preferred(&nodes, &[false, false]);
@@ -371,8 +404,18 @@ mod tests {
     #[test]
     fn select_preferred_ignores_reachable_local_picks_remote() {
         let nodes = vec![
-            Node { name: "local".into(), url: "http://127.0.0.1:2049".into(), token: None, mesh: None },
-            Node { name: "remote".into(), url: "http://10.0.0.1:2049".into(), token: None, mesh: None },
+            Node {
+                name: "local".into(),
+                url: "http://127.0.0.1:2049".into(),
+                token: None,
+                mesh: None,
+            },
+            Node {
+                name: "remote".into(),
+                url: "http://10.0.0.1:2049".into(),
+                token: None,
+                mesh: None,
+            },
         ];
         // both reachable — should still prefer the non-local remote
         let chosen = select_preferred(&nodes, &[true, true]);

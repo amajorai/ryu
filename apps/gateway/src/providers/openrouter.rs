@@ -229,7 +229,10 @@ impl Provider for OpenRouterProvider {
                 payload["modalities"] = json!(["image", "text"]);
             }
             self.options.apply(&mut payload);
-            debug!(provider = "openrouter", model, "sending image generation (chat) request");
+            debug!(
+                provider = "openrouter",
+                model, "sending image generation (chat) request"
+            );
 
             let resp = self
                 .client

@@ -120,10 +120,7 @@ pub fn detect_drift(
 
     // R6: sanitize mode is chosen but secret redaction is turned off, so secrets
     // pass through unredacted.
-    if firewall.enabled
-        && firewall.policy == FirewallPolicy::Sanitize
-        && !firewall.redact_secrets
-    {
+    if firewall.enabled && firewall.policy == FirewallPolicy::Sanitize && !firewall.redact_secrets {
         warnings.push(DriftWarning::new(
             "secret_redaction_disabled",
             "high",

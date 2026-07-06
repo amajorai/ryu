@@ -217,7 +217,10 @@ mod tests {
             "",
             "no-dot",
         ] {
-            assert!(validate_plugin_id(bad).is_err(), "expected '{bad}' to be rejected");
+            assert!(
+                validate_plugin_id(bad).is_err(),
+                "expected '{bad}' to be rejected"
+            );
         }
     }
 
@@ -246,8 +249,7 @@ mod tests {
         let bad_id = r#"{"id":"../evil","name":"X","version":"1.0.0","runnables":[]}"#;
         assert!(PluginManifest::parse_and_validate(bad_id).is_err());
 
-        let bad_kind =
-            r#"{"id":"com.example.x","name":"X","version":"1.0.0","runnables":[{"id":"r","name":"R","kind":"nope"}]}"#;
+        let bad_kind = r#"{"id":"com.example.x","name":"X","version":"1.0.0","runnables":[{"id":"r","name":"R","kind":"nope"}]}"#;
         assert!(PluginManifest::parse_and_validate(bad_kind)
             .unwrap_err()
             .contains("JSON parse error"));

@@ -399,7 +399,8 @@ pub trait Provider: Send + Sync {
         &'a self,
         _model: &'a str,
         _body: &'a Value,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>>
+    {
         let name = self.name();
         Box::pin(async move {
             Err(GatewayError::ProviderError(format!(
@@ -414,7 +415,8 @@ pub trait Provider: Send + Sync {
     fn poll_video<'a>(
         &'a self,
         _provider_ref: &'a str,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>>
+    {
         let name = self.name();
         Box::pin(async move {
             Err(GatewayError::ProviderError(format!(
@@ -503,14 +505,17 @@ mod media_output_tests {
 
     #[test]
     fn normalizes_fal_images_shape() {
-        let out =
-            normalize_media_output(&json!({ "images": [{ "url": "https://x/i.png", "width": 512 }] }));
+        let out = normalize_media_output(
+            &json!({ "images": [{ "url": "https://x/i.png", "width": 512 }] }),
+        );
         assert_eq!(out["data"][0]["url"], json!("https://x/i.png"));
     }
 
     #[test]
     fn dedupes_repeated_urls() {
-        let out = normalize_media_output(&json!({ "video": { "url": "https://x/v.mp4" }, "url": "https://x/v.mp4" }));
+        let out = normalize_media_output(
+            &json!({ "video": { "url": "https://x/v.mp4" }, "url": "https://x/v.mp4" }),
+        );
         assert_eq!(out["data"].as_array().unwrap().len(), 1);
     }
 }

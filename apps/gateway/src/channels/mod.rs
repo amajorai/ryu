@@ -143,7 +143,10 @@ fn channel_context(channel_name: &str) -> RequestContext {
 /// per-message. NOTE: `InboundMessage` carries only `chat_id`, so this gates on
 /// the originating chat/conversation, not an individual sender user id.
 fn channel_allowlist(platform: &str) -> Option<Vec<String>> {
-    let per_platform_key = format!("RYU_CHANNEL_ALLOWED_USERS_{}", platform.to_ascii_uppercase());
+    let per_platform_key = format!(
+        "RYU_CHANNEL_ALLOWED_USERS_{}",
+        platform.to_ascii_uppercase()
+    );
     let raw = std::env::var(&per_platform_key)
         .ok()
         .or_else(|| std::env::var("RYU_CHANNEL_ALLOWED_USERS").ok())?;
@@ -447,11 +450,7 @@ pub async fn spawn_registered(state: SharedState) {
                     info!(name = %bot.name, "registering slack bot from store");
                     spawn_channel(
                         &state,
-                        slack::SlackChannel::new_with_status(
-                            cfg,
-                            state.http.clone(),
-                            reporter,
-                        ),
+                        slack::SlackChannel::new_with_status(cfg, state.http.clone(), reporter),
                     );
                     store_slack = true;
                 } else {
@@ -463,11 +462,7 @@ pub async fn spawn_registered(state: SharedState) {
                     info!(name = %bot.name, "registering discord bot from store");
                     spawn_channel(
                         &state,
-                        discord::DiscordChannel::new_with_status(
-                            cfg,
-                            state.http.clone(),
-                            reporter,
-                        ),
+                        discord::DiscordChannel::new_with_status(cfg, state.http.clone(), reporter),
                     );
                     store_discord = true;
                 } else {

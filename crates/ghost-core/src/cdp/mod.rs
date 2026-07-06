@@ -133,24 +133,21 @@ pub async fn find_elements(query: &str) -> Result<Vec<CdpElement>> {
     .await?;
 
     // 5. Read response — skip Ping/Pong/Close; match on id=1
-    let resp_text = tokio::time::timeout(
-        std::time::Duration::from_millis(WS_TIMEOUT_MS),
-        async {
-            loop {
-                match ws.next().await {
-                    Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t))) => {
-                        let v: Value = serde_json::from_str(&t)?;
-                        if v["id"] == 1 {
-                            return Ok::<_, anyhow::Error>(t);
-                        }
+    let resp_text = tokio::time::timeout(std::time::Duration::from_millis(WS_TIMEOUT_MS), async {
+        loop {
+            match ws.next().await {
+                Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t))) => {
+                    let v: Value = serde_json::from_str(&t)?;
+                    if v["id"] == 1 {
+                        return Ok::<_, anyhow::Error>(t);
                     }
-                    Some(Ok(_)) => continue, // Ping, Pong, Binary — skip
-                    Some(Err(e)) => return Err(anyhow::anyhow!("WebSocket error: {e}")),
-                    None => return Err(anyhow::anyhow!("WebSocket closed unexpectedly")),
                 }
+                Some(Ok(_)) => continue, // Ping, Pong, Binary — skip
+                Some(Err(e)) => return Err(anyhow::anyhow!("WebSocket error: {e}")),
+                None => return Err(anyhow::anyhow!("WebSocket closed unexpectedly")),
             }
-        },
-    )
+        }
+    })
     .await
     .map_err(|_| anyhow::anyhow!("WebSocket response timeout"))??;
 
@@ -165,10 +162,10 @@ pub async fn find_elements(query: &str) -> Result<Vec<CdpElement>> {
         .iter()
         .filter_map(|item| {
             Some(CdpElement {
-                center_x:   item["centerX"].as_f64()?,
-                center_y:   item["centerY"].as_f64()?,
-                text:       item["text"].as_str().unwrap_or("").to_string(),
-                tag:        item["tag"].as_str().unwrap_or("").to_string(),
+                center_x: item["centerX"].as_f64()?,
+                center_y: item["centerY"].as_f64()?,
+                text: item["text"].as_str().unwrap_or("").to_string(),
+                tag: item["tag"].as_str().unwrap_or("").to_string(),
                 match_type: item["matchType"].as_str().unwrap_or("").to_string(),
             })
         })

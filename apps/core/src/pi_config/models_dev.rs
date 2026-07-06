@@ -134,6 +134,11 @@ pub async fn models_for(provider_id: &str) -> Vec<Value> {
         out.push(Value::Object(entry));
     }
     // Stable order so the picker doesn't reshuffle between reads.
-    out.sort_by(|a, b| a["id"].as_str().unwrap_or("").cmp(b["id"].as_str().unwrap_or("")));
+    out.sort_by(|a, b| {
+        a["id"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["id"].as_str().unwrap_or(""))
+    });
     out
 }

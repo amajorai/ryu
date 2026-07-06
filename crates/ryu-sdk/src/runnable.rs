@@ -21,9 +21,7 @@ use serde::{Deserialize, Serialize};
 /// Mirrors `RunnableKind` in `apps/core/src/runnable/mod.rs`, including its
 /// `#[serde(rename_all = "snake_case")]` wire form, so a manifest authored
 /// against this enum deserialises byte-for-byte the same in Core.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunnableKind {
     /// A configured agent (system prompt + tools + model/engine binding).
@@ -188,13 +186,21 @@ impl RunnableEntry {
 /// Require a config blob to be present, parse it as `T`, and run `check` on the
 /// parsed value. Centralises the "missing config / invalid shape / empty field"
 /// error wording so every kind reports consistently.
-fn require_config<T, F>(entry: &RunnableEntry, kind: &str, needs: &str, check: F) -> Result<(), String>
+fn require_config<T, F>(
+    entry: &RunnableEntry,
+    kind: &str,
+    needs: &str,
+    check: F,
+) -> Result<(), String>
 where
     T: for<'de> Deserialize<'de>,
     F: FnOnce(&T) -> Result<(), String>,
 {
     let raw = entry.config.as_ref().ok_or_else(|| {
-        format!("runnable '{}' (kind={kind}): missing required 'config' (needs {needs})", entry.id)
+        format!(
+            "runnable '{}' (kind={kind}): missing required 'config' (needs {needs})",
+            entry.id
+        )
     })?;
     let cfg: T = serde_json::from_value(raw.clone())
         .map_err(|e| format!("runnable '{}' (kind={kind}): invalid config: {e}", entry.id))?;
@@ -204,7 +210,9 @@ where
 /// Reject an empty/whitespace-only required string field.
 fn non_empty(value: &str, entry_id: &str, kind: &str, field: &str) -> Result<(), String> {
     if value.trim().is_empty() {
-        return Err(format!("runnable '{entry_id}' (kind={kind}): '{field}' must not be empty"));
+        return Err(format!(
+            "runnable '{entry_id}' (kind={kind}): '{field}' must not be empty"
+        ));
     }
     Ok(())
 }
@@ -225,24 +233,34 @@ pub fn validate_runnable(entry: &RunnableEntry) -> Result<(), String> {
             }
             Ok(())
         }
-        RunnableKind::Workflow => require_config::<WorkflowConfig, _>(entry, "workflow", "'entry'", |c| {
-            non_empty(&c.entry, &entry.id, "workflow", "entry")
-        }),
+        RunnableKind::Workflow => {
+            require_config::<WorkflowConfig, _>(entry, "workflow", "'entry'", |c| {
+                non_empty(&c.entry, &entry.id, "workflow", "entry")
+            })
+        }
         RunnableKind::Tool => require_config::<ToolConfig, _>(entry, "tool", "'slug'", |c| {
             non_empty(&c.slug, &entry.id, "tool", "slug")
         }),
-        RunnableKind::Skill => require_config::<SkillConfig, _>(entry, "skill", "'skill_id'", |c| {
-            non_empty(&c.skill_id, &entry.id, "skill", "skill_id")
-        }),
-        RunnableKind::Companion => require_config::<CompanionConfig, _>(entry, "companion", "'label'", |c| {
-            non_empty(&c.label, &entry.id, "companion", "label")
-        }),
-        RunnableKind::Channel => require_config::<ChannelConfig, _>(entry, "channel", "'platform'", |c| {
-            non_empty(&c.platform, &entry.id, "channel", "platform")
-        }),
-        RunnableKind::Engine => require_config::<EngineConfig, _>(entry, "engine", "'engine_type'", |c| {
-            non_empty(&c.engine_type, &entry.id, "engine", "engine_type")
-        }),
+        RunnableKind::Skill => {
+            require_config::<SkillConfig, _>(entry, "skill", "'skill_id'", |c| {
+                non_empty(&c.skill_id, &entry.id, "skill", "skill_id")
+            })
+        }
+        RunnableKind::Companion => {
+            require_config::<CompanionConfig, _>(entry, "companion", "'label'", |c| {
+                non_empty(&c.label, &entry.id, "companion", "label")
+            })
+        }
+        RunnableKind::Channel => {
+            require_config::<ChannelConfig, _>(entry, "channel", "'platform'", |c| {
+                non_empty(&c.platform, &entry.id, "channel", "platform")
+            })
+        }
+        RunnableKind::Engine => {
+            require_config::<EngineConfig, _>(entry, "engine", "'engine_type'", |c| {
+                non_empty(&c.engine_type, &entry.id, "engine", "engine_type")
+            })
+        }
         RunnableKind::Policy => require_config::<PolicyConfig, _>(
             entry,
             "policy",
@@ -258,13 +276,24 @@ mod tests {
     use serde_json::json;
 
     fn entry(id: &str, kind: RunnableKind, config: Option<serde_json::Value>) -> RunnableEntry {
-        RunnableEntry { id: id.to_string(), name: id.to_string(), kind, config }
+        RunnableEntry {
+            id: id.to_string(),
+            name: id.to_string(),
+            kind,
+            config,
+        }
     }
 
     #[test]
     fn kind_wire_form_is_snake_case() {
-        assert_eq!(serde_json::to_string(&RunnableKind::Agent).unwrap(), "\"agent\"");
-        assert_eq!(serde_json::to_string(&RunnableKind::Policy).unwrap(), "\"policy\"");
+        assert_eq!(
+            serde_json::to_string(&RunnableKind::Agent).unwrap(),
+            "\"agent\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RunnableKind::Policy).unwrap(),
+            "\"policy\""
+        );
         assert_eq!(RunnableKind::Workflow.as_str(), "workflow");
     }
 
@@ -282,20 +311,58 @@ mod tests {
     #[test]
     fn workflow_requires_non_empty_entry() {
         let err = validate_runnable(&entry("w", RunnableKind::Workflow, None)).unwrap_err();
-        assert!(err.contains("kind=workflow") && err.contains("entry"), "{err}");
-        assert!(validate_runnable(&entry("w", RunnableKind::Workflow, Some(json!({"entry":"start"})))).is_ok());
-        let empty = validate_runnable(&entry("w", RunnableKind::Workflow, Some(json!({"entry":"  "})))).unwrap_err();
+        assert!(
+            err.contains("kind=workflow") && err.contains("entry"),
+            "{err}"
+        );
+        assert!(validate_runnable(&entry(
+            "w",
+            RunnableKind::Workflow,
+            Some(json!({"entry":"start"}))
+        ))
+        .is_ok());
+        let empty = validate_runnable(&entry(
+            "w",
+            RunnableKind::Workflow,
+            Some(json!({"entry":"  "})),
+        ))
+        .unwrap_err();
         assert!(empty.contains("'entry' must not be empty"), "{empty}");
     }
 
     #[test]
     fn tool_skill_channel_engine_companion_required_fields() {
-        assert!(validate_runnable(&entry("t", RunnableKind::Tool, Some(json!({"slug":"web_search"})))).is_ok());
+        assert!(validate_runnable(&entry(
+            "t",
+            RunnableKind::Tool,
+            Some(json!({"slug":"web_search"}))
+        ))
+        .is_ok());
         assert!(validate_runnable(&entry("t", RunnableKind::Tool, None)).is_err());
-        assert!(validate_runnable(&entry("s", RunnableKind::Skill, Some(json!({"skill_id":"ryu:research/v1"})))).is_ok());
-        assert!(validate_runnable(&entry("c", RunnableKind::Companion, Some(json!({"label":"Panel"})))).is_ok());
-        assert!(validate_runnable(&entry("ch", RunnableKind::Channel, Some(json!({"platform":"telegram"})))).is_ok());
-        assert!(validate_runnable(&entry("e", RunnableKind::Engine, Some(json!({"engine_type":"llamacpp"})))).is_ok());
+        assert!(validate_runnable(&entry(
+            "s",
+            RunnableKind::Skill,
+            Some(json!({"skill_id":"ryu:research/v1"}))
+        ))
+        .is_ok());
+        assert!(validate_runnable(&entry(
+            "c",
+            RunnableKind::Companion,
+            Some(json!({"label":"Panel"}))
+        ))
+        .is_ok());
+        assert!(validate_runnable(&entry(
+            "ch",
+            RunnableKind::Channel,
+            Some(json!({"platform":"telegram"}))
+        ))
+        .is_ok());
+        assert!(validate_runnable(&entry(
+            "e",
+            RunnableKind::Engine,
+            Some(json!({"engine_type":"llamacpp"}))
+        ))
+        .is_ok());
     }
 
     #[test]

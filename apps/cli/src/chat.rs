@@ -280,7 +280,10 @@ pub async fn ask_btw(
             content: m.content.clone(),
         })
         .collect();
-    let body = BtwRequest { question, messages: wire };
+    let body = BtwRequest {
+        question,
+        messages: wire,
+    };
 
     let client = reqwest::Client::new();
     let response = match client.post(&btw_url).json(&body).send().await {
@@ -354,7 +357,12 @@ pub async fn judge_goal(
                     .unwrap_or("")
                     .to_string();
                 let turns = v.get("turns").and_then(|n| n.as_u64()).unwrap_or(0) as u32;
-                let _ = tx.send(GoalEvent::Verdict { met, reason, stop, turns });
+                let _ = tx.send(GoalEvent::Verdict {
+                    met,
+                    reason,
+                    stop,
+                    turns,
+                });
             }
             Err(e) => {
                 let _ = tx.send(GoalEvent::Error(e.to_string()));
@@ -413,7 +421,11 @@ pub async fn double_check(
                     .and_then(|s| s.as_str())
                     .unwrap_or("")
                     .to_string();
-                let _ = tx.send(DoubleCheckEvent::Result { ok, critique, model });
+                let _ = tx.send(DoubleCheckEvent::Result {
+                    ok,
+                    critique,
+                    model,
+                });
             }
             Err(e) => {
                 let _ = tx.send(DoubleCheckEvent::Error(e.to_string()));

@@ -884,8 +884,8 @@ mod tests {
         // On a genuine conflict the merge should fail with the conflicted file list.
         if let Err(conflict) = result {
             assert!(
-                !conflict.conflicted_files.is_empty() || true,
-                "conflict error returned"
+                !conflict.conflicted_files.is_empty(),
+                "conflict error should include conflicted files"
             );
             // Base repo must be in a clean state (merge --abort ran).
             let status = Command::new("git")

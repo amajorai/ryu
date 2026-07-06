@@ -75,9 +75,8 @@ impl BudgetEnforcer {
         // The session cap (a single global rule) also activates enforcement, so
         // a deployment can run with ONLY a session budget configured. Forgetting
         // this would make `record` early-return and the counter never move.
-        let enabled = !config.users.is_empty()
-            || !config.agents.is_empty()
-            || config.session.limit > 0;
+        let enabled =
+            !config.users.is_empty() || !config.agents.is_empty() || config.session.limit > 0;
         Self {
             config,
             user_usage: DashMap::new(),
@@ -233,8 +232,7 @@ impl BudgetEnforcer {
         let Some(sid) = session_id.filter(|s| !s.is_empty()) else {
             return;
         };
-        if self.session_usage.len() >= MAX_SESSION_ENTRIES
-            && !self.session_usage.contains_key(sid)
+        if self.session_usage.len() >= MAX_SESSION_ENTRIES && !self.session_usage.contains_key(sid)
         {
             self.session_usage.clear();
         }
@@ -439,7 +437,10 @@ mod tests {
 
     #[test]
     fn session_downgrade_without_target_degrades_to_restrict() {
-        let e = BudgetEnforcer::new(config_with_session(session_cfg(10, BudgetAction::Downgrade)));
+        let e = BudgetEnforcer::new(config_with_session(session_cfg(
+            10,
+            BudgetAction::Downgrade,
+        )));
         e.record_session(Some("s1"), 20);
         let d = e
             .evaluate_session(Some("s1"))

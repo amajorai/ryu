@@ -1,9 +1,9 @@
 mod api;
 mod app;
 mod auth;
+mod chat;
 mod config;
 mod nodes;
-mod chat;
 mod ui;
 
 #[cfg(test)]
@@ -25,9 +25,12 @@ use ratatui::{
     Terminal,
 };
 
-use app::{fetch_catalog, fetch_agent_detail, App, HintAction, Screen, SidebarTab, SIDECAR_ORDER, SIDEBAR_TABS};
-use ui::ui;
+use app::{
+    fetch_agent_detail, fetch_catalog, App, HintAction, Screen, SidebarTab, SIDEBAR_TABS,
+    SIDECAR_ORDER,
+};
 use futures_util;
+use ui::ui;
 
 /// Resolves which node URL to use for this invocation.
 /// Checks for a leading `--node <name>` in args, otherwise uses the active node.
@@ -47,20 +50,116 @@ fn resolve_node(args: &[String]) -> (String, Option<String>) {
 
 fn print_logo_ansi() {
     const LINES: &[&[(&str, u8, u8, u8)]] = &[
-        &[(".", 27, 67, 129), (":::::::::::", 27, 67, 129), (":::.", 66, 69, 125)],
-        &[(":::--::::::", 28, 78, 144), ("::::", 31, 62, 124), ("--", 80, 84, 152), ("==", 111, 104, 177), ("=", 124, 112, 187)],
-        &[(":------:::::", 28, 78, 145), (":::::", 31, 61, 123), ("--", 78, 84, 151), ("-=", 99, 96, 167), ("=+=", 133, 117, 192)],
-        &[("--------::::", 32, 80, 148), (":::::", 40, 63, 125), ("--", 80, 84, 152), ("-=", 100, 96, 167), ("==+:", 121, 110, 185)],
-        &[(":------", 33, 84, 154), ("--==", 73, 114, 188), ("+++++", 151, 115, 190), ("====", 106, 96, 167), ("==+=", 135, 117, 191)],
-        &[(":----", 35, 87, 158), ("-==", 66, 113, 189), ("+++", 109, 139, 219), ("*", 153, 140, 221), ("*********", 210, 133, 213), ("++++++", 142, 116, 192)],
-        &[("---", 37, 89, 160), ("-==", 63, 111, 186), ("++++", 106, 141, 221), ("+*", 144, 142, 223), ("*************", 218, 132, 212), ("*+*", 186, 127, 206)],
-        &[("---=", 45, 96, 168), ("++++", 99, 140, 220), ("@@", 244, 243, 251), ("****", 217, 137, 217), ("@@", 250, 235, 248), ("#", 233, 157, 223), ("********", 224, 134, 214)],
-        &[("==", 70, 116, 192), ("=+", 90, 133, 212), ("++++", 103, 143, 224), ("@", 222, 231, 248), ("\u{2588}\u{2588}\u{2588}", 255, 255, 255), ("#", 216, 178, 231), ("**", 215, 137, 217), ("#", 234, 176, 229), ("\u{2588}\u{2588}\u{2588}", 255, 255, 255), ("@", 249, 230, 247), ("********", 227, 135, 215)],
-        &[("=", 85, 123, 195), ("+++++++", 100, 141, 222), ("@", 225, 233, 249), ("\u{2588}\u{2588}\u{2588}", 255, 255, 255), ("#", 199, 182, 233), ("**", 198, 138, 218), ("#", 228, 178, 230), ("\u{2588}\u{2588}\u{2588}", 255, 255, 255), ("@", 249, 233, 248), ("*******+", 226, 136, 216)],
-        &[(":", 69, 95, 149), ("+++++++", 104, 144, 225), ("*@@", 229, 236, 250), ("+***", 144, 143, 223), ("%@@", 249, 242, 250), ("#", 226, 162, 225), ("*******:", 224, 136, 217)],
-        &[("+++++++++++++", 104, 142, 223), ("+**", 155, 140, 221), ("**********", 213, 135, 216)],
-        &[(" -", 83, 115, 179), ("+++++++++++++", 107, 143, 224), ("+*", 154, 141, 222), ("*******=", 209, 136, 217)],
-        &[("   .:-", 69, 95, 148), ("==", 95, 131, 204), ("++++++++", 110, 142, 223), ("++", 158, 138, 217), ("++=:", 172, 108, 171)],
+        &[
+            (".", 27, 67, 129),
+            (":::::::::::", 27, 67, 129),
+            (":::.", 66, 69, 125),
+        ],
+        &[
+            (":::--::::::", 28, 78, 144),
+            ("::::", 31, 62, 124),
+            ("--", 80, 84, 152),
+            ("==", 111, 104, 177),
+            ("=", 124, 112, 187),
+        ],
+        &[
+            (":------:::::", 28, 78, 145),
+            (":::::", 31, 61, 123),
+            ("--", 78, 84, 151),
+            ("-=", 99, 96, 167),
+            ("=+=", 133, 117, 192),
+        ],
+        &[
+            ("--------::::", 32, 80, 148),
+            (":::::", 40, 63, 125),
+            ("--", 80, 84, 152),
+            ("-=", 100, 96, 167),
+            ("==+:", 121, 110, 185),
+        ],
+        &[
+            (":------", 33, 84, 154),
+            ("--==", 73, 114, 188),
+            ("+++++", 151, 115, 190),
+            ("====", 106, 96, 167),
+            ("==+=", 135, 117, 191),
+        ],
+        &[
+            (":----", 35, 87, 158),
+            ("-==", 66, 113, 189),
+            ("+++", 109, 139, 219),
+            ("*", 153, 140, 221),
+            ("*********", 210, 133, 213),
+            ("++++++", 142, 116, 192),
+        ],
+        &[
+            ("---", 37, 89, 160),
+            ("-==", 63, 111, 186),
+            ("++++", 106, 141, 221),
+            ("+*", 144, 142, 223),
+            ("*************", 218, 132, 212),
+            ("*+*", 186, 127, 206),
+        ],
+        &[
+            ("---=", 45, 96, 168),
+            ("++++", 99, 140, 220),
+            ("@@", 244, 243, 251),
+            ("****", 217, 137, 217),
+            ("@@", 250, 235, 248),
+            ("#", 233, 157, 223),
+            ("********", 224, 134, 214),
+        ],
+        &[
+            ("==", 70, 116, 192),
+            ("=+", 90, 133, 212),
+            ("++++", 103, 143, 224),
+            ("@", 222, 231, 248),
+            ("\u{2588}\u{2588}\u{2588}", 255, 255, 255),
+            ("#", 216, 178, 231),
+            ("**", 215, 137, 217),
+            ("#", 234, 176, 229),
+            ("\u{2588}\u{2588}\u{2588}", 255, 255, 255),
+            ("@", 249, 230, 247),
+            ("********", 227, 135, 215),
+        ],
+        &[
+            ("=", 85, 123, 195),
+            ("+++++++", 100, 141, 222),
+            ("@", 225, 233, 249),
+            ("\u{2588}\u{2588}\u{2588}", 255, 255, 255),
+            ("#", 199, 182, 233),
+            ("**", 198, 138, 218),
+            ("#", 228, 178, 230),
+            ("\u{2588}\u{2588}\u{2588}", 255, 255, 255),
+            ("@", 249, 233, 248),
+            ("*******+", 226, 136, 216),
+        ],
+        &[
+            (":", 69, 95, 149),
+            ("+++++++", 104, 144, 225),
+            ("*@@", 229, 236, 250),
+            ("+***", 144, 143, 223),
+            ("%@@", 249, 242, 250),
+            ("#", 226, 162, 225),
+            ("*******:", 224, 136, 217),
+        ],
+        &[
+            ("+++++++++++++", 104, 142, 223),
+            ("+**", 155, 140, 221),
+            ("**********", 213, 135, 216),
+        ],
+        &[
+            (" -", 83, 115, 179),
+            ("+++++++++++++", 107, 143, 224),
+            ("+*", 154, 141, 222),
+            ("*******=", 209, 136, 217),
+        ],
+        &[
+            ("   .:-", 69, 95, 148),
+            ("==", 95, 131, 204),
+            ("++++++++", 110, 142, 223),
+            ("++", 158, 138, 217),
+            ("++=:", 172, 108, 171),
+        ],
     ];
 
     for spans in LINES {
@@ -79,14 +178,23 @@ fn versions_json_path() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| ".".into());
-    std::path::PathBuf::from(home).join(".ryu").join("versions.json")
+    std::path::PathBuf::from(home)
+        .join(".ryu")
+        .join("versions.json")
 }
 
 fn is_first_run() -> bool {
     let path = versions_json_path();
-    let Ok(content) = std::fs::read_to_string(&path) else { return true };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else { return true };
-    !json.get("setup_seen").and_then(|v| v.as_bool()).unwrap_or(false)
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return true;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return true;
+    };
+    !json
+        .get("setup_seen")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 fn mark_initialized() {
@@ -99,7 +207,10 @@ fn mark_initialized() {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap_or_default());
+    let _ = std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&json).unwrap_or_default(),
+    );
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -152,27 +263,27 @@ async fn run_command(args: Vec<String>) -> anyhow::Result<()> {
             }
         }
 
-        "update" => {
-            match api::fetch_update_check(&api_url, token.as_deref()).await {
-                Some(notice) if notice.available => {
-                    println!("A new Ryu release is available.");
-                    println!("  installed: v{}", notice.current);
-                    println!("  latest:    v{}", notice.latest);
-                    if let Some(url) = notice.html_url {
-                        println!("  release:   {url}");
-                    }
-                    println!();
-                    println!("The desktop app self-updates. To update the CLI/Core binaries,");
-                    println!("download the latest release from the URL above.");
+        "update" => match api::fetch_update_check(&api_url, token.as_deref()).await {
+            Some(notice) if notice.available => {
+                println!("A new Ryu release is available.");
+                println!("  installed: v{}", notice.current);
+                println!("  latest:    v{}", notice.latest);
+                if let Some(url) = notice.html_url {
+                    println!("  release:   {url}");
                 }
-                Some(notice) => {
-                    println!("Ryu is up to date (v{}).", notice.current);
-                }
-                None => {
-                    eprintln!("error: could not reach Core to check for updates — start with `ryu-core`");
-                }
+                println!();
+                println!("The desktop app self-updates. To update the CLI/Core binaries,");
+                println!("download the latest release from the URL above.");
             }
-        }
+            Some(notice) => {
+                println!("Ryu is up to date (v{}).", notice.current);
+            }
+            None => {
+                eprintln!(
+                    "error: could not reach Core to check for updates — start with `ryu-core`"
+                );
+            }
+        },
 
         "status" => {
             let catalog_items = fetch_catalog(&api_url, token.as_deref())
@@ -201,8 +312,16 @@ async fn run_command(args: Vec<String>) -> anyhow::Result<()> {
                 .collect();
 
             for s in &app.statuses {
-                let installed = if all_installed.contains(&s.name) { "yes" } else { "no" };
-                let status = if s.running { "● running" } else { "○ stopped" };
+                let installed = if all_installed.contains(&s.name) {
+                    "yes"
+                } else {
+                    "no"
+                };
+                let status = if s.running {
+                    "● running"
+                } else {
+                    "○ stopped"
+                };
                 println!("{:<14}  {:<9}  {}", s.name, installed, status);
             }
         }
@@ -243,8 +362,8 @@ async fn run_command(args: Vec<String>) -> anyhow::Result<()> {
         },
 
         "login" => {
-            let backend_url = std::env::var("RYU_AUTH_URL")
-                .unwrap_or_else(|_| "http://localhost:3000".into());
+            let backend_url =
+                std::env::var("RYU_AUTH_URL").unwrap_or_else(|_| "http://localhost:3000".into());
             auth::run_login(&backend_url).await?;
         }
 
@@ -467,7 +586,9 @@ fn print_usage() {
     eprintln!("  stop  <name|all>               stop a sidecar or all");
     eprintln!("  restart <name>                 restart a sidecar");
     eprintln!("  node <sub>                     manage nodes (add/remove/list/use/test/init)");
-    eprintln!("  open <ryu://…|page|chat …>     open a deep link / page / new chat in the desktop app");
+    eprintln!(
+        "  open <ryu://…|page|chat …>     open a deep link / page / new chat in the desktop app"
+    );
     eprintln!("  setup                          open setup wizard TUI");
     eprintln!("  version                        show CLI + Ryu release version");
     eprintln!("  update                         check for a newer Ryu release");
@@ -476,7 +597,9 @@ fn print_usage() {
     eprintln!("  skills list [query]            browse the skills catalog");
     eprintln!("  skills add <id|owner/repo|url> install a skill (id or source)");
     eprintln!("  mcp list [query]               browse the MCP server catalog");
-    eprintln!("  mcp add <id>                   install an MCP server (written disabled; enable to use)");
+    eprintln!(
+        "  mcp add <id>                   install an MCP server (written disabled; enable to use)"
+    );
     eprintln!("  okf export <dir> [--bundle id] export indexed knowledge as an OKF bundle");
     eprintln!();
     eprintln!("Config-as-code (GitOps):");
@@ -533,7 +656,11 @@ async fn run_whoami() -> anyhow::Result<()> {
     println!("Logged in as {name}");
     println!(
         "Email:     {email}{}",
-        if verified { " (verified)" } else { " (unverified)" }
+        if verified {
+            " (verified)"
+        } else {
+            " (unverified)"
+        }
     );
 
     if let Ok(pw) = pw_res {
@@ -547,7 +674,11 @@ async fn run_whoami() -> anyhow::Result<()> {
             .unwrap_or("unknown");
         println!(
             "Auth:      {}",
-            if has_password { "Password set".to_owned() } else { format!("Signed in via {method}") }
+            if has_password {
+                "Password set".to_owned()
+            } else {
+                format!("Signed in via {method}")
+            }
         );
     }
 
@@ -569,7 +700,10 @@ async fn run_whoami() -> anyhow::Result<()> {
 }
 
 pub fn format_plan(sub: &serde_json::Value) -> String {
-    if let Some(lt) = sub.get("lifetime").and_then(|v| if v.is_null() { None } else { Some(v) }) {
+    if let Some(lt) = sub
+        .get("lifetime")
+        .and_then(|v| if v.is_null() { None } else { Some(v) })
+    {
         let expired = lt.get("expired").and_then(|v| v.as_bool()).unwrap_or(false);
         if expired {
             return "Lifetime (updates expired)".to_owned();
@@ -582,15 +716,27 @@ pub fn format_plan(sub: &serde_json::Value) -> String {
         return format!("Lifetime (updates until {until})");
     }
 
-    if let Some(s) = sub.get("subscription").and_then(|v| if v.is_null() { None } else { Some(v) }) {
-        let status = s.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
+    if let Some(s) = sub
+        .get("subscription")
+        .and_then(|v| if v.is_null() { None } else { Some(v) })
+    {
+        let status = s
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let interval = s.get("interval").and_then(|v| v.as_str()).unwrap_or("");
 
         if status == "trialing" {
             return format!("Trial ({interval}ly after trial)");
         }
 
-        let label = if interval == "month" { "monthly" } else if interval == "year" { "annual" } else { interval };
+        let label = if interval == "month" {
+            "monthly"
+        } else if interval == "year" {
+            "annual"
+        } else {
+            interval
+        };
         return format!("Pro ({label})");
     }
 
@@ -618,7 +764,8 @@ async fn run_sessions_command(args: &[String]) -> anyhow::Result<()> {
             println!("{}", "-".repeat(80));
 
             for (i, s) in sessions.iter().enumerate() {
-                let id = s.get("_id")
+                let id = s
+                    .get("_id")
                     .or_else(|| s.get("id"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("—");
@@ -627,10 +774,7 @@ async fn run_sessions_command(args: &[String]) -> anyhow::Result<()> {
                     .and_then(|v| v.as_str())
                     .map(parse_user_agent)
                     .unwrap_or_else(|| "Unknown".to_owned());
-                let ip = s
-                    .get("ipAddress")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("—");
+                let ip = s.get("ipAddress").and_then(|v| v.as_str()).unwrap_or("—");
                 let created = s
                     .get("createdAt")
                     .and_then(|v| v.as_str())
@@ -642,9 +786,9 @@ async fn run_sessions_command(args: &[String]) -> anyhow::Result<()> {
         }
 
         "revoke" => {
-            let session_id = args.get(1).ok_or_else(|| {
-                anyhow::anyhow!("usage: ryu sessions revoke <session-id>")
-            })?;
+            let session_id = args
+                .get(1)
+                .ok_or_else(|| anyhow::anyhow!("usage: ryu sessions revoke <session-id>"))?;
             auth::revoke_session(&backend_url, &data.token, session_id).await?;
             println!("Session {session_id} revoked.");
         }
@@ -697,8 +841,14 @@ async fn run_plan_command() -> anyhow::Result<()> {
     let plan = format_plan(&sub);
     println!("Plan:      {plan}");
 
-    if let Some(s) = sub.get("subscription").and_then(|v| if v.is_null() { None } else { Some(v) }) {
-        let status = s.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
+    if let Some(s) = sub
+        .get("subscription")
+        .and_then(|v| if v.is_null() { None } else { Some(v) })
+    {
+        let status = s
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         println!("Status:    {status}");
 
         if let Some(end) = s.get("currentPeriodEnd").and_then(|v| v.as_str()) {
@@ -728,20 +878,20 @@ async fn run_plan_command() -> anyhow::Result<()> {
                     .and_then(|v| v.as_str())
                     .and_then(|s| s.split('T').next())
                     .unwrap_or("—");
-                let status = inv
-                    .get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("—");
-                let amount = inv
-                    .get("amount")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
+                let status = inv.get("status").and_then(|v| v.as_str()).unwrap_or("—");
+                let amount = inv.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let currency = inv
                     .get("currency")
                     .and_then(|v| v.as_str())
                     .unwrap_or("usd")
                     .to_uppercase();
-                println!("{:<16}  {:<10}  {:.2} {}", date, status, amount / 100.0, currency);
+                println!(
+                    "{:<16}  {:<10}  {:.2} {}",
+                    date,
+                    status,
+                    amount / 100.0,
+                    currency
+                );
             }
         }
     }
@@ -757,9 +907,9 @@ async fn run_account_command(args: &[String]) -> anyhow::Result<()> {
 
     match sub {
         Some("name") => {
-            let new_name = args.get(1).ok_or_else(|| {
-                anyhow::anyhow!("usage: ryu account name <new-name>")
-            })?;
+            let new_name = args
+                .get(1)
+                .ok_or_else(|| anyhow::anyhow!("usage: ryu account name <new-name>"))?;
             auth::update_display_name(&backend_url, &data.token, new_name).await?;
             println!("Display name updated to \"{new_name}\".");
         }
@@ -793,7 +943,11 @@ async fn run_account_command(args: &[String]) -> anyhow::Result<()> {
             println!("Name:      {name}");
             println!(
                 "Email:     {email}{}",
-                if verified { " (verified)" } else { " (unverified)" }
+                if verified {
+                    " (verified)"
+                } else {
+                    " (unverified)"
+                }
             );
 
             if let Ok(pw) = pw_res {
@@ -839,22 +993,38 @@ async fn run_node_command(args: &[String]) -> anyhow::Result<()> {
             println!("{:<16}  {:<40}  {}", "NAME", "URL", "DEFAULT");
             println!("{}", "-".repeat(66));
             for node in &config.nodes {
-                let marker = if node.name == config.default { "●" } else { " " };
-                let auth = if node.token.is_some() { "(token)" } else { "(open)" };
+                let marker = if node.name == config.default {
+                    "●"
+                } else {
+                    " "
+                };
+                let auth = if node.token.is_some() {
+                    "(token)"
+                } else {
+                    "(open)"
+                };
                 println!("{:<16}  {:<40}  {} {}", node.name, node.url, marker, auth);
             }
         }
 
         "add" => {
-            let name = args.get(1).ok_or_else(|| anyhow::anyhow!("usage: ryu node add <name> <url> [--token <token>]"))?;
-            let url  = args.get(2).ok_or_else(|| anyhow::anyhow!("usage: ryu node add <name> <url> [--token <token>]"))?;
+            let name = args.get(1).ok_or_else(|| {
+                anyhow::anyhow!("usage: ryu node add <name> <url> [--token <token>]")
+            })?;
+            let url = args.get(2).ok_or_else(|| {
+                anyhow::anyhow!("usage: ryu node add <name> <url> [--token <token>]")
+            })?;
 
             if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '-') {
                 anyhow::bail!("node name must be alphanumeric + hyphens only");
             }
 
             let token = args.windows(2).find_map(|w| {
-                if w[0] == "--token" { Some(w[1].clone()) } else { None }
+                if w[0] == "--token" {
+                    Some(w[1].clone())
+                } else {
+                    None
+                }
             });
 
             let mut config = nodes::load();
@@ -873,7 +1043,9 @@ async fn run_node_command(args: &[String]) -> anyhow::Result<()> {
         }
 
         "remove" => {
-            let name = args.get(1).ok_or_else(|| anyhow::anyhow!("usage: ryu node remove <name>"))?;
+            let name = args
+                .get(1)
+                .ok_or_else(|| anyhow::anyhow!("usage: ryu node remove <name>"))?;
             if name == "local" {
                 anyhow::bail!("cannot remove the local node");
             }
@@ -891,10 +1063,15 @@ async fn run_node_command(args: &[String]) -> anyhow::Result<()> {
         }
 
         "use" => {
-            let name = args.get(1).ok_or_else(|| anyhow::anyhow!("usage: ryu node use <name>"))?;
+            let name = args
+                .get(1)
+                .ok_or_else(|| anyhow::anyhow!("usage: ryu node use <name>"))?;
             let mut config = nodes::load();
             if !config.nodes.iter().any(|n| n.name == *name) {
-                anyhow::bail!("node '{}' not found — run `ryu node list` to see available nodes", name);
+                anyhow::bail!(
+                    "node '{}' not found — run `ryu node list` to see available nodes",
+                    name
+                );
             }
             config.default = name.clone();
             nodes::save(&config)?;
@@ -907,7 +1084,10 @@ async fn run_node_command(args: &[String]) -> anyhow::Result<()> {
         }
 
         "test" => {
-            let name = args.get(1).cloned().unwrap_or_else(|| nodes::active_node().name);
+            let name = args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| nodes::active_node().name);
             let node = nodes::get_node(&name)?;
             let client = api::authed_client(node.token.as_deref());
             let start = std::time::Instant::now();
@@ -934,7 +1114,9 @@ async fn run_node_command(args: &[String]) -> anyhow::Result<()> {
                 let home = std::env::var("USERPROFILE")
                     .or_else(|_| std::env::var("HOME"))
                     .unwrap_or_else(|_| ".".into());
-                std::path::PathBuf::from(home).join(".ryu").join("core.token")
+                std::path::PathBuf::from(home)
+                    .join(".ryu")
+                    .join("core.token")
             };
 
             let force = args.iter().any(|a| a == "--force");
@@ -966,7 +1148,11 @@ async fn run_node_command(args: &[String]) -> anyhow::Result<()> {
         // registers every found node and prints instructions to activate one.
         "discover" => {
             let port: Option<u16> = args.windows(2).find_map(|w| {
-                if w[0] == "--port" { w[1].parse().ok() } else { None }
+                if w[0] == "--port" {
+                    w[1].parse().ok()
+                } else {
+                    None
+                }
             });
             let do_add = args.iter().any(|a| a == "--add");
 
@@ -1071,9 +1257,9 @@ async fn run_skills_command(
         }
 
         "add" | "install" => {
-            let target = args.get(1).ok_or_else(|| {
-                anyhow::anyhow!("usage: ryu skills add <id|owner/repo|url>")
-            })?;
+            let target = args
+                .get(1)
+                .ok_or_else(|| anyhow::anyhow!("usage: ryu skills add <id|owner/repo|url>"))?;
             // A `://` URL is unambiguously a source. A catalog id is
             // `owner/repo/slug` (also contains slashes), so for everything else
             // try catalog-install first and fall back to install-from-source on
@@ -1152,7 +1338,9 @@ async fn run_mcp_command(
         }
 
         "add" | "install" => {
-            let id = args.get(1).ok_or_else(|| anyhow::anyhow!("usage: ryu mcp add <id>"))?;
+            let id = args
+                .get(1)
+                .ok_or_else(|| anyhow::anyhow!("usage: ryu mcp add <id>"))?;
             println!("Installing MCP server '{id}'...");
             let name = api::install_mcp_server(api_url, token, id).await?;
             println!("Installed '{name}' (disabled; enable it to use).");
@@ -1302,7 +1490,10 @@ pub fn palette_entries() -> Vec<(String, PaletteAction)> {
         .collect();
     v.push(("New chat".into(), PaletteAction::NewChat));
     v.push(("Sessions (run history)".into(), PaletteAction::Sessions));
-    v.push(("Toggle double-check".into(), PaletteAction::ToggleDoubleCheck));
+    v.push((
+        "Toggle double-check".into(),
+        PaletteAction::ToggleDoubleCheck,
+    ));
     v.push(("Switch node".into(), PaletteAction::NodePicker));
     v
 }
@@ -1521,9 +1712,9 @@ async fn open_node_picker(app: &mut App) {
     app.node_picker_open = true;
 
     // Run health checks concurrently and cache results.
-    let results: Vec<bool> = futures_util::future::join_all(
-        config.nodes.iter().map(|n| api::health_check_node(n))
-    ).await;
+    let results: Vec<bool> =
+        futures_util::future::join_all(config.nodes.iter().map(|n| api::health_check_node(n)))
+            .await;
     app.node_health.clear();
     for (node, ok) in config.nodes.iter().zip(results.iter()) {
         app.node_health.insert(node.name.clone(), *ok);
@@ -1861,7 +2052,11 @@ fn apps_list_up(app: &mut App) {
     if len == 0 {
         return;
     }
-    let next = app.apps_list_state.selected().unwrap_or(0).saturating_sub(1);
+    let next = app
+        .apps_list_state
+        .selected()
+        .unwrap_or(0)
+        .saturating_sub(1);
     app.apps_list_state.select(Some(next));
 }
 
@@ -1914,7 +2109,8 @@ async fn refresh_workflows(app: &mut App) {
     match api::fetch_workflows(&app.api_url, token.as_deref()).await {
         Ok(wfs) => {
             app.workflows_list = wfs;
-            if app.workflows_tab_index >= app.workflows_list.len() && !app.workflows_list.is_empty() {
+            if app.workflows_tab_index >= app.workflows_list.len() && !app.workflows_list.is_empty()
+            {
                 app.workflows_tab_index = app.workflows_list.len() - 1;
             }
         }
@@ -1987,7 +2183,11 @@ async fn refresh_engines(app: &mut App) {
     let active_res = api::fetch_active_engine(&app.api_url, token.as_deref()).await;
 
     if let Ok(mut engines) = engines_res {
-        let active_name = active_res.as_ref().ok().and_then(|a| a.active.as_deref()).unwrap_or("");
+        let active_name = active_res
+            .as_ref()
+            .ok()
+            .and_then(|a| a.active.as_deref())
+            .unwrap_or("");
         for eng in &mut engines {
             eng.active = eng.name == active_name || eng.id == active_name;
         }
@@ -2009,7 +2209,10 @@ async fn do_activate_engine(app: &mut App) {
         None => return,
     };
     let token = nodes::active_node().token;
-    if api::post_active_engine(&app.api_url, token.as_deref(), &engine.name).await.is_ok() {
+    if api::post_active_engine(&app.api_url, token.as_deref(), &engine.name)
+        .await
+        .is_ok()
+    {
         // Refresh so the active marker updates immediately.
         refresh_engines(app).await;
     }
@@ -2022,8 +2225,7 @@ async fn refresh_schedules(app: &mut App) {
     match api::fetch_scheduled_jobs(&app.api_url, token.as_deref()).await {
         Ok(jobs) => {
             app.scheduled_jobs = jobs;
-            if app.schedules_tab_index >= app.scheduled_jobs.len()
-                && !app.scheduled_jobs.is_empty()
+            if app.schedules_tab_index >= app.scheduled_jobs.len() && !app.scheduled_jobs.is_empty()
             {
                 app.schedules_tab_index = app.scheduled_jobs.len() - 1;
             }
@@ -2064,60 +2266,95 @@ async fn refresh_feature_tab(app: &mut App, tab: SidebarTab) {
     }
     let result = match tab {
         SidebarTab::Models => {
-            api::fetch_feature_list(&url, t, "/api/models/catalog?limit=30",
+            api::fetch_feature_list(
+                &url,
+                t,
+                "/api/models/catalog?limit=30",
                 &["data", "models", "items", "results"],
                 &["name", "id", "model_id", "slug"],
                 &["description", "author", "pipeline_tag"],
                 &["downloads", "installs", "likes"],
-                &["id", "model_id", "slug"]).await
+                &["id", "model_id", "slug"],
+            )
+            .await
         }
         SidebarTab::Skills => {
-            api::fetch_feature_list(&url, t, "/api/skills/catalog?limit=30",
+            api::fetch_feature_list(
+                &url,
+                t,
+                "/api/skills/catalog?limit=30",
                 &["skills", "data", "results"],
                 &["name", "slug", "id"],
                 &["description", "summary"],
                 &["installed"],
-                &["id", "slug"]).await
+                &["id", "slug"],
+            )
+            .await
         }
         SidebarTab::Tools => {
-            api::fetch_feature_list(&url, t, "/api/tools/search?limit=30",
+            api::fetch_feature_list(
+                &url,
+                t,
+                "/api/tools/search?limit=30",
                 &["data", "tools", "results"],
                 &["name", "id"],
                 &["description"],
                 &["kind"],
-                &["id"]).await
+                &["id"],
+            )
+            .await
         }
         SidebarTab::Monitors => {
-            api::fetch_feature_list(&url, t, "/api/monitors",
+            api::fetch_feature_list(
+                &url,
+                t,
+                "/api/monitors",
                 &["monitors", "data"],
                 &["name", "id"],
                 &["url"],
                 &["last_status", "enabled"],
-                &["id"]).await
+                &["id"],
+            )
+            .await
         }
         SidebarTab::Teams => {
-            api::fetch_feature_list(&url, t, "/api/teams",
+            api::fetch_feature_list(
+                &url,
+                t,
+                "/api/teams",
                 &["teams", "data"],
                 &["name", "id"],
                 &["coordination", "description"],
                 &["members"],
-                &["id"]).await
+                &["id"],
+            )
+            .await
         }
         SidebarTab::Meetings => {
-            api::fetch_feature_list(&url, t, "/api/meetings",
+            api::fetch_feature_list(
+                &url,
+                t,
+                "/api/meetings",
                 &["meetings", "data"],
                 &["title", "name", "id"],
                 &["created_at", "status"],
                 &["status"],
-                &["id"]).await
+                &["id"],
+            )
+            .await
         }
         SidebarTab::Recipes => {
-            api::fetch_feature_list(&url, t, "/api/recipes",
+            api::fetch_feature_list(
+                &url,
+                t,
+                "/api/recipes",
                 &["recipes", "data"],
                 &["name", "id"],
                 &["description", "task"],
                 &["steps"],
-                &["name", "id"]).await
+                &["name", "id"],
+            )
+            .await
         }
         _ => Ok(Vec::new()),
     };
@@ -2144,7 +2381,10 @@ async fn feature_tab_action(app: &mut App, tab: SidebarTab) {
         _ => return,
     };
     let (verb, result) = match tab {
-        SidebarTab::Models => ("install queued", api::install_model_by_id(&url, t, &id).await),
+        SidebarTab::Models => (
+            "install queued",
+            api::install_model_by_id(&url, t, &id).await,
+        ),
         SidebarTab::Skills => (
             "install queued",
             api::install_skill_by_id(&url, t, &id).await.map(|_| ()),
@@ -2552,14 +2792,24 @@ async fn run_app<B: ratatui::backend::Backend>(
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<chat::GoalEvent>();
                 goal_rx = Some(rx);
                 let (url, token) = api::active_url_and_token();
-                tokio::spawn(chat::judge_goal(url, app.conversation_id.clone(), token, tx));
+                tokio::spawn(chat::judge_goal(
+                    url,
+                    app.conversation_id.clone(),
+                    token,
+                    tx,
+                ));
             }
         }
 
         // ── Drain goal-judge verdicts (drives the continuation loop) ───
         if let Some(rx) = &mut goal_rx {
             match rx.try_recv() {
-                Ok(chat::GoalEvent::Verdict { met, reason, stop, turns }) => {
+                Ok(chat::GoalEvent::Verdict {
+                    met,
+                    reason,
+                    stop,
+                    turns,
+                }) => {
                     app.chat_goal.judging = false;
                     app.chat_goal.turns = turns;
                     app.chat_goal.last_reason = Some(reason);
@@ -2595,7 +2845,11 @@ async fn run_app<B: ratatui::backend::Backend>(
         // ── Drain double-check reviews ─────────────────────────────────
         if let Some(rx) = &mut dc_rx {
             match rx.try_recv() {
-                Ok(chat::DoubleCheckEvent::Result { ok, critique, model }) => {
+                Ok(chat::DoubleCheckEvent::Result {
+                    ok,
+                    critique,
+                    model,
+                }) => {
                     app.double_check.loading = false;
                     app.double_check.ok = Some(ok);
                     app.double_check.critique = critique;
@@ -2766,8 +3020,7 @@ async fn run_app<B: ratatui::backend::Backend>(
                     // Command palette captures all input while open.
                     if app.palette.open {
                         match (key.modifiers, key.code) {
-                            (_, KeyCode::Esc)
-                            | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
+                            (_, KeyCode::Esc) | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
                                 app.palette.open = false;
                             }
                             (KeyModifiers::NONE, KeyCode::Up) => {
@@ -2802,7 +3055,10 @@ async fn run_app<B: ratatui::backend::Backend>(
 
                     // Open the command palette with Ctrl+P (global, any tab).
                     if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('p') {
-                        app.palette = crate::app::CommandPalette { open: true, ..Default::default() };
+                        app.palette = crate::app::CommandPalette {
+                            open: true,
+                            ..Default::default()
+                        };
                         continue;
                     }
 
@@ -2846,7 +3102,11 @@ async fn run_app<B: ratatui::backend::Backend>(
                             .position(|t| *t == app.active_tab)
                             .unwrap_or(0);
                         let next = if key.code == KeyCode::BackTab {
-                            if cur == 0 { SIDEBAR_TABS.len() - 1 } else { cur - 1 }
+                            if cur == 0 {
+                                SIDEBAR_TABS.len() - 1
+                            } else {
+                                cur - 1
+                            }
                         } else {
                             (cur + 1) % SIDEBAR_TABS.len()
                         };
@@ -2856,10 +3116,22 @@ async fn run_app<B: ratatui::backend::Backend>(
 
                     if key.modifiers == KeyModifiers::NONE {
                         match key.code {
-                            KeyCode::Char('1') => { switch_tab(&mut app, SidebarTab::Chat); continue; }
-                            KeyCode::Char('2') => { switch_tab(&mut app, SidebarTab::Services); continue; }
-                            KeyCode::Char('3') => { switch_tab(&mut app, SidebarTab::Agents); continue; }
-                            KeyCode::Char('4') => { switch_tab(&mut app, SidebarTab::Account); continue; }
+                            KeyCode::Char('1') => {
+                                switch_tab(&mut app, SidebarTab::Chat);
+                                continue;
+                            }
+                            KeyCode::Char('2') => {
+                                switch_tab(&mut app, SidebarTab::Services);
+                                continue;
+                            }
+                            KeyCode::Char('3') => {
+                                switch_tab(&mut app, SidebarTab::Agents);
+                                continue;
+                            }
+                            KeyCode::Char('4') => {
+                                switch_tab(&mut app, SidebarTab::Account);
+                                continue;
+                            }
                             _ => {}
                         }
                     }
@@ -2872,7 +3144,8 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 match (key.modifiers, key.code) {
                                     (_, KeyCode::Esc | KeyCode::Enter)
                                     | (KeyModifiers::NONE, KeyCode::Char(' ')) => {
-                                        app.double_check = crate::app::DoubleCheckOverlay::default();
+                                        app.double_check =
+                                            crate::app::DoubleCheckOverlay::default();
                                     }
                                     (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
                                         app.double_check.scroll =
@@ -2987,43 +3260,41 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 _ => {}
                             }
                         }
-                        SidebarTab::Services => {
-                            match (key.modifiers, key.code) {
-                                (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
-                                (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
-                                    list_up(&mut app, SIDECAR_ORDER.len());
-                                }
-                                (KeyModifiers::NONE, KeyCode::Down | KeyCode::Char('j')) => {
-                                    list_down(&mut app, SIDECAR_ORDER.len());
-                                }
-                                (KeyModifiers::NONE, KeyCode::Char('s')) => {
-                                    do_start_sidecar(&mut app).await;
-                                }
-                                (KeyModifiers::NONE, KeyCode::Char('x')) => {
-                                    do_stop_sidecar(&mut app).await;
-                                }
-                                (KeyModifiers::NONE, KeyCode::Char('r')) => {
-                                    do_restart_sidecar(&mut app).await;
-                                }
-                                (KeyModifiers::SHIFT, KeyCode::Char('A') | KeyCode::Char('a')) => {
-                                    do_start_all(&mut app).await;
-                                }
-                                (KeyModifiers::SHIFT, KeyCode::Char('Z') | KeyCode::Char('z')) => {
-                                    do_stop_all(&mut app).await;
-                                }
-                                (KeyModifiers::NONE, KeyCode::Char('d')) => {
-                                    do_install_sidecar(&mut app).await;
-                                }
-                                (KeyModifiers::SHIFT, KeyCode::Char('D') | KeyCode::Char('d')) => {
-                                    do_uninstall_sidecar(&mut app).await;
-                                }
-                                (KeyModifiers::NONE, KeyCode::Char('i')) => {
-                                    app.current_screen = Screen::SetupDependencies;
-                                    app.list_state.select(Some(0));
-                                }
-                                _ => {}
+                        SidebarTab::Services => match (key.modifiers, key.code) {
+                            (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
+                            (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
+                                list_up(&mut app, SIDECAR_ORDER.len());
                             }
-                        }
+                            (KeyModifiers::NONE, KeyCode::Down | KeyCode::Char('j')) => {
+                                list_down(&mut app, SIDECAR_ORDER.len());
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('s')) => {
+                                do_start_sidecar(&mut app).await;
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('x')) => {
+                                do_stop_sidecar(&mut app).await;
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('r')) => {
+                                do_restart_sidecar(&mut app).await;
+                            }
+                            (KeyModifiers::SHIFT, KeyCode::Char('A') | KeyCode::Char('a')) => {
+                                do_start_all(&mut app).await;
+                            }
+                            (KeyModifiers::SHIFT, KeyCode::Char('Z') | KeyCode::Char('z')) => {
+                                do_stop_all(&mut app).await;
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('d')) => {
+                                do_install_sidecar(&mut app).await;
+                            }
+                            (KeyModifiers::SHIFT, KeyCode::Char('D') | KeyCode::Char('d')) => {
+                                do_uninstall_sidecar(&mut app).await;
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('i')) => {
+                                app.current_screen = Screen::SetupDependencies;
+                                app.list_state.select(Some(0));
+                            }
+                            _ => {}
+                        },
                         SidebarTab::Agents => {
                             match (key.modifiers, key.code) {
                                 (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
@@ -3051,14 +3322,17 @@ async fn run_app<B: ratatui::backend::Backend>(
                                         app.agent_detail = None;
                                         app.agent_detail_loading = true;
                                         app.agent_detail_error = None;
-                                        match fetch_agent_detail(&api_url, token.as_deref(), &id).await {
+                                        match fetch_agent_detail(&api_url, token.as_deref(), &id)
+                                            .await
+                                        {
                                             Ok(detail) => {
                                                 app.agent_detail = Some(detail);
                                                 app.agent_detail_loading = false;
                                             }
                                             Err(e) => {
                                                 app.agent_detail_loading = false;
-                                                app.agent_detail_error = Some(format!("Failed to load detail: {e}"));
+                                                app.agent_detail_error =
+                                                    Some(format!("Failed to load detail: {e}"));
                                             }
                                         }
                                     }
@@ -3083,79 +3357,73 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 _ => {}
                             }
                         }
-                        SidebarTab::Account => {
-                            match (key.modifiers, key.code) {
-                                (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
-                                (KeyModifiers::NONE, KeyCode::Char('r')) => {
-                                    app.auth_info = auth::fetch_auth_info().await;
-                                }
-                                (KeyModifiers::NONE, KeyCode::Char('l')) => {
-                                    do_login(&mut app, &mut login_rx);
-                                }
-                                (KeyModifiers::SHIFT, KeyCode::Char('L') | KeyCode::Char('l')) => {
-                                    do_logout(&mut app);
-                                }
-                                _ => {}
+                        SidebarTab::Account => match (key.modifiers, key.code) {
+                            (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
+                            (KeyModifiers::NONE, KeyCode::Char('r')) => {
+                                app.auth_info = auth::fetch_auth_info().await;
                             }
-                        }
-                        SidebarTab::Apps => {
-                            match (key.modifiers, key.code) {
-                                (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
-                                (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
-                                    apps_list_up(&mut app);
-                                }
-                                (KeyModifiers::NONE, KeyCode::Down | KeyCode::Char('j')) => {
-                                    apps_list_down(&mut app);
-                                }
-                                (KeyModifiers::NONE, KeyCode::Char('i')) => {
-                                    do_install_catalog_item(&mut app).await;
-                                }
-                                (KeyModifiers::SHIFT, KeyCode::Char('D') | KeyCode::Char('d')) => {
-                                    do_uninstall_catalog_item(&mut app).await;
-                                }
-                                (KeyModifiers::NONE, KeyCode::Char('r')) => {
-                                    refresh_catalog(&mut app).await;
-                                }
-                                _ => {}
+                            (KeyModifiers::NONE, KeyCode::Char('l')) => {
+                                do_login(&mut app, &mut login_rx);
                             }
-                        }
-                        SidebarTab::Workflows => {
-                            match (key.modifiers, key.code) {
-                                (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
-                                (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
-                                    if app.workflows_tab_index > 0 {
-                                        app.workflows_tab_index -= 1;
-                                        app.workflow_confirm_pending = false;
-                                    }
-                                }
-                                (KeyModifiers::NONE, KeyCode::Down | KeyCode::Char('j')) => {
-                                    let len = app.workflows_list.len();
-                                    if len > 0 && app.workflows_tab_index < len - 1 {
-                                        app.workflows_tab_index += 1;
-                                        app.workflow_confirm_pending = false;
-                                    }
-                                }
-                                (KeyModifiers::NONE, KeyCode::Enter) => {
-                                    if app.workflow_confirm_pending {
-                                        app.workflow_confirm_pending = false;
-                                        do_trigger_workflow_run(&mut app).await;
-                                    } else if !app.workflows_list.is_empty() {
-                                        app.workflow_confirm_pending = true;
-                                    }
-                                }
-                                (KeyModifiers::NONE, KeyCode::Esc) => {
+                            (KeyModifiers::SHIFT, KeyCode::Char('L') | KeyCode::Char('l')) => {
+                                do_logout(&mut app);
+                            }
+                            _ => {}
+                        },
+                        SidebarTab::Apps => match (key.modifiers, key.code) {
+                            (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
+                            (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
+                                apps_list_up(&mut app);
+                            }
+                            (KeyModifiers::NONE, KeyCode::Down | KeyCode::Char('j')) => {
+                                apps_list_down(&mut app);
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('i')) => {
+                                do_install_catalog_item(&mut app).await;
+                            }
+                            (KeyModifiers::SHIFT, KeyCode::Char('D') | KeyCode::Char('d')) => {
+                                do_uninstall_catalog_item(&mut app).await;
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('r')) => {
+                                refresh_catalog(&mut app).await;
+                            }
+                            _ => {}
+                        },
+                        SidebarTab::Workflows => match (key.modifiers, key.code) {
+                            (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
+                            (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
+                                if app.workflows_tab_index > 0 {
+                                    app.workflows_tab_index -= 1;
                                     app.workflow_confirm_pending = false;
-                                    app.workflow_run_id = None;
-                                    app.workflow_run_state = None;
-                                    app.workflow_run_output = None;
-                                    app.workflow_run_error = None;
                                 }
-                                (KeyModifiers::NONE, KeyCode::Char('r')) => {
-                                    refresh_workflows(&mut app).await;
-                                }
-                                _ => {}
                             }
-                        }
+                            (KeyModifiers::NONE, KeyCode::Down | KeyCode::Char('j')) => {
+                                let len = app.workflows_list.len();
+                                if len > 0 && app.workflows_tab_index < len - 1 {
+                                    app.workflows_tab_index += 1;
+                                    app.workflow_confirm_pending = false;
+                                }
+                            }
+                            (KeyModifiers::NONE, KeyCode::Enter) => {
+                                if app.workflow_confirm_pending {
+                                    app.workflow_confirm_pending = false;
+                                    do_trigger_workflow_run(&mut app).await;
+                                } else if !app.workflows_list.is_empty() {
+                                    app.workflow_confirm_pending = true;
+                                }
+                            }
+                            (KeyModifiers::NONE, KeyCode::Esc) => {
+                                app.workflow_confirm_pending = false;
+                                app.workflow_run_id = None;
+                                app.workflow_run_state = None;
+                                app.workflow_run_output = None;
+                                app.workflow_run_error = None;
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('r')) => {
+                                refresh_workflows(&mut app).await;
+                            }
+                            _ => {}
+                        },
                         SidebarTab::Spaces => {
                             match (key.modifiers, key.code) {
                                 (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
@@ -3209,26 +3477,24 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 _ => {}
                             }
                         }
-                        SidebarTab::Schedules => {
-                            match (key.modifiers, key.code) {
-                                (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
-                                (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
-                                    if app.schedules_tab_index > 0 {
-                                        app.schedules_tab_index -= 1;
-                                    }
+                        SidebarTab::Schedules => match (key.modifiers, key.code) {
+                            (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
+                            (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
+                                if app.schedules_tab_index > 0 {
+                                    app.schedules_tab_index -= 1;
                                 }
-                                (KeyModifiers::NONE, KeyCode::Down | KeyCode::Char('j')) => {
-                                    let len = app.scheduled_jobs.len();
-                                    if len > 0 && app.schedules_tab_index < len - 1 {
-                                        app.schedules_tab_index += 1;
-                                    }
-                                }
-                                (KeyModifiers::NONE, KeyCode::Char('r')) => {
-                                    refresh_schedules(&mut app).await;
-                                }
-                                _ => {}
                             }
-                        }
+                            (KeyModifiers::NONE, KeyCode::Down | KeyCode::Char('j')) => {
+                                let len = app.scheduled_jobs.len();
+                                if len > 0 && app.schedules_tab_index < len - 1 {
+                                    app.schedules_tab_index += 1;
+                                }
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('r')) => {
+                                refresh_schedules(&mut app).await;
+                            }
+                            _ => {}
+                        },
                         SidebarTab::Agents | SidebarTab::Gateway => {
                             if let (KeyModifiers::NONE, KeyCode::Char('q')) =
                                 (key.modifiers, key.code)
@@ -3280,8 +3546,7 @@ async fn run_app<B: ratatui::backend::Backend>(
                         app.list_state.select(Some(0));
                     }
 
-                    (KeyModifiers::NONE, KeyCode::Right)
-                    | (KeyModifiers::NONE, KeyCode::Enter) => {
+                    (KeyModifiers::NONE, KeyCode::Right) | (KeyModifiers::NONE, KeyCode::Enter) => {
                         if !matches!(app.current_screen, Screen::WaitingForCore) {
                             if go_next(&mut app).await? {
                                 return Ok(());
@@ -3361,7 +3626,9 @@ async fn run_app<B: ratatui::backend::Backend>(
 
                         // Check service list row click
                         if let Some(area) = app.click_regions.service_list_area {
-                            if rect_contains(area, col, row) && app.active_tab == SidebarTab::Services {
+                            if rect_contains(area, col, row)
+                                && app.active_tab == SidebarTab::Services
+                            {
                                 let row_idx = (row - app.click_regions.service_list_top_y) as usize;
                                 if row_idx < SIDECAR_ORDER.len() {
                                     app.list_state.select(Some(row_idx));
@@ -3372,7 +3639,8 @@ async fn run_app<B: ratatui::backend::Backend>(
 
                         // Check agent list row click on the Agents tab
                         if let Some(area) = app.click_regions.agent_list_area {
-                            if rect_contains(area, col, row) && app.active_tab == SidebarTab::Agents {
+                            if rect_contains(area, col, row) && app.active_tab == SidebarTab::Agents
+                            {
                                 let row_idx = (row - app.click_regions.agent_list_top_y) as usize;
                                 let len = app.agents_list.len();
                                 if row_idx < len {

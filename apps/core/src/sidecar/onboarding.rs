@@ -665,11 +665,15 @@ impl SetupManager {
         {
             Ok(path) => {
                 self.mark_installed("vad-model:silero-v4").await;
-                tracing::info!("onboarding: Silero VAD model installed at {}", path.display());
+                tracing::info!(
+                    "onboarding: Silero VAD model installed at {}",
+                    path.display()
+                );
                 true
             }
             Err(e) => {
-                let msg = format!("Silero VAD model download failed (voice uses energy VAD): {e:#}");
+                let msg =
+                    format!("Silero VAD model download failed (voice uses energy VAD): {e:#}");
                 tracing::warn!("{}", msg);
                 warnings.push(msg);
                 false
@@ -769,22 +773,23 @@ impl SetupManager {
         // else — on a platform with no prebuilt server (Intel mac, arm Linux) it
         // warns and never blocks. The engine stays opt-in to *run* (not in
         // `startup_order`); the `/api/images/generate` route lazily starts it.
-        let sdcpp_installed = match crate::sidecar::providers::sdcpp::StableDiffusionDownloader::new()
-            .ensure_installed(downloads)
-            .await
-        {
-            Ok(_version) => {
-                self.mark_installed("sdcpp").await;
-                tracing::info!("onboarding: stable-diffusion.cpp image engine installed");
-                true
-            }
-            Err(e) => {
-                let msg = format!("image engine (sdcpp) install skipped/failed: {e:#}");
-                tracing::warn!("{}", msg);
-                warnings.push(msg);
-                false
-            }
-        };
+        let sdcpp_installed =
+            match crate::sidecar::providers::sdcpp::StableDiffusionDownloader::new()
+                .ensure_installed(downloads)
+                .await
+            {
+                Ok(_version) => {
+                    self.mark_installed("sdcpp").await;
+                    tracing::info!("onboarding: stable-diffusion.cpp image engine installed");
+                    true
+                }
+                Err(e) => {
+                    let msg = format!("image engine (sdcpp) install skipped/failed: {e:#}");
+                    tracing::warn!("{}", msg);
+                    warnings.push(msg);
+                    false
+                }
+            };
 
         let status = LocalStackStatus {
             llamacpp_installed,

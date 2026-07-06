@@ -1,9 +1,9 @@
 // Learning session: tracks recording state and collected action events.
 // Platform hook management is handled by the caller (apps/ghost or apps/shadow).
 
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
 
 /// Maximum learning session duration.
 pub const MAX_SESSION_DURATION: Duration = Duration::from_secs(10 * 60); // 10 minutes
@@ -111,9 +111,7 @@ impl LearningSession {
 
     pub fn elapsed_secs(&self) -> u64 {
         let g = self.inner.lock().unwrap();
-        g.started_at
-            .map(|t| t.elapsed().as_secs())
-            .unwrap_or(0)
+        g.started_at.map(|t| t.elapsed().as_secs()).unwrap_or(0)
     }
 
     pub fn task_description(&self) -> Option<String> {

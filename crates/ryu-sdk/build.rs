@@ -21,8 +21,8 @@ fn generate_gateway_client() {
     use std::path::Path;
 
     let spec_path = "specs/gateway-openapi.yaml";
-    let raw = std::fs::read_to_string(spec_path)
-        .unwrap_or_else(|e| panic!("read {spec_path}: {e}"));
+    let raw =
+        std::fs::read_to_string(spec_path).unwrap_or_else(|e| panic!("read {spec_path}: {e}"));
 
     // progenitor consumes an `openapiv3::OpenAPI` (OpenAPI 3.0 model). A 3.1
     // spec may fail here; that failure is expected and is why the feature is

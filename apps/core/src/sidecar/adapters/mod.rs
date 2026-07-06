@@ -80,9 +80,7 @@ fn unregister_live_stream(conversation_id: &str) {
 }
 
 /// Get a conversation's live stream (if a turn is in-flight).
-pub fn get_live_stream(
-    conversation_id: &str,
-) -> Option<Arc<LiveStream>> {
+pub fn get_live_stream(conversation_id: &str) -> Option<Arc<LiveStream>> {
     live_stream_registry()
         .lock()
         .ok()
@@ -815,7 +813,11 @@ impl PartsAccumulator {
     /// bare output with no matching input part is dropped (not renderable).
     fn tool_output(&mut self, id: &str, output: &Value, error: bool) {
         if let Some(&i) = self.tool_idx.get(id) {
-            let state = if error { "output-error" } else { "output-available" };
+            let state = if error {
+                "output-error"
+            } else {
+                "output-available"
+            };
             self.parts[i]["state"] = Value::String(state.to_owned());
             self.parts[i]["output"] = output.clone();
         }
@@ -3144,13 +3146,7 @@ pub async fn route_chat_stream(
         let conv_id = conversation_id_for_persist.clone();
         let agent_id = persist_agent_id.clone();
         move |reply: String, outcome: &'static str| {
-            persist_assistant_reply(
-                conversations.clone(),
-                conv_id,
-                agent_id,
-                reply,
-                outcome,
-            )
+            persist_assistant_reply(conversations.clone(), conv_id, agent_id, reply, outcome)
         }
     };
 
@@ -4067,8 +4063,7 @@ async fn route_acp_stream(
     // AUTHENTICATED one reads the credential under the gateway grant. Empty = none.
     identity_profile_ids: Vec<String>,
     traces: TraceStore,
-) -> Response
-{
+) -> Response {
     let user_message = last_user_message(&req.messages);
     if user_message.is_empty() {
         return error_stream("No user message to send to ACP agent".to_owned());
@@ -4142,9 +4137,7 @@ async fn route_acp_stream(
     // Live stream: register a broadcast channel keyed by conversation id so a
     // reconnecting client can subscribe via `/api/chat/stream/resume/:id` and
     // pick up live frames from this still-running turn.
-    let live_stream = persist_conversation_id
-        .as_deref()
-        .map(register_live_stream);
+    let live_stream = persist_conversation_id.as_deref().map(register_live_stream);
     let live_conv_id_for_cleanup = persist_conversation_id.clone();
 
     // Detached completion task — owns the worktree guard, persist closure,
@@ -4299,13 +4292,10 @@ async fn route_acp_stream(
                         } else if bytes_since_flush >= INCREMENTAL_FLUSH_BYTES {
                             // Periodic flush — update the existing row.
                             if let Some(ref mid) = persisted_msg_id {
-                                if let Err(e) = persist_store
-                                    .update_message_content(mid, &reply)
-                                    .await
+                                if let Err(e) =
+                                    persist_store.update_message_content(mid, &reply).await
                                 {
-                                    tracing::warn!(
-                                        "failed to flush incremental reply: {e:#}"
-                                    );
+                                    tracing::warn!("failed to flush incremental reply: {e:#}");
                                 }
                             }
                             bytes_since_flush = 0;
@@ -4383,10 +4373,7 @@ async fn route_acp_stream(
                     // so it never collides with a real tool input field.
                     if !locations.is_empty() {
                         if let Value::Object(ref mut map) = emit_input {
-                            map.insert(
-                                "_ryuLocations".to_owned(),
-                                Value::Array(locations.clone()),
-                            );
+                            map.insert("_ryuLocations".to_owned(), Value::Array(locations.clone()));
                         } else if emit_input.is_null() {
                             emit_input = serde_json::json!({ "_ryuLocations": locations });
                         }
@@ -4567,9 +4554,7 @@ async fn route_acp_stream(
                     // errored still persists its parts).
                     if let Some(ref conv_id) = persist_conversation_id {
                         if let Some(ref mid) = persisted_msg_id {
-                            let _ = persist_store
-                                .update_message_content(mid, &reply)
-                                .await;
+                            let _ = persist_store.update_message_content(mid, &reply).await;
                         } else if !reply.is_empty() || !acc.is_empty() {
                             match persist_store
                                 .append_message(
@@ -4588,9 +4573,7 @@ async fn route_acp_stream(
                                 ),
                             }
                         }
-                        let _ = persist_store
-                            .set_run_status(conv_id, "failed")
-                            .await;
+                        let _ = persist_store.set_run_status(conv_id, "failed").await;
                     }
                     close_thought!();
                     if plan_open {
@@ -4607,8 +4590,9 @@ async fn route_acp_stream(
                     // context survive a reload. Best-effort.
                     if let Some(ref mid) = persisted_msg_id {
                         if !acc.is_empty() {
-                            if let Err(e) =
-                                persist_store.update_message_parts(mid, &acc.to_json()).await
+                            if let Err(e) = persist_store
+                                .update_message_parts(mid, &acc.to_json())
+                                .await
                             {
                                 tracing::warn!("failed to persist message parts on error: {e:#}");
                             }
@@ -4630,9 +4614,7 @@ async fn route_acp_stream(
         if let Some(ref conv_id) = persist_conversation_id {
             if let Some(ref mid) = persisted_msg_id {
                 // Update the existing row with the final full reply.
-                let _ = persist_store
-                    .update_message_content(mid, &reply)
-                    .await;
+                let _ = persist_store.update_message_content(mid, &reply).await;
             } else if !reply.is_empty() || !acc.is_empty() {
                 // No row yet — create one now. A turn that only ran tools (no text)
                 // still needs a row so its structured parts (and thus the cowork
@@ -4654,9 +4636,7 @@ async fn route_acp_stream(
                     }
                 }
             }
-            let _ = persist_store
-                .set_run_status(conv_id, "completed")
-                .await;
+            let _ = persist_store.set_run_status(conv_id, "completed").await;
         }
         close_thought!();
         if plan_open {
@@ -4676,7 +4656,10 @@ async fn route_acp_stream(
         // rows + the cowork context (Progress / Sources / Subagents) on reload.
         if let Some(ref mid) = persisted_msg_id {
             if !acc.is_empty() {
-                if let Err(e) = persist_store.update_message_parts(mid, &acc.to_json()).await {
+                if let Err(e) = persist_store
+                    .update_message_parts(mid, &acc.to_json())
+                    .await
+                {
                     tracing::warn!("failed to persist message parts: {e:#}");
                 }
             }

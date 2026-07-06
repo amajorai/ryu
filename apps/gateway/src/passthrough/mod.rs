@@ -543,9 +543,9 @@ fn redact_response_passthrough(
             match s.inner.next().await {
                 Some(Ok(bytes)) => {
                     s.pending.extend_from_slice(&bytes);
-                    let (out, text) = s.state.with_firewall(|fw| {
-                        drain_complete_events(s.format, fw, &mut s.pending)
-                    });
+                    let (out, text) = s
+                        .state
+                        .with_firewall(|fw| drain_complete_events(s.format, fw, &mut s.pending));
                     s.accumulated.push_str(&text);
                     if out.is_empty() {
                         // No complete event yet — keep reading without emitting an
@@ -576,8 +576,9 @@ fn redact_response_passthrough(
                         // (e.g. a data: URI in output) routes to the SSE path and is
                         // passed through un-redacted — acceptable best-effort.
                         if raw.contains("data:") {
-                            let (redacted, text) =
-                                s.state.with_firewall(|fw| redact_sse_event(s.format, fw, &raw));
+                            let (redacted, text) = s
+                                .state
+                                .with_firewall(|fw| redact_sse_event(s.format, fw, &raw));
                             s.accumulated.push_str(&text);
                             redacted.into_bytes()
                         } else {
@@ -921,7 +922,10 @@ mod tests {
             !out.contains("sk-abcdefghijklmnopqrstuvwx"),
             "secret should be redacted, got: {out}"
         );
-        assert!(out.contains("[REDACTED:"), "expected a redaction marker: {out}");
+        assert!(
+            out.contains("[REDACTED:"),
+            "expected a redaction marker: {out}"
+        );
         // Non-text events pass through verbatim, framing preserved.
         assert!(out.contains("\"type\":\"message_start\""));
         assert!(out.contains("event: content_block_delta\n"));
@@ -941,7 +945,10 @@ mod tests {
             !out.contains("sk-abcdefghijklmnopqrstuvwx"),
             "secret should be redacted, got: {out}"
         );
-        assert!(out.contains("[REDACTED:"), "expected a redaction marker: {out}");
+        assert!(
+            out.contains("[REDACTED:"),
+            "expected a redaction marker: {out}"
+        );
         // Sentinel and non-text events untouched.
         assert!(out.contains("[DONE]"));
         assert!(out.contains("\"type\":\"response.created\""));
@@ -995,7 +1002,10 @@ mod tests {
 
     #[test]
     fn codex_upstream_is_swappable() {
-        std::env::set_var("RYU_PASSTHROUGH_CODEX_UPSTREAM", "http://test-upstream.local");
+        std::env::set_var(
+            "RYU_PASSTHROUGH_CODEX_UPSTREAM",
+            "http://test-upstream.local",
+        );
         assert_eq!(codex_upstream(), "http://test-upstream.local");
         std::env::remove_var("RYU_PASSTHROUGH_CODEX_UPSTREAM");
     }

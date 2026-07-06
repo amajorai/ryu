@@ -27,15 +27,24 @@ pub struct ChatMessage {
 impl ChatMessage {
     /// Convenience constructor for a `system` message.
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".into(), content: content.into() }
+        Self {
+            role: "system".into(),
+            content: content.into(),
+        }
     }
     /// Convenience constructor for a `user` message.
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".into(), content: content.into() }
+        Self {
+            role: "user".into(),
+            content: content.into(),
+        }
     }
     /// Convenience constructor for an `assistant` message.
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: "assistant".into(), content: content.into() }
+        Self {
+            role: "assistant".into(),
+            content: content.into(),
+        }
     }
 }
 
@@ -78,7 +87,11 @@ pub enum ModelError {
     Transport(#[from] reqwest::Error),
     /// The gateway returned a non-2xx status.
     #[error("[ryu-sdk] gateway returned HTTP {status} from {url}: {body}")]
-    Http { status: u16, url: String, body: String },
+    Http {
+        status: u16,
+        url: String,
+        body: String,
+    },
 }
 
 /// Options for [`ModelClient::new`].
@@ -188,7 +201,13 @@ impl ModelClient {
             return Err(ModelError::Http { status, url, body });
         }
         let parsed: UnaryResponse = resp.json().await?;
-        let choice = parsed.choices.and_then(|mut c| if c.is_empty() { None } else { Some(c.remove(0)) });
+        let choice = parsed.choices.and_then(|mut c| {
+            if c.is_empty() {
+                None
+            } else {
+                Some(c.remove(0))
+            }
+        });
         let (content, finish_reason) = match choice {
             Some(c) => (
                 c.message.and_then(|m| m.content).unwrap_or_default(),
@@ -262,8 +281,13 @@ fn parse_sse_line(line: &str) -> SseLine {
     let Ok(chunk) = serde_json::from_str::<StreamChunk>(payload) else {
         return SseLine::Skip;
     };
-    let Some(choice) = chunk.choices.and_then(|mut c| if c.is_empty() { None } else { Some(c.remove(0)) })
-    else {
+    let Some(choice) = chunk.choices.and_then(|mut c| {
+        if c.is_empty() {
+            None
+        } else {
+            Some(c.remove(0))
+        }
+    }) else {
         return SseLine::Skip;
     };
     SseLine::Delta(ChatDelta {
@@ -273,7 +297,10 @@ fn parse_sse_line(line: &str) -> SseLine {
 }
 
 /// Convenience constructor mirroring the TS `defineModel(id, opts)` factory.
-pub fn define_model(model: impl Into<String>, options: ModelClientOptions) -> Result<ModelClient, ModelError> {
+pub fn define_model(
+    model: impl Into<String>,
+    options: ModelClientOptions,
+) -> Result<ModelClient, ModelError> {
     ModelClient::new(model, options)
 }
 
@@ -285,7 +312,10 @@ mod tests {
     fn rejects_direct_provider_base_url() {
         let err = ModelClient::new(
             "gpt-4o",
-            ModelClientOptions { base_url: Some("https://api.openai.com".into()), token: None },
+            ModelClientOptions {
+                base_url: Some("https://api.openai.com".into()),
+                token: None,
+            },
         )
         .unwrap_err();
         assert!(matches!(err, ModelError::Egress(_)));
@@ -295,18 +325,26 @@ mod tests {
     fn defaults_to_gateway_and_strips_trailing_slash() {
         let c = ModelClient::new(
             "gemma4",
-            ModelClientOptions { base_url: Some("http://127.0.0.1:7981/".into()), token: None },
+            ModelClientOptions {
+                base_url: Some("http://127.0.0.1:7981/".into()),
+                token: None,
+            },
         )
         .unwrap();
         assert_eq!(c.base_url(), "http://127.0.0.1:7981");
-        assert_eq!(c.completions_url(), "http://127.0.0.1:7981/v1/chat/completions");
+        assert_eq!(
+            c.completions_url(),
+            "http://127.0.0.1:7981/v1/chat/completions"
+        );
     }
 
     #[test]
     fn parses_sse_lines() {
         assert!(matches!(parse_sse_line(": comment"), SseLine::Skip));
         assert!(matches!(parse_sse_line("data: [DONE]"), SseLine::Done));
-        match parse_sse_line(r#"data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}"#) {
+        match parse_sse_line(
+            r#"data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}"#,
+        ) {
             SseLine::Delta(d) => {
                 assert_eq!(d.content, "hi");
                 assert!(d.finish_reason.is_none());

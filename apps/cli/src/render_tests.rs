@@ -12,7 +12,7 @@ use ratatui::{backend::TestBackend, Terminal};
 
 use crate::app::{
     Agent, AgentDetail, App, AuthInfo, ConversationSummary, EngineActiveInfo, EngineInfo,
-    GatewayStatus, ListRow, RemoteCatalogItem, Screen, ScheduledJobInfo, SessionRow, SidebarTab,
+    GatewayStatus, ListRow, RemoteCatalogItem, ScheduledJobInfo, Screen, SessionRow, SidebarTab,
     SidecarStatus, SimpleListTab, Space, SpaceDocument, Workflow, FEATURE_TABS, SIDEBAR_TABS,
 };
 use crate::chat::{ChatMessage, Role};
@@ -123,8 +123,14 @@ fn populated() -> App {
     app.core_connected = true;
 
     app.statuses = vec![
-        SidecarStatus { name: "llamacpp".into(), running: true },
-        SidecarStatus { name: "spider".into(), running: false },
+        SidecarStatus {
+            name: "llamacpp".into(),
+            running: true,
+        },
+        SidecarStatus {
+            name: "spider".into(),
+            running: false,
+        },
     ];
 
     app.agents_list = vec![sample_agent("ryu"), sample_agent("codex")];
@@ -156,27 +162,23 @@ fn populated() -> App {
         effective_config: Some(serde_json::json!({ "routing": { "default_model": "gemma-4" } })),
     });
 
-    app.workflows_list = vec![
-        Workflow {
-            id: "wf-1".into(),
-            name: "Nightly digest".into(),
-            description: Some("Summarise the day".into()),
-            created_at: Some("2026-06-22T00:00:00Z".into()),
-        },
-    ];
+    app.workflows_list = vec![Workflow {
+        id: "wf-1".into(),
+        name: "Nightly digest".into(),
+        description: Some("Summarise the day".into()),
+        created_at: Some("2026-06-22T00:00:00Z".into()),
+    }];
     app.workflows_tab_index = 0;
     app.workflow_run_id = Some("run-123".into());
     app.workflow_run_state = Some("running".into());
     app.workflow_run_output = Some("partial output line\nsecond line".into());
 
-    app.spaces = vec![
-        Space {
-            id: "space-1".into(),
-            name: "Research".into(),
-            description: Some("Long-term notes".into()),
-            document_count: Some(3),
-        },
-    ];
+    app.spaces = vec![Space {
+        id: "space-1".into(),
+        name: "Research".into(),
+        description: Some("Long-term notes".into()),
+        document_count: Some(3),
+    }];
     app.space_documents.insert(
         "space-1".into(),
         vec![SpaceDocument {
@@ -372,7 +374,12 @@ fn renders_double_check_overlay() {
     let states: &[(bool, Option<bool>, &str, Option<&str>)] = &[
         (true, None, "", None),
         (false, Some(true), "Looks correct.", None),
-        (false, Some(false), "Found a problem with the second step.", None),
+        (
+            false,
+            Some(false),
+            "Found a problem with the second step.",
+            None,
+        ),
         (false, None, "", Some("review request failed")),
     ];
     for &(loading, ok, critique, error) in states {

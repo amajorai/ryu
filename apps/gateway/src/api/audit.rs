@@ -104,7 +104,11 @@ pub async fn query_audit(
             let cost_micro_usd: Option<u64> = if per_1k == 0 {
                 None
             } else {
-                Some(estimate_cost_micro_usd(e.input_tokens, e.output_tokens, per_1k))
+                Some(estimate_cost_micro_usd(
+                    e.input_tokens,
+                    e.output_tokens,
+                    per_1k,
+                ))
             };
             let mut v = serde_json::to_value(&e).unwrap_or_else(|_| json!({}));
             if let Value::Object(map) = &mut v {

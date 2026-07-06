@@ -1421,7 +1421,8 @@ pub async fn run_stream(
                 // into the body so it drops only when the SSE is fully consumed
                 // (or the client disconnects). Until then this generation counts
                 // against the engine's slot budget.
-                let observed_body = hold_admission_until_stream_end(observed_body, admission_permit);
+                let observed_body =
+                    hold_admission_until_stream_end(observed_body, admission_permit);
 
                 return Ok(PipelineStreamOutput {
                     body: observed_body,
@@ -1910,7 +1911,8 @@ pub async fn poll_video_job(
     };
 
     let poll = provider.poll_video(&job.provider_ref).await?;
-    let newly_succeeded = poll.status == crate::jobs::JobStatus::Succeeded && !job.status.is_terminal();
+    let newly_succeeded =
+        poll.status == crate::jobs::JobStatus::Succeeded && !job.status.is_terminal();
     state.jobs.update(&job_id, |j| {
         j.status = poll.status;
         j.output = poll.output.clone();
@@ -2125,11 +2127,12 @@ fn enforce_budget(
     // Per-session running cap (#510): one global rule, counter keyed by
     // x-ryu-session-id. Folded into the same most-severe chain so a session
     // decision flows through the existing Notify/Downgrade/Restrict/Stop arms.
-    let session_decision =
-        state.with_budget(|b| b.evaluate_session(ctx.session_id.as_deref()));
+    let session_decision = state.with_budget(|b| b.evaluate_session(ctx.session_id.as_deref()));
 
-    let Some(budget) = most_severe(most_severe(token_decision, wallet_decision), session_decision)
-    else {
+    let Some(budget) = most_severe(
+        most_severe(token_decision, wallet_decision),
+        session_decision,
+    ) else {
         return Ok(None);
     };
 
@@ -3298,7 +3301,10 @@ mod tests {
         );
         let ctx = profile_ctx(None, Some("full"));
         let out = effective_tool_allowlist(&ctx, &cfg);
-        assert!(out.contains(&"*".to_string()), "full profile seeds wildcard");
+        assert!(
+            out.contains(&"*".to_string()),
+            "full profile seeds wildcard"
+        );
         assert!(out.contains(&"search__web".to_string()));
     }
 

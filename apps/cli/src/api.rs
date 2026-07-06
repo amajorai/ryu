@@ -37,7 +37,10 @@ pub async fn health_check_node(node: &nodes::Node) -> bool {
     if let Some(t) = &node.token {
         req = req.header("Authorization", format!("Bearer {t}"));
     }
-    req.send().await.map(|r| r.status().is_success()).unwrap_or(false)
+    req.send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
 }
 
 /// Health-checks all configured nodes concurrently, selects the preferred one
@@ -214,19 +217,13 @@ pub async fn fetch_installed(app: &mut App) -> anyhow::Result<()> {
         let json: serde_json::Value = resp.json().await?;
         if let Some(installed) = json.get("installed").and_then(|o| o.as_array()) {
             for sidecar in &mut app.providers {
-                sidecar.installed = installed
-                    .iter()
-                    .any(|s| s.as_str() == Some(&sidecar.name));
+                sidecar.installed = installed.iter().any(|s| s.as_str() == Some(&sidecar.name));
             }
             for sidecar in &mut app.tools {
-                sidecar.installed = installed
-                    .iter()
-                    .any(|s| s.as_str() == Some(&sidecar.name));
+                sidecar.installed = installed.iter().any(|s| s.as_str() == Some(&sidecar.name));
             }
             for sidecar in &mut app.agents {
-                sidecar.installed = installed
-                    .iter()
-                    .any(|s| s.as_str() == Some(&sidecar.name));
+                sidecar.installed = installed.iter().any(|s| s.as_str() == Some(&sidecar.name));
             }
         }
     }
@@ -264,7 +261,10 @@ pub async fn install_sidecar(url: &str, name: &str) -> anyhow::Result<bool> {
     Ok(resp.status().is_success())
 }
 
-pub async fn fetch_workflows(api_url: &str, token: Option<&str>) -> anyhow::Result<Vec<crate::app::Workflow>> {
+pub async fn fetch_workflows(
+    api_url: &str,
+    token: Option<&str>,
+) -> anyhow::Result<Vec<crate::app::Workflow>> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
@@ -335,7 +335,10 @@ pub async fn fetch_workflow_run(
 /// Fetch the engines list from `GET /api/engines`.
 /// Returns the raw JSON value for the `engines` array so the caller can
 /// layer it with the active-engine marker from `/api/engine/active`.
-pub async fn fetch_engines(api_url: &str, token: Option<&str>) -> anyhow::Result<Vec<crate::app::EngineInfo>> {
+pub async fn fetch_engines(
+    api_url: &str,
+    token: Option<&str>,
+) -> anyhow::Result<Vec<crate::app::EngineInfo>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
@@ -354,7 +357,10 @@ pub async fn fetch_engines(api_url: &str, token: Option<&str>) -> anyhow::Result
 /// Fetch the active engine from `GET /api/engine/active`.
 /// Returns the name of the active engine, whether it is running, and the
 /// names of available (installed) local engines.
-pub async fn fetch_active_engine(api_url: &str, token: Option<&str>) -> anyhow::Result<crate::app::EngineActiveInfo> {
+pub async fn fetch_active_engine(
+    api_url: &str,
+    token: Option<&str>,
+) -> anyhow::Result<crate::app::EngineActiveInfo> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
@@ -370,7 +376,11 @@ pub async fn fetch_active_engine(api_url: &str, token: Option<&str>) -> anyhow::
 
 /// POST `{ "name": engine_name }` to `/api/engine/active` to swap the active engine.
 /// The selection is persisted by Core, not the CLI.
-pub async fn post_active_engine(api_url: &str, token: Option<&str>, name: &str) -> anyhow::Result<()> {
+pub async fn post_active_engine(
+    api_url: &str,
+    token: Option<&str>,
+    name: &str,
+) -> anyhow::Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -389,7 +399,10 @@ pub async fn post_active_engine(api_url: &str, token: Option<&str>, name: &str) 
 
 /// Fetch scheduled jobs from `GET /heartbeat/jobs`.
 /// No job definitions are hardcoded — all data comes from Core.
-pub async fn fetch_scheduled_jobs(api_url: &str, token: Option<&str>) -> anyhow::Result<Vec<crate::app::ScheduledJobInfo>> {
+pub async fn fetch_scheduled_jobs(
+    api_url: &str,
+    token: Option<&str>,
+) -> anyhow::Result<Vec<crate::app::ScheduledJobInfo>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
@@ -442,16 +455,16 @@ pub async fn fetch_spaces(api_url: &str) -> anyhow::Result<Vec<Space>> {
         .timeout(Duration::from_secs(5))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
-    let resp = client
-        .get(format!("{api_url}/api/spaces"))
-        .send()
-        .await?;
+    let resp = client.get(format!("{api_url}/api/spaces")).send().await?;
     if !resp.status().is_success() {
         return Ok(Vec::new());
     }
     let json: serde_json::Value = resp.json().await?;
     // Core returns `{ "spaces": [...] }` or a bare array.
-    let arr = json.get("spaces").and_then(|v| v.as_array()).cloned()
+    let arr = json
+        .get("spaces")
+        .and_then(|v| v.as_array())
+        .cloned()
         .or_else(|| json.as_array().cloned())
         .unwrap_or_default();
     let spaces: Vec<Space> = arr
@@ -462,7 +475,10 @@ pub async fn fetch_spaces(api_url: &str) -> anyhow::Result<Vec<Space>> {
 }
 
 /// Fetch documents for a single space from `GET /api/spaces/:id/documents`.
-pub async fn fetch_space_documents(api_url: &str, space_id: &str) -> anyhow::Result<Vec<SpaceDocument>> {
+pub async fn fetch_space_documents(
+    api_url: &str,
+    space_id: &str,
+) -> anyhow::Result<Vec<SpaceDocument>> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
@@ -475,7 +491,10 @@ pub async fn fetch_space_documents(api_url: &str, space_id: &str) -> anyhow::Res
         return Ok(Vec::new());
     }
     let json: serde_json::Value = resp.json().await?;
-    let arr = json.get("documents").and_then(|v| v.as_array()).cloned()
+    let arr = json
+        .get("documents")
+        .and_then(|v| v.as_array())
+        .cloned()
         .or_else(|| json.as_array().cloned())
         .unwrap_or_default();
     let docs: Vec<SpaceDocument> = arr
@@ -499,7 +518,10 @@ pub async fn fetch_conversations(api_url: &str) -> anyhow::Result<Vec<Conversati
         return Ok(Vec::new());
     }
     let json: serde_json::Value = resp.json().await?;
-    let arr = json.get("conversations").and_then(|v| v.as_array()).cloned()
+    let arr = json
+        .get("conversations")
+        .and_then(|v| v.as_array())
+        .cloned()
         .or_else(|| json.as_array().cloned())
         .unwrap_or_default();
     let convs: Vec<ConversationSummary> = arr
@@ -524,7 +546,9 @@ pub async fn set_goal(
     let client = authed_client(token);
     let body = serde_json::json!({ "goal": goal });
     client
-        .put(format!("{api_url}/api/conversations/{conversation_id}/goal"))
+        .put(format!(
+            "{api_url}/api/conversations/{conversation_id}/goal"
+        ))
         .header("Content-Type", "application/json")
         .body(body.to_string())
         .send()
@@ -541,7 +565,9 @@ pub async fn clear_goal(
 ) -> anyhow::Result<()> {
     let client = authed_client(token);
     client
-        .delete(format!("{api_url}/api/conversations/{conversation_id}/goal"))
+        .delete(format!(
+            "{api_url}/api/conversations/{conversation_id}/goal"
+        ))
         .send()
         .await?;
     Ok(())
@@ -556,7 +582,9 @@ pub async fn fetch_sessions(
 ) -> anyhow::Result<Vec<crate::app::SessionRow>> {
     let client = authed_client(token);
     let resp = client
-        .get(format!("{api_url}/api/conversations/{conversation_id}/sessions"))
+        .get(format!(
+            "{api_url}/api/conversations/{conversation_id}/sessions"
+        ))
         .send()
         .await?
         .error_for_status()?;
@@ -575,14 +603,22 @@ pub async fn fetch_sessions(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
-            status: s.get("status").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            status: s
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             created_at: s
                 .get("created_at")
                 .or_else(|| s.get("started_at"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
-            branch: s.get("branch").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            branch: s
+                .get("branch")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
         })
         .collect())
 }
@@ -651,7 +687,11 @@ pub async fn fetch_feature_list(
             }
             let title = {
                 let t = pick_field(v, title_keys);
-                if t.is_empty() { "—".to_string() } else { t }
+                if t.is_empty() {
+                    "—".to_string()
+                } else {
+                    t
+                }
             };
             crate::app::ListRow {
                 title,
@@ -780,8 +820,16 @@ pub async fn fetch_skill_catalog(
                 .or_else(|| s.get("downloads"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let installed = s.get("installed").and_then(|v| v.as_bool()).unwrap_or(false);
-            Some(SkillCatalogCard { id, name, installs, installed })
+            let installed = s
+                .get("installed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            Some(SkillCatalogCard {
+                id,
+                name,
+                installs,
+                installed,
+            })
         })
         .collect())
 }
@@ -803,7 +851,10 @@ pub async fn install_skill_by_id(
         .await?;
     let json: serde_json::Value = resp.json().await?;
     if json.get("success").and_then(|v| v.as_bool()) == Some(false) {
-        let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("install failed");
+        let err = json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("install failed");
         anyhow::bail!("{err}");
     }
     let slug = json["result"]["slug"]
@@ -831,7 +882,10 @@ pub async fn install_skill_from_source(
         .await?;
     let json: serde_json::Value = resp.json().await?;
     if json.get("success").and_then(|v| v.as_bool()) == Some(false) {
-        let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("install failed");
+        let err = json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("install failed");
         anyhow::bail!("{err}");
     }
     let slug = json["result"]["slug"]
@@ -860,7 +914,11 @@ pub async fn fetch_installed_mcp_names(
     token: Option<&str>,
 ) -> std::collections::HashSet<String> {
     let client = authed_client(token);
-    let resp = match client.get(format!("{api_url}/api/mcp/servers")).send().await {
+    let resp = match client
+        .get(format!("{api_url}/api/mcp/servers"))
+        .send()
+        .await
+    {
         Ok(r) if r.status().is_success() => r,
         // Treat an unreachable servers endpoint as "none installed" rather than
         // failing the browse — the catalog list is still useful.
@@ -906,7 +964,12 @@ pub async fn fetch_mcp_catalog(
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
             let is_installed = installed.contains(id.trim());
-            Some(McpCatalogCard { id, name, description, installed: is_installed })
+            Some(McpCatalogCard {
+                id,
+                name,
+                description,
+                installed: is_installed,
+            })
         })
         .collect())
 }
@@ -929,7 +992,10 @@ pub async fn install_mcp_server(
         .await?;
     let json: serde_json::Value = resp.json().await?;
     if json.get("success").and_then(|v| v.as_bool()) == Some(false) {
-        let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("install failed");
+        let err = json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("install failed");
         anyhow::bail!("{err}");
     }
     let name = json["server"]["name"].as_str().unwrap_or(id).to_string();
@@ -1007,8 +1073,7 @@ pub async fn export_okf_bundle(
 fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
-        let unreserved = byte.is_ascii_alphanumeric()
-            || matches!(byte, b'-' | b'_' | b'.' | b'~');
+        let unreserved = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~');
         if unreserved {
             out.push(byte as char);
         } else {

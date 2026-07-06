@@ -210,8 +210,8 @@ impl Channel for DiscordChannel {
                         // A successful fetch means the bot is live — heartbeat
                         // online, throttled so we don't spam the control plane.
                         if let Some(reporter) = &self.status {
-                            let due = last_online
-                                .map_or(true, |t| t.elapsed() >= HEARTBEAT_MIN_SPACING);
+                            let due =
+                                last_online.map_or(true, |t| t.elapsed() >= HEARTBEAT_MIN_SPACING);
                             if due {
                                 reporter.online().await;
                                 last_online = Some(Instant::now());

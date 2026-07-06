@@ -68,7 +68,10 @@ fn render_steps(f: &mut Frame, area: Rect, screen: &Screen, app: &mut App) {
         let style = if is_current {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
         } else if hovered && is_clickable {
-            Style::default().fg(HOVER_FG).bg(HOVER_BG).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(HOVER_FG)
+                .bg(HOVER_BG)
+                .add_modifier(Modifier::BOLD)
         } else if is_done {
             Style::default().fg(SUCCESS)
         } else {
@@ -186,86 +189,140 @@ pub fn ui(f: &mut Frame, app: &mut App) {
 
 fn ghost_logo_lines() -> Vec<Line<'static>> {
     let s = |t: &'static str, r: u8, g: u8, b: u8| -> Span<'static> {
-        Span::styled(t, Style::default().fg(Color::Rgb(r, g, b)).add_modifier(Modifier::BOLD))
+        Span::styled(
+            t,
+            Style::default()
+                .fg(Color::Rgb(r, g, b))
+                .add_modifier(Modifier::BOLD),
+        )
     };
     vec![
         Line::from(vec![
-            s("      ", 0, 0, 0), s(".::::::::::::", 27, 67, 129),
-            s(":::.", 66, 69, 125), s(".", 55, 50, 85),
+            s("      ", 0, 0, 0),
+            s(".::::::::::::", 27, 67, 129),
+            s(":::.", 66, 69, 125),
+            s(".", 55, 50, 85),
         ]),
         Line::from(vec![
-            s("  .", 6, 16, 29), s(":::--::::::", 28, 78, 144),
-            s("::::", 31, 62, 124), s(":-", 56, 71, 135),
-            s("--", 80, 84, 152), s("=", 98, 96, 166),
-            s("=", 111, 104, 177), s("=", 124, 112, 187),
+            s("  .", 6, 16, 29),
+            s(":::--::::::", 28, 78, 144),
+            s("::::", 31, 62, 124),
+            s(":-", 56, 71, 135),
+            s("--", 80, 84, 152),
+            s("=", 98, 96, 166),
+            s("=", 111, 104, 177),
+            s("=", 124, 112, 187),
             s("-", 107, 94, 156),
         ]),
         Line::from(vec![
-            s(" ", 5, 14, 25), s(":------:::::", 28, 78, 145),
-            s(":::::", 31, 61, 123), s(":-", 58, 72, 136),
-            s("--", 78, 84, 151), s("-=", 99, 96, 167),
-            s("=", 117, 108, 182), s("+=", 133, 117, 192),
+            s(" ", 5, 14, 25),
+            s(":------:::::", 28, 78, 145),
+            s(":::::", 31, 61, 123),
+            s(":-", 58, 72, 136),
+            s("--", 78, 84, 151),
+            s("-=", 99, 96, 167),
+            s("=", 117, 108, 182),
+            s("+=", 133, 117, 192),
         ]),
         Line::from(vec![
-            s(".", 22, 56, 101), s("--------::::", 32, 80, 148),
-            s(":::::", 40, 63, 125), s(":-", 62, 73, 137),
-            s("--", 80, 84, 152), s("-=", 100, 96, 167),
-            s("==", 121, 110, 185), s("+", 139, 121, 199),
+            s(".", 22, 56, 101),
+            s("--------::::", 32, 80, 148),
+            s(":::::", 40, 63, 125),
+            s(":-", 62, 73, 137),
+            s("--", 80, 84, 152),
+            s("-=", 100, 96, 167),
+            s("==", 121, 110, 185),
+            s("+", 139, 121, 199),
             s(":", 99, 84, 138),
         ]),
         Line::from(vec![
-            s(":------", 33, 84, 154), s("--", 50, 99, 171),
-            s("==", 73, 114, 188), s("=+", 105, 120, 196),
-            s("+++++", 151, 115, 190), s("==", 133, 101, 173),
-            s("====", 106, 96, 167), s("==", 122, 110, 185),
+            s(":------", 33, 84, 154),
+            s("--", 50, 99, 171),
+            s("==", 73, 114, 188),
+            s("=+", 105, 120, 196),
+            s("+++++", 151, 115, 190),
+            s("==", 133, 101, 173),
+            s("====", 106, 96, 167),
+            s("==", 122, 110, 185),
             s("+=", 135, 117, 191),
         ]),
         Line::from(vec![
-            s(":----", 35, 87, 158), s("-", 49, 100, 173),
-            s("=", 66, 113, 189), s("=", 84, 127, 205),
-            s("+++", 109, 139, 219), s("*", 153, 140, 221),
-            s("*********", 210, 133, 213), s("*", 192, 124, 202),
-            s("+", 170, 118, 194), s("+++++", 142, 116, 192),
+            s(":----", 35, 87, 158),
+            s("-", 49, 100, 173),
+            s("=", 66, 113, 189),
+            s("=", 84, 127, 205),
+            s("+++", 109, 139, 219),
+            s("*", 153, 140, 221),
+            s("*********", 210, 133, 213),
+            s("*", 192, 124, 202),
+            s("+", 170, 118, 194),
+            s("+++++", 142, 116, 192),
         ]),
         Line::from(vec![
-            s("---", 37, 89, 160), s("-", 47, 98, 171),
-            s("=", 63, 111, 186), s("=", 82, 127, 205),
-            s("++++", 106, 141, 221), s("+", 144, 142, 223),
+            s("---", 37, 89, 160),
+            s("-", 47, 98, 171),
+            s("=", 63, 111, 186),
+            s("=", 82, 127, 205),
+            s("++++", 106, 141, 221),
+            s("+", 144, 142, 223),
             s("*", 176, 140, 220),
-            s("*************", 218, 132, 212), s("*+*", 186, 127, 206),
+            s("*************", 218, 132, 212),
+            s("*+*", 186, 127, 206),
         ]),
         Line::from(vec![
-            s("--", 45, 96, 168), s("-", 58, 107, 181),
-            s("=", 74, 120, 197), s("++++", 99, 140, 220),
-            s("*", 134, 164, 231), s("@", 224, 229, 248),
-            s("@", 244, 243, 251), s("%", 222, 203, 239),
-            s("****", 217, 137, 217), s("%", 242, 200, 237),
-            s("@@", 250, 235, 248), s("#", 233, 157, 223),
+            s("--", 45, 96, 168),
+            s("-", 58, 107, 181),
+            s("=", 74, 120, 197),
+            s("++++", 99, 140, 220),
+            s("*", 134, 164, 231),
+            s("@", 224, 229, 248),
+            s("@", 244, 243, 251),
+            s("%", 222, 203, 239),
+            s("****", 217, 137, 217),
+            s("%", 242, 200, 237),
+            s("@@", 250, 235, 248),
+            s("#", 233, 157, 223),
             s("********", 224, 134, 214),
         ]),
         Line::from(vec![
-            s("==", 70, 116, 192), s("=+", 90, 133, 212),
-            s("++++", 103, 143, 224), s("@", 222, 231, 248),
-            s("███", 255, 255, 255), s("#", 216, 178, 231),
-            s("**", 215, 137, 217), s("#", 234, 176, 229),
-            s("███", 255, 255, 255), s("@", 249, 230, 247),
+            s("==", 70, 116, 192),
+            s("=+", 90, 133, 212),
+            s("++++", 103, 143, 224),
+            s("@", 222, 231, 248),
+            s("███", 255, 255, 255),
+            s("#", 216, 178, 231),
+            s("**", 215, 137, 217),
+            s("#", 234, 176, 229),
+            s("███", 255, 255, 255),
+            s("@", 249, 230, 247),
             s("********", 227, 135, 215),
         ]),
         Line::from(vec![
-            s("=", 85, 123, 195), s("+++++++", 100, 141, 222),
-            s("@", 225, 233, 249), s("███", 255, 255, 255),
-            s("#", 199, 182, 233), s("**", 198, 138, 218),
-            s("#", 228, 178, 230), s("███", 255, 255, 255),
-            s("@", 249, 233, 248), s("*******", 226, 136, 216),
+            s("=", 85, 123, 195),
+            s("+++++++", 100, 141, 222),
+            s("@", 225, 233, 249),
+            s("███", 255, 255, 255),
+            s("#", 199, 182, 233),
+            s("**", 198, 138, 218),
+            s("#", 228, 178, 230),
+            s("███", 255, 255, 255),
+            s("@", 249, 233, 248),
+            s("*******", 226, 136, 216),
             s("+", 208, 123, 196),
         ]),
         Line::from(vec![
-            s(":", 69, 95, 149), s("+++++++", 104, 144, 225),
-            s("*", 137, 167, 232), s("@", 229, 236, 250),
-            s("@", 247, 249, 253), s("%", 200, 212, 243),
-            s("+*", 144, 143, 223), s("**", 184, 140, 220),
-            s("%", 231, 208, 240), s("@@", 249, 242, 250),
-            s("#", 226, 162, 225), s("*******", 224, 136, 217),
+            s(":", 69, 95, 149),
+            s("+++++++", 104, 144, 225),
+            s("*", 137, 167, 232),
+            s("@", 229, 236, 250),
+            s("@", 247, 249, 253),
+            s("%", 200, 212, 243),
+            s("+*", 144, 143, 223),
+            s("**", 184, 140, 220),
+            s("%", 231, 208, 240),
+            s("@@", 249, 242, 250),
+            s("#", 226, 162, 225),
+            s("*******", 224, 136, 217),
             s(":", 154, 91, 145),
         ]),
         Line::from(vec![
@@ -275,17 +332,24 @@ fn ghost_logo_lines() -> Vec<Line<'static>> {
             s("**********", 213, 135, 216),
         ]),
         Line::from(vec![
-            s("  ", 0, 0, 0), s("-", 83, 115, 179),
+            s("  ", 0, 0, 0),
+            s("-", 83, 115, 179),
             s("+++++++++++++", 107, 143, 224),
             s("+*", 154, 141, 222),
-            s("*******", 209, 136, 217), s("=", 184, 109, 174),
+            s("*******", 209, 136, 217),
+            s("=", 184, 109, 174),
         ]),
         Line::from(vec![
-            s("    .", 20, 28, 44), s(":", 69, 95, 148),
-            s("-", 82, 114, 178), s("==", 95, 131, 204),
-            s("++++++++", 110, 142, 223), s("++", 158, 138, 217),
-            s("++", 181, 124, 198), s("=", 172, 108, 171),
-            s(":", 148, 90, 143), s(".", 107, 64, 102),
+            s("    .", 20, 28, 44),
+            s(":", 69, 95, 148),
+            s("-", 82, 114, 178),
+            s("==", 95, 131, 204),
+            s("++++++++", 110, 142, 223),
+            s("++", 158, 138, 217),
+            s("++", 181, 124, 198),
+            s("=", 172, 108, 171),
+            s(":", 148, 90, 143),
+            s(".", 107, 64, 102),
         ]),
     ]
 }
@@ -298,90 +362,149 @@ fn render_logo(f: &mut Frame, area: Rect) {
 
 fn render_sidebar_logo(f: &mut Frame, area: Rect) {
     let s = |t: &'static str, fr: u8, fg: u8, fb: u8, br: u8, bg: u8, bb: u8| -> Span<'static> {
-        Span::styled(t, Style::default().fg(Color::Rgb(fr, fg, fb)).bg(Color::Rgb(br, bg, bb)))
+        Span::styled(
+            t,
+            Style::default()
+                .fg(Color::Rgb(fr, fg, fb))
+                .bg(Color::Rgb(br, bg, bb)),
+        )
     };
     let c = |t: &'static str, r: u8, g: u8, b: u8| -> Span<'static> {
         Span::styled(t, Style::default().fg(Color::Rgb(r, g, b)))
     };
     let lines = vec![
-        Line::from(vec![Span::raw("  "),
-            c("▄", 11, 28, 51), c("▄", 31, 80, 146),
-            s("▀", 17, 44, 81, 33, 83, 152), s("▀", 25, 64, 118, 33, 83, 152),
-            s("▀▀▀", 29, 76, 140, 30, 79, 146), s("▀▀▀▀", 29, 63, 126, 30, 65, 127),
-            s("▀", 57, 68, 127, 60, 74, 138), s("▀", 67, 69, 123, 81, 85, 153),
-            s("▀", 58, 55, 94, 102, 98, 169), c("▄", 118, 107, 179), c("▄", 46, 41, 68),
+        Line::from(vec![
+            Span::raw("  "),
+            c("▄", 11, 28, 51),
+            c("▄", 31, 80, 146),
+            s("▀", 17, 44, 81, 33, 83, 152),
+            s("▀", 25, 64, 118, 33, 83, 152),
+            s("▀▀▀", 29, 76, 140, 30, 79, 146),
+            s("▀▀▀▀", 29, 63, 126, 30, 65, 127),
+            s("▀", 57, 68, 127, 60, 74, 138),
+            s("▀", 67, 69, 123, 81, 85, 153),
+            s("▀", 58, 55, 94, 102, 98, 169),
+            c("▄", 118, 107, 179),
+            c("▄", 46, 41, 68),
         ]),
-        Line::from(vec![Span::raw(" "),
+        Line::from(vec![
+            Span::raw(" "),
             c("▄", 17, 45, 82),
             s("▀▀▀▀▀▀", 31, 81, 149, 31, 82, 151),
             s("▀▀▀▀", 27, 66, 130, 28, 64, 126),
-            s("▀", 46, 67, 129, 48, 66, 129), s("▀", 62, 75, 139, 63, 75, 139),
-            s("▀", 79, 84, 151, 79, 84, 151), s("▀", 96, 95, 165, 94, 93, 163),
-            s("▀", 115, 106, 180, 112, 104, 177), s("▀", 131, 115, 190, 131, 116, 193),
+            s("▀", 46, 67, 129, 48, 66, 129),
+            s("▀", 62, 75, 139, 63, 75, 139),
+            s("▀", 79, 84, 151, 79, 84, 151),
+            s("▀", 96, 95, 165, 94, 93, 163),
+            s("▀", 115, 106, 180, 112, 104, 177),
+            s("▀", 131, 115, 190, 131, 116, 193),
             c("▄", 79, 68, 111),
         ]),
-        Line::from(vec![Span::raw(" "),
+        Line::from(vec![
+            Span::raw(" "),
             s("▀", 26, 66, 120, 31, 78, 141),
             s("▀▀▀▀", 34, 85, 154, 35, 86, 157),
-            s("▀", 34, 84, 153, 46, 95, 167), s("▀", 33, 81, 148, 60, 103, 176),
-            s("▀", 31, 74, 139, 78, 108, 181), s("▀", 31, 66, 128, 103, 109, 181),
-            s("▀▀", 38, 62, 123, 125, 103, 175), s("▀", 52, 68, 130, 115, 94, 164),
-            s("▀", 65, 75, 140, 98, 89, 157), s("▀", 80, 84, 152, 92, 89, 158),
-            s("▀", 95, 94, 164, 99, 96, 166), s("▀", 111, 104, 177, 112, 104, 177),
-            s("▀", 129, 115, 191, 128, 114, 190), s("▀", 114, 98, 161, 133, 114, 186),
+            s("▀", 34, 84, 153, 46, 95, 167),
+            s("▀", 33, 81, 148, 60, 103, 176),
+            s("▀", 31, 74, 139, 78, 108, 181),
+            s("▀", 31, 66, 128, 103, 109, 181),
+            s("▀▀", 38, 62, 123, 125, 103, 175),
+            s("▀", 52, 68, 130, 115, 94, 164),
+            s("▀", 65, 75, 140, 98, 89, 157),
+            s("▀", 80, 84, 152, 92, 89, 158),
+            s("▀", 95, 94, 164, 99, 96, 166),
+            s("▀", 111, 104, 177, 112, 104, 177),
+            s("▀", 129, 115, 191, 128, 114, 190),
+            s("▀", 114, 98, 161, 133, 114, 186),
         ]),
-        Line::from(vec![Span::raw(" "),
+        Line::from(vec![
+            Span::raw(" "),
             s("▀▀▀", 34, 86, 155, 36, 89, 160),
-            s("▀", 40, 92, 164, 59, 108, 182), s("▀", 57, 106, 180, 87, 131, 209),
-            s("▀", 82, 125, 203, 104, 141, 222), s("▀", 105, 136, 216, 125, 143, 223),
-            s("▀", 139, 138, 218, 169, 140, 221), s("▀", 180, 137, 217, 205, 137, 218),
-            s("▀▀▀", 209, 133, 212, 222, 136, 216), s("▀", 194, 125, 202, 225, 135, 215),
-            s("▀", 161, 114, 188, 219, 133, 213), s("▀", 130, 105, 178, 198, 127, 205),
-            s("▀", 121, 107, 180, 166, 119, 195), s("▀", 130, 114, 190, 150, 118, 194),
+            s("▀", 40, 92, 164, 59, 108, 182),
+            s("▀", 57, 106, 180, 87, 131, 209),
+            s("▀", 82, 125, 203, 104, 141, 222),
+            s("▀", 105, 136, 216, 125, 143, 223),
+            s("▀", 139, 138, 218, 169, 140, 221),
+            s("▀", 180, 137, 217, 205, 137, 218),
+            s("▀▀▀", 209, 133, 212, 222, 136, 216),
+            s("▀", 194, 125, 202, 225, 135, 215),
+            s("▀", 161, 114, 188, 219, 133, 213),
+            s("▀", 130, 105, 178, 198, 127, 205),
+            s("▀", 121, 107, 180, 166, 119, 195),
+            s("▀", 130, 114, 190, 150, 118, 194),
             s("▀", 141, 121, 198, 154, 124, 202),
         ]),
-        Line::from(vec![Span::raw(" "),
-            s("▀", 36, 89, 159, 42, 94, 166), s("▀", 40, 92, 164, 53, 103, 177),
-            s("▀", 56, 105, 179, 78, 124, 201), s("▀", 85, 129, 207, 99, 140, 220),
-            s("▀", 101, 142, 222, 104, 144, 225), s("▀", 109, 144, 225, 134, 163, 230),
-            s("▀", 134, 143, 223, 235, 236, 249), s("▀", 183, 139, 220, 210, 177, 231),
-            s("▀▀", 218, 137, 217, 219, 136, 217), s("▀", 226, 136, 217, 236, 174, 229),
-            s("▀", 228, 136, 217, 250, 235, 248), s("▀", 228, 136, 216, 233, 156, 223),
-            s("▀▀▀", 222, 134, 213, 227, 135, 215), s("▀▀", 194, 128, 207, 222, 134, 214),
+        Line::from(vec![
+            Span::raw(" "),
+            s("▀", 36, 89, 159, 42, 94, 166),
+            s("▀", 40, 92, 164, 53, 103, 177),
+            s("▀", 56, 105, 179, 78, 124, 201),
+            s("▀", 85, 129, 207, 99, 140, 220),
+            s("▀", 101, 142, 222, 104, 144, 225),
+            s("▀", 109, 144, 225, 134, 163, 230),
+            s("▀", 134, 143, 223, 235, 236, 249),
+            s("▀", 183, 139, 220, 210, 177, 231),
+            s("▀▀", 218, 137, 217, 219, 136, 217),
+            s("▀", 226, 136, 217, 236, 174, 229),
+            s("▀", 228, 136, 217, 250, 235, 248),
+            s("▀", 228, 136, 216, 233, 156, 223),
+            s("▀▀▀", 222, 134, 213, 227, 135, 215),
+            s("▀▀", 194, 128, 207, 222, 134, 214),
         ]),
-        Line::from(vec![Span::raw(" "),
-            s("▀", 58, 107, 181, 81, 124, 200), s("▀", 75, 121, 197, 93, 135, 215),
+        Line::from(vec![
+            Span::raw(" "),
+            s("▀", 58, 107, 181, 81, 124, 200),
+            s("▀", 75, 121, 197, 93, 135, 215),
             s("▀▀▀", 100, 140, 221, 103, 143, 224),
-            s("▀", 199, 213, 244, 220, 229, 248), s("▀", 255, 255, 255, 255, 255, 255),
-            s("▀", 245, 236, 249, 254, 253, 254), s("▀▀", 216, 137, 217, 208, 137, 218),
-            s("▀", 250, 235, 248, 254, 252, 254), s("▀", 255, 255, 255, 255, 255, 255),
-            s("▀", 245, 211, 241, 248, 228, 246), s("▀▀▀▀▀", 228, 135, 215, 226, 135, 215),
+            s("▀", 199, 213, 244, 220, 229, 248),
+            s("▀", 255, 255, 255, 255, 255, 255),
+            s("▀", 245, 236, 249, 254, 253, 254),
+            s("▀▀", 216, 137, 217, 208, 137, 218),
+            s("▀", 250, 235, 248, 254, 252, 254),
+            s("▀", 255, 255, 255, 255, 255, 255),
+            s("▀", 245, 211, 241, 248, 228, 246),
+            s("▀▀▀▀▀", 228, 135, 215, 226, 135, 215),
         ]),
-        Line::from(vec![Span::raw(" "),
+        Line::from(vec![
+            Span::raw(" "),
             s("▀", 90, 128, 202, 81, 113, 177),
             s("▀▀▀▀", 103, 143, 224, 104, 144, 225),
-            s("▀", 207, 219, 245, 147, 175, 234), s("▀", 255, 255, 255, 253, 253, 254),
-            s("▀", 244, 243, 251, 187, 198, 239), s("▀", 176, 140, 220, 147, 142, 223),
-            s("▀", 205, 138, 218, 180, 139, 220), s("▀", 250, 242, 250, 224, 194, 236),
-            s("▀", 255, 255, 255, 254, 253, 254), s("▀", 245, 218, 243, 229, 170, 228),
+            s("▀", 207, 219, 245, 147, 175, 234),
+            s("▀", 255, 255, 255, 253, 253, 254),
+            s("▀", 244, 243, 251, 187, 198, 239),
+            s("▀", 176, 140, 220, 147, 142, 223),
+            s("▀", 205, 138, 218, 180, 139, 220),
+            s("▀", 250, 242, 250, 224, 194, 236),
+            s("▀", 255, 255, 255, 254, 253, 254),
+            s("▀", 245, 218, 243, 229, 170, 228),
             s("▀▀▀▀", 226, 136, 217, 225, 136, 217),
             s("▀", 210, 124, 199, 181, 107, 171),
         ]),
-        Line::from(vec![Span::raw(" "),
+        Line::from(vec![
+            Span::raw(" "),
             c("▀", 56, 78, 122),
             s("▀▀▀▀▀▀▀▀", 108, 144, 224, 104, 143, 223),
-            s("▀", 151, 141, 222, 129, 143, 224), s("▀", 178, 140, 220, 153, 141, 222),
+            s("▀", 151, 141, 222, 129, 143, 224),
+            s("▀", 178, 140, 220, 153, 141, 222),
             s("▀▀", 205, 141, 219, 189, 138, 219),
             s("▀▀▀▀", 223, 136, 217, 220, 135, 215),
             c("▀", 125, 74, 118),
         ]),
-        Line::from(vec![Span::raw("  "),
-            Span::raw(" "), c("▀", 36, 50, 78), c("▀", 101, 140, 219),
-            s("▀", 105, 145, 226, 57, 78, 123), s("▀", 105, 145, 226, 82, 114, 177),
-            s("▀", 105, 145, 226, 96, 132, 207), s("▀▀▀▀", 109, 144, 225, 107, 143, 223),
-            s("▀", 136, 142, 223, 129, 143, 224), s("▀", 164, 141, 221, 155, 138, 217),
-            s("▀", 192, 139, 219, 176, 127, 201), s("▀", 212, 137, 217, 169, 108, 171),
-            s("▀", 223, 137, 217, 122, 74, 118), c("▀", 222, 132, 211),
+        Line::from(vec![
+            Span::raw("  "),
+            Span::raw(" "),
+            c("▀", 36, 50, 78),
+            c("▀", 101, 140, 219),
+            s("▀", 105, 145, 226, 57, 78, 123),
+            s("▀", 105, 145, 226, 82, 114, 177),
+            s("▀", 105, 145, 226, 96, 132, 207),
+            s("▀▀▀▀", 109, 144, 225, 107, 143, 223),
+            s("▀", 136, 142, 223, 129, 143, 224),
+            s("▀", 164, 141, 221, 155, 138, 217),
+            s("▀", 192, 139, 219, 176, 127, 201),
+            s("▀", 212, 137, 217, 169, 108, 171),
+            s("▀", 223, 137, 217, 122, 74, 118),
+            c("▀", 222, 132, 211),
             c("▀", 81, 48, 76),
         ]),
     ];
@@ -406,9 +529,15 @@ fn ui_waiting_for_core(f: &mut Frame, app: &mut App) {
 
     let frame = spinner_frame(app.animation_tick);
     let msg = Paragraph::new(Line::from(vec![
-        Span::styled(format!("{frame} "), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{frame} "),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled("waiting for ", Style::default().fg(MUTED)),
-        Span::styled("ryu-core", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "ryu-core",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" — start it to continue", Style::default().fg(MUTED)),
     ]))
     .alignment(ratatui::layout::Alignment::Center);
@@ -423,10 +552,7 @@ fn render_main_app(f: &mut Frame, app: &mut App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(2),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Length(2)])
         .split(f.area());
 
     let body = outer[0];
@@ -434,10 +560,7 @@ fn render_main_app(f: &mut Frame, app: &mut App) {
 
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(SIDEBAR_WIDTH),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(1)])
         .split(body);
 
     let sidebar_area = columns[0];
@@ -713,10 +836,7 @@ fn render_node_picker(f: &mut Frame, area: Rect, app: &App) {
             let mut spans = vec![
                 health_icon,
                 Span::styled(node.name.clone(), name_style),
-                Span::styled(
-                    format!("  {}", node.url),
-                    Style::default().fg(MUTED),
-                ),
+                Span::styled(format!("  {}", node.url), Style::default().fg(MUTED)),
             ];
             if node.token.is_some() {
                 spans.push(Span::styled("  [token]", Style::default().fg(MUTED)));
@@ -730,9 +850,7 @@ fn render_node_picker(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let mut list_state = ratatui::widgets::ListState::default();
-    list_state.select(Some(
-        app.node_picker_index.min(row_count.saturating_sub(1)),
-    ));
+    list_state.select(Some(app.node_picker_index.min(row_count.saturating_sub(1))));
 
     let list = List::new(items)
         .block(
@@ -767,10 +885,10 @@ fn render_sidebar(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(9),  // logo (half-block icon from app-icon.png)
-            Constraint::Length(1),  // spacer
-            Constraint::Min(1),     // nav items
-            Constraint::Length(3),  // user info
+            Constraint::Length(9), // logo (half-block icon from app-icon.png)
+            Constraint::Length(1), // spacer
+            Constraint::Min(1),    // nav items
+            Constraint::Length(3), // user info
         ])
         .split(inner);
 
@@ -786,7 +904,10 @@ fn render_sidebar(f: &mut Frame, area: Rect, app: &mut App) {
         let hovered = mouse_in(app, tab_rect);
 
         let (prefix, style) = if is_active {
-            ("▸ ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
+            (
+                "▸ ",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            )
         } else if hovered {
             ("▸ ", Style::default().fg(HOVER_FG).bg(HOVER_BG))
         } else {
@@ -815,7 +936,11 @@ fn render_sidebar(f: &mut Frame, area: Rect, app: &mut App) {
         Span::styled(" ", Style::default().bg(user_bg)),
         Span::styled(dot, dot_style.bg(user_bg)),
         Span::styled(
-            if app.core_connected { " connected" } else { " offline" },
+            if app.core_connected {
+                " connected"
+            } else {
+                " offline"
+            },
             Style::default().fg(MUTED).bg(user_bg),
         ),
     ]));
@@ -826,26 +951,28 @@ fn render_sidebar(f: &mut Frame, area: Rect, app: &mut App) {
         } else {
             info.name.clone()
         };
-        user_lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {name_display}"),
-                Style::default().fg(if user_hovered { HOVER_FG } else { FG }).bg(user_bg),
-            ),
-        ]));
+        user_lines.push(Line::from(vec![Span::styled(
+            format!(" {name_display}"),
+            Style::default()
+                .fg(if user_hovered { HOVER_FG } else { FG })
+                .bg(user_bg),
+        )]));
         let plan_display = if info.plan.len() > 16 {
             format!("{}…", &info.plan[..15])
         } else {
             info.plan.clone()
         };
-        user_lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {plan_display}"),
-                Style::default().fg(ACCENT).bg(user_bg),
-            ),
-        ]));
+        user_lines.push(Line::from(vec![Span::styled(
+            format!(" {plan_display}"),
+            Style::default().fg(ACCENT).bg(user_bg),
+        )]));
     } else if crate::auth::load_token().is_none() {
         user_lines.push(Line::from(Span::styled(
-            if user_hovered { " not logged in ◂" } else { " not logged in" },
+            if user_hovered {
+                " not logged in ◂"
+            } else {
+                " not logged in"
+            },
             Style::default().fg(Color::Yellow).bg(user_bg),
         )));
     }
@@ -858,22 +985,17 @@ fn render_sidebar(f: &mut Frame, area: Rect, app: &mut App) {
 fn render_services_content(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
         .split(area);
 
     let header_area = chunks[0];
     let list_area = chunks[1];
 
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                " Services",
-                Style::default().fg(FG).add_modifier(Modifier::BOLD),
-            ),
-        ])),
+        Paragraph::new(Line::from(vec![Span::styled(
+            " Services",
+            Style::default().fg(FG).add_modifier(Modifier::BOLD),
+        )])),
         header_area,
     );
 
@@ -886,7 +1008,10 @@ fn render_services_content(f: &mut Frame, area: Rect, app: &mut App) {
     if core_offline {
         let msg = Paragraph::new(Line::from(vec![
             Span::styled("core not running — start with ", Style::default().fg(MUTED)),
-            Span::styled("`ryu-core`", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "`ryu-core`",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
         ]))
         .alignment(ratatui::layout::Alignment::Center);
         f.render_widget(msg, list_area);
@@ -906,7 +1031,10 @@ fn render_services_content(f: &mut Frame, area: Rect, app: &mut App) {
             let installed = info.map(|s| s.installed).unwrap_or(false);
             let running = status_entry.map(|s| s.running).unwrap_or(false);
             let downloading = !installed
-                && app.install_results.iter().any(|(n, queued)| n == *name && *queued);
+                && app
+                    .install_results
+                    .iter()
+                    .any(|(n, queued)| n == *name && *queued);
 
             let install_failed = matches!(
                 app.install_states.get(*name),
@@ -948,14 +1076,21 @@ fn render_services_content(f: &mut Frame, area: Rect, app: &mut App) {
                 Span::styled(" ", Style::default().bg(row_bg)),
                 Span::styled(
                     format!("{:<12}", name),
-                    Style::default().fg(if hovered { HOVER_FG } else { FG }).bg(row_bg),
+                    Style::default()
+                        .fg(if hovered { HOVER_FG } else { FG })
+                        .bg(row_bg),
                 ),
                 Span::styled(
                     format!(" {category} "),
                     Style::default().fg(MUTED).bg(row_bg),
                 ),
                 if installed {
-                    Span::styled("[✓] ", Style::default().fg(if hovered { SUCCESS } else { MUTED }).bg(row_bg))
+                    Span::styled(
+                        "[✓] ",
+                        Style::default()
+                            .fg(if hovered { SUCCESS } else { MUTED })
+                            .bg(row_bg),
+                    )
                 } else {
                     Span::styled("    ", Style::default().fg(MUTED).bg(row_bg))
                 },
@@ -967,8 +1102,16 @@ fn render_services_content(f: &mut Frame, area: Rect, app: &mut App) {
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(MUTED)))
-        .highlight_style(Style::default().bg(HIGHLIGHT_BG).add_modifier(Modifier::BOLD));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(MUTED)),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(HIGHLIGHT_BG)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_stateful_widget(list, list_area, &mut app.list_state.clone());
 }
 
@@ -977,10 +1120,7 @@ fn render_services_content(f: &mut Frame, area: Rect, app: &mut App) {
 fn render_account_content(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
         .split(area);
 
     f.render_widget(
@@ -1066,12 +1206,7 @@ fn render_account_content(f: &mut Frame, area: Rect, app: &mut App) {
                     Style::default().fg(MUTED),
                 )));
             } else {
-                let login_rect = Rect::new(
-                    content_area.x + 2,
-                    content_area.y + 1 + 3,
-                    20,
-                    1,
-                );
+                let login_rect = Rect::new(content_area.x + 2, content_area.y + 1 + 3, 20, 1);
                 app.click_regions.account_login_area = Some(login_rect);
                 let login_hovered = mouse_in(app, login_rect);
 
@@ -1090,10 +1225,7 @@ fn render_account_content(f: &mut Frame, area: Rect, app: &mut App) {
                                 .bg(ACCENT)
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled(
-                            "  click or press l",
-                            Style::default().fg(MUTED),
-                        ),
+                        Span::styled("  click or press l", Style::default().fg(MUTED)),
                     ]));
                 } else {
                     lines.push(Line::from(vec![
@@ -1105,10 +1237,7 @@ fn render_account_content(f: &mut Frame, area: Rect, app: &mut App) {
                                 .bg(MUTED)
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled(
-                            "  press l",
-                            Style::default().fg(MUTED),
-                        ),
+                        Span::styled("  press l", Style::default().fg(MUTED)),
                     ]));
                 }
             }
@@ -1128,32 +1257,25 @@ fn render_account_content(f: &mut Frame, area: Rect, app: &mut App) {
 fn render_apps_content(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
         .split(area);
 
     let header_area = chunks[0];
     let list_area = chunks[1];
 
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                " Apps",
-                Style::default().fg(FG).add_modifier(Modifier::BOLD),
-            ),
-        ])),
+        Paragraph::new(Line::from(vec![Span::styled(
+            " Apps",
+            Style::default().fg(FG).add_modifier(Modifier::BOLD),
+        )])),
         header_area,
     );
 
     if app.catalog_items.is_empty() {
-        let msg = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "no catalog items — press r to refresh",
-                Style::default().fg(MUTED),
-            ),
-        ]))
+        let msg = Paragraph::new(Line::from(vec![Span::styled(
+            "no catalog items — press r to refresh",
+            Style::default().fg(MUTED),
+        )]))
         .alignment(ratatui::layout::Alignment::Center);
         f.render_widget(msg, list_area);
         return;
@@ -1418,7 +1540,10 @@ fn render_workflows_content(f: &mut Frame, area: Rect, app: &mut App) {
 
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" Workflows", Style::default().fg(FG).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " Workflows",
+                Style::default().fg(FG).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 "  \u{2191}\u{2193} nav \u{b7} enter run \u{b7} r refresh \u{b7} esc clear",
                 Style::default().fg(MUTED),
@@ -1460,7 +1585,9 @@ fn render_workflows_content(f: &mut Frame, area: Rect, app: &mut App) {
     }
 
     // Split body: left list (40%) + right detail/run pane.
-    let list_width = (body.width * 2 / 5).max(22).min(body.width.saturating_sub(2));
+    let list_width = (body.width * 2 / 5)
+        .max(22)
+        .min(body.width.saturating_sub(2));
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(list_width), Constraint::Min(1)])
@@ -1470,7 +1597,9 @@ fn render_workflows_content(f: &mut Frame, area: Rect, app: &mut App) {
     let detail_area = columns[1];
 
     // Workflow list
-    let sel = app.workflows_tab_index.min(app.workflows_list.len().saturating_sub(1));
+    let sel = app
+        .workflows_tab_index
+        .min(app.workflows_list.len().saturating_sub(1));
     let mut items: Vec<ListItem> = Vec::with_capacity(app.workflows_list.len());
     for (i, wf) in app.workflows_list.iter().enumerate() {
         let is_selected = i == sel;
@@ -1480,7 +1609,10 @@ fn render_workflows_content(f: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(FG)
         };
         let mut wf_lines: Vec<Line> = Vec::new();
-        wf_lines.push(Line::from(Span::styled(format!(" {}", wf.name), name_style)));
+        wf_lines.push(Line::from(Span::styled(
+            format!(" {}", wf.name),
+            name_style,
+        )));
         if let Some(desc) = &wf.description {
             wf_lines.push(Line::from(Span::styled(
                 format!("  {}", desc),
@@ -1522,7 +1654,10 @@ fn render_workflows_content(f: &mut Frame, area: Rect, app: &mut App) {
         ]));
         detail_lines.push(Line::from(vec![
             Span::styled(" name  ", Style::default().fg(MUTED)),
-            Span::styled(wf.name.clone(), Style::default().fg(FG).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                wf.name.clone(),
+                Style::default().fg(FG).add_modifier(Modifier::BOLD),
+            ),
         ]));
         if let Some(desc) = &wf.description {
             detail_lines.push(Line::from(vec![
@@ -1536,7 +1671,9 @@ fn render_workflows_content(f: &mut Frame, area: Rect, app: &mut App) {
     if app.workflow_confirm_pending {
         detail_lines.push(Line::from(Span::styled(
             " Press enter to confirm run, esc to cancel",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )));
     } else if app.workflow_run_loading {
         detail_lines.push(Line::from(Span::styled(
@@ -1553,7 +1690,10 @@ fn render_workflows_content(f: &mut Frame, area: Rect, app: &mut App) {
         let (state_icon, state_style) = match state {
             "completed" => ("\u{2713}", Style::default().fg(SUCCESS)),
             "failed" => ("\u{2717}", Style::default().fg(DANGER)),
-            "running" => (spinner_frame(app.animation_tick), Style::default().fg(ACCENT)),
+            "running" => (
+                spinner_frame(app.animation_tick),
+                Style::default().fg(ACCENT),
+            ),
             _ => ("\u{25cb}", Style::default().fg(MUTED)),
         };
         detail_lines.push(Line::from(vec![
@@ -1661,7 +1801,9 @@ fn render_spaces_content(f: &mut Frame, area: Rect, app: &mut App) {
             ])));
         }
         let mut list_state = ratatui::widgets::ListState::default();
-        list_state.select(Some(app.spaces_tab_index.min(app.spaces.len().saturating_sub(1))));
+        list_state.select(Some(
+            app.spaces_tab_index.min(app.spaces.len().saturating_sub(1)),
+        ));
         let list = List::new(space_items)
             .highlight_style(Style::default().bg(HIGHLIGHT_BG))
             .highlight_symbol("");
@@ -1805,19 +1947,22 @@ fn render_engines_content(f: &mut Frame, area: Rect, app: &mut App) {
 
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" Engines", Style::default().fg(FG).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " Engines",
+                Style::default().fg(FG).add_modifier(Modifier::BOLD),
+            ),
             if !active_name.is_empty() {
                 let (dot, dot_style) = if running {
                     ("●", Style::default().fg(SUCCESS))
                 } else {
                     ("○", Style::default().fg(Color::Yellow))
                 };
+                Span::styled(format!("  active: "), Style::default().fg(MUTED))
+            } else {
                 Span::styled(
-                    format!("  active: "),
+                    "  ↑↓ nav · enter activate · r refresh",
                     Style::default().fg(MUTED),
                 )
-            } else {
-                Span::styled("  ↑↓ nav · enter activate · r refresh", Style::default().fg(MUTED))
             },
         ])),
         chunks[0],
@@ -1832,11 +1977,20 @@ fn render_engines_content(f: &mut Frame, area: Rect, app: &mut App) {
         };
         f.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(" Engines", Style::default().fg(FG).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    " Engines",
+                    Style::default().fg(FG).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("  active: ", Style::default().fg(MUTED)),
                 Span::styled(dot, dot_style),
-                Span::styled(format!(" {active_name}"), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("  ↑↓ nav · enter activate · r refresh", Style::default().fg(MUTED)),
+                Span::styled(
+                    format!(" {active_name}"),
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "  ↑↓ nav · enter activate · r refresh",
+                    Style::default().fg(MUTED),
+                ),
             ])),
             chunks[0],
         );
@@ -1874,7 +2028,9 @@ fn render_engines_content(f: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let sel = app.engines_tab_index.min(app.engines_list.len().saturating_sub(1));
+    let sel = app
+        .engines_tab_index
+        .min(app.engines_list.len().saturating_sub(1));
     let mut items: Vec<ListItem> = Vec::with_capacity(app.engines_list.len());
     for (i, eng) in app.engines_list.iter().enumerate() {
         let is_sel = i == sel;
@@ -1903,14 +2059,29 @@ fn render_engines_content(f: &mut Frame, area: Rect, app: &mut App) {
             Span::styled(format!(" {status_icon} "), status_style),
             Span::styled(format!("{:<18}", eng.name), name_style),
             Span::styled(
-                if installed { "installed" } else { "not installed" },
-                if installed { Style::default().fg(SUCCESS) } else { Style::default().fg(MUTED) },
+                if installed {
+                    "installed"
+                } else {
+                    "not installed"
+                },
+                if installed {
+                    Style::default().fg(SUCCESS)
+                } else {
+                    Style::default().fg(MUTED)
+                },
             ),
-            Span::styled(active_label, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                active_label,
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
         ];
 
         if let Some(desc) = &eng.description {
-            let short = if desc.len() > 30 { format!("  {}…", &desc[..29]) } else { format!("  {desc}") };
+            let short = if desc.len() > 30 {
+                format!("  {}…", &desc[..29])
+            } else {
+                format!("  {desc}")
+            };
             line_spans.push(Span::styled(short, Style::default().fg(MUTED)));
         }
 
@@ -1943,7 +2114,10 @@ fn render_schedules_content(f: &mut Frame, area: Rect, app: &mut App) {
 
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" Schedules", Style::default().fg(FG).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " Schedules",
+                Style::default().fg(FG).add_modifier(Modifier::BOLD),
+            ),
             Span::styled("  ↑↓ nav · r refresh", Style::default().fg(MUTED)),
         ])),
         chunks[0],
@@ -1981,7 +2155,9 @@ fn render_schedules_content(f: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let sel = app.schedules_tab_index.min(app.scheduled_jobs.len().saturating_sub(1));
+    let sel = app
+        .schedules_tab_index
+        .min(app.scheduled_jobs.len().saturating_sub(1));
     let mut items: Vec<ListItem> = Vec::with_capacity(app.scheduled_jobs.len());
 
     for (i, job) in app.scheduled_jobs.iter().enumerate() {
@@ -1998,8 +2174,10 @@ fn render_schedules_content(f: &mut Frame, area: Rect, app: &mut App) {
             ("○", Style::default().fg(MUTED))
         };
 
-        let schedule_str = job.schedule.as_ref().map(|s| {
-            match s {
+        let schedule_str = job
+            .schedule
+            .as_ref()
+            .map(|s| match s {
                 serde_json::Value::Object(m) => {
                     if let Some(expr) = m.get("expr").and_then(|v| v.as_str()) {
                         expr.to_string()
@@ -2010,10 +2188,12 @@ fn render_schedules_content(f: &mut Frame, area: Rect, app: &mut App) {
                     }
                 }
                 other => other.to_string(),
-            }
-        }).unwrap_or_else(|| "—".to_string());
+            })
+            .unwrap_or_else(|| "—".to_string());
 
-        let last_run = job.last_run_at.as_deref()
+        let last_run = job
+            .last_run_at
+            .as_deref()
             .and_then(|s| s.split('T').next())
             .unwrap_or("—");
 
@@ -2084,7 +2264,10 @@ fn render_feature_tab(f: &mut Frame, area: Rect, app: &App, tab: SidebarTab) {
     ];
     let state = app.feature_tabs.get(&tab);
     if let Some(notice) = state.and_then(|s| s.notice.as_ref()) {
-        header.push(Span::styled(format!("  · {notice}"), Style::default().fg(ACCENT)));
+        header.push(Span::styled(
+            format!("  · {notice}"),
+            Style::default().fg(ACCENT),
+        ));
     }
     f.render_widget(Paragraph::new(Line::from(header)), chunks[0]);
 
@@ -2233,14 +2416,13 @@ fn render_chat_content(f: &mut Frame, area: Rect, app: &mut App) {
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ));
                 if let Some(engine) = agent.and_then(|a| a.engine.as_deref()) {
-                    header_spans
-                        .push(Span::styled(format!(" → {engine}"), Style::default().fg(MUTED)));
+                    header_spans.push(Span::styled(
+                        format!(" → {engine}"),
+                        Style::default().fg(MUTED),
+                    ));
                 }
             }
-            None => header_spans.push(Span::styled(
-                "  Default agent",
-                Style::default().fg(MUTED),
-            )),
+            None => header_spans.push(Span::styled("  Default agent", Style::default().fg(MUTED))),
         }
     }
     header_spans.push(Span::styled(
@@ -2260,8 +2442,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, app: &mut App) {
 
     for (i, msg) in app.chat.messages.iter().enumerate() {
         let is_last = i == app.chat.messages.len() - 1;
-        let is_streaming_assistant =
-            is_last && app.chat.streaming && msg.role == Role::Assistant;
+        let is_streaming_assistant = is_last && app.chat.streaming && msg.role == Role::Assistant;
 
         match msg.role {
             Role::User => {
@@ -2372,8 +2553,16 @@ fn render_chat_content(f: &mut Frame, area: Rect, app: &mut App) {
             .title(Span::styled(
                 title_label,
                 Style::default()
-                    .fg(if composer_hovered && !app.chat.streaming { HOVER_FG } else { border_color })
-                    .add_modifier(if composer_hovered { Modifier::BOLD } else { Modifier::empty() }),
+                    .fg(if composer_hovered && !app.chat.streaming {
+                        HOVER_FG
+                    } else {
+                        border_color
+                    })
+                    .add_modifier(if composer_hovered {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
             )),
     );
     f.render_widget(composer, composer_area);
@@ -2408,32 +2597,58 @@ fn render_chat_status_bar(f: &mut Frame, area: Rect, app: &App) {
         } else {
             "◎"
         };
-        let color = if app.chat_goal.achieved { SUCCESS } else { ACCENT };
+        let color = if app.chat_goal.achieved {
+            SUCCESS
+        } else {
+            ACCENT
+        };
         let mut label = format!(" {icon} goal: {cond}");
         if let Some(started) = app.chat_goal.started_at {
             let secs = started.elapsed().as_secs();
-            label.push_str(&format!("  ({}m{:02}s · turn {}/{})",
-                secs / 60, secs % 60, app.chat_goal.turns, crate::app::MAX_GOAL_TURNS));
+            label.push_str(&format!(
+                "  ({}m{:02}s · turn {}/{})",
+                secs / 60,
+                secs % 60,
+                app.chat_goal.turns,
+                crate::app::MAX_GOAL_TURNS
+            ));
         }
-        spans.push(Span::styled(label, Style::default().fg(color).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            label,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ));
         if let Some(reason) = &app.chat_goal.last_reason {
             let trimmed: String = reason.chars().take(60).collect();
-            spans.push(Span::styled(format!(" — {trimmed}"), Style::default().fg(MUTED)));
+            spans.push(Span::styled(
+                format!(" — {trimmed}"),
+                Style::default().fg(MUTED),
+            ));
         }
     }
     if app.double_check_on {
-        spans.push(Span::styled("  ✓✓ double-check", Style::default().fg(SUCCESS)));
+        spans.push(Span::styled(
+            "  ✓✓ double-check",
+            Style::default().fg(SUCCESS),
+        ));
     }
     if let Some(model) = &app.selected_model {
-        spans.push(Span::styled(format!("  ⚙ {model}"), Style::default().fg(MUTED)));
+        spans.push(Span::styled(
+            format!("  ⚙ {model}"),
+            Style::default().fg(MUTED),
+        ));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// Centered overlay showing the last double-check review (verdict + critique).
 fn render_double_check_overlay(f: &mut Frame, area: Rect, app: &App) {
-    let width = (area.width.saturating_mul(7) / 10).clamp(40, 100).min(area.width.saturating_sub(2));
-    let height = (area.height.saturating_mul(6) / 10).clamp(8, 26).min(area.height).max(1);
+    let width = (area.width.saturating_mul(7) / 10)
+        .clamp(40, 100)
+        .min(area.width.saturating_sub(2));
+    let height = (area.height.saturating_mul(6) / 10)
+        .clamp(8, 26)
+        .min(area.height)
+        .max(1);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(width)) / 2,
         y: area.y + (area.height.saturating_sub(height)) / 2,
@@ -2451,12 +2666,21 @@ fn render_double_check_overlay(f: &mut Frame, area: Rect, app: &App) {
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     if let Some(err) = &app.double_check.error {
-        lines.push(Line::from(Span::styled(format!("error: {err}"), Style::default().fg(DANGER))));
+        lines.push(Line::from(Span::styled(
+            format!("error: {err}"),
+            Style::default().fg(DANGER),
+        )));
     } else if app.double_check.loading {
-        lines.push(Line::from(Span::styled("Reviewing the last answer…", Style::default().fg(MUTED))));
+        lines.push(Line::from(Span::styled(
+            "Reviewing the last answer…",
+            Style::default().fg(MUTED),
+        )));
     } else {
         for l in app.double_check.critique.lines() {
-            lines.push(Line::from(Span::styled(l.to_string(), Style::default().fg(FG))));
+            lines.push(Line::from(Span::styled(
+                l.to_string(),
+                Style::default().fg(FG),
+            )));
         }
         if !app.double_check.model.is_empty() {
             lines.push(Line::from(""));
@@ -2467,12 +2691,20 @@ fn render_double_check_overlay(f: &mut Frame, area: Rect, app: &App) {
         }
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Esc/Enter to dismiss · ↑↓ scroll", Style::default().fg(MUTED))));
+    lines.push(Line::from(Span::styled(
+        "Esc/Enter to dismiss · ↑↓ scroll",
+        Style::default().fg(MUTED),
+    )));
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(title_color))
-        .title(Span::styled(title, Style::default().fg(title_color).add_modifier(Modifier::BOLD)));
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(title_color)
+                .add_modifier(Modifier::BOLD),
+        ));
     f.render_widget(
         Paragraph::new(lines)
             .block(block)
@@ -2484,8 +2716,13 @@ fn render_double_check_overlay(f: &mut Frame, area: Rect, app: &App) {
 
 /// Centered overlay listing the runs/sessions of the current conversation.
 fn render_sessions_overlay(f: &mut Frame, area: Rect, app: &App) {
-    let width = (area.width.saturating_mul(7) / 10).clamp(40, 90).min(area.width.saturating_sub(2));
-    let height = (area.height.saturating_mul(6) / 10).clamp(8, 26).min(area.height).max(1);
+    let width = (area.width.saturating_mul(7) / 10)
+        .clamp(40, 90)
+        .min(area.width.saturating_sub(2));
+    let height = (area.height.saturating_mul(6) / 10)
+        .clamp(8, 26)
+        .min(area.height)
+        .max(1);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(width)) / 2,
         y: area.y + (area.height.saturating_sub(height)) / 2,
@@ -2522,13 +2759,23 @@ fn render_sessions_overlay(f: &mut Frame, area: Rect, app: &App) {
             let mut spans = vec![
                 Span::styled(marker, Style::default().fg(ACCENT)),
                 Span::styled(
-                    format!("{:<10}", if row.status.is_empty() { "—" } else { &row.status }),
+                    format!(
+                        "{:<10}",
+                        if row.status.is_empty() {
+                            "—"
+                        } else {
+                            &row.status
+                        }
+                    ),
                     Style::default().fg(status_color),
                 ),
                 Span::styled(format!(" {}", row.created_at), Style::default().fg(MUTED)),
             ];
             if !row.branch.is_empty() {
-                spans.push(Span::styled(format!("  ⎇ {}", row.branch), Style::default().fg(MUTED)));
+                spans.push(Span::styled(
+                    format!("  ⎇ {}", row.branch),
+                    Style::default().fg(MUTED),
+                ));
             }
             items.push(ListItem::new(Line::from(spans)));
         }
@@ -2550,7 +2797,10 @@ fn render_sessions_overlay(f: &mut Frame, area: Rect, app: &App) {
 fn render_btw_overlay(f: &mut Frame, area: Rect, app: &App) {
     let width = area.width.saturating_mul(7) / 10;
     let width = width.clamp(40, 100).min(area.width.saturating_sub(2));
-    let height = (area.height.saturating_mul(7) / 10).clamp(8, 30).min(area.height).max(1);
+    let height = (area.height.saturating_mul(7) / 10)
+        .clamp(8, 30)
+        .min(area.height)
+        .max(1);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(width)) / 2,
         y: area.y + (area.height.saturating_sub(height)) / 2,
@@ -2610,9 +2860,10 @@ fn render_agents_content(f: &mut Frame, area: Rect, app: &mut App) {
         .split(area);
 
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(" Agents", Style::default().fg(FG).add_modifier(Modifier::BOLD)),
-        ])),
+        Paragraph::new(Line::from(vec![Span::styled(
+            " Agents",
+            Style::default().fg(FG).add_modifier(Modifier::BOLD),
+        )])),
         chunks[0],
     );
 
@@ -2620,9 +2871,10 @@ fn render_agents_content(f: &mut Frame, area: Rect, app: &mut App) {
 
     if !app.core_connected && app.agents_list.is_empty() {
         f.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" core not running", Style::default().fg(MUTED)),
-            ])),
+            Paragraph::new(Line::from(vec![Span::styled(
+                " core not running",
+                Style::default().fg(MUTED),
+            )])),
             body,
         );
         return;
@@ -2630,22 +2882,22 @@ fn render_agents_content(f: &mut Frame, area: Rect, app: &mut App) {
 
     if app.agents_list.is_empty() {
         f.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" no agents configured", Style::default().fg(MUTED)),
-            ])),
+            Paragraph::new(Line::from(vec![Span::styled(
+                " no agents configured",
+                Style::default().fg(MUTED),
+            )])),
             body,
         );
         return;
     }
 
     // Split body: left list (40% of width, min 22 cols) + right detail pane.
-    let list_width = (body.width * 2 / 5).max(22).min(body.width.saturating_sub(2));
+    let list_width = (body.width * 2 / 5)
+        .max(22)
+        .min(body.width.saturating_sub(2));
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(list_width),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Length(list_width), Constraint::Min(1)])
         .split(body);
 
     let list_area = columns[0];
@@ -2661,7 +2913,10 @@ fn render_agents_content(f: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(FG)
         };
         let mut lines: Vec<Line> = Vec::new();
-        lines.push(Line::from(Span::styled(format!(" {}", agent.name), name_style)));
+        lines.push(Line::from(Span::styled(
+            format!(" {}", agent.name),
+            name_style,
+        )));
 
         // Engine/transport badge on second line
         let mut badge_spans: Vec<Span> = Vec::new();
@@ -2688,7 +2943,9 @@ fn render_agents_content(f: &mut Frame, area: Rect, app: &mut App) {
     app.click_regions.agent_list_top_y = list_area.y + 1; // inside border
 
     let mut list_state = ratatui::widgets::ListState::default();
-    let sel = app.agents_tab_index.min(app.agents_list.len().saturating_sub(1));
+    let sel = app
+        .agents_tab_index
+        .min(app.agents_list.len().saturating_sub(1));
     list_state.select(Some(sel));
 
     let list = List::new(items)
@@ -2740,7 +2997,10 @@ fn render_agents_content(f: &mut Frame, area: Rect, app: &mut App) {
         // Name
         lines.push(Line::from(vec![
             Span::styled(" name       ", Style::default().fg(MUTED)),
-            Span::styled(agent.name.clone(), Style::default().fg(FG).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                agent.name.clone(),
+                Style::default().fg(FG).add_modifier(Modifier::BOLD),
+            ),
         ]));
 
         // Engine slot
@@ -2883,7 +3143,9 @@ fn render_agent_picker(f: &mut Frame, area: Rect, app: &App) {
     }
 
     let mut list_state = ratatui::widgets::ListState::default();
-    list_state.select(Some(app.agent_picker_index.min(row_count.saturating_sub(1))));
+    list_state.select(Some(
+        app.agent_picker_index.min(row_count.saturating_sub(1)),
+    ));
 
     let list = List::new(items)
         .block(
@@ -2917,7 +3179,11 @@ pub fn ui_setup_dependencies(f: &mut Frame, app: &mut App) {
 
     let body = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(2), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(2),
+            Constraint::Min(1),
+        ])
         .split(r.body);
 
     f.render_widget(
@@ -2933,7 +3199,11 @@ pub fn ui_setup_dependencies(f: &mut Frame, app: &mut App) {
             .deps_install_started
             .map(|t| t.elapsed().as_secs())
             .unwrap_or(0);
-        format!("all required · cannot be skipped  ·  installing {}  {}", fmt_elapsed(elapsed), spinner_frame(app.animation_tick))
+        format!(
+            "all required · cannot be skipped  ·  installing {}  {}",
+            fmt_elapsed(elapsed),
+            spinner_frame(app.animation_tick)
+        )
     } else {
         "all required · cannot be skipped".to_string()
     };
@@ -2975,7 +3245,10 @@ pub fn ui_setup_dependencies(f: &mut Frame, app: &mut App) {
                 let frame = spinner_frame(app.animation_tick);
                 (
                     frame,
-                    Style::default().fg(ACCENT).bg(row_bg).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(ACCENT)
+                        .bg(row_bg)
+                        .add_modifier(Modifier::BOLD),
                     Span::styled("installing…", Style::default().fg(MUTED).bg(row_bg)),
                 )
             } else {
@@ -2990,7 +3263,9 @@ pub fn ui_setup_dependencies(f: &mut Frame, app: &mut App) {
                 Span::styled(format!("  {} ", icon), icon_style),
                 Span::styled(
                     format!("{:<14}", name),
-                    Style::default().fg(if hovered { HOVER_FG } else { FG }).bg(row_bg),
+                    Style::default()
+                        .fg(if hovered { HOVER_FG } else { FG })
+                        .bg(row_bg),
                 ),
                 status_span,
             ])
@@ -2999,8 +3274,16 @@ pub fn ui_setup_dependencies(f: &mut Frame, app: &mut App) {
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(MUTED)))
-        .highlight_style(Style::default().bg(HIGHLIGHT_BG).add_modifier(Modifier::BOLD));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(MUTED)),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(HIGHLIGHT_BG)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_stateful_widget(list, dep_list_area, &mut app.list_state.clone());
 
     render_hints(
@@ -3051,12 +3334,7 @@ pub fn ui_setup_agents(f: &mut Frame, app: &mut App) {
 
 // ── Shared selection renderer ─────────────────────────────────────────────────
 
-fn render_selection_screen(
-    f: &mut Frame,
-    app: &mut App,
-    heading: &str,
-    caption: &str,
-) {
+fn render_selection_screen(f: &mut Frame, app: &mut App, heading: &str, caption: &str) {
     let items_data: Vec<crate::app::SidecarInfo> = match app.current_screen {
         Screen::SetupProviders => app.providers.clone(),
         Screen::SetupTools => app.tools.clone(),
@@ -3108,18 +3386,31 @@ fn render_selection_screen(
                 1,
             );
             let hovered = mouse_in(app, row_rect);
-            let row_bg = if hovered && !unavailable { HOVER_BG } else { Color::Reset };
+            let row_bg = if hovered && !unavailable {
+                HOVER_BG
+            } else {
+                Color::Reset
+            };
 
             let (marker, marker_style) = if unavailable || !s.selected {
                 ("◇", Style::default().fg(MUTED).bg(row_bg))
             } else {
-                ("◆", Style::default().fg(ACCENT).bg(row_bg).add_modifier(Modifier::BOLD))
+                (
+                    "◆",
+                    Style::default()
+                        .fg(ACCENT)
+                        .bg(row_bg)
+                        .add_modifier(Modifier::BOLD),
+                )
             };
 
             let name_style = if unavailable {
                 Style::default().fg(MUTED).bg(row_bg)
             } else if s.selected {
-                Style::default().fg(FG).bg(row_bg).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(FG)
+                    .bg(row_bg)
+                    .add_modifier(Modifier::BOLD)
             } else if hovered {
                 Style::default().fg(HOVER_FG).bg(row_bg)
             } else {
@@ -3134,11 +3425,20 @@ fn render_selection_screen(
             ];
 
             if unavailable {
-                spans.push(Span::styled("unsupported on this platform", Style::default().fg(MUTED).bg(row_bg)));
+                spans.push(Span::styled(
+                    "unsupported on this platform",
+                    Style::default().fg(MUTED).bg(row_bg),
+                ));
             } else if s.installed {
-                spans.push(Span::styled("installed", Style::default().fg(SUCCESS).bg(row_bg)));
+                spans.push(Span::styled(
+                    "installed",
+                    Style::default().fg(SUCCESS).bg(row_bg),
+                ));
             } else if !s.description.is_empty() {
-                spans.push(Span::styled(s.description.as_str(), Style::default().fg(MUTED).bg(row_bg)));
+                spans.push(Span::styled(
+                    s.description.as_str(),
+                    Style::default().fg(MUTED).bg(row_bg),
+                ));
             }
 
             Line::from(spans).into()
@@ -3146,8 +3446,16 @@ fn render_selection_screen(
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(MUTED)))
-        .highlight_style(Style::default().bg(HIGHLIGHT_BG).add_modifier(Modifier::BOLD));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(MUTED)),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(HIGHLIGHT_BG)
+                .add_modifier(Modifier::BOLD),
+        );
 
     f.render_stateful_widget(list, wiz_list_area, &mut app.list_state.clone());
 
@@ -3201,14 +3509,26 @@ pub fn ui_complete(f: &mut Frame, app: &mut App) {
         .unwrap_or(0);
 
     let all_sidecars_ref: Vec<&crate::app::SidecarInfo> = app.all_sidecars().collect();
-    let all_done = app.install_results.is_empty() || app.install_results.iter().all(|(name, queued)| {
-        !queued || all_sidecars_ref.iter().find(|s| &s.name == name).map(|s| s.installed).unwrap_or(false)
-    });
+    let all_done = app.install_results.is_empty()
+        || app.install_results.iter().all(|(name, queued)| {
+            !queued
+                || all_sidecars_ref
+                    .iter()
+                    .find(|s| &s.name == name)
+                    .map(|s| s.installed)
+                    .unwrap_or(false)
+        });
 
     let heading_text = if app.install_results.is_empty() {
-        Span::styled("nothing selected", Style::default().fg(MUTED).add_modifier(Modifier::BOLD))
+        Span::styled(
+            "nothing selected",
+            Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
+        )
     } else if all_done {
-        Span::styled("all done", Style::default().fg(SUCCESS).add_modifier(Modifier::BOLD))
+        Span::styled(
+            "all done",
+            Style::default().fg(SUCCESS).add_modifier(Modifier::BOLD),
+        )
     } else {
         Span::styled(
             format!("installing  {}", fmt_elapsed(elapsed_secs)),
@@ -3249,7 +3569,10 @@ pub fn ui_complete(f: &mut Frame, app: &mut App) {
                 let frame = spinner_frame(app.animation_tick);
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
-                    Span::styled(frame, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        frame,
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(" "),
                     Span::styled(format!("{:<16}", name), Style::default().fg(FG)),
                     Span::styled("installing", Style::default().fg(MUTED)),

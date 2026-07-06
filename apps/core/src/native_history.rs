@@ -607,7 +607,11 @@ fn first_line_title(messages: &[ImportedMessage]) -> String {
         .or_else(|| messages.first());
     match first_user {
         Some(m) => {
-            let line = m.content.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+            let line = m
+                .content
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("");
             let trimmed = line.trim();
             if trimmed.chars().count() > 80 {
                 let cut: String = trimmed.chars().take(80).collect();
@@ -717,7 +721,10 @@ mod tests {
                 );
                 assert!(!imported.messages.is_empty(), "read produced no messages");
                 assert!(
-                    imported.messages.iter().all(|m| m.role == "user" || m.role == "assistant"),
+                    imported
+                        .messages
+                        .iter()
+                        .all(|m| m.role == "user" || m.role == "assistant"),
                     "unexpected role in imported transcript"
                 );
                 // read_thread's title must match what the list showed — not the

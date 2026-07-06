@@ -148,7 +148,10 @@ impl ReplicateProvider {
         let status = replicate_status(prediction);
         let provider_ref = prediction["id"].as_str().unwrap_or_default().to_string();
         let (output, error) = match status {
-            JobStatus::Succeeded => (Some(super::normalize_media_output(&prediction["output"])), None),
+            JobStatus::Succeeded => (
+                Some(super::normalize_media_output(&prediction["output"])),
+                None,
+            ),
             JobStatus::Failed => (
                 None,
                 Some(
@@ -190,8 +193,9 @@ impl Provider for ReplicateProvider {
         &'a self,
         _model: &'a str,
         _body: &'a Value,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<axum::body::Body, GatewayError>> + Send + 'a>>
-    {
+    ) -> Pin<
+        Box<dyn std::future::Future<Output = Result<axum::body::Body, GatewayError>> + Send + 'a>,
+    > {
         Box::pin(async move {
             Err(GatewayError::ProviderError(
                 "replicate is a media provider; chat is not supported".to_string(),
@@ -219,7 +223,8 @@ impl Provider for ReplicateProvider {
         &'a self,
         model: &'a str,
         body: &'a Value,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let input = build_input(body);
             let prediction = self.create_prediction(model, input).await?;
@@ -236,7 +241,8 @@ impl Provider for ReplicateProvider {
     fn poll_video<'a>(
         &'a self,
         provider_ref: &'a str,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let prediction = self.get_prediction(provider_ref).await?;
             Ok(Self::video_from_prediction(&prediction))
@@ -303,7 +309,8 @@ mod tests {
 
     #[test]
     fn build_input_wraps_body_minus_control_fields() {
-        let body = json!({ "model": "x", "n": 2, "provider": "replicate", "prompt": "cat", "seed": 7 });
+        let body =
+            json!({ "model": "x", "n": 2, "provider": "replicate", "prompt": "cat", "seed": 7 });
         assert_eq!(build_input(&body), json!({ "prompt": "cat", "seed": 7 }));
     }
 
@@ -312,12 +319,18 @@ mod tests {
         // OpenAI TTS body: `input` is a text string, NOT a Replicate payload —
         // it must fall through to the strip-and-wrap branch, not be returned bare.
         let body = json!({ "model": "x", "input": "say hello", "voice": "alloy" });
-        assert_eq!(build_input(&body), json!({ "input": "say hello", "voice": "alloy" }));
+        assert_eq!(
+            build_input(&body),
+            json!({ "input": "say hello", "voice": "alloy" })
+        );
     }
 
     #[test]
     fn status_mapping() {
-        assert_eq!(replicate_status(&json!({"status":"starting"})), JobStatus::Queued);
+        assert_eq!(
+            replicate_status(&json!({"status":"starting"})),
+            JobStatus::Queued
+        );
         assert_eq!(
             replicate_status(&json!({"status":"processing"})),
             JobStatus::Running
@@ -326,7 +339,13 @@ mod tests {
             replicate_status(&json!({"status":"succeeded"})),
             JobStatus::Succeeded
         );
-        assert_eq!(replicate_status(&json!({"status":"failed"})), JobStatus::Failed);
-        assert_eq!(replicate_status(&json!({"status":"canceled"})), JobStatus::Failed);
+        assert_eq!(
+            replicate_status(&json!({"status":"failed"})),
+            JobStatus::Failed
+        );
+        assert_eq!(
+            replicate_status(&json!({"status":"canceled"})),
+            JobStatus::Failed
+        );
     }
 }

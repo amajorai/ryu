@@ -89,7 +89,10 @@ pub struct RemoteCatalogItem {
     pub install_state: String,
 }
 
-pub async fn fetch_catalog(api_url: &str, token: Option<&str>) -> anyhow::Result<Vec<RemoteCatalogItem>> {
+pub async fn fetch_catalog(
+    api_url: &str,
+    token: Option<&str>,
+) -> anyhow::Result<Vec<RemoteCatalogItem>> {
     let client = reqwest::Client::new();
     let mut req = client.get(format!("{api_url}/api/catalog"));
     if let Some(t) = token {
@@ -261,9 +264,17 @@ pub enum Category {
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum InstallState {
     NotInstalled,
-    Installing { started_at: String },
-    Installed { version: String, installed_at: String },
-    Failed { error: String, failed_at: String },
+    Installing {
+        started_at: String,
+    },
+    Installed {
+        version: String,
+        installed_at: String,
+    },
+    Failed {
+        error: String,
+        failed_at: String,
+    },
 }
 
 impl Default for InstallState {
@@ -707,9 +718,16 @@ pub struct SidecarStatus {
 }
 
 pub const SIDECAR_ORDER: &[&str] = &[
-    "spider", "screenpipe", "llmfit", "shadow", "ghost",
-    "llamacpp", "ollama", "vllm",
-    "zeroclaw", "openclaw",
+    "spider",
+    "screenpipe",
+    "llmfit",
+    "shadow",
+    "ghost",
+    "llamacpp",
+    "ollama",
+    "vllm",
+    "zeroclaw",
+    "openclaw",
 ];
 
 fn si(
@@ -750,26 +768,86 @@ impl App {
     pub fn new(api_url: String) -> Self {
         Self {
             dependencies: vec![
-                si("git",    "", Category::Dependency, false, true),
-                si("rust",   "", Category::Dependency, false, true),
-                si("npm",    "", Category::Dependency, false, true),
+                si("git", "", Category::Dependency, false, true),
+                si("rust", "", Category::Dependency, false, true),
+                si("npm", "", Category::Dependency, false, true),
                 si("python", "", Category::Dependency, false, true),
             ],
             providers: vec![
-                si("llamacpp", "wide range of model support (default)",              Category::Provider, true,  true),
-                si("ollama",   "wrapper on llama.cpp with predefined models",        Category::Provider, false, true),
-                si("vllm",     "high-throughput GPU inference · requires python ≥3.9", Category::Provider, false, true),
+                si(
+                    "llamacpp",
+                    "wide range of model support (default)",
+                    Category::Provider,
+                    true,
+                    true,
+                ),
+                si(
+                    "ollama",
+                    "wrapper on llama.cpp with predefined models",
+                    Category::Provider,
+                    false,
+                    true,
+                ),
+                si(
+                    "vllm",
+                    "high-throughput GPU inference · requires python ≥3.9",
+                    Category::Provider,
+                    false,
+                    true,
+                ),
             ],
             tools: vec![
-                si("spider",     "web crawler, more than just search (recommended)",          Category::Tool, false, true),
-                si("screenpipe", "continuous local screen + audio recorder for context (recommended)",      Category::Tool, false, true),
-                si("llmfit",     "hardware-aware LLM model recommendations",                   Category::Tool, false, true),
-                si("shadow",     "personal intelligence engine — screen capture & OCR",        Category::Tool, false, true),
-                si("ghost",      "MCP server — AI eyes and hands for any desktop app",         Category::Tool, false, true),
+                si(
+                    "spider",
+                    "web crawler, more than just search (recommended)",
+                    Category::Tool,
+                    false,
+                    true,
+                ),
+                si(
+                    "screenpipe",
+                    "continuous local screen + audio recorder for context (recommended)",
+                    Category::Tool,
+                    false,
+                    true,
+                ),
+                si(
+                    "llmfit",
+                    "hardware-aware LLM model recommendations",
+                    Category::Tool,
+                    false,
+                    true,
+                ),
+                si(
+                    "shadow",
+                    "personal intelligence engine — screen capture & OCR",
+                    Category::Tool,
+                    false,
+                    true,
+                ),
+                si(
+                    "ghost",
+                    "MCP server — AI eyes and hands for any desktop app",
+                    Category::Tool,
+                    false,
+                    true,
+                ),
             ],
             agents: vec![
-                si("zeroclaw",  "native binary · fast autonomous agent (default)",          Category::Agent, true,  true),
-                si("openclaw",  "npm global package · cross-platform JS agent",             Category::Agent, false, true),
+                si(
+                    "zeroclaw",
+                    "native binary · fast autonomous agent (default)",
+                    Category::Agent,
+                    true,
+                    true,
+                ),
+                si(
+                    "openclaw",
+                    "npm global package · cross-platform JS agent",
+                    Category::Agent,
+                    false,
+                    true,
+                ),
             ],
             statuses: Vec::new(),
             install_states: HashMap::new(),
@@ -844,18 +922,27 @@ impl App {
                 "provider" => Category::Provider,
                 _ => Category::Agent,
             };
-            si_owned(&item.name, &item.description, category, item.recommended, !item.deprecated)
+            si_owned(
+                &item.name,
+                &item.description,
+                category,
+                item.recommended,
+                !item.deprecated,
+            )
         };
 
-        let agents: Vec<SidecarInfo> = items.iter()
+        let agents: Vec<SidecarInfo> = items
+            .iter()
             .filter(|i| i.category == "agent" && !i.deprecated)
             .map(to_info)
             .collect();
-        let tools: Vec<SidecarInfo> = items.iter()
+        let tools: Vec<SidecarInfo> = items
+            .iter()
             .filter(|i| i.category == "tool" && !i.deprecated)
             .map(to_info)
             .collect();
-        let providers: Vec<SidecarInfo> = items.iter()
+        let providers: Vec<SidecarInfo> = items
+            .iter()
             .filter(|i| i.category == "provider" && !i.deprecated)
             .map(to_info)
             .collect();
@@ -876,6 +963,9 @@ impl App {
     }
 
     pub fn all_sidecars(&self) -> impl Iterator<Item = &SidecarInfo> {
-        self.providers.iter().chain(self.tools.iter()).chain(self.agents.iter())
+        self.providers
+            .iter()
+            .chain(self.tools.iter())
+            .chain(self.agents.iter())
     }
 }

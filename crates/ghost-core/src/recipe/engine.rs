@@ -1,9 +1,9 @@
 // Recipe engine: {{param}} substitution and step preparation.
 // Actual step execution is handled by apps/ghost which dispatches to tool handlers.
 
-use std::collections::HashMap;
 use anyhow::Result;
 use regex::Regex;
+use std::collections::HashMap;
 
 use super::types::{Recipe, RecipeStep};
 
@@ -13,7 +13,10 @@ pub fn substitute(template: &str, params: &HashMap<String, String>) -> String {
     let re = Regex::new(r"\{\{(\w+)\}\}").expect("valid regex");
     re.replace_all(template, |caps: &regex::Captures| {
         let key = &caps[1];
-        params.get(key).cloned().unwrap_or_else(|| format!("{{{{{key}}}}}"))
+        params
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| format!("{{{{{key}}}}}"))
     })
     .to_string()
 }
@@ -24,15 +27,17 @@ pub fn substitute_step(step: &RecipeStep, params: &HashMap<String, String>) -> R
         id: step.id,
         action: substitute(&step.action, params),
         target: step.target.as_ref().map(|t| super::types::Locator {
-            query:      t.query.as_deref().map(|s| substitute(s, params)),
-            role:       t.role.as_deref().map(|s| substitute(s, params)),
-            dom_id:     t.dom_id.as_deref().map(|s| substitute(s, params)),
-            dom_class:  t.dom_class.as_deref().map(|s| substitute(s, params)),
+            query: t.query.as_deref().map(|s| substitute(s, params)),
+            role: t.role.as_deref().map(|s| substitute(s, params)),
+            dom_id: t.dom_id.as_deref().map(|s| substitute(s, params)),
+            dom_class: t.dom_class.as_deref().map(|s| substitute(s, params)),
             identifier: t.identifier.as_deref().map(|s| substitute(s, params)),
-            app:        t.app.as_deref().map(|s| substitute(s, params)),
+            app: t.app.as_deref().map(|s| substitute(s, params)),
         }),
         params: step.params.as_ref().map(|p| {
-            p.iter().map(|(k, v)| (k.clone(), substitute(v, params))).collect()
+            p.iter()
+                .map(|(k, v)| (k.clone(), substitute(v, params)))
+                .collect()
         }),
         wait_after: step.wait_after.clone(),
         note: step.note.clone(),
@@ -66,7 +71,10 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("recipient".to_string(), "alice@example.com".to_string());
         params.insert("subject".to_string(), "Hello".to_string());
-        let s = substitute("Send email to {{recipient}} with subject {{subject}}", &params);
+        let s = substitute(
+            "Send email to {{recipient}} with subject {{subject}}",
+            &params,
+        );
         assert_eq!(s, "Send email to alice@example.com with subject Hello");
     }
 

@@ -61,8 +61,7 @@ impl RecipeStore {
 
     /// Save a recipe from a JSON string.
     pub fn save_json(&self, json: &str) -> Result<Recipe> {
-        let recipe: Recipe = serde_json::from_str(json)
-            .context("Invalid recipe JSON")?;
+        let recipe: Recipe = serde_json::from_str(json).context("Invalid recipe JSON")?;
         self.save(&recipe)?;
         Ok(recipe)
     }

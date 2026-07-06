@@ -159,8 +159,9 @@ impl Provider for FalProvider {
         &'a self,
         _model: &'a str,
         _body: &'a Value,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<axum::body::Body, GatewayError>> + Send + 'a>>
-    {
+    ) -> Pin<
+        Box<dyn std::future::Future<Output = Result<axum::body::Body, GatewayError>> + Send + 'a>,
+    > {
         Box::pin(async move {
             Err(GatewayError::ProviderError(
                 "fal is a media provider; chat is not supported".to_string(),
@@ -188,7 +189,8 @@ impl Provider for FalProvider {
         &'a self,
         model: &'a str,
         body: &'a Value,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let (response_url, status) = self.submit(model, body).await?;
             // If Fal reports the job already COMPLETED at submit time, fetch the
@@ -211,7 +213,8 @@ impl Provider for FalProvider {
     fn poll_video<'a>(
         &'a self,
         provider_ref: &'a str,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<VideoJob, GatewayError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let status = self.status(provider_ref).await?;
             let (output, error) = match status {
@@ -312,14 +315,23 @@ mod tests {
         // OpenAI TTS `input` is a text string, not a Fal payload — it must stay in
         // the wrapped object rather than become the bare JSON body.
         let body = json!({ "model": "fal-ai/x", "input": "say hi", "voice": "alloy" });
-        assert_eq!(build_input(&body), json!({ "input": "say hi", "voice": "alloy" }));
+        assert_eq!(
+            build_input(&body),
+            json!({ "input": "say hi", "voice": "alloy" })
+        );
     }
 
     #[test]
     fn status_mapping() {
         assert_eq!(fal_status(&json!({"status":"IN_QUEUE"})), JobStatus::Queued);
-        assert_eq!(fal_status(&json!({"status":"IN_PROGRESS"})), JobStatus::Running);
-        assert_eq!(fal_status(&json!({"status":"COMPLETED"})), JobStatus::Succeeded);
+        assert_eq!(
+            fal_status(&json!({"status":"IN_PROGRESS"})),
+            JobStatus::Running
+        );
+        assert_eq!(
+            fal_status(&json!({"status":"COMPLETED"})),
+            JobStatus::Succeeded
+        );
         assert_eq!(fal_status(&json!({"status":"ERROR"})), JobStatus::Failed);
     }
 }

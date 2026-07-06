@@ -114,7 +114,11 @@ fn print_diff(diff: &serde_json::Value) {
             })
             .collect::<Vec<_>>()
             .join(" ");
-        let scope_suffix = if scope.is_empty() { String::new() } else { format!(" ({scope})") };
+        let scope_suffix = if scope.is_empty() {
+            String::new()
+        } else {
+            format!(" ({scope})")
+        };
         println!("  {sym} {action:<6} {level}{scope_suffix}");
     }
 }
@@ -196,7 +200,9 @@ async fn run_revisions(args: &[String]) -> Result<()> {
     let (data, backend) = auth::require_token_and_url()?;
 
     let resp = http()
-        .get(format!("{backend}{CONTROL_PLANE_BASE}/{org}/config/revisions"))
+        .get(format!(
+            "{backend}{CONTROL_PLANE_BASE}/{org}/config/revisions"
+        ))
         .header("Authorization", format!("Bearer {}", data.token))
         .send()
         .await
@@ -213,7 +219,10 @@ async fn run_revisions(args: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<6}  {:<10}  {:<8}  {}", "REV", "SOURCE", "POLICIES", "CREATED");
+    println!(
+        "{:<6}  {:<10}  {:<8}  {}",
+        "REV", "SOURCE", "POLICIES", "CREATED"
+    );
     println!("{}", "-".repeat(48));
     for rev in revisions {
         let revision = rev.get("revision").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -245,7 +254,9 @@ async fn run_rollback(args: &[String]) -> Result<()> {
     let (data, backend) = auth::require_token_and_url()?;
 
     let resp = http()
-        .post(format!("{backend}{CONTROL_PLANE_BASE}/{org}/config/rollback"))
+        .post(format!(
+            "{backend}{CONTROL_PLANE_BASE}/{org}/config/rollback"
+        ))
         .header("Authorization", format!("Bearer {}", data.token))
         .json(&serde_json::json!({ "revision": target }))
         .send()

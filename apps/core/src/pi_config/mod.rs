@@ -950,7 +950,8 @@ pub struct PiConfigView {
 /// Read the current configuration.
 pub fn current() -> PiConfigView {
     let settings = read_settings();
-    let provider = active_provider_id_from(&settings).unwrap_or_else(|| GATEWAY_PROVIDER_ID.to_owned());
+    let provider =
+        active_provider_id_from(&settings).unwrap_or_else(|| GATEWAY_PROVIDER_ID.to_owned());
     let routing = provider_routing(&provider).to_owned();
 
     // Surface routing for every provider that is either built-in or configured.
@@ -1225,7 +1226,9 @@ pub fn configure_provider(input: ProviderConfigInput) -> Result<Value> {
     let is_builtin = provider_meta(&provider).is_some();
 
     if !is_builtin && base_url.is_none() && !custom_provider_ids().contains(&provider) {
-        anyhow::bail!("unknown provider '{provider}'; supply a baseUrl to define a custom provider");
+        anyhow::bail!(
+            "unknown provider '{provider}'; supply a baseUrl to define a custom provider"
+        );
     }
 
     if let Some(url) = &base_url {
@@ -1287,12 +1290,14 @@ pub fn remove_provider(id: &str) -> Result<Value> {
     }
     // If we just removed the active provider, revert to the managed default.
     if active_provider_id_from(&settings).as_deref() == Some(id) {
-        settings
-            .extra
-            .insert(ACTIVE_KEY.to_owned(), Value::String(GATEWAY_PROVIDER_ID.to_owned()));
-        settings
-            .extra
-            .insert(ROUTING_KEY.to_owned(), Value::String(ROUTING_GATEWAY.to_owned()));
+        settings.extra.insert(
+            ACTIVE_KEY.to_owned(),
+            Value::String(GATEWAY_PROVIDER_ID.to_owned()),
+        );
+        settings.extra.insert(
+            ROUTING_KEY.to_owned(),
+            Value::String(ROUTING_GATEWAY.to_owned()),
+        );
         settings.default_provider = Some("openai".to_owned());
         dirty = true;
     }
@@ -1394,12 +1399,16 @@ pub async fn discover_models(input: DiscoverInput) -> Value {
 /// Resolve the discovery URL + auth for a known/custom provider id from stored
 /// config. Returns `None` when the provider has no discoverable endpoint (e.g.
 /// Google's non-OpenAI shape), so the caller falls back to suggestions.
-fn resolve_provider_discovery(id: &str, explicit_key: Option<String>) -> Option<(String, DiscoveryAuth)> {
+fn resolve_provider_discovery(
+    id: &str,
+    explicit_key: Option<String>,
+) -> Option<(String, DiscoveryAuth)> {
     // Managed/gateway → the local Gateway's own /v1/models.
     if is_managed_or_gateway(id) {
         let base = crate::sidecar::gateway::gateway_url();
         let url = format!("{}/v1/models", base.trim_end_matches('/'));
-        let token = crate::sidecar::gateway::gateway_token().unwrap_or_else(|| "ryu-local".to_owned());
+        let token =
+            crate::sidecar::gateway::gateway_token().unwrap_or_else(|| "ryu-local".to_owned());
         return Some((url, DiscoveryAuth::Bearer(token)));
     }
 
@@ -1428,7 +1437,9 @@ fn resolve_provider_discovery(id: &str, explicit_key: Option<String>) -> Option<
             .map(str::to_owned)
             .filter(|s| !s.is_empty())
     });
-    let auth = key.map(DiscoveryAuth::Bearer).unwrap_or(DiscoveryAuth::None);
+    let auth = key
+        .map(DiscoveryAuth::Bearer)
+        .unwrap_or(DiscoveryAuth::None);
     Some((models_url_from_base(base), auth))
 }
 
@@ -1436,9 +1447,7 @@ fn resolve_provider_discovery(id: &str, explicit_key: Option<String>) -> Option<
 /// shape into `[{id}]`. Short timeout so a dead endpoint fails fast to fallback.
 async fn fetch_models(url: &str, auth: DiscoveryAuth) -> Result<Vec<Value>> {
     let client = reqwest::Client::new();
-    let mut req = client
-        .get(url)
-        .timeout(std::time::Duration::from_secs(8));
+    let mut req = client.get(url).timeout(std::time::Duration::from_secs(8));
     match auth {
         DiscoveryAuth::Bearer(token) => req = req.bearer_auth(token),
         DiscoveryAuth::Anthropic(key) => {

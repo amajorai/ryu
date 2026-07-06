@@ -307,10 +307,7 @@ async fn receive_webhook(
                     team_id = ?channel.team_id,
                     "whatsapp: routing via Core session seam"
                 );
-                let reply = match channel
-                    .run_via_core(&inbound.chat_id, &inbound.text)
-                    .await
-                {
+                let reply = match channel.run_via_core(&inbound.chat_id, &inbound.text).await {
                     Ok(r) if !r.is_empty() => r,
                     Ok(_) => "(no response)".to_string(),
                     Err(err) => {

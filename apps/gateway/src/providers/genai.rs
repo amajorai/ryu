@@ -9,7 +9,9 @@ use tracing::debug;
 
 // External `genai` crate (disambiguated with a leading `::` so it is never
 // confused with this `crate::providers::genai` module).
-use ::genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatResponse, ChatStreamEvent, StreamChunk};
+use ::genai::chat::{
+    ChatMessage, ChatOptions, ChatRequest, ChatResponse, ChatStreamEvent, StreamChunk,
+};
 use ::genai::resolver::{AuthData, AuthResolver};
 use ::genai::{Client, ModelIden};
 

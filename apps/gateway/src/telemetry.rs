@@ -96,10 +96,7 @@ pub fn gen_ai_semconv_opted_in(opt_in: &str) -> bool {
 /// leaks it so spans flush for the whole run.
 pub fn build_otlp_layer<S>() -> Option<(Box<dyn Layer<S> + Send + Sync>, SdkTracerProvider)>
 where
-    S: tracing::Subscriber
-        + for<'a> tracing_subscriber::registry::LookupSpan<'a>
-        + Send
-        + Sync,
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
     let enabled = std::env::var(DIAGNOSTICS_EXPORT_ENABLED_ENV)
         .map(|v| parse_bool(&v, false))
@@ -254,7 +251,9 @@ mod tests {
         // The bare token and the standard comma-joined multi-category form both enable it.
         assert!(gen_ai_semconv_opted_in("gen_ai"));
         assert!(gen_ai_semconv_opted_in("gen_ai_latest_experimental"));
-        assert!(gen_ai_semconv_opted_in("http,gen_ai_latest_experimental,database"));
+        assert!(gen_ai_semconv_opted_in(
+            "http,gen_ai_latest_experimental,database"
+        ));
         // Case-insensitive.
         assert!(gen_ai_semconv_opted_in("GEN_AI"));
     }

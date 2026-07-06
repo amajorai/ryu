@@ -6,11 +6,11 @@ use std::time::Duration;
 use agent_client_protocol::schema::{
     AuthMethodId, AuthenticateRequest, AvailableCommandInput, CancelNotification,
     ClientCapabilities, CloseSessionRequest, ContentBlock, CreateTerminalRequest,
-    CreateTerminalResponse, EmbeddedResourceResource, FileSystemCapabilities,
-    ImageContent, InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    KillTerminalRequest, KillTerminalResponse, LoadSessionRequest, LogoutRequest, NewSessionRequest,
-    NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion, ReadTextFileRequest,
-    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    CreateTerminalResponse, EmbeddedResourceResource, FileSystemCapabilities, ImageContent,
+    InitializeRequest, InitializeResponse, KillTerminalRequest, KillTerminalResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LogoutRequest,
+    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
+    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, TerminalId,
@@ -340,10 +340,20 @@ async fn terminal_create(
         }
     }
     if let Some(out_pipe) = child.stdout.take() {
-        tokio::spawn(pump(out_pipe, Arc::clone(&output), Arc::clone(&truncated), limit));
+        tokio::spawn(pump(
+            out_pipe,
+            Arc::clone(&output),
+            Arc::clone(&truncated),
+            limit,
+        ));
     }
     if let Some(err_pipe) = child.stderr.take() {
-        tokio::spawn(pump(err_pipe, Arc::clone(&output), Arc::clone(&truncated), limit));
+        tokio::spawn(pump(
+            err_pipe,
+            Arc::clone(&output),
+            Arc::clone(&truncated),
+            limit,
+        ));
     }
 
     // Owner task: race the process's own exit against a kill request so `kill`
@@ -527,11 +537,8 @@ async fn terminal_wait_for_exit(
         if let Some(status) = exit_arc.lock().await.clone() {
             return status;
         }
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_millis(250),
-            notify.notified(),
-        )
-        .await;
+        let _ =
+            tokio::time::timeout(std::time::Duration::from_millis(250), notify.notified()).await;
     }
 }
 
@@ -942,7 +949,11 @@ pub async fn list_acp_sessions(spawn_cmd: String) -> anyhow::Result<serde_json::
                 cx.send_request(ryu_initialize_request())
                     .block_task()
                     .await?;
-                match cx.send_request(ListSessionsRequest::new()).block_task().await {
+                match cx
+                    .send_request(ListSessionsRequest::new())
+                    .block_task()
+                    .await
+                {
                     Ok(resp) => {
                         let resp: ListSessionsResponse = resp;
                         Ok(serde_json::json!({
@@ -976,9 +987,11 @@ pub async fn close_acp_session(spawn_cmd: String, session_id: String) -> anyhow:
                     cx.send_request(ryu_initialize_request())
                         .block_task()
                         .await?;
-                    cx.send_request(CloseSessionRequest::new(SessionId::new(session_id.as_str())))
-                        .block_task()
-                        .await?;
+                    cx.send_request(CloseSessionRequest::new(SessionId::new(
+                        session_id.as_str(),
+                    )))
+                    .block_task()
+                    .await?;
                     Ok(())
                 }
             }),
@@ -1170,7 +1183,7 @@ pub fn spawn_acp_task(
     let mut pending = Some(acp_turn);
     if let Some(turns) = pool.get(&key) {
         match turns.send(pending.take().expect("turn present")) {
-            Ok(()) => return events_rx, // reused this chat's live instance
+            Ok(()) => return events_rx,        // reused this chat's live instance
             Err(err) => pending = Some(err.0), // raced with teardown; respawn below
         }
     }
@@ -1193,8 +1206,9 @@ pub fn spawn_acp_task(
 /// See [`spawn_acp_task`] for the reuse / auto-restore / idle-TTL lifecycle.
 #[allow(clippy::type_complexity)]
 fn acp_pool() -> &'static Mutex<std::collections::HashMap<String, mpsc::UnboundedSender<AcpTurn>>> {
-    static POOL: OnceLock<Mutex<std::collections::HashMap<String, mpsc::UnboundedSender<AcpTurn>>>> =
-        OnceLock::new();
+    static POOL: OnceLock<
+        Mutex<std::collections::HashMap<String, mpsc::UnboundedSender<AcpTurn>>>,
+    > = OnceLock::new();
     POOL.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
@@ -3598,10 +3612,7 @@ mod tests {
     fn extract_exec_command_finds_command_shapes() {
         // Top-level command string.
         let tc = serde_json::json!({ "command": "rm -rf /tmp/x" });
-        assert_eq!(
-            extract_exec_command(&tc).as_deref(),
-            Some("rm -rf /tmp/x")
-        );
+        assert_eq!(extract_exec_command(&tc).as_deref(), Some("rm -rf /tmp/x"));
         // Nested under rawInput as an argv array.
         let tc = serde_json::json!({
             "kind": "execute",

@@ -66,7 +66,11 @@ pub enum EmbeddingError {
     Transport(#[from] reqwest::Error),
     /// The gateway returned a non-2xx status.
     #[error("[ryu-sdk] gateway returned HTTP {status} from {url}: {body}")]
-    Http { status: u16, url: String, body: String },
+    Http {
+        status: u16,
+        url: String,
+        body: String,
+    },
 }
 
 /// Options for [`EmbeddingClient::new`]. Mirrors
@@ -151,7 +155,10 @@ impl EmbeddingClient {
     /// Embed a batch of texts, returning one vector per input (in input order).
     pub async fn embed(&self, inputs: &[String]) -> Result<EmbeddingResult, EmbeddingError> {
         let url = self.embeddings_url();
-        let body = EmbeddingRequest { model: &self.model, input: inputs };
+        let body = EmbeddingRequest {
+            model: &self.model,
+            input: inputs,
+        };
         let mut req = self.http.post(&url).json(&body);
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
@@ -186,7 +193,10 @@ impl EmbeddingClient {
     /// Embed a single text, returning its vector. Convenience over [`Self::embed`].
     pub async fn embed_one(&self, input: impl Into<String>) -> Result<Vec<f32>, EmbeddingError> {
         let result = self.embed(&[input.into()]).await?;
-        Ok(result.first_vector().map(<[f32]>::to_vec).unwrap_or_default())
+        Ok(result
+            .first_vector()
+            .map(<[f32]>::to_vec)
+            .unwrap_or_default())
     }
 }
 
@@ -264,7 +274,10 @@ mod tests {
         assert_eq!(result.first_vector(), Some([0.1, 0.2].as_slice()));
         assert_eq!(
             result.usage,
-            Some(EmbeddingUsage { prompt_tokens: 5, total_tokens: 5 })
+            Some(EmbeddingUsage {
+                prompt_tokens: 5,
+                total_tokens: 5
+            })
         );
     }
 

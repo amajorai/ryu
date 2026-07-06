@@ -75,7 +75,14 @@ mod tests {
             .get("properties")
             .and_then(|p| p.as_object())
             .expect("schema has properties");
-        for key in ["id", "name", "version", "runnables", "permission_grants", "companion"] {
+        for key in [
+            "id",
+            "name",
+            "version",
+            "runnables",
+            "permission_grants",
+            "companion",
+        ] {
             assert!(props.contains_key(key), "schema missing property '{key}'");
         }
     }

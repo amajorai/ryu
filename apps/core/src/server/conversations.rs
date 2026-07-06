@@ -960,11 +960,7 @@ impl ConversationStore {
     /// streaming replies: the assistant message row is created early (possibly
     /// with partial text) and updated as more text arrives, so the content
     /// survives a client disconnect.
-    pub async fn update_message_content(
-        &self,
-        message_id: &str,
-        content: &str,
-    ) -> Result<()> {
+    pub async fn update_message_content(&self, message_id: &str, content: &str) -> Result<()> {
         let sealed = self.cipher.seal(content)?;
         let conn = self.conn.lock().await;
         conn.execute(
