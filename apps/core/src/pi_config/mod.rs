@@ -110,6 +110,18 @@ fn ensure_dir() -> Result<()> {
     Ok(())
 }
 
+/// Shared, poison-tolerant lock for tests that mutate `RYU_PI_AGENT_DIR` or the
+/// managed Pi config files behind it. These globals are read from several modules.
+#[cfg(test)]
+pub(crate) static PI_CONFIG_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn lock_pi_config_test_env() -> std::sync::MutexGuard<'static, ()> {
+    PI_CONFIG_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 /// Write a file that may contain credentials. On Unix the file is created with
 /// `0600` from the outset (never world-readable, even briefly), mirroring Pi's
 /// own `auth.json` convention; on other platforms it is a plain write.
@@ -1492,13 +1504,9 @@ async fn fetch_models(url: &str, auth: DiscoveryAuth) -> Result<Vec<Value>> {
 mod tests {
     use super::*;
 
-    /// Serializes the module's tests: they all mutate the same process-global
-    /// `RYU_PI_AGENT_DIR` env var, so parallel test threads would race.
-    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     /// Point the config dir at a temp location for the duration of a test.
     fn with_temp_dir<F: FnOnce()>(f: F) {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock_pi_config_test_env();
         let dir = std::env::temp_dir().join(format!("ryu-pi-config-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         std::env::set_var("RYU_PI_AGENT_DIR", &dir);

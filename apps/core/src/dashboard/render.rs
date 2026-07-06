@@ -118,6 +118,10 @@ pub struct RenderedImage {
     pub content_type: &'static str,
     /// The profile this was rendered for (echoed in the display metadata).
     pub profile: DeviceProfile,
+    /// Hash of the source SVG used to produce the raster. Some very small
+    /// e-ink changes can quantize to identical bytes, but they are still new
+    /// dashboard content and should advance the device rev.
+    source_hash: u64,
 }
 
 impl RenderedImage {
@@ -131,6 +135,9 @@ impl RenderedImage {
             h ^= b as u64;
             h = h.wrapping_mul(0x0000_0100_0000_01b3);
         };
+        for b in self.source_hash.to_le_bytes() {
+            mix(b);
+        }
         for b in self.profile.w.to_le_bytes() {
             mix(b);
         }
@@ -465,7 +472,17 @@ pub fn render(widgets: &[Widget], profile: DeviceProfile) -> anyhow::Result<Rend
         bytes,
         content_type,
         profile,
+        source_hash: fnv1a64(svg.as_bytes()),
     })
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 /// Rotate a pixmap clockwise by `quarter * 90°`. `quarter == 0` clones (cheap path).

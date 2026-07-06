@@ -5202,6 +5202,7 @@ mod tests {
 
     #[test]
     fn ryu_agent_routes_to_pi_acp_with_gateway() {
+        let _pi_guard = crate::pi_config::lock_pi_config_test_env();
         // AC1: agent_id="ryu" must resolve to an ACP route (Pi engine) and
         // inject the gateway URL into the spawn command so every outbound
         // model call is governed by the Gateway (via env injection like Codex).
@@ -5224,6 +5225,7 @@ mod tests {
 
     #[test]
     fn ryu_is_not_routed_as_generic_default_llm() {
+        let _pi_guard = crate::pi_config::lock_pi_config_test_env();
         // ryu must branch before the generic default_agent_route() so it never
         // falls through to the plain-LLM OpenAI-compat path.
         let route =

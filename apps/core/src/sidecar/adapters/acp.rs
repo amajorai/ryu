@@ -3521,6 +3521,7 @@ mod tests {
 
     #[test]
     fn codex_spawn_cmd_injects_gateway_base_url() {
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
         // codex_acp_cmd() must embed the gateway /v1 URL so that Codex routes
         // every outbound provider call through ryu-gateway, not directly to
         // OpenAI.  The test validates the URL is present regardless of whether
@@ -3536,6 +3537,7 @@ mod tests {
 
     #[test]
     fn codex_spawn_cmd_injects_api_key() {
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
         // The spawn cmd must set an OPENAI_API_KEY that the subprocess can
         // present to the gateway's auth layer (even if auth is disabled, the
         // key slot must be populated so the subprocess doesn't error out on
@@ -3549,6 +3551,7 @@ mod tests {
 
     #[test]
     fn codex_spawn_cmd_gateway_url_is_swappable() {
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
         // The injection must honour RYU_GATEWAY_URL — no hardcoded endpoint.
         let prev = std::env::var("RYU_GATEWAY_URL").ok();
         std::env::set_var("RYU_GATEWAY_URL", "http://test-gw.local:9999");
@@ -3748,65 +3751,48 @@ mod tests {
     // ── ACP gateway injection opt-out (AC2 of #214) ──────────────────────────
 
     #[test]
-    fn pi_spawn_cmd_injects_gateway_base_url_by_default() {
-        // pi_acp_cmd_gated() must embed the gateway /v1 URL by default so Pi routes
-        // its model calls through ryu-gateway (same constraint as Codex).
-        // Note: this test is sensitive to RYU_ACP_GATEWAY_INJECT being unset/1.
-        let prev = std::env::var("RYU_ACP_GATEWAY_INJECT").ok();
-        std::env::remove_var("RYU_ACP_GATEWAY_INJECT");
-
+    fn pi_spawn_cmd_is_bare_by_default() {
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
+        // acp:pi runs the user's own Pi. Gateway routing is explicit through the
+        // generic OpenAI-compatible wrapper or through the managed `ryu` agent.
         let cmd = pi_acp_cmd_gated();
+
+        assert!(
+            cmd.contains("pi-acp"),
+            "pi spawn cmd should contain pi-acp, got: {cmd}"
+        );
+        assert!(
+            !cmd.contains("OPENAI_BASE_URL") && !cmd.contains("OPENAI_API_KEY"),
+            "bare pi spawn cmd should not inject gateway env, got: {cmd}"
+        );
+    }
+
+    #[test]
+    fn openai_gateway_cmd_wraps_pi_when_requested() {
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
+        let cmd = openai_gateway_cmd(&pi_acp_cmd_gated());
         let gateway_base = crate::sidecar::gateway::gateway_url();
         let expected_v1 = format!("{}/v1", gateway_base.trim_end_matches('/'));
 
-        match prev {
-            Some(v) => std::env::set_var("RYU_ACP_GATEWAY_INJECT", v),
-            None => std::env::remove_var("RYU_ACP_GATEWAY_INJECT"),
-        }
-
         assert!(
             cmd.contains(&expected_v1),
-            "pi spawn cmd should contain gateway /v1 URL by default, got: {cmd}"
+            "gateway-wrapped pi spawn cmd should contain gateway /v1 URL, got: {cmd}"
+        );
+        assert!(
+            cmd.contains("OPENAI_API_KEY") && cmd.contains("pi-acp"),
+            "gateway-wrapped pi spawn cmd should include auth env and original command, got: {cmd}"
         );
     }
 
     #[test]
-    fn pi_spawn_cmd_opts_out_when_inject_disabled() {
-        // Setting RYU_ACP_GATEWAY_INJECT=0 must fall back to the bare Pi command
-        // (no gateway URL injected) — BYO-endpoint mode (AC2 of #214).
-        let prev = std::env::var("RYU_ACP_GATEWAY_INJECT").ok();
-        std::env::set_var("RYU_ACP_GATEWAY_INJECT", "0");
-
-        let cmd = pi_acp_cmd_gated();
-        let gateway_base = crate::sidecar::gateway::gateway_url();
-        let gateway_v1 = format!("{}/v1", gateway_base.trim_end_matches('/'));
-
-        std::env::set_var("RYU_ACP_GATEWAY_INJECT", prev.unwrap_or_default());
-
-        assert!(
-            !cmd.contains(&gateway_v1),
-            "pi spawn cmd should NOT contain the gateway URL when inject is disabled, got: {cmd}"
-        );
-        assert!(
-            cmd.contains("pi-acp"),
-            "pi spawn cmd should still contain pi-acp when inject is disabled, got: {cmd}"
-        );
-    }
-
-    #[test]
-    fn pi_spawn_cmd_gateway_url_is_swappable() {
+    fn openai_gateway_cmd_gateway_url_is_swappable_for_pi() {
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
         // The injection must honour RYU_GATEWAY_URL — no hardcoded endpoint.
-        let prev_inject = std::env::var("RYU_ACP_GATEWAY_INJECT").ok();
         let prev_gw = std::env::var("RYU_GATEWAY_URL").ok();
-        std::env::remove_var("RYU_ACP_GATEWAY_INJECT");
         std::env::set_var("RYU_GATEWAY_URL", "http://custom-gw.local:7777");
 
-        let cmd = pi_acp_cmd_gated();
+        let cmd = openai_gateway_cmd(&pi_acp_cmd_gated());
 
-        match prev_inject {
-            Some(v) => std::env::set_var("RYU_ACP_GATEWAY_INJECT", v),
-            None => std::env::remove_var("RYU_ACP_GATEWAY_INJECT"),
-        }
         match prev_gw {
             Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
             None => std::env::remove_var("RYU_GATEWAY_URL"),
@@ -3814,12 +3800,13 @@ mod tests {
 
         assert!(
             cmd.contains("http://custom-gw.local:7777/v1"),
-            "pi spawn cmd should use RYU_GATEWAY_URL when set, got: {cmd}"
+            "gateway-wrapped pi spawn cmd should use RYU_GATEWAY_URL when set, got: {cmd}"
         );
     }
 
     #[test]
     fn should_inject_gateway_defaults_to_true() {
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
         let prev = std::env::var("RYU_ACP_GATEWAY_INJECT").ok();
         std::env::remove_var("RYU_ACP_GATEWAY_INJECT");
         let result = crate::sidecar::gateway::should_inject_gateway();
@@ -3835,6 +3822,7 @@ mod tests {
 
     #[test]
     fn should_inject_gateway_respects_opt_out() {
+        let _env_guard = crate::sidecar::gateway::lock_gateway_env();
         for val in &["0", "false", "no"] {
             let prev = std::env::var("RYU_ACP_GATEWAY_INJECT").ok();
             std::env::set_var("RYU_ACP_GATEWAY_INJECT", val);
