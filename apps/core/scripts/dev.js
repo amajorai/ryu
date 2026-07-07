@@ -16,25 +16,33 @@ process.env.CARGO_TARGET_DIR = sharedTarget;
 if (process.platform === "win32") {
 	try {
 		execSync("taskkill /F /IM ryu-core.exe", { stdio: "ignore" });
-	} catch {}
+	} catch {
+		// Intentionally ignored.
+	}
 	// Poll up to 15s until the compiled exe is no longer locked.
 	const exePath = path.join(sharedTarget, "debug", "ryu-core.exe");
 	for (let i = 0; i < 15; i++) {
 		try {
 			execSync("cmd /c timeout /t 1 /nobreak", { stdio: "ignore" });
-		} catch {}
+		} catch {
+			// Intentionally ignored.
+		}
 		if (!existsSync(exePath)) {
 			break;
 		}
 		try {
 			closeSync(openSync(exePath, "r+"));
 			break;
-		} catch {}
+		} catch {
+			// Intentionally ignored.
+		}
 	}
 } else {
 	try {
 		execSync("pkill -f ryu-core", { stdio: "ignore" });
-	} catch {}
+	} catch {
+		// Intentionally ignored.
+	}
 }
 
 // Ship the running-binary defaults that the lean Cargo `default` set omits (so

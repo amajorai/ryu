@@ -2828,15 +2828,12 @@ fn registry_bridge_version(registry_id: &str) -> Option<String> {
 }
 
 fn registry_icon_url(registry_id: &str) -> Option<String> {
-    registry_meta(registry_id).map(|a| {
-        crate::sidecar::agents::acp_registry::icon_url_for_agent(&a)
-    })
+    registry_meta(registry_id).map(|a| crate::sidecar::agents::acp_registry::icon_url_for_agent(&a))
 }
 
 fn version_probe_for_registry(registry_id: &str) -> Option<AgentVersionProbe> {
     let bridge = registry_meta(registry_id).and_then(|a| {
-        crate::sidecar::agents::acp_registry::spawn_plan_for(&a)
-            .and_then(|p| p.bridge_npm_package)
+        crate::sidecar::agents::acp_registry::spawn_plan_for(&a).and_then(|p| p.bridge_npm_package)
     });
     let (binary, npm) = crate::sidecar::agents::acp_registry::underlying_cli_probe(registry_id)
         .map(|(b, n)| (Some(b), Some(n.to_owned())))
@@ -2880,7 +2877,9 @@ fn entry_from_registry(
         archive_spec: None,
         direct_archive: plan.direct_archive,
         bridge_version: Some(agent.version.clone()),
-        icon_url: Some(crate::sidecar::agents::acp_registry::icon_url_for_agent(agent)),
+        icon_url: Some(crate::sidecar::agents::acp_registry::icon_url_for_agent(
+            agent,
+        )),
         version_probe: version_probe_for_registry(&agent.id),
     })
 }

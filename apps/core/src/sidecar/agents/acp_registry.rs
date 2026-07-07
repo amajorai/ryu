@@ -97,11 +97,15 @@ pub struct DirectArchiveDist {
 }
 
 fn cache_path() -> PathBuf {
-    crate::paths::ryu_dir().join("cache").join("acp-registry.json")
+    crate::paths::ryu_dir()
+        .join("cache")
+        .join("acp-registry.json")
 }
 
 fn cache_meta_path() -> PathBuf {
-    crate::paths::ryu_dir().join("cache").join("acp-registry.fetched")
+    crate::paths::ryu_dir()
+        .join("cache")
+        .join("acp-registry.fetched")
 }
 
 fn cache_age_secs() -> Option<u64> {
@@ -154,10 +158,7 @@ pub fn load_registry_agents() -> Vec<RegistryAgent> {
                 Ok(file) => {
                     let agents = file.agents.clone();
                     if write_cache(&file).is_ok() {
-                        tracing::info!(
-                            count = agents.len(),
-                            "refreshed ACP registry from CDN"
-                        );
+                        tracing::info!(count = agents.len(), "refreshed ACP registry from CDN");
                     }
                     return agents;
                 }

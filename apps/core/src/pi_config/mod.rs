@@ -323,32 +323,75 @@ fn gateway_openai_patch(model: Option<&str>) -> Map<String, Value> {
     );
     patch.insert("apiKey".to_owned(), Value::String(token));
 
-    // Union of declared model ids (order-preserving, deduped).
-    let mut ids: Vec<String> = read_models()["providers"]
+    // Union of declared model entries (order-preserving, deduped). Ryu's bundled
+    // local model gets full metadata because Pi treats unknown custom ids with
+    // generic fallback metadata, which hurts context/output sizing.
+    let mut entries: Vec<Value> = read_models()["providers"]
         .get("openai")
         .and_then(|p| p.get("models"))
         .and_then(Value::as_array)
         .map(|models| {
             models
                 .iter()
-                .filter_map(|m| m.get("id").and_then(Value::as_str))
-                .map(str::to_owned)
+                .filter_map(|m| {
+                    m.get("id")
+                        .and_then(Value::as_str)
+                        .map(|id| gateway_model_entry(id, Some(m)))
+                })
                 .collect()
         })
         .unwrap_or_default();
     let default_local = default_gateway_model();
     for candidate in [Some(default_local.as_str()), model] {
         if let Some(id) = candidate.map(str::trim).filter(|s| !s.is_empty()) {
-            if !ids.iter().any(|existing| existing == id) {
-                ids.push(id.to_owned());
+            if let Some(existing) = entries
+                .iter_mut()
+                .find(|entry| entry.get("id").and_then(Value::as_str) == Some(id))
+            {
+                *existing = gateway_model_entry(id, Some(existing));
+            } else {
+                entries.push(gateway_model_entry(id, None));
             }
         }
     }
-    if !ids.is_empty() {
-        let entries: Vec<Value> = ids.into_iter().map(|id| json!({ "id": id })).collect();
+    if !entries.is_empty() {
         patch.insert("models".to_owned(), Value::Array(entries));
     }
     patch
+}
+
+fn gateway_model_entry(id: &str, existing: Option<&Value>) -> Value {
+    let local_id = default_gateway_model();
+    if id != local_id {
+        return existing.cloned().unwrap_or_else(|| json!({ "id": id }));
+    }
+
+    let mut entry = existing.cloned().unwrap_or_else(|| json!({ "id": id }));
+    if !entry.is_object() {
+        entry = json!({ "id": id });
+    }
+    let obj = entry.as_object_mut().expect("gateway model entry object");
+    obj.entry("id".to_owned())
+        .or_insert_with(|| Value::String(id.to_owned()));
+    obj.entry("name".to_owned())
+        .or_insert_with(|| Value::String("Gemma 4 E2B IT Q4_K_M".to_owned()));
+    obj.entry("api".to_owned())
+        .or_insert_with(|| Value::String("openai-completions".to_owned()));
+    obj.entry("input".to_owned())
+        .or_insert_with(|| json!(["text"]));
+    obj.entry("cost".to_owned()).or_insert_with(|| {
+        json!({
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+        })
+    });
+    obj.entry("contextWindow".to_owned())
+        .or_insert_with(|| json!(128_000));
+    obj.entry("maxTokens".to_owned())
+        .or_insert_with(|| json!(8_192));
+    entry
 }
 
 /// The zero-key default model for the managed Pi in Gateway-routed mode: the
@@ -1625,7 +1668,22 @@ mod tests {
                 .as_array()
                 .cloned()
                 .unwrap_or_default();
-            assert!(declared.iter().any(|m| m["id"] == json!(model.clone())));
+            let default = declared
+                .iter()
+                .find(|m| m["id"] == json!(model.clone()))
+                .expect("default model declared");
+            assert_eq!(default["api"], json!("openai-completions"));
+            assert_eq!(default["contextWindow"], json!(128_000));
+            assert_eq!(default["maxTokens"], json!(8_192));
+            assert_eq!(
+                default["cost"],
+                json!({
+                    "input": 0,
+                    "output": 0,
+                    "cacheRead": 0,
+                    "cacheWrite": 0
+                })
+            );
         });
     }
 
@@ -1712,6 +1770,39 @@ mod tests {
             // Both picks stay declared so the user can switch back.
             assert!(declared.iter().any(|id| id == "model-a"));
             assert!(declared.iter().any(|id| id == "model-b"));
+        });
+    }
+
+    #[test]
+    fn gateway_patch_upgrades_bare_default_model_metadata() {
+        with_temp_dir(|| {
+            let default_model = default_gateway_model();
+            upsert_provider(
+                "openai",
+                json!({
+                    "api": "openai-completions",
+                    "models": [
+                        { "id": default_model },
+                        { "id": "gpt-4o" }
+                    ]
+                })
+                .as_object()
+                .cloned()
+                .unwrap(),
+            )
+            .unwrap();
+            ensure_gateway_models_json().unwrap();
+            let models = read_models();
+            let declared = models["providers"]["openai"]["models"].as_array().unwrap();
+            let default = declared
+                .iter()
+                .find(|m| m["id"] == json!(default_model))
+                .expect("default model declared");
+            assert_eq!(default["name"], json!("Gemma 4 E2B IT Q4_K_M"));
+            assert_eq!(default["api"], json!("openai-completions"));
+            assert_eq!(default["contextWindow"], json!(128_000));
+            assert_eq!(default["maxTokens"], json!(8_192));
+            assert!(declared.iter().any(|m| m == &json!({ "id": "gpt-4o" })));
         });
     }
 

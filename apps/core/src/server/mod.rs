@@ -731,10 +731,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/models/llmfit-estimate", get(models_llmfit_estimate))
         .route("/api/models/engines", get(models_engines))
         .route("/api/models/installed", get(models_installed))
-        .route(
-            "/api/models/context-window",
-            get(models_context_window),
-        )
+        .route("/api/models/context-window", get(models_context_window))
         // Live hardware snapshot for this node (CPU/RAM/disk/GPU) — backs the
         // desktop node selector's per-node "what's this machine" view.
         .route("/api/system/info", get(system_info_handler))
@@ -5362,8 +5359,7 @@ async fn list_agent_catalog(State(state): State<ServerState>) -> Json<serde_json
             tokio::spawn(async move {
                 let version_probe = entry.as_ref().and_then(|e| e.version_probe.clone());
                 let registry_id = entry.as_ref().and_then(|e| e.registry_id.clone());
-                let registry_bridge_version =
-                    entry.as_ref().and_then(|e| e.bridge_version.clone());
+                let registry_bridge_version = entry.as_ref().and_then(|e| e.bridge_version.clone());
                 let icon_url = entry.as_ref().and_then(|e| e.icon_url.clone());
 
                 let (
