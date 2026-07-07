@@ -37,6 +37,7 @@
       "!apps/core/Python",
       "!apps/fumadocs",
       "!apps/raycast",
+      "!**/.wxt",
       "!apps/web/public/compare-logos",
       "!apps/tui/components/ui",
       "!apps/tui/hooks",
@@ -228,6 +229,24 @@
             "noBarrelFile": "off"
           }
         }
+      }
+    },
+    {
+      "includes": ["apps/extension/.wxt/**"],
+      "linter": {
+        "enabled": false
+      },
+      "formatter": {
+        "enabled": false
+      }
+    },
+    {
+      "includes": ["apps/native/app/**"],
+      "linter": {
+        "enabled": false
+      },
+      "formatter": {
+        "enabled": false
       }
     }
   ],
