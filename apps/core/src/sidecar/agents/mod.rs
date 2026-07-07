@@ -1,3 +1,4 @@
+pub mod acp_registry;
 pub mod archive_agent;
 pub mod hermes;
 pub mod openclaw;

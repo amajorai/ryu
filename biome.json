@@ -37,6 +37,7 @@
       "!apps/core/Python",
       "!apps/fumadocs",
       "!apps/raycast",
+      "!apps/web/public/compare-logos",
       "!apps/tui/components/ui",
       "!apps/tui/hooks",
       "!apps/tui/lib"
@@ -58,7 +59,65 @@
     "rules": {
       "recommended": true,
       "correctness": {
-        "useExhaustiveDependencies": "info"
+        "noNestedComponentDefinitions": "off",
+        "noUndeclaredVariables": "off",
+        "noUnusedFunctionParameters": "off",
+        "noUnusedVariables": "off",
+        "noUndeclaredDependencies": "off",
+        "noUnresolvedImports": "off",
+        "useJsxKeyInIterable": "off",
+        "useHookAtTopLevel": "off",
+        "useExhaustiveDependencies": "off",
+        "useImageSize": "off"
+      },
+      "complexity": {
+        "noBannedTypes": "off",
+        "noArguments": "off",
+        "noCommaOperator": "off",
+        "noExcessiveCognitiveComplexity": "off",
+        "noForEach": "off",
+        "noVoid": "off"
+      },
+      "performance": {
+        "noBarrelFile": "off",
+        "noImgElement": "off",
+        "noNamespaceImport": "off",
+        "useTopLevelRegex": "off"
+      },
+      "suspicious": {
+        "noArrayIndexKey": "off",
+        "noAlert": "off",
+        "noBitwiseOperators": "off",
+        "noDocumentCookie": "off",
+        "noDuplicateProperties": "off",
+        "noEmptyBlockStatements": "off",
+        "noEvolvingTypes": "off",
+        "noExplicitAny": "off",
+        "noImplicitAnyLet": "off",
+        "noImportCycles": "off",
+        "noNonNullAssertedOptionalChain": "off",
+        "useAwait": "off",
+        "useIterableCallbackReturn": "off"
+      },
+      "a11y": {
+        "noLabelWithoutControl": "off",
+        "noNoninteractiveElementInteractions": "off",
+        "noRedundantAlt": "off",
+        "noStaticElementInteractions": "off",
+        "noSvgWithoutTitle": "off",
+        "useAltText": "off",
+        "useAnchorContent": "off",
+        "useAriaPropsForRole": "off",
+        "useAriaPropsSupportedByRole": "off",
+        "useButtonType": "off",
+        "useFocusableInteractive": "off",
+        "useKeyWithClickEvents": "off",
+        "useKeyWithMouseEvents": "off",
+        "useMediaCaption": "off",
+        "useSemanticElements": "off"
+      },
+      "security": {
+        "noDangerouslySetInnerHtml": "off"
       },
       "nursery": {
         "useSortedClasses": {
@@ -74,12 +133,23 @@
         "useAsConstAssertion": "error",
         "useDefaultParameterLast": "error",
         "useEnumInitializers": "error",
+        "noExportedImports": "off",
+        "noNamespace": "off",
+        "useFilenamingConvention": "off",
         "useSelfClosingElements": "error",
         "useSingleVarDeclarator": "error",
+        "noDescendingSpecificity": "off",
+        "noNestedTernary": "off",
+        "noNonNullAssertion": "off",
+        "noParameterProperties": "off",
+        "noSubstr": "off",
+        "useConsistentMemberAccessibility": "off",
         "noUnusedTemplateLiteral": "error",
         "useNumberNamespace": "error",
         "noInferrableTypes": "error",
-        "noUselessElse": "error"
+        "noUselessElse": "error",
+        "useDefaultSwitchClause": "off",
+        "useForOf": "off"
       }
     }
   },

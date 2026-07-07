@@ -19,6 +19,7 @@ mod crypto;
 mod dashboard;
 mod data_path;
 mod downloads;
+mod entitlement;
 mod events;
 mod experience;
 mod fal_auth;
@@ -456,6 +457,16 @@ async fn main() {
     }
     if let Ok(Some(key)) = preferences.get(fal_auth::FAL_API_KEY_PREF_KEY).await {
         fal_auth::set_key(&key);
+    }
+    // Node entitlement gate (#496): seed the in-process flag so the scheduler
+    // pauses autonomous automation when the desktop's trial has hard-expired
+    // with no subscription/license. Absent ⇒ default-ON (headless / OSS Core /
+    // still-entitled desktop run automations normally).
+    if let Ok(Some(v)) = preferences
+        .get(entitlement::ENTITLEMENT_ACTIVE_PREF_KEY)
+        .await
+    {
+        entitlement::set_active(&v);
     }
     // Same for the Artificial Analysis API key, which enriches the model catalog
     // with independent benchmark stats (intelligence/speed/price).

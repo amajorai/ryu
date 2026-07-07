@@ -78,6 +78,19 @@ impl Scheduler {
     /// Evaluate every persisted job against `now` and fire those that are due.
     /// Exposed (rather than inlined into the loop) so it can be unit-tested.
     pub async fn tick(&self, now: DateTime<Utc>) {
+        // Node entitlement gate (#496): when the desktop's trial has hard-expired
+        // with no subscription/license, it pushes `entitlement-active=false` to
+        // Core's preferences and we PAUSE all autonomous firing here — otherwise a
+        // paywalled user's automations (monitors, quests, workflows, agent runs)
+        // would keep spending managed inference in the background. Debounced to
+        // avoid double-firing is preserved: `last_fired` is untouched while paused,
+        // so an interval job resumes immediately (not fires a backlog) once the
+        // user pays. Default-ON ⇒ headless / OSS Core / entitled desktop tick
+        // normally. See [`crate::entitlement`].
+        if !crate::entitlement::is_active() {
+            tracing::debug!("scheduler: node not entitled; skipping tick (automations paused)");
+            return;
+        }
         for job in store::list_jobs() {
             if !job.enabled {
                 continue;

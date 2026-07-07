@@ -63,6 +63,7 @@ use utoipa::OpenApi;
         super::models_catalog_install,
         super::models_catalog_uninstall,
         super::models_device,
+        super::models_context_window,
         super::models_engines,
         super::system_info_handler,
         super::catalog_sources_list,

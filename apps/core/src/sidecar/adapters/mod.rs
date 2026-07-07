@@ -4503,6 +4503,10 @@ async fn route_acp_stream(
                     stats.insert("id".into(), serde_json::json!("acp-usage"));
                     if let Some(v) = usage_used {
                         stats.insert("used".into(), serde_json::json!(v));
+                    } else if let Some(v) = usage_total_tokens {
+                        stats.insert("used".into(), serde_json::json!(v));
+                    } else if let (Some(p), Some(c)) = (usage_prompt, usage_completion) {
+                        stats.insert("used".into(), serde_json::json!(p + c));
                     }
                     if let Some(v) = usage_total {
                         stats.insert("total".into(), serde_json::json!(v));

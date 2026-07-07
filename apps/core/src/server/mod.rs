@@ -731,6 +731,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/models/llmfit-estimate", get(models_llmfit_estimate))
         .route("/api/models/engines", get(models_engines))
         .route("/api/models/installed", get(models_installed))
+        .route(
+            "/api/models/context-window",
+            get(models_context_window),
+        )
         // Live hardware snapshot for this node (CPU/RAM/disk/GPU) — backs the
         // desktop node selector's per-node "what's this machine" view.
         .route("/api/system/info", get(system_info_handler))
@@ -1620,6 +1624,13 @@ async fn set_preference(
             if key == crate::sidecar::untrusted::UNTRUSTED_WRAPPING_PREF_KEY {
                 crate::sidecar::untrusted::set_enabled(&body.value);
             }
+            // Node entitlement gate (#496): keep the in-process flag in sync so
+            // the scheduler pauses (or resumes) autonomous automation the moment
+            // the desktop pushes a new entitlement verdict. No gateway respawn —
+            // the flag is read on Core's (sync) scheduler tick path.
+            if key == crate::entitlement::ENTITLEMENT_ACTIVE_PREF_KEY {
+                crate::entitlement::set_active(&body.value);
+            }
             // Generic per-agent gateway routing: keep the in-process map in sync so
             // the next spawn of any toggled agent injects (or omits) OPENAI_BASE_URL.
             // No gateway respawn needed — the map is read on Core's spawn path.
@@ -1684,6 +1695,30 @@ async fn set_model_launch_config(
         )
             .into_response(),
     }
+}
+
+/// `GET /api/models/context-window?model=<id>` — best-effort context window for
+/// a model string via models.dev (cached in Core). Fills the denominator gap for
+/// ACP / cloud models that don't have a local launch `ctx_size`. Fail-open:
+/// returns `{ "contextLength": null }` when unknown or unreachable.
+#[utoipa::path(
+    get,
+    path = "/api/models/context-window",
+    tag = "Models",
+    summary = "Resolve a model's context window (models.dev)",
+    params(("model" = String, Query, description = "Model id (bare or provider/id)")),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn models_context_window(
+    axum::extract::Query(q): axum::extract::Query<ModelsContextWindowQuery>,
+) -> Json<serde_json::Value> {
+    let context_length = crate::model_catalog::models_dev::context_window(&q.model).await;
+    Json(json!({ "contextLength": context_length }))
+}
+
+#[derive(serde::Deserialize)]
+struct ModelsContextWindowQuery {
+    model: String,
 }
 
 /// SSE stream of preference changes. The island companion subscribes to this so
@@ -2633,24 +2668,48 @@ async fn agent_update_check(
     State(state): State<ServerState>,
     Path(agent_id): Path<String>,
 ) -> Json<serde_json::Value> {
+    let entry = state.agents.find_by_prefix(&agent_id).cloned();
     let npm_package = agent_npm_package(&state, &agent_id).await;
+    let bridge_npm_package = entry
+        .as_ref()
+        .and_then(|e| e.version_probe.as_ref())
+        .and_then(|p| p.bridge_npm_package.clone());
     let installed = if agent_id == "ryu" {
         crate::sidecar::adapters::acp::read_managed_pi_version()
     } else {
-        None
+        match entry
+            .as_ref()
+            .and_then(|e| e.version_probe.as_ref())
+            .and_then(|p| p.binary)
+        {
+            Some(bin) if crate::sidecar::adapters::acp::binary_in_path(bin) => {
+                crate::sidecar::adapters::acp::probe_cli_version(bin).await
+            }
+            _ => None,
+        }
     };
-    let latest = match &npm_package {
-        Some(pkg) => crate::catalog::npm::fetch_latest_version(&reqwest::Client::new(), pkg)
-            .await
-            .ok(),
+    let latest = match npm_package.as_deref() {
+        Some(pkg) => resolve_npm_latest_for_agent(pkg).await,
         None => None,
     };
-    let update_available = matches!((&installed, &latest), (Some(i), Some(l)) if i != l);
+    let installed_bridge = match bridge_npm_package.as_deref() {
+        Some(pkg) => probe_npx_package_version(pkg).await,
+        None => None,
+    };
+    let latest_bridge = match bridge_npm_package.as_deref() {
+        Some(pkg) => resolve_npm_latest_for_agent(pkg).await,
+        None => entry.as_ref().and_then(|e| e.bridge_version.clone()),
+    };
+    let update_available = matches!((&installed, &latest), (Some(i), Some(l)) if i != l)
+        || matches!((&installed_bridge, &latest_bridge), (Some(i), Some(l)) if i != l);
     Json(json!({
         "id": agent_id,
         "npmPackage": npm_package,
+        "bridgeNpmPackage": bridge_npm_package,
         "installedVersion": installed,
         "latestVersion": latest,
+        "installedBridgeVersion": installed_bridge,
+        "latestBridgeVersion": latest_bridge,
         "updateAvailable": update_available,
     }))
 }
@@ -2687,7 +2746,31 @@ async fn agent_update(
     }
     match agent_npm_package(&state, &agent_id).await {
         Some(pkg) => {
-            warm_npx_package(&pkg).await;
+            warm_npx_package(&format!("{pkg}@latest")).await;
+            if let Some(entry) = state.agents.find_by_prefix(&agent_id) {
+                if let Some(bridge) = entry
+                    .version_probe
+                    .as_ref()
+                    .and_then(|p| p.bridge_npm_package.as_deref())
+                {
+                    warm_npx_package(&format!(
+                        "{}@latest",
+                        crate::sidecar::agents::acp_registry::npm_package_name(bridge)
+                    ))
+                    .await;
+                }
+                if let Some(agent_pkg) = entry
+                    .version_probe
+                    .as_ref()
+                    .and_then(|p| p.npm_package.as_deref())
+                {
+                    warm_npx_package(&format!(
+                        "{}@latest",
+                        crate::sidecar::agents::acp_registry::npm_package_name(agent_pkg)
+                    ))
+                    .await;
+                }
+            }
             (StatusCode::OK, Json(json!({ "updated": true })))
         }
         None => (
@@ -5275,30 +5358,67 @@ async fn list_agent_catalog(State(state): State<ServerState>) -> Json<serde_json
         .into_iter()
         .map(|i| {
             let added = i.id == "ryu" || installed_set.contains(&i.id);
-            let version_probe = state
-                .agents
-                .find_by_prefix(&i.id)
-                .and_then(|entry| entry.version_probe.clone());
+            let entry = state.agents.find_by_prefix(&i.id).cloned();
             tokio::spawn(async move {
-                let (installed_version, latest_version) = match version_probe {
-                    Some(probe) if i.installed == Some(true) => {
-                        let current =
-                            crate::sidecar::adapters::acp::probe_cli_version(probe.binary);
-                        let latest = resolve_npm_latest_for_agent(probe.npm_package);
-                        tokio::join!(current, latest)
+                let version_probe = entry.as_ref().and_then(|e| e.version_probe.clone());
+                let registry_id = entry.as_ref().and_then(|e| e.registry_id.clone());
+                let registry_bridge_version =
+                    entry.as_ref().and_then(|e| e.bridge_version.clone());
+                let icon_url = entry.as_ref().and_then(|e| e.icon_url.clone());
+
+                let (
+                    installed_version,
+                    latest_version,
+                    installed_bridge_version,
+                    latest_bridge_version,
+                ) = match version_probe {
+                    Some(probe) => {
+                        let agent_installed = if i.installed == Some(true) {
+                            match probe.binary {
+                                Some(bin) => {
+                                    crate::sidecar::adapters::acp::probe_cli_version(bin).await
+                                }
+                                None => None,
+                            }
+                        } else {
+                            None
+                        };
+                        let agent_latest = match probe.npm_package.as_deref() {
+                            Some(pkg) => resolve_npm_latest_for_agent(pkg).await,
+                            None => None,
+                        };
+                        let bridge_installed = match probe.bridge_npm_package.as_deref() {
+                            Some(pkg) => probe_npx_package_version(pkg).await,
+                            None => None,
+                        };
+                        let bridge_latest = match probe.bridge_npm_package.as_deref() {
+                            Some(pkg) => resolve_npm_latest_for_agent(pkg).await,
+                            None => registry_bridge_version.clone(),
+                        };
+                        (
+                            agent_installed,
+                            agent_latest,
+                            bridge_installed,
+                            bridge_latest,
+                        )
                     }
-                    Some(probe) => (None, resolve_npm_latest_for_agent(probe.npm_package).await),
-                    None => (None, None),
+                    None => (None, None, None, registry_bridge_version),
                 };
+
                 let version_status =
                     agent_version_status(installed_version.as_deref(), latest_version.as_deref());
+                let bridge_version_status = agent_version_status(
+                    installed_bridge_version.as_deref(),
+                    latest_bridge_version.as_deref(),
+                );
                 json!({
                     "id": i.id,
+                    "registry_id": registry_id,
+                    "icon_url": icon_url,
                     "name": i.name,
                     "description": i.description,
                     "install_hint": i.install_hint,
                     "recommended": i.recommended,
-                    // `installed` from list_infos = binary detected on PATH.
                     "detected": i.installed,
                     "added": added,
                     "gateway_bypass": i.gateway_bypass,
@@ -5307,6 +5427,9 @@ async fn list_agent_catalog(State(state): State<ServerState>) -> Json<serde_json
                     "installed_version": installed_version,
                     "latest_version": latest_version,
                     "version_status": version_status,
+                    "installed_bridge_version": installed_bridge_version,
+                    "latest_bridge_version": latest_bridge_version,
+                    "bridge_version_status": bridge_version_status,
                 })
             })
         })
@@ -5334,6 +5457,7 @@ fn agent_version_status(current: Option<&str>, latest: Option<&str>) -> Option<&
 }
 
 async fn resolve_npm_latest_for_agent(package: &str) -> Option<String> {
+    let package = crate::sidecar::agents::acp_registry::npm_package_name(package);
     let mut cache = crate::catalog::cache::VersionCache::load();
     let key = format!("agent:npm:{package}");
     if cache.is_fresh() {
@@ -5344,7 +5468,7 @@ async fn resolve_npm_latest_for_agent(package: &str) -> Option<String> {
     let client = reqwest::Client::new();
     let latest = tokio::time::timeout(
         std::time::Duration::from_secs(4),
-        crate::catalog::npm::fetch_latest_version(&client, package),
+        crate::catalog::npm::fetch_latest_version(&client, &package),
     )
     .await
     .ok()
@@ -5368,13 +5492,41 @@ struct AgentCatalogAction {
 fn npx_package_of(spawn_cmd: &str) -> Option<String> {
     let tokens: Vec<&str> = spawn_cmd.split_whitespace().collect();
     let npx_idx = tokens.iter().position(|t| *t == "npx")?;
-    tokens.iter().skip(npx_idx + 1).find_map(|t| {
+    let raw = tokens.iter().skip(npx_idx + 1).find_map(|t| {
         if *t == "-y" || *t == "--yes" || *t == "--" || t.starts_with('-') {
             None
         } else {
             Some((*t).to_string())
         }
-    })
+    })?;
+    Some(crate::sidecar::agents::acp_registry::npm_package_name(&raw))
+}
+
+async fn probe_npx_package_version(pkg: &str) -> Option<String> {
+    let base = crate::sidecar::agents::acp_registry::npm_package_name(pkg);
+    let spec = format!("{base}@latest");
+    #[cfg(target_os = "windows")]
+    let (prog, args): (&str, Vec<&str>) = ("cmd", vec!["/c", "npx", "-y", &spec, "--version"]);
+    #[cfg(not(target_os = "windows"))]
+    let (prog, args): (&str, Vec<&str>) = ("npx", vec!["-y", &spec, "--version"]);
+
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tokio::process::Command::new(prog)
+            .args(&args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)?;
+
+    let mut combined = String::new();
+    combined.push_str(&String::from_utf8_lossy(&output.stdout));
+    combined.push('\n');
+    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    crate::sidecar::adapters::acp::parse_cli_version(&combined)
 }
 
 /// Warm npx's cache for `pkg` so the package is downloaded and ready before the
@@ -5414,6 +5566,11 @@ async fn install_agent_runtime(
 
     let id = entry.id.clone();
     let result: anyhow::Result<()> = async {
+        // Registry `binary` distribution — full archive under `~/.ryu/agents/<id>`.
+        if let Some(dist) = entry.direct_archive.as_ref() {
+            crate::sidecar::agents::acp_registry::ensure_direct_archive(dist, &downloads).await?;
+            return Ok(());
+        }
         // Per-platform GitHub-release binary agents (e.g. goose).
         if let Some(spec) = entry.archive_spec.as_ref() {
             agents::archive_agent::ensure_installed(spec, &downloads).await?;
@@ -5440,7 +5597,23 @@ async fn install_agent_runtime(
         // uvx agents and OpenAI-compat servers self-fetch on first use.
         if let AgentTransport::Acp { spawn_cmd } = &entry.transport {
             if let Some(pkg) = npx_package_of(spawn_cmd) {
-                warm_npx_package(&pkg).await;
+                warm_npx_package(&format!("{pkg}@latest")).await;
+            }
+        }
+        if let Some(probe) = entry.version_probe.as_ref() {
+            if let Some(pkg) = probe.npm_package.as_deref() {
+                warm_npx_package(&format!(
+                    "{}@latest",
+                    crate::sidecar::agents::acp_registry::npm_package_name(pkg)
+                ))
+                .await;
+            }
+            if let Some(bridge) = probe.bridge_npm_package.as_deref() {
+                warm_npx_package(&format!(
+                    "{}@latest",
+                    crate::sidecar::agents::acp_registry::npm_package_name(bridge)
+                ))
+                .await;
             }
         }
         Ok(())

@@ -17,8 +17,9 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use super::sources::{
-    HfSource, MarketplaceSource, ModelIndexSource, OfficialMcpSource, OkfBundleSource,
-    RyuHostedMcpSource, RyuMarketplaceSource, SkillsShSource, SmitherySource, Source, StubSource,
+    HfSource, IntegrationsShSource, MarketplaceSource, ModelIndexSource, OfficialMcpSource,
+    OkfBundleSource, RyuHostedMcpSource, RyuMarketplaceSource, SkillsShSource, SmitherySource,
+    Source, StubSource,
 };
 use super::CatalogKind;
 use crate::server::preferences::PreferencesStore;
@@ -422,6 +423,9 @@ fn builtin_sources() -> HashMap<CatalogKind, Vec<Source>> {
             // Primary (default active): the Ryu Marketplace federated source
             // (#467) — the real plugin/app catalog.
             Source::RyuMarketplace(RyuMarketplaceSource::builtin(CatalogKind::Plugin)),
+            // Browse every publicly documented integration surface
+            // (MCP/OpenAPI/GraphQL/CLI) as descriptor-only marketplace entries.
+            Source::IntegrationsSh(IntegrationsShSource::builtin()),
             Source::Stub(StubSource {
                 id: "ryu-apps".to_string(),
                 display_name: "Ryu App Catalog".to_string(),

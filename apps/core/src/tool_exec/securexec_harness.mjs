@@ -154,7 +154,11 @@ for (const line of stdout.split("\n")) {
 }
 
 const value = result?.value ?? null;
-if (value && typeof value === "object" && typeof value.__ryu_error__ === "string") {
+if (
+	value &&
+	typeof value === "object" &&
+	typeof value.__ryu_error__ === "string"
+) {
 	emit(TAG_ERROR + value.__ryu_error__);
 } else {
 	emit(TAG_DONE + JSON.stringify(value));

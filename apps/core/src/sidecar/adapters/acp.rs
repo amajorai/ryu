@@ -2147,6 +2147,12 @@ pub async fn run_acp_instance(
                         if let Some(v) = u.get("totalTokens").and_then(serde_json::Value::as_u64)
                         {
                             usage_payload.insert("totalTokens".to_owned(), v.into());
+                            usage_payload.insert("used".to_owned(), v.into());
+                        } else if let (Some(p), Some(c)) = (
+                            u.get("inputTokens").and_then(serde_json::Value::as_u64),
+                            u.get("outputTokens").and_then(serde_json::Value::as_u64),
+                        ) {
+                            usage_payload.insert("used".to_owned(), (p + c).into());
                         }
                     }
                     let _ = tx.send(AcpEvent::Usage(serde_json::Value::Object(usage_payload)));
@@ -2299,39 +2305,37 @@ pub enum AgentTransport {
 #[derive(Debug, Clone)]
 pub struct AcpAgentEntry {
     pub id: String,
+    /// Official ACP registry id (e.g. `claude-acp`), when this agent comes from the CDN catalog.
+    pub registry_id: Option<String>,
     pub name: String,
-    pub description: &'static str,
+    pub description: String,
     /// Binary name to probe in PATH; `None` for always-available agents.
     pub detect_binary: Option<&'static str>,
     /// User-facing install instructions shown when binary not found.
-    pub install_hint: &'static str,
+    pub install_hint: String,
     pub transport: AgentTransport,
     /// True for the single recommended/flagship agent (currently "ryu").
-    /// Propagated into [`AgentInfo::recommended`] so clients can badge it
-    /// without hard-coding the agent id.
     pub recommended: bool,
-    /// True when this engine does NOT honour `OPENAI_BASE_URL` / `OPENAI_API_KEY`
-    /// for provider redirect. Engines that hardcode their endpoint (Anthropic
-    /// format, Google format) carry `gateway_bypass: true`; OpenAI-compat engines
-    /// (Codex, Pi, OpenClaw, ZeroClaw) carry `false`. Propagated into
-    /// [`AgentInfo::gateway_bypass`] so clients can surface a bypass warning.
     pub gateway_bypass: bool,
-    /// Set for binary-only registry agents distributed as per-platform GitHub
-    /// release archives (goose, …). When present, the agents-catalog install
-    /// handler fetches + extracts the binary into `~/.ryu/bin` BEFORE flipping
-    /// the installed flag (so the user gets DownloadCenter progress), and the
-    /// entry's `spawn_cmd` already points at that absolute binary path. `None`
-    /// for self-fetching (npx/uvx) and always-available agents.
+    /// GitHub-release archive spec (legacy goose path via `archive_agent`).
     pub archive_spec: Option<crate::sidecar::agents::archive_agent::ArchiveAgentSpec>,
-    /// Optional live version/update metadata for external CLIs. `binary` is
-    /// probed with `--version`; `npm_package` is checked against npm latest.
+    /// Registry `binary` distribution — full archive extracted under `~/.ryu/agents/<id>`.
+    pub direct_archive: Option<crate::sidecar::agents::acp_registry::DirectArchiveDist>,
+    /// Latest bridge version from the official ACP registry CDN.
+    pub bridge_version: Option<String>,
+    /// Brand icon URL (ACP registry CDN or curated local default).
+    pub icon_url: Option<String>,
     pub version_probe: Option<AgentVersionProbe>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AgentVersionProbe {
-    pub binary: &'static str,
-    pub npm_package: &'static str,
+    /// Underlying agent CLI binary (`claude`, `codex`, …).
+    pub binary: Option<&'static str>,
+    /// npm package for the underlying agent CLI.
+    pub npm_package: Option<String>,
+    /// npm package for the ACP bridge/wrapper (unpinned name).
+    pub bridge_npm_package: Option<String>,
 }
 
 pub fn parse_cli_version(output: &str) -> Option<String> {
@@ -2619,7 +2623,7 @@ fn codex_acp_cmd() -> String {
     // Windows: inject env vars via `cmd /c set VAR=val&& ...` so the AcpAgent
     // subprocess inherits them. This mirrors pi_acp_cmd()'s approach.
     format!(
-        "cmd /c set OPENAI_BASE_URL={gateway_v1}&& set OPENAI_API_KEY={token}&& npx -y @zed-industries/codex-acp"
+        "cmd /c set OPENAI_BASE_URL={gateway_v1}&& set OPENAI_API_KEY={token}&& npx -y @agentclientprotocol/codex-acp@latest"
     )
 }
 
@@ -2629,7 +2633,7 @@ fn codex_acp_cmd() -> String {
     let gateway_v1 = format!("{}/v1", gateway_base.trim_end_matches('/'));
     let token = crate::sidecar::gateway::gateway_token().unwrap_or_else(|| "ryu-local".to_owned());
     // POSIX: prefix the command with inline env var assignments.
-    format!("OPENAI_BASE_URL={gateway_v1} OPENAI_API_KEY={token} npx -y @zed-industries/codex-acp")
+    format!("OPENAI_BASE_URL={gateway_v1} OPENAI_API_KEY={token} npx -y @agentclientprotocol/codex-acp@latest")
 }
 
 /// The gateway URL Claude Code is pointed at via `ANTHROPIC_BASE_URL`. Claude Code
@@ -2803,259 +2807,95 @@ fn hermes_acp_cmd() -> String {
 /// no Ryu-side download infrastructure. Every such agent makes its own provider
 /// calls internally (Ryu cannot inject `OPENAI_BASE_URL`), so all carry
 /// `gateway_bypass: true` — honest about the egress not traversing Ryu's gateway.
-fn registry_acp_entry(
-    id: &str,
-    name: &str,
-    description: &'static str,
-    detect_binary: Option<&'static str>,
-    install_hint: &'static str,
-    dist: AcpDist,
-) -> AcpAgentEntry {
-    let mut archive_spec = None;
-    let spawn_cmd = match dist {
-        AcpDist::Npx(rest) => npx_cmd(&format!("npx -y {rest}")),
-        // `uvx` is a real binary (shipped with `uv`); no `cmd /c` wrapper needed.
-        AcpDist::Uvx(rest) => format!("uvx {rest}"),
-        // Binary-only registry agent: install handler downloads + extracts the
-        // archive into `~/.ryu/bin`, so the spawn command is the absolute binary
-        // path plus the agent's ACP args (e.g. `<bin> acp`).
-        AcpDist::Archive { spec, acp_args } => {
-            let bin = spec.binary_path();
-            let bin = bin.display();
-            let spawn_cmd = if acp_args.is_empty() {
-                format!("{bin}")
-            } else {
-                format!("{bin} {acp_args}")
-            };
-            archive_spec = Some(spec);
-            spawn_cmd
-        }
-    };
-    AcpAgentEntry {
-        id: id.to_owned(),
-        name: name.to_owned(),
-        description,
-        detect_binary,
-        install_hint,
-        transport: AgentTransport::Acp { spawn_cmd },
-        recommended: false,
-        gateway_bypass: true,
-        archive_spec,
-        version_probe: None,
+fn registry_meta(registry_id: &str) -> Option<crate::sidecar::agents::acp_registry::RegistryAgent> {
+    crate::sidecar::agents::acp_registry::find_registry_agent(registry_id)
+}
+
+fn registry_name(registry_id: &str, fallback: &str) -> String {
+    registry_meta(registry_id)
+        .map(|a| a.name)
+        .unwrap_or_else(|| fallback.to_owned())
+}
+
+fn registry_description(registry_id: &str, fallback: &str) -> String {
+    registry_meta(registry_id)
+        .map(|a| a.description)
+        .unwrap_or_else(|| fallback.to_owned())
+}
+
+fn registry_bridge_version(registry_id: &str) -> Option<String> {
+    registry_meta(registry_id).map(|a| a.version)
+}
+
+fn registry_icon_url(registry_id: &str) -> Option<String> {
+    registry_meta(registry_id).map(|a| {
+        crate::sidecar::agents::acp_registry::icon_url_for_agent(&a)
+    })
+}
+
+fn version_probe_for_registry(registry_id: &str) -> Option<AgentVersionProbe> {
+    let bridge = registry_meta(registry_id).and_then(|a| {
+        crate::sidecar::agents::acp_registry::spawn_plan_for(&a)
+            .and_then(|p| p.bridge_npm_package)
+    });
+    let (binary, npm) = crate::sidecar::agents::acp_registry::underlying_cli_probe(registry_id)
+        .map(|(b, n)| (Some(b), Some(n.to_owned())))
+        .unwrap_or((None, None));
+    if binary.is_none() && npm.is_none() && bridge.is_none() {
+        return None;
     }
+    Some(AgentVersionProbe {
+        binary,
+        npm_package: npm,
+        bridge_npm_package: bridge,
+    })
 }
 
-/// Distribution form for a self-fetching ACP registry agent (see
-/// [`registry_acp_entry`]).
-enum AcpDist {
-    /// `npx -y <rest>` — npm-published adapters that self-fetch.
-    Npx(&'static str),
-    /// `uvx <rest>` — PyPI-published adapters run via `uv`'s `uvx`.
-    Uvx(&'static str),
-    /// A binary-only agent distributed as per-platform GitHub release archives.
-    /// Ryu installs the binary into `~/.ryu/bin` (via the agents-catalog install
-    /// handler) and spawns it with `acp_args` (e.g. `acp`).
-    Archive {
-        spec: crate::sidecar::agents::archive_agent::ArchiveAgentSpec,
-        acp_args: &'static str,
-    },
+fn entry_from_registry(
+    agent: &crate::sidecar::agents::acp_registry::RegistryAgent,
+) -> Option<AcpAgentEntry> {
+    use crate::sidecar::agents::acp_registry::{self, registry_gateway_bypass};
+    let plan = acp_registry::spawn_plan_for(agent)?;
+    let id = acp_registry::canonical_agent_id(&agent.id);
+    let install_hint = if plan.direct_archive.is_some() {
+        "Downloads the agent from the official ACP registry on install".to_owned()
+    } else if agent.distribution.uvx.is_some() {
+        "Self-fetches via uvx on first run (install `uv` from https://docs.astral.sh/uv/)"
+            .to_owned()
+    } else {
+        "Self-fetches via npx on first run".to_owned()
+    };
+    Some(AcpAgentEntry {
+        id,
+        registry_id: Some(agent.id.clone()),
+        name: agent.name.clone(),
+        description: agent.description.clone(),
+        detect_binary: acp_registry::underlying_cli_probe(&agent.id).map(|(b, _)| b),
+        install_hint,
+        transport: AgentTransport::Acp {
+            spawn_cmd: plan.spawn_cmd,
+        },
+        recommended: false,
+        gateway_bypass: registry_gateway_bypass(&agent.id),
+        archive_spec: None,
+        direct_archive: plan.direct_archive,
+        bridge_version: Some(agent.version.clone()),
+        icon_url: Some(crate::sidecar::agents::acp_registry::icon_url_for_agent(agent)),
+        version_probe: version_probe_for_registry(&agent.id),
+    })
 }
 
-/// The self-fetching (npx/uvx) agents from the official ACP registry, minus the
-/// ones already curated as first-class entries above (Claude Code, Codex, Gemini
-/// CLI, Pi — those have bespoke gateway-injection handling). Pure ACP subprocess
-/// agents; each self-fetches via `npx`/`uvx` on first run.
-///
-/// The **binary-only** registry agents (amp, cortex-code, corust, crow-cli,
-/// cursor, devin, goose, junie, kimi, mistral-vibe, opencode, poolside, stakpak,
-/// vtcode) are distributed as per-platform GitHub release archives, not npx/uvx.
-/// The archive-download machinery now exists
-/// ([`crate::sidecar::agents::archive_agent`]), so each can be added here as an
-/// [`AcpDist::Archive`] entry once its real GitHub repo, asset-name template,
-/// platform-tag convention, binary name, and ACP invocation flag are confirmed
-/// from that project's releases page. **goose** (`block/goose`,
-/// `goose-{platform}.{ext}`, `goose acp`) is wired below as the proven anchor;
-/// the remaining 13 stay deferred (not fabricated) until their asset patterns are
-/// verified — adding one is a single `Archive` row.
-fn registry_acp_entries() -> Vec<AcpAgentEntry> {
-    use crate::sidecar::agents::archive_agent::ArchiveAgentSpec;
-    use AcpDist::{Archive, Npx, Uvx};
-    vec![
-        // ── Binary-only archive agents ──────────────────────────────────────
-        // goose: the proven anchor. block/goose ships `goose-<triple>.tar.gz`
-        // (`.zip` on Windows) on every GitHub release; the CLI speaks ACP via
-        // `goose acp` (verified from goose's ACP-clients docs).
-        registry_acp_entry(
-            "acp:goose",
-            "goose",
-            "Block's goose — extensible on-machine coding agent (ACP)",
-            None,
-            "Installs the goose binary from GitHub releases on first install",
-            Archive {
-                spec: ArchiveAgentSpec {
-                    id: "goose",
-                    repo: "block/goose",
-                    asset_template: "goose-{platform}.{ext}",
-                    binary_name: "goose",
-                    pinned_tag: None,
-                    label: "goose",
-                },
-                acp_args: "acp",
-            },
-        ),
-        registry_acp_entry(
-            "acp:cline",
-            "Cline",
-            "Cline — autonomous coding agent (ACP)",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("cline --acp"),
-        ),
-        registry_acp_entry(
-            "acp:auggie",
-            "Auggie CLI",
-            "Augment Code's CLI coding agent (ACP)",
-            None,
-            "Self-fetches via npx; sign in to Augment Code for provider access",
-            Npx("@augmentcode/auggie --acp"),
-        ),
-        registry_acp_entry(
-            "acp:qwen",
-            "Qwen Code",
-            "Alibaba Qwen Code agent (ACP)",
-            None,
-            "Self-fetches via npx; set your Qwen/DashScope credentials",
-            Npx("@qwen-code/qwen-code --acp --experimental-skills"),
-        ),
-        registry_acp_entry(
-            "acp:copilot",
-            "GitHub Copilot",
-            "GitHub Copilot CLI coding agent (ACP, public preview)",
-            None,
-            "Self-fetches via npx; sign in with `gh auth login` / Copilot access",
-            Npx("@github/copilot --acp"),
-        ),
-        registry_acp_entry(
-            "acp:kilo",
-            "Kilo",
-            "Kilo Code agent (ACP)",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("@kilocode/cli acp"),
-        ),
-        registry_acp_entry(
-            "acp:codebuddy",
-            "Codebuddy Code",
-            "Tencent Codebuddy Code agent (ACP)",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("@tencent-ai/codebuddy-code --acp"),
-        ),
-        registry_acp_entry(
-            "acp:nova",
-            "Nova",
-            "Compass AI Nova coding agent (ACP)",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("@compass-ai/nova acp"),
-        ),
-        registry_acp_entry(
-            "acp:qoder",
-            "Qoder CLI",
-            "Qoder coding agent (ACP)",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("@qoder-ai/qodercli --acp"),
-        ),
-        registry_acp_entry(
-            "acp:grok",
-            "Grok Build",
-            "xAI Grok coding agent (ACP)",
-            None,
-            "Self-fetches via npx; set your xAI API key",
-            Npx("@xai-official/grok agent stdio"),
-        ),
-        registry_acp_entry(
-            "acp:droid",
-            "Factory Droid",
-            "Factory Droid agent (ACP)",
-            None,
-            "Self-fetches via npx; sign in to Factory",
-            Npx("droid exec --output-format acp-daemon"),
-        ),
-        registry_acp_entry(
-            "acp:dirac",
-            "Dirac",
-            "Dirac CLI coding agent (ACP)",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("dirac-cli --acp"),
-        ),
-        registry_acp_entry(
-            "acp:dimcode",
-            "DimCode",
-            "DimCode coding agent (ACP)",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("dimcode acp"),
-        ),
-        registry_acp_entry(
-            "acp:autohand",
-            "Autohand Code",
-            "Autohand coding agent (ACP)",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("@autohandai/autohand-acp"),
-        ),
-        registry_acp_entry(
-            "acp:deepagents",
-            "DeepAgents",
-            "DeepAgents ACP agent",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("deepagents-acp"),
-        ),
-        registry_acp_entry(
-            "acp:glm",
-            "GLM Agent",
-            "Zhipu GLM coding agent (ACP)",
-            None,
-            "Self-fetches via npx; set your Zhipu GLM API key",
-            Npx("glm-acp-agent"),
-        ),
-        registry_acp_entry(
-            "acp:sigit",
-            "siGit Code",
-            "siGit coding agent (ACP)",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("@smbcloud/sigit"),
-        ),
-        registry_acp_entry(
-            "acp:agoragentic",
-            "Agoragentic",
-            "Agoragentic — agent marketplace with 174+ capabilities (ACP)",
-            None,
-            "Self-fetches via npx on first run",
-            Npx("agoragentic-mcp --acp"),
-        ),
-        registry_acp_entry(
-            "acp:fast-agent",
-            "fast-agent",
-            "fast-agent — Python ACP agent server",
-            Some("uvx"),
-            "Run via uvx (install `uv`: https://docs.astral.sh/uv/)",
-            Uvx("fast-agent-acp -x"),
-        ),
-        registry_acp_entry(
-            "acp:minion",
-            "Minion Code",
-            "Minion Code agent (ACP)",
-            Some("uvx"),
-            "Run via uvx (install `uv`: https://docs.astral.sh/uv/)",
-            Uvx("minion-code acp"),
-        ),
-    ]
+/// All installable agents from the official ACP registry CDN, minus the
+/// first-class curated entries (Claude, Codex, Gemini, Pi) which have bespoke
+/// gateway routing.
+fn registry_driven_entries() -> Vec<AcpAgentEntry> {
+    use crate::sidecar::agents::acp_registry::{load_registry_agents, CURATED_OVERRIDE_IDS};
+    let skip: std::collections::HashSet<&str> = CURATED_OVERRIDE_IDS.iter().copied().collect();
+    load_registry_agents()
+        .iter()
+        .filter(|a| !skip.contains(a.id.as_str()))
+        .filter_map(entry_from_registry)
+        .collect()
 }
 
 pub struct AcpAgentRegistry {
@@ -3073,140 +2913,139 @@ impl AcpAgentRegistry {
                 // Seeded first so it appears at the top of the agent list.
                 AcpAgentEntry {
                     id: "ryu".into(),
+                    registry_id: None,
                     name: "Ryu".into(),
-                    description: "The default Ryu agent — Core-managed Pi engine with the Gateway on top. Installed separately from your own Pi.",
-                    // Ryu manages its own Pi binary in ~/.ryu/bin/; it does not
-                    // depend on the user having Pi installed. detect_binary is None
-                    // so the availability check in ryu_agent_route() governs instead.
+                    description: "The default Ryu agent — Core-managed Pi engine with the Gateway on top. Installed separately from your own Pi.".into(),
                     detect_binary: None,
-                    install_hint: "Ryu installs its own Pi engine automatically on first run",
+                    install_hint: "Ryu installs its own Pi engine automatically on first run".into(),
                     transport: AgentTransport::Acp {
-                        // Fallback spawn_cmd used only when the managed binary is
-                        // not yet installed (ryu_agent_route() calls ryu_pi_acp_cmd()
-                        // first and falls back to user's pi + gateway if not ready).
                         spawn_cmd: pi_acp_cmd(),
                     },
                     recommended: true,
                     gateway_bypass: false,
                     archive_spec: None,
+                    direct_archive: None,
+                    bridge_version: registry_bridge_version("pi-acp"),
+                    icon_url: None,
                     version_probe: None,
                 },
                 AcpAgentEntry {
                     id: "acp:claude".into(),
-                    name: "Claude Code".into(),
-                    description: "Anthropic's agentic AI — coding, analysis, and reasoning",
+                    registry_id: Some("claude-acp".into()),
+                    name: registry_name("claude-acp", "Claude Agent"),
+                    description: registry_description(
+                        "claude-acp",
+                        "ACP wrapper for Anthropic's Claude",
+                    ),
                     detect_binary: Some("claude"),
-                    install_hint: "npm install -g @anthropic-ai/claude-code",
+                    install_hint: "npm install -g @anthropic-ai/claude-code".into(),
                     transport: AgentTransport::Acp {
-                        spawn_cmd: npx_cmd("npx -y @zed-industries/claude-code-acp@latest"),
+                        spawn_cmd: registry_meta("claude-acp")
+                            .and_then(|a| {
+                                crate::sidecar::agents::acp_registry::spawn_plan_for(&a)
+                                    .map(|p| p.spawn_cmd)
+                            })
+                            .unwrap_or_else(|| {
+                                npx_cmd("npx -y @agentclientprotocol/claude-agent-acp@latest")
+                            }),
                     },
                     recommended: false,
-                    // Claude Code uses Anthropic /v1/messages and ignores
-                    // OPENAI_BASE_URL; gateway injection would 404. This is a
-                    // residual bypass pending a translating ingress in the gateway.
                     gateway_bypass: true,
                     archive_spec: None,
-                    version_probe: Some(AgentVersionProbe {
-                        binary: "claude",
-                        npm_package: "@anthropic-ai/claude-code",
-                    }),
+                    direct_archive: None,
+                    bridge_version: registry_bridge_version("claude-acp"),
+                    icon_url: registry_icon_url("claude-acp"),
+                    version_probe: version_probe_for_registry("claude-acp"),
                 },
                 AcpAgentEntry {
                     id: "acp:codex".into(),
-                    name: "Codex".into(),
-                    description: "OpenAI's coding agent — natural language to code",
+                    registry_id: Some("codex-acp".into()),
+                    name: registry_name("codex-acp", "Codex"),
+                    description: registry_description("codex-acp", "OpenAI Codex agent (ACP)"),
                     detect_binary: Some("codex"),
-                    install_hint: "Set OPENAI_API_KEY (or sign in to Codex); the codex-acp adapter is fetched via npx",
+                    install_hint: "Set OPENAI_API_KEY (or sign in to Codex); the codex-acp adapter is fetched via npx".into(),
                     transport: AgentTransport::Acp {
-                        // Codex has no native ACP mode — bridge through Zed's
-                        // codex-acp adapter. OPENAI_BASE_URL is injected to route
-                        // every Codex provider call through ryu-gateway so the
-                        // firewall, budget, and audit pipeline govern egress (U28).
                         spawn_cmd: codex_acp_cmd(),
                     },
                     recommended: false,
-                    // API-key mode honours OPENAI_BASE_URL (injected by
-                    // codex_acp_cmd() above), so that path is governed. The
-                    // ChatGPT-login (subscription) path ignores OPENAI_BASE_URL
-                    // and bypasses the gateway UNLESS the user opts into the
-                    // `codex-gateway-routing` toggle, which routes it through the
-                    // subscription passthrough (codex_acp_gateway_cmd + the
-                    // gateway /passthrough/openai-responses route, see
-                    // crate::codex_config).
                     gateway_bypass: false,
                     archive_spec: None,
-                    version_probe: Some(AgentVersionProbe {
-                        binary: "codex",
-                        npm_package: "@openai/codex",
-                    }),
+                    direct_archive: None,
+                    bridge_version: registry_bridge_version("codex-acp"),
+                    icon_url: registry_icon_url("codex-acp"),
+                    version_probe: version_probe_for_registry("codex-acp"),
                 },
                 AcpAgentEntry {
                     id: "acp:gemini".into(),
-                    name: "Gemini CLI".into(),
-                    description: "Google Gemini — multimodal agent with large context window",
+                    registry_id: Some("gemini".into()),
+                    name: registry_name("gemini", "Gemini CLI"),
+                    description: registry_description("gemini", "Google Gemini CLI (ACP)"),
                     detect_binary: Some("gemini"),
-                    install_hint: "npm install -g @google/gemini-cli",
+                    install_hint: "npm install -g @google/gemini-cli".into(),
                     transport: AgentTransport::Acp {
-                        spawn_cmd: npx_cmd("npx -y -- @google/gemini-cli@latest --experimental-acp"),
+                        spawn_cmd: registry_meta("gemini")
+                            .and_then(|a| {
+                                crate::sidecar::agents::acp_registry::spawn_plan_for(&a)
+                                    .map(|p| p.spawn_cmd)
+                            })
+                            .unwrap_or_else(|| {
+                                npx_cmd("npx -y -- @google/gemini-cli@latest --experimental-acp")
+                            }),
                     },
                     recommended: false,
-                    // Gemini CLI uses Google's endpoint format and ignores
-                    // OPENAI_BASE_URL; gateway injection is not possible without a
-                    // translating ingress. Residual bypass until that is built.
                     gateway_bypass: true,
                     archive_spec: None,
-                    version_probe: Some(AgentVersionProbe {
-                        binary: "gemini",
-                        npm_package: "@google/gemini-cli",
-                    }),
+                    direct_archive: None,
+                    bridge_version: registry_bridge_version("gemini"),
+                    icon_url: registry_icon_url("gemini"),
+                    version_probe: version_probe_for_registry("gemini"),
                 },
                 AcpAgentEntry {
                     id: "acp:pi".into(),
-                    name: "Pi".into(),
-                    description: "Pi — your own installed Pi agent, runs with your config and API key",
+                    registry_id: Some("pi-acp".into()),
+                    name: registry_name("pi-acp", "pi ACP"),
+                    description: registry_description(
+                        "pi-acp",
+                        "Pi — your own installed Pi agent, runs with your config and API key",
+                    ),
                     detect_binary: Some("pi"),
-                    install_hint: "npm install -g pi-acp",
+                    install_hint: "npm install -g pi-acp".into(),
                     transport: AgentTransport::Acp {
-                        // Bare Pi: no gateway injection. The user's own Pi binary
-                        // on PATH is used as-is with their config, API key, and
-                        // model settings. The Ryu flagship agent (above) is the
-                        // separately managed Pi build with gateway on top.
                         spawn_cmd: pi_acp_cmd(),
                     },
                     recommended: false,
                     gateway_bypass: false,
                     archive_spec: None,
-                    version_probe: Some(AgentVersionProbe {
-                        binary: "pi",
-                        npm_package: "pi-acp",
-                    }),
+                    direct_archive: None,
+                    bridge_version: registry_bridge_version("pi-acp"),
+                    icon_url: registry_icon_url("pi-acp"),
+                    version_probe: version_probe_for_registry("pi-acp"),
                 },
                 AcpAgentEntry {
                     id: "openclaw".into(),
+                    registry_id: None,
                     name: "OpenClaw".into(),
-                    description: "OpenClaw — self-hosted AI assistant, run over its native ACP bridge",
-                    // OpenClaw ships a CLI (managed under ~/.ryu/bin or on PATH).
+                    description: "OpenClaw — self-hosted AI assistant, run over its native ACP bridge".into(),
                     detect_binary: Some("openclaw"),
-                    install_hint: "Requires a reachable OpenClaw Gateway (run `openclaw gateway` locally, or point your OpenClaw config at a remote one); `openclaw acp` then bridges to it",
+                    install_hint: "Requires a reachable OpenClaw Gateway (run `openclaw gateway` locally, or point your OpenClaw config at a remote one); `openclaw acp` then bridges to it".into(),
                     transport: AgentTransport::Acp {
-                        // `openclaw acp` is a Gateway-backed stdio bridge — see
-                        // openclaw_acp_cmd(). It is NOT self-contained; it needs the
-                        // user's OpenClaw Gateway running/configured.
                         spawn_cmd: openclaw_acp_cmd(),
                     },
                     recommended: false,
-                    // OpenClaw talks to its own gateway and never honours
-                    // OPENAI_BASE_URL, so its egress does not traverse Ryu's gateway.
                     gateway_bypass: true,
                     archive_spec: None,
+                    direct_archive: None,
+                    bridge_version: None,
+                    icon_url: None,
                     version_probe: None,
                 },
                 AcpAgentEntry {
                     id: "zeroclaw".into(),
+                    registry_id: None,
                     name: "ZeroClaw".into(),
-                    description: "Fast native autonomous agent by Ryu",
+                    description: "Fast native autonomous agent by Ryu".into(),
                     detect_binary: None,
-                    install_hint: "",
+                    install_hint: String::new(),
                     transport: AgentTransport::OpenAiCompat {
                         base_url: "http://127.0.0.1:42617",
                         model: None,
@@ -3214,29 +3053,31 @@ impl AcpAgentRegistry {
                     recommended: false,
                     gateway_bypass: false,
                     archive_spec: None,
+                    direct_archive: None,
+                    bridge_version: None,
+                    icon_url: None,
                     version_probe: None,
                 },
                 AcpAgentEntry {
                     id: "hermes".into(),
+                    registry_id: None,
                     name: "Hermes Agent".into(),
-                    description: "NousResearch Hermes — open-source agent with native tool use (ACP)",
+                    description: "NousResearch Hermes — open-source agent with native tool use (ACP)".into(),
                     detect_binary: Some("hermes"),
-                    install_hint: "Install Hermes Agent (`pip install 'hermes-agent[acp]'` or the install script) and set a provider with `hermes model`; ACP runs via `hermes acp`",
+                    install_hint: "Install Hermes Agent (`pip install 'hermes-agent[acp]'` or the install script) and set a provider with `hermes model`; ACP runs via `hermes acp`".into(),
                     transport: AgentTransport::Acp {
-                        // `hermes acp` runs the agent loop in-process from ~/.hermes
-                        // config; falls back to a self-fetching uvx invocation when
-                        // the hermes CLI is not on PATH (see hermes_acp_cmd()).
                         spawn_cmd: hermes_acp_cmd(),
                     },
                     recommended: false,
-                    // Hermes uses its own provider credentials (~/.hermes), not
-                    // OPENAI_BASE_URL, so its egress does not traverse Ryu's gateway.
                     gateway_bypass: true,
                     archive_spec: None,
+                    direct_archive: None,
+                    bridge_version: None,
+                    icon_url: None,
                     version_probe: None,
                 },
             ];
-            entries.extend(registry_acp_entries());
+            entries.extend(registry_driven_entries());
             Self { entries }
         }
     }
@@ -3375,11 +3216,11 @@ impl AcpAgentRegistry {
                 AgentInfo {
                     id: e.id.clone(),
                     name: e.name.clone(),
-                    description: Some(e.description.to_string()),
+                    description: Some(e.description.clone()),
                     install_hint: if e.install_hint.is_empty() {
                         None
                     } else {
-                        Some(e.install_hint.to_string())
+                        Some(e.install_hint.clone())
                     },
                     recommended: e.recommended.then_some(true),
                     installed,
@@ -3890,6 +3731,9 @@ mod tests {
             "acp:grok",
             "acp:fast-agent",
             "acp:minion",
+            "acp:cursor",
+            "acp:opencode",
+            "acp:devin",
         ] {
             let entry = reg
                 .find_by_prefix(id)
@@ -3911,9 +3755,9 @@ mod tests {
             AgentTransport::Acp { spawn_cmd } => spawn_cmd.clone(),
             AgentTransport::OpenAiCompat { .. } => unreachable!("expected ACP"),
         };
-        assert!(spawn("acp:cline").contains("npx -y cline --acp"));
-        assert!(spawn("acp:fast-agent").contains("uvx fast-agent-acp -x"));
-        assert!(spawn("acp:minion").contains("uvx minion-code acp"));
+        assert!(spawn("acp:cline").contains("npx -y cline@latest"));
+        assert!(spawn("acp:fast-agent").contains("uvx fast-agent-acp"));
+        assert!(spawn("acp:minion").contains("uvx minion-code"));
     }
 
     #[test]

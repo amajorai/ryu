@@ -258,6 +258,143 @@ pub(crate) fn extract_tar_gz_to_dir(
     Ok(written)
 }
 
+/// Like [`extract_tar_gz_to_dir`] but for `.tar.bz2` archives (e.g. goose releases).
+pub(crate) fn extract_tar_bz2_to_dir(
+    data: &[u8],
+    dest_dir: &Path,
+    max_total_bytes: Option<u64>,
+) -> anyhow::Result<Vec<String>> {
+    use bzip2::read::BzDecoder;
+    use std::io::Read;
+    use tar::Archive;
+
+    std::fs::create_dir_all(dest_dir)
+        .with_context(|| format!("creating {}", dest_dir.display()))?;
+
+    let max_total_bytes = max_total_bytes.unwrap_or(DEFAULT_EXTRACT_CAP_BYTES);
+    const MAX_ENTRIES: usize = 50_000;
+
+    let decoder = BzDecoder::new(data);
+    let mut archive = Archive::new(decoder);
+    let mut written = Vec::new();
+    let mut total_bytes: u64 = 0;
+    let mut entry_count: usize = 0;
+
+    for entry in archive.entries().context("reading tar entries")? {
+        entry_count += 1;
+        if entry_count > MAX_ENTRIES {
+            anyhow::bail!("archive has too many entries (cap {MAX_ENTRIES})");
+        }
+        let mut entry = entry.context("reading tar entry")?;
+        let rel = entry.path().context("getting entry path")?.into_owned();
+
+        if rel
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+            || rel.is_absolute()
+        {
+            tracing::warn!("skipping unsafe tar entry path: {}", rel.display());
+            continue;
+        }
+
+        let out_path = dest_dir.join(&rel);
+        if entry.header().entry_type().is_dir() {
+            std::fs::create_dir_all(&out_path)
+                .with_context(|| format!("creating dir {}", out_path.display()))?;
+            continue;
+        }
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating dir {}", parent.display()))?;
+        }
+        let mut bytes = Vec::new();
+        entry
+            .read_to_end(&mut bytes)
+            .context("reading entry bytes")?;
+        total_bytes += bytes.len() as u64;
+        if total_bytes > max_total_bytes {
+            anyhow::bail!(
+                "archive expands past the {max_total_bytes}-byte cap (decompression bomb?)"
+            );
+        }
+        std::fs::write(&out_path, &bytes)
+            .with_context(|| format!("writing {}", out_path.display()))?;
+        written.push(rel.to_string_lossy().into_owned());
+    }
+
+    Ok(written)
+}
+
+/// Extract **every** file entry from a `.zip` archive into `dest_dir`, preserving
+/// the archive's internal directory structure (unlike [`extract_all_to_dir`]).
+pub(crate) fn extract_zip_to_dir(
+    data: &[u8],
+    dest_dir: &Path,
+    max_total_bytes: Option<u64>,
+) -> anyhow::Result<Vec<String>> {
+    use std::io::{Cursor, Read};
+    use zip::ZipArchive;
+
+    std::fs::create_dir_all(dest_dir)
+        .with_context(|| format!("creating {}", dest_dir.display()))?;
+
+    let max_total_bytes = max_total_bytes.unwrap_or(DEFAULT_EXTRACT_CAP_BYTES);
+    const MAX_ENTRIES: usize = 50_000;
+
+    let reader = Cursor::new(data);
+    let mut archive = ZipArchive::new(reader).context("reading zip archive")?;
+    let mut written = Vec::new();
+    let mut total_bytes: u64 = 0;
+
+    for i in 0..archive.len() {
+        if i >= MAX_ENTRIES {
+            anyhow::bail!("archive has too many entries (cap {MAX_ENTRIES})");
+        }
+        let mut file = archive.by_index(i).context("reading zip entry")?;
+        let entry_name = file.name().to_string();
+        if entry_name.ends_with('/') {
+            let rel = std::path::Path::new(&entry_name);
+            if rel
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                continue;
+            }
+            std::fs::create_dir_all(dest_dir.join(rel))
+                .with_context(|| format!("creating dir {}", entry_name))?;
+            continue;
+        }
+        let rel = std::path::Path::new(&entry_name);
+        if rel
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+            || rel.is_absolute()
+        {
+            tracing::warn!("skipping unsafe zip entry path: {entry_name}");
+            continue;
+        }
+        let out_path = dest_dir.join(rel);
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating dir {}", parent.display()))?;
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .context("reading zip entry bytes")?;
+        total_bytes += bytes.len() as u64;
+        if total_bytes > max_total_bytes {
+            anyhow::bail!(
+                "archive expands past the {max_total_bytes}-byte cap (decompression bomb?)"
+            );
+        }
+        std::fs::write(&out_path, &bytes)
+            .with_context(|| format!("writing {}", out_path.display()))?;
+        written.push(entry_name);
+    }
+
+    Ok(written)
+}
+
 /// Extract a named binary from a `.zip` archive.
 pub(crate) fn extract_from_zip(data: &[u8], binary_name: &str) -> anyhow::Result<Vec<u8>> {
     use std::io::{Cursor, Read};

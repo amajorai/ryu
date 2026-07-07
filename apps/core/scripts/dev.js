@@ -5,7 +5,7 @@ const { existsSync, openSync, closeSync } = require("node:fs");
 const path = require("node:path");
 
 const sharedTarget = path.resolve(
-	__dirname,
+	import.meta.dirname,
 	"..",
 	"..",
 	"..",

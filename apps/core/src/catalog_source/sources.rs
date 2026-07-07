@@ -8,6 +8,7 @@
 
 use anyhow::{bail, Result};
 use serde_json::Value;
+use std::sync::OnceLock;
 
 use super::{CatalogKind, CatalogQuery, CatalogSource, DescriptorFile, InstallDescriptor};
 use crate::model_catalog::HfEndpoint;
@@ -2024,6 +2025,370 @@ impl CatalogSource for RyuMarketplaceSource {
     }
 }
 
+// ── integrations.sh source (Plugin kind) ────────────────────────────────────
+
+/// Default integrations.sh catalog envelope. Prefer this over individual raw
+/// source files because it is the normalized, multi-format catalog
+/// (`mcp`/`api`/`graphql`/`cli`) and needs no credentials.
+const INTEGRATIONS_SH_API_URL: &str = "https://integrations.sh/api.json";
+
+/// Raw GitHub fallback for the OpenAPI subset only. This is intentionally not
+/// the primary source: it is one upstream feed (`api-guru-openapi.json`), while
+/// `/api.json` carries the full normalized integrations.sh registry.
+const INTEGRATIONS_SH_RAW_OPENAPI_URL: &str =
+    "https://raw.githubusercontent.com/UsefulSoftwareCo/integrationsdotsh/refs/heads/main/sources/api-guru-openapi.json";
+
+const INTEGRATIONS_SH_API_ENV: &str = "RYU_INTEGRATIONS_SH_API_URL";
+const INTEGRATIONS_SH_RAW_ENV: &str = "RYU_INTEGRATIONS_SH_RAW_OPENAPI_URL";
+const INTEGRATIONS_SH_TTL_ENV: &str = "RYU_INTEGRATIONS_SH_CACHE_TTL_SECS";
+const INTEGRATIONS_SH_DEFAULT_TTL_SECS: u64 = 24 * 60 * 60;
+
+static INTEGRATIONS_SH_CACHE: OnceLock<tokio::sync::Mutex<Option<IntegrationsShCache>>> =
+    OnceLock::new();
+
+#[derive(Clone)]
+struct IntegrationsShCache {
+    fetched_at: std::time::Instant,
+    records: Vec<IntegrationsShRecord>,
+    source_url: String,
+}
+
+/// A normalized integrations.sh item. This is deliberately smaller than the raw
+/// payload so the cache is cheap and stable across small upstream schema changes.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct IntegrationsShRecord {
+    id: String,
+    kind: String,
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default)]
+    domain: Option<String>,
+    #[serde(default)]
+    categories: Vec<String>,
+    #[serde(default)]
+    feeds: Vec<String>,
+    #[serde(default)]
+    popularity: Option<u64>,
+    #[serde(default)]
+    version: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct IntegrationsShApiEnvelope {
+    #[serde(default)]
+    data: Vec<IntegrationsShRecord>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct IntegrationsShRawOpenApiEnvelope {
+    #[serde(default)]
+    specs: Vec<IntegrationsShRawOpenApiSpec>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct IntegrationsShRawOpenApiSpec {
+    provider: String,
+    #[serde(default, rename = "versionKey")]
+    version_key: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    link: Option<String>,
+    #[serde(default, rename = "swaggerUrl")]
+    swagger_url: Option<String>,
+    #[serde(default, rename = "swaggerYamlUrl")]
+    swagger_yaml_url: Option<String>,
+    #[serde(default)]
+    categories: Vec<String>,
+    #[serde(default)]
+    service: Option<String>,
+    #[serde(default, rename = "providerName")]
+    provider_name: Option<String>,
+    #[serde(default)]
+    raw: Value,
+}
+
+/// Built-in integrations.sh source for the Plugin/App catalog. It is descriptor
+/// discovery, not a Ryu plugin runtime: records tell users which integration
+/// surfaces exist and where to inspect them. Install returns a raw descriptor
+/// handoff only.
+#[derive(Clone)]
+pub struct IntegrationsShSource {
+    pub id: String,
+    pub display_name: String,
+    pub api_url: Option<String>,
+    pub raw_openapi_url: Option<String>,
+}
+
+impl IntegrationsShSource {
+    pub fn builtin() -> Self {
+        Self {
+            id: "integrations-sh".to_string(),
+            display_name: "integrations.sh".to_string(),
+            api_url: None,
+            raw_openapi_url: None,
+        }
+    }
+
+    fn resolve_api_url(&self) -> String {
+        self.api_url
+            .clone()
+            .filter(|u| !u.trim().is_empty())
+            .or_else(|| {
+                std::env::var(INTEGRATIONS_SH_API_ENV)
+                    .ok()
+                    .map(|u| u.trim().to_string())
+                    .filter(|u| !u.is_empty())
+            })
+            .unwrap_or_else(|| INTEGRATIONS_SH_API_URL.to_string())
+    }
+
+    fn resolve_raw_openapi_url(&self) -> String {
+        self.raw_openapi_url
+            .clone()
+            .filter(|u| !u.trim().is_empty())
+            .or_else(|| {
+                std::env::var(INTEGRATIONS_SH_RAW_ENV)
+                    .ok()
+                    .map(|u| u.trim().to_string())
+                    .filter(|u| !u.is_empty())
+            })
+            .unwrap_or_else(|| INTEGRATIONS_SH_RAW_OPENAPI_URL.to_string())
+    }
+
+    fn cache_ttl() -> std::time::Duration {
+        let secs = std::env::var(INTEGRATIONS_SH_TTL_ENV)
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(INTEGRATIONS_SH_DEFAULT_TTL_SECS);
+        std::time::Duration::from_secs(secs)
+    }
+
+    async fn fetch_records(&self) -> Result<IntegrationsShCache> {
+        let api_url = self.resolve_api_url();
+        match crate::server::guarded_get_bytes(&api_url).await {
+            Ok(bytes) => {
+                let envelope: IntegrationsShApiEnvelope = serde_json::from_slice(&bytes)
+                    .map_err(|e| anyhow::anyhow!("parsing integrations.sh API {api_url}: {e}"))?;
+                return Ok(IntegrationsShCache {
+                    fetched_at: std::time::Instant::now(),
+                    records: envelope.data,
+                    source_url: api_url,
+                });
+            }
+            Err(api_err) => {
+                tracing::warn!(
+                    url = api_url,
+                    "integrations.sh API fetch failed, trying raw OpenAPI fallback: {api_err}"
+                );
+            }
+        }
+
+        let raw_url = self.resolve_raw_openapi_url();
+        let body = crate::server::guarded_get_bytes(&raw_url)
+            .await
+            .map_err(|e| anyhow::anyhow!("fetching integrations.sh raw fallback {raw_url}: {e}"))?;
+        let envelope: IntegrationsShRawOpenApiEnvelope = serde_json::from_slice(&body)
+            .map_err(|e| anyhow::anyhow!("parsing integrations.sh raw fallback {raw_url}: {e}"))?;
+        Ok(IntegrationsShCache {
+            fetched_at: std::time::Instant::now(),
+            records: envelope.specs.iter().map(raw_openapi_to_record).collect(),
+            source_url: raw_url,
+        })
+    }
+
+    async fn records(&self) -> Result<IntegrationsShCache> {
+        let lock = INTEGRATIONS_SH_CACHE.get_or_init(|| tokio::sync::Mutex::new(None));
+        let mut guard = lock.lock().await;
+        if let Some(cache) = guard.as_ref() {
+            if cache.fetched_at.elapsed() < Self::cache_ttl() {
+                return Ok(cache.clone());
+            }
+        }
+        let cache = self.fetch_records().await?;
+        *guard = Some(cache.clone());
+        Ok(cache)
+    }
+
+    fn wrap_items(&self, records: Vec<Value>, source_url: &str, note: Option<&str>) -> Value {
+        let mut obj = serde_json::Map::new();
+        obj.insert("items".to_string(), Value::Array(records));
+        obj.insert("next_cursor".to_string(), Value::Null);
+        obj.insert(
+            "source_url".to_string(),
+            Value::String(source_url.to_string()),
+        );
+        obj.insert(
+            "cache_ttl_seconds".to_string(),
+            Value::Number(Self::cache_ttl().as_secs().into()),
+        );
+        if let Some(note) = note {
+            obj.insert("note".to_string(), Value::String(note.to_string()));
+        }
+        Value::Object(obj)
+    }
+}
+
+impl CatalogSource for IntegrationsShSource {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn display_name(&self) -> &str {
+        &self.display_name
+    }
+    fn kind(&self) -> CatalogKind {
+        CatalogKind::Plugin
+    }
+
+    async fn search(&self, _client: &reqwest::Client, q: &CatalogQuery) -> Result<Value> {
+        let limit = if q.limit == 0 { 40 } else { q.limit };
+        match self.records().await {
+            Ok(cache) => {
+                let needle = q.query.trim().to_ascii_lowercase();
+                let kind_filter = q.extra_str("integration_kind").to_ascii_lowercase();
+                let items: Vec<Value> = cache
+                    .records
+                    .iter()
+                    .filter(|record| {
+                        (kind_filter.is_empty() || record.kind.eq_ignore_ascii_case(&kind_filter))
+                            && (needle.is_empty()
+                                || record.id.to_ascii_lowercase().contains(&needle)
+                                || record.name.to_ascii_lowercase().contains(&needle)
+                                || record
+                                    .domain
+                                    .as_deref()
+                                    .is_some_and(|d| d.to_ascii_lowercase().contains(&needle))
+                                || record
+                                    .description
+                                    .as_deref()
+                                    .is_some_and(|d| d.to_ascii_lowercase().contains(&needle))
+                                || record
+                                    .categories
+                                    .iter()
+                                    .any(|c| c.to_ascii_lowercase().contains(&needle)))
+                    })
+                    .take(limit)
+                    .map(integration_record_to_item)
+                    .collect();
+                Ok(self.wrap_items(items, &cache.source_url, None))
+            }
+            Err(e) => {
+                Ok(self.wrap_items(Vec::new(), &self.resolve_api_url(), Some(&e.to_string())))
+            }
+        }
+    }
+
+    async fn detail(&self, _client: &reqwest::Client, id: &str) -> Result<Value> {
+        let cache = self.records().await?;
+        let record = cache
+            .records
+            .iter()
+            .find(|record| record.id == id)
+            .ok_or_else(|| anyhow::anyhow!("integration `{id}` not found in integrations.sh"))?;
+        Ok(serde_json::json!({
+            "id": record.id,
+            "kind": record.kind,
+            "name": record.name,
+            "description": record.description,
+            "url": record.url,
+            "iconUrl": record.icon,
+            "domain": record.domain,
+            "categories": record.categories,
+            "feeds": record.feeds,
+            "popularity": record.popularity,
+            "version": record.version,
+            "source": self.display_name,
+            "sourceUrl": cache.source_url,
+            "descriptor": {
+                "kind": "integration-descriptor",
+                "integration_kind": record.kind,
+                "url": record.url,
+                "domain": record.domain,
+            },
+        }))
+    }
+
+    async fn install_descriptor(
+        &self,
+        _client: &reqwest::Client,
+        id: &str,
+    ) -> Result<InstallDescriptor> {
+        let detail = self.detail(_client, id).await?;
+        Ok(InstallDescriptor {
+            kind: CatalogKind::Plugin,
+            source_id: self.id.clone(),
+            repo_id: id.to_string(),
+            files: Vec::new(),
+            raw: detail,
+        })
+    }
+}
+
+fn integration_record_to_item(record: &IntegrationsShRecord) -> Value {
+    serde_json::json!({
+        "id": record.id,
+        "name": record.name,
+        "description": record.description,
+        "author": record.domain,
+        "version": record.version.clone().unwrap_or_else(|| record.kind.to_uppercase()),
+        "install_source": record.url,
+        "installed": false,
+        "icon_url": record.icon,
+        "category": record.categories.first().cloned().unwrap_or_else(|| record.kind.clone()),
+        "integration_kind": record.kind,
+        "domain": record.domain,
+        "url": record.url,
+        "feeds": record.feeds,
+        "popularity": record.popularity.unwrap_or(0),
+        "rating_average": 0.0,
+        "rating_count": 0,
+    })
+}
+
+fn raw_openapi_to_record(spec: &IntegrationsShRawOpenApiSpec) -> IntegrationsShRecord {
+    let version = spec.version_key.clone();
+    let provider = spec
+        .provider_name
+        .clone()
+        .unwrap_or_else(|| spec.provider.clone());
+    let title = spec
+        .title
+        .clone()
+        .unwrap_or_else(|| provider.replace([':', '.'], " "));
+    let url = spec
+        .link
+        .clone()
+        .or_else(|| spec.swagger_url.clone())
+        .or_else(|| spec.swagger_yaml_url.clone());
+    let logo = spec
+        .raw
+        .get("info")
+        .and_then(|info| info.get("x-logo"))
+        .and_then(|logo| logo.get("url"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    IntegrationsShRecord {
+        id: format!("api/{}", spec.provider),
+        kind: "api".to_string(),
+        name: title,
+        description: spec.description.clone(),
+        url,
+        icon: logo,
+        domain: Some(provider),
+        categories: spec.categories.clone(),
+        feeds: vec!["api-guru-openapi".to_string()],
+        popularity: None,
+        version: version.or_else(|| spec.service.clone()),
+    }
+}
+
 // ── OKF knowledge-bundle source (Knowledge kind) ─────────────────────────────
 
 /// A **knowledge-bundle** source backing the `Knowledge` catalog kind. It points
@@ -2188,6 +2553,7 @@ pub enum Source {
     Smithery(SmitherySource),
     RyuHostedMcp(RyuHostedMcpSource),
     RyuMarketplace(RyuMarketplaceSource),
+    IntegrationsSh(IntegrationsShSource),
     OkfBundle(OkfBundleSource),
     Stub(StubSource),
 }
@@ -2203,6 +2569,7 @@ impl Source {
             Source::Smithery(s) => s.id(),
             Source::RyuHostedMcp(s) => s.id(),
             Source::RyuMarketplace(s) => s.id(),
+            Source::IntegrationsSh(s) => s.id(),
             Source::OkfBundle(s) => s.id(),
             Source::Stub(s) => s.id(),
         }
@@ -2217,6 +2584,7 @@ impl Source {
             Source::Smithery(s) => s.display_name(),
             Source::RyuHostedMcp(s) => s.display_name(),
             Source::RyuMarketplace(s) => s.display_name(),
+            Source::IntegrationsSh(s) => s.display_name(),
             Source::OkfBundle(s) => s.display_name(),
             Source::Stub(s) => s.display_name(),
         }
@@ -2231,6 +2599,7 @@ impl Source {
             Source::Smithery(s) => s.kind(),
             Source::RyuHostedMcp(s) => s.kind(),
             Source::RyuMarketplace(s) => s.kind(),
+            Source::IntegrationsSh(s) => s.kind(),
             Source::OkfBundle(s) => s.kind(),
             Source::Stub(s) => s.kind(),
         }
@@ -2250,6 +2619,9 @@ impl Source {
             Source::RyuHostedMcp(s) => s.index_url.as_deref(),
             // Ryu Marketplace surfaces its (optional) API base override.
             Source::RyuMarketplace(s) => s.base_url.as_deref(),
+            // integrations.sh uses its public API by default, with optional env
+            // overrides. Builtin listing keeps the base implicit.
+            Source::IntegrationsSh(s) => s.api_url.as_deref(),
             // A knowledge bundle surfaces its OKF source URL (git/local).
             Source::OkfBundle(s) => Some(&s.source_url),
             Source::Smithery(_) | Source::SkillsSh(_) | Source::Stub(_) => None,
@@ -2266,6 +2638,7 @@ impl Source {
             Source::Smithery(s) => s.search(client, q).await,
             Source::RyuHostedMcp(s) => s.search(client, q).await,
             Source::RyuMarketplace(s) => s.search(client, q).await,
+            Source::IntegrationsSh(s) => s.search(client, q).await,
             Source::OkfBundle(s) => s.search(client, q).await,
             Source::Stub(s) => s.search(client, q).await,
         }
@@ -2280,6 +2653,7 @@ impl Source {
             Source::Smithery(s) => s.detail(client, id).await,
             Source::RyuHostedMcp(s) => s.detail(client, id).await,
             Source::RyuMarketplace(s) => s.detail(client, id).await,
+            Source::IntegrationsSh(s) => s.detail(client, id).await,
             Source::OkfBundle(s) => s.detail(client, id).await,
             Source::Stub(s) => s.detail(client, id).await,
         }
@@ -2298,6 +2672,7 @@ impl Source {
             Source::Smithery(s) => s.install_descriptor(client, id).await,
             Source::RyuHostedMcp(s) => s.install_descriptor(client, id).await,
             Source::RyuMarketplace(s) => s.install_descriptor(client, id).await,
+            Source::IntegrationsSh(s) => s.install_descriptor(client, id).await,
             Source::OkfBundle(s) => s.install_descriptor(client, id).await,
             Source::Stub(s) => s.install_descriptor(client, id).await,
         }
@@ -2769,6 +3144,69 @@ mod tests {
             let default_src = RyuMarketplaceSource::builtin(CatalogKind::Plugin);
             assert_eq!(default_src.resolve_base(), RYU_MARKETPLACE_DEFAULT_BASE);
         }
+    }
+
+    #[test]
+    fn integrations_sh_item_maps_to_plugin_catalog_card() {
+        let record = IntegrationsShRecord {
+            id: "mcp/figma".to_string(),
+            kind: "mcp".to_string(),
+            name: "Figma".to_string(),
+            description: Some("Design context for agents".to_string()),
+            url: Some("https://help.figma.com/mcp".to_string()),
+            icon: Some("https://integrations.sh/logo/figma.com".to_string()),
+            domain: Some("figma.com".to_string()),
+            categories: vec!["design".to_string()],
+            feeds: vec!["claude".to_string(), "openai".to_string()],
+            popularity: Some(21_667),
+            version: None,
+        };
+
+        let item = integration_record_to_item(&record);
+        assert_eq!(item["id"], "mcp/figma");
+        assert_eq!(item["name"], "Figma");
+        assert_eq!(item["author"], "figma.com");
+        assert_eq!(item["version"], "MCP");
+        assert_eq!(item["install_source"], "https://help.figma.com/mcp");
+        assert_eq!(item["category"], "design");
+        assert_eq!(item["integration_kind"], "mcp");
+    }
+
+    #[test]
+    fn integrations_sh_raw_openapi_fallback_maps_specs() {
+        let spec: IntegrationsShRawOpenApiSpec = serde_json::from_str(
+            r#"{
+                "provider": "stripe.com",
+                "versionKey": "2024-01-01",
+                "title": "Stripe API",
+                "description": "Payments API",
+                "link": "https://api.apis.guru/v2/specs/stripe.com/2024-01-01.json",
+                "categories": ["payments"],
+                "providerName": "stripe.com",
+                "raw": {
+                    "info": {
+                        "x-logo": { "url": "https://logo.example/stripe.svg" }
+                    }
+                }
+            }"#,
+        )
+        .expect("parse raw spec");
+
+        let record = raw_openapi_to_record(&spec);
+        assert_eq!(record.id, "api/stripe.com");
+        assert_eq!(record.kind, "api");
+        assert_eq!(record.name, "Stripe API");
+        assert_eq!(record.domain.as_deref(), Some("stripe.com"));
+        assert_eq!(record.categories, vec!["payments"]);
+        assert_eq!(
+            record.url.as_deref(),
+            Some("https://api.apis.guru/v2/specs/stripe.com/2024-01-01.json")
+        );
+        assert_eq!(
+            record.icon.as_deref(),
+            Some("https://logo.example/stripe.svg")
+        );
+        assert_eq!(record.feeds, vec!["api-guru-openapi"]);
     }
 
     #[test]
