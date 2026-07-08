@@ -26,9 +26,6 @@ pub struct ChatState {
     pub auto_scroll: bool,
     pub streaming: bool,
     pub error: Option<String>,
-    /// Set for one tick when an assistant turn finishes streaming, so the event
-    /// loop can fire post-turn hooks (goal judge, double-check) exactly once.
-    pub turn_just_completed: bool,
 }
 
 impl ChatState {
@@ -44,6 +41,11 @@ impl ChatState {
 
 pub enum ChatEvent {
     Chunk(String),
+    /// An out-of-band note emitted by a Core plugin turn-hook (double-check
+    /// review, "Goal met.", verifier report) as a `data-plugin_note` SSE frame
+    /// inside the same chat response. Shown in the plugin-note overlay; never
+    /// added to chat history.
+    PluginNote(String),
     Done,
     Error(String),
 }
@@ -73,6 +75,10 @@ pub struct ChatOptions {
     pub acp_model: Option<String>,
     /// Route the turn to an agent team instead of a single agent (`@team`).
     pub team_id: Option<String>,
+    /// Arm Core's double-check plugin turn-hook for this turn. When true the
+    /// request carries `plugin_flags: { "io.ryu.double-check": true }` and Core
+    /// reviews the answer, emitting the critique as a `data-plugin_note` frame.
+    pub double_check: bool,
 }
 
 // ── Wire format sent to the server ───────────────────────────────────────────
@@ -90,6 +96,10 @@ struct ChatRequest {
     acp_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     team_id: Option<String>,
+    /// Per-turn plugin toggles Core reads to arm optional turn-hooks (e.g.
+    /// `"io.ryu.double-check": true`). Omitted entirely when no flag is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plugin_flags: Option<std::collections::HashMap<String, bool>>,
 }
 
 #[derive(Serialize)]
@@ -129,12 +139,19 @@ pub async fn stream_chat(
         })
         .collect();
 
+    let plugin_flags = opts.double_check.then(|| {
+        let mut flags = std::collections::HashMap::new();
+        flags.insert("io.ryu.double-check".to_string(), true);
+        flags
+    });
+
     let body = ChatRequest {
         messages: api_messages,
         agent_id: opts.agent_id,
         conversation_id: opts.conversation_id,
         acp_model: opts.acp_model,
         team_id: opts.team_id,
+        plugin_flags,
     };
 
     let client = reqwest::Client::new();
@@ -233,6 +250,18 @@ pub async fn stream_chat(
                     let _ = tx.send(ChatEvent::Done);
                     return;
                 }
+                Some("data-plugin_note") => {
+                    // Out-of-band note from a Core plugin turn-hook, shaped
+                    // `{"type":"data-plugin_note","data":{"text":"…"}}`. Route it
+                    // to the overlay, not the transcript.
+                    if let Some(text) = chunk
+                        .get("data")
+                        .and_then(|d| d.get("text"))
+                        .and_then(|t| t.as_str())
+                    {
+                        let _ = tx.send(ChatEvent::PluginNote(text.to_owned()));
+                    }
+                }
                 // start, text-start, text-end, tool-input-start, etc. — ignored.
                 _ => {}
             }
@@ -310,132 +339,4 @@ pub async fn ask_btw(
         .unwrap_or_default()
         .to_string();
     let _ = tx.send(BtwEvent::Answer(answer));
-}
-
-// ── Goal judge (`/goal`) task ─────────────────────────────────────────────────
-
-/// One judge verdict for an active goal, mirroring Core's `GoalVerdict`.
-pub enum GoalEvent {
-    Verdict {
-        /// Whether the judge decided the completion condition is met.
-        met: bool,
-        /// The judge's short reason.
-        reason: String,
-        /// Halt the loop regardless of `met` (true when met, or on a fail-safe
-        /// stop — unreachable judge / unparseable verdict).
-        stop: bool,
-        /// Turns evaluated so far (post-increment).
-        turns: u32,
-    },
-    Error(String),
-}
-
-/// Spawnable task: run one goal-judge evaluation against the conversation
-/// transcript Core holds (keyed by `conversation_id`). The judge model is
-/// resolved + routed server-side; the client only drives the continuation loop.
-pub async fn judge_goal(
-    api_url: String,
-    conversation_id: String,
-    token: Option<String>,
-    tx: mpsc::UnboundedSender<GoalEvent>,
-) {
-    let url = format!("{api_url}/api/conversations/{conversation_id}/goal/judge");
-    let client = reqwest::Client::new();
-    let mut req = client.post(&url);
-    if let Some(t) = &token {
-        req = req.bearer_auth(t);
-    }
-    match req.send().await {
-        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
-            Ok(v) => {
-                let met = v.get("met").and_then(|b| b.as_bool()).unwrap_or(false);
-                // Fail-safe default is to stop, never loop on a garbage verdict.
-                let stop = v.get("stop").and_then(|b| b.as_bool()).unwrap_or(true);
-                let reason = v
-                    .get("reason")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let turns = v.get("turns").and_then(|n| n.as_u64()).unwrap_or(0) as u32;
-                let _ = tx.send(GoalEvent::Verdict {
-                    met,
-                    reason,
-                    stop,
-                    turns,
-                });
-            }
-            Err(e) => {
-                let _ = tx.send(GoalEvent::Error(e.to_string()));
-            }
-        },
-        Ok(resp) => {
-            let _ = tx.send(GoalEvent::Error(format!("HTTP {}", resp.status())));
-        }
-        Err(e) => {
-            let _ = tx.send(GoalEvent::Error(e.to_string()));
-        }
-    }
-}
-
-// ── Double-check task ─────────────────────────────────────────────────────────
-
-/// One double-check review of the latest assistant answer (Core's
-/// `DoubleCheckResult`). Stateless — Core persists nothing.
-pub enum DoubleCheckEvent {
-    Result {
-        /// True when the reviewer found no issues (fail-loud: false flags one).
-        ok: bool,
-        /// The reviewer's short critique.
-        critique: String,
-        /// The reviewing model id (resolved server-side).
-        model: String,
-    },
-    Error(String),
-}
-
-/// Spawnable task: have a separately-configured side model review the latest
-/// assistant turn in `conversation_id` and report a verdict + critique.
-pub async fn double_check(
-    api_url: String,
-    conversation_id: String,
-    token: Option<String>,
-    tx: mpsc::UnboundedSender<DoubleCheckEvent>,
-) {
-    let url = format!("{api_url}/api/conversations/{conversation_id}/double-check");
-    let client = reqwest::Client::new();
-    let mut req = client.post(&url);
-    if let Some(t) = &token {
-        req = req.bearer_auth(t);
-    }
-    match req.send().await {
-        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
-            Ok(v) => {
-                let ok = v.get("ok").and_then(|b| b.as_bool()).unwrap_or(false);
-                let critique = v
-                    .get("critique")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let model = v
-                    .get("model")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let _ = tx.send(DoubleCheckEvent::Result {
-                    ok,
-                    critique,
-                    model,
-                });
-            }
-            Err(e) => {
-                let _ = tx.send(DoubleCheckEvent::Error(e.to_string()));
-            }
-        },
-        Ok(resp) => {
-            let _ = tx.send(DoubleCheckEvent::Error(format!("HTTP {}", resp.status())));
-        }
-        Err(e) => {
-            let _ = tx.send(DoubleCheckEvent::Error(e.to_string()));
-        }
-    }
 }

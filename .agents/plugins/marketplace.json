@@ -1,0 +1,21 @@
+{
+  "name": "ryu",
+  "interface": {
+    "displayName": "Ryu",
+    "shortDescription": "Ryu plugins for Codex: drive a local Ryu Core node."
+  },
+  "plugins": [
+    {
+      "name": "ryu",
+      "source": {
+        "source": "local",
+        "path": "./apps/plugins/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

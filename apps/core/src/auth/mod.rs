@@ -150,15 +150,24 @@ async fn poll_device_token(
         };
 
         if let Some(token) = data["access_token"].as_str() {
-            if let Err(e) = save_token(token) {
-                tracing::warn!("failed to save token: {e}");
+            // Resolve the account profile so the multi-account vault can list a
+            // human-friendly name/email. On failure we still add the account
+            // keyed by token, so a switch never loses it.
+            let (user_id, email, name, image) = fetch_profile(&client, &backend_url, token).await;
+            let user_id = user_id.unwrap_or_else(|| format!("token:{token}"));
+            if let Err(e) = upsert_account(token, &user_id, &email, name, image) {
+                tracing::warn!("failed to upsert account: {e}");
+                // Fall back to the legacy single-token path so login still works.
+                if let Err(e) = save_token(token) {
+                    tracing::warn!("failed to save token: {e}");
+                }
             }
             let mut s = state.lock().await;
             s.status = AuthStatus::Authenticated;
             s.token = Some(token.to_string());
             s.user_code = None;
             s.verification_uri = None;
-            tracing::info!("device auth: token received and saved");
+            tracing::info!("device auth: token received, account upserted + set active");
             return;
         }
 
@@ -205,6 +214,158 @@ async fn poll_device_token(
     tracing::warn!("device auth: polling timed out");
 }
 
+// ── Multi-account vault ───────────────────────────────────────────────────────
+
+/// One signed-in account. Tokens NEVER leave the device: this struct is the
+/// on-disk vault shape and the `token` field is only ever read locally to pick
+/// which bearer to send. Endpoints that list accounts strip `token` first.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Account {
+    pub token: String,
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub image: Option<String>,
+}
+
+/// The persisted multi-account vault: `<ryu_dir>/accounts.json`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct AccountVault {
+    #[serde(default)]
+    pub accounts: Vec<Account>,
+    #[serde(rename = "activeUserId", default)]
+    pub active_user_id: Option<String>,
+}
+
+impl AccountVault {
+    /// The active account, if the pointer resolves to one in the list.
+    pub fn active(&self) -> Option<&Account> {
+        let id = self.active_user_id.as_deref()?;
+        self.accounts.iter().find(|a| a.user_id == id)
+    }
+}
+
+fn accounts_path() -> std::path::PathBuf {
+    crate::paths::ryu_dir().join("accounts.json")
+}
+
+/// Load the vault from `accounts.json`. Returns an empty vault when the file is
+/// absent or malformed (callers fall back to the legacy single-token path).
+pub fn load_accounts() -> AccountVault {
+    let Ok(bytes) = std::fs::read(accounts_path()) else {
+        return AccountVault::default();
+    };
+    serde_json::from_slice(&bytes).unwrap_or_default()
+}
+
+/// Persist the vault to `accounts.json` (0600) and mirror the active account's
+/// token into the legacy `auth.json` so single-token consumers keep working.
+pub fn save_accounts(vault: &AccountVault) -> Result<()> {
+    let path = accounts_path();
+    write_secret_file(&path, &serde_json::to_string_pretty(vault)?)?;
+    match vault.active().map(|a| a.token.clone()) {
+        Some(token) => save_token(&token)?,
+        None => {
+            let _ = clear_token();
+        }
+    }
+    Ok(())
+}
+
+/// Insert or update an account (dedupe by `userId`) and make it the active one.
+/// Existing accounts are preserved — this never wipes the vault.
+pub fn upsert_account(
+    token: &str,
+    user_id: &str,
+    email: &str,
+    name: Option<String>,
+    image: Option<String>,
+) -> Result<AccountVault> {
+    let mut vault = load_accounts();
+    let account = Account {
+        token: token.to_string(),
+        user_id: user_id.to_string(),
+        email: email.to_string(),
+        name,
+        image,
+    };
+    if let Some(existing) = vault.accounts.iter_mut().find(|a| a.user_id == user_id) {
+        *existing = account;
+    } else {
+        vault.accounts.push(account);
+    }
+    vault.active_user_id = Some(user_id.to_string());
+    save_accounts(&vault)?;
+    Ok(vault)
+}
+
+/// Switch the active account. Errors if `user_id` is not in the vault.
+pub fn switch_account(user_id: &str) -> Result<AccountVault> {
+    let mut vault = load_accounts();
+    if !vault.accounts.iter().any(|a| a.user_id == user_id) {
+        return Err(anyhow!("no account with userId {user_id}"));
+    }
+    vault.active_user_id = Some(user_id.to_string());
+    save_accounts(&vault)?;
+    Ok(vault)
+}
+
+/// Remove an account by `userId`. If it was active, fall to the first remaining
+/// account (else `None`). Returns the new active `userId`.
+pub fn remove_account(user_id: &str) -> Result<Option<String>> {
+    let mut vault = load_accounts();
+    vault.accounts.retain(|a| a.user_id != user_id);
+    if vault.active_user_id.as_deref() == Some(user_id) {
+        vault.active_user_id = vault.accounts.first().map(|a| a.user_id.clone());
+    }
+    save_accounts(&vault)?;
+    Ok(vault.active_user_id.clone())
+}
+
+/// The active account's token, if any.
+pub fn active_token() -> Option<String> {
+    load_accounts().active().map(|a| a.token.clone())
+}
+
+/// Fetch the signed-in user's profile from Better Auth using a fresh bearer
+/// token. Returns `(user_id, email, name, image)`; `user_id` is `None` if the
+/// request fails or the response is missing an id.
+async fn fetch_profile(
+    client: &reqwest::Client,
+    backend_url: &str,
+    token: &str,
+) -> (Option<String>, String, Option<String>, Option<String>) {
+    let resp = match client
+        .get(format!("{backend_url}/api/auth/get-session"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("get-session request failed: {e}");
+            return (None, String::new(), None, None);
+        }
+    };
+    let data: serde_json::Value = match resp.json().await {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("get-session parse failed: {e}");
+            return (None, String::new(), None, None);
+        }
+    };
+    let user = &data["user"];
+    let user_id = user["id"].as_str().map(str::to_string);
+    let email = user["email"].as_str().unwrap_or_default().to_string();
+    let name = user["name"].as_str().map(str::to_string);
+    let image = user["image"].as_str().map(str::to_string);
+    (user_id, email, name, image)
+}
+
 // ── Token persistence ────────────────────────────────────────────────────────
 
 pub fn save_token(token: &str) -> Result<()> {
@@ -215,6 +376,11 @@ pub fn save_token(token: &str) -> Result<()> {
 }
 
 pub fn load_token() -> Option<String> {
+    // Prefer the multi-account vault's active token; fall back to the legacy
+    // single-token `auth.json` for backward compatibility.
+    if let Some(token) = active_token() {
+        return Some(token);
+    }
     let bytes = std::fs::read(token_path()).ok()?;
     let data: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     data["token"]

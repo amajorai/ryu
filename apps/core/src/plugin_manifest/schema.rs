@@ -540,8 +540,8 @@ mod tests {
     fn companion_label_impersonating_system_chrome_errors() {
         for bad in ["Ryu Settings", "system tools", "RYU", "My System Panel"] {
             let cfg = json!({ "label": bad });
-            let err = validate_runnable(&entry("c", RunnableKind::Companion, Some(cfg)))
-                .unwrap_err();
+            let err =
+                validate_runnable(&entry("c", RunnableKind::Companion, Some(cfg))).unwrap_err();
             assert!(
                 err.contains("impersonate system chrome"),
                 "label '{bad}' should be rejected, got: {err}"

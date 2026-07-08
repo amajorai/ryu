@@ -768,7 +768,13 @@ mod tests {
         let (status, json) = body_json(resp).await;
         assert_eq!(status, StatusCode::OK);
         // Home is a real directory, so listing it succeeds and echoes the home path.
+        // On Windows, `canonicalize` yields a verbatim (`\\?\`) prefix that the raw
+        // home path lacks, so strip it before comparing.
+        let strip_verbatim = |p: &str| p.trim_start_matches(r"\\?\").to_string();
         let home = dirs::home_dir().unwrap().to_string_lossy().into_owned();
-        assert_eq!(json["path"].as_str().unwrap(), home);
+        assert_eq!(
+            strip_verbatim(json["path"].as_str().unwrap()),
+            strip_verbatim(&home)
+        );
     }
 }

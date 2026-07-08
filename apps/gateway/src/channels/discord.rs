@@ -22,7 +22,10 @@ use serde::Deserialize;
 use serde_json::json;
 use tracing::{debug, info, warn};
 
-use crate::{config::DiscordChannelConfig, state::SharedState};
+use crate::{
+    config::{DiscordChannelConfig, GroupReplyMode},
+    state::SharedState,
+};
 
 use super::{handle_message, status::StatusReporter, Channel, InboundMessage};
 
@@ -60,6 +63,11 @@ pub struct DiscordChannel {
     team_id: Option<String>,
     /// Base URL of the Core sidecar, used when `agent_id` or `team_id` is set.
     core_url: String,
+    /// When the bot replies inside a watched (guild) channel. `Mentions` (the
+    /// default) answers only when the bot is @mentioned; `All` answers every
+    /// message. Watched channels are always multi-user, so this is applied to
+    /// every one of them.
+    group_reply_mode: GroupReplyMode,
     /// Reports this bot's live connection status to the control plane. `None`
     /// for env-configured bots (no store id), which then show as `unknown`.
     status: Option<StatusReporter>,
@@ -92,12 +100,31 @@ impl DiscordChannel {
             agent_id: cfg.agent_id,
             team_id: cfg.team_id,
             core_url: cfg.core_url,
+            group_reply_mode: cfg.group_reply_mode,
             status,
         })
     }
 
     fn auth_header(&self) -> String {
         format!("Bot {}", self.token)
+    }
+
+    /// Fetch the bot's own user id (`GET /users/@me`) so mention detection can
+    /// recognise `<@id>` mentions. Called once at the start of the poll loop; on
+    /// failure the loop proceeds with an empty id — in `Mentions` mode that means
+    /// no message matches (bot stays quiet) until the next restart.
+    async fn get_me_id(&self) -> anyhow::Result<String> {
+        let url = format!("{API_BASE}/users/@me");
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", self.auth_header())
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await?
+            .error_for_status()?;
+        let me: DiscordUser = resp.json().await?;
+        Ok(me.id)
     }
 
     /// True when this bot routes through Core's session seam (a single agent or
@@ -193,6 +220,19 @@ impl Channel for DiscordChannel {
         if let Some(reporter) = &self.status {
             reporter.connecting().await;
         }
+        // Resolve the bot's own user id once so mention detection recognises
+        // `<@id>`. Non-fatal on failure: in Mentions mode nothing matches (the
+        // bot stays quiet) until restart; All mode is unaffected.
+        let me_id = match self.get_me_id().await {
+            Ok(id) => id,
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "discord get_me failed; mention detection disabled until restart"
+                );
+                String::new()
+            }
+        };
         // Per-channel cursor: the snowflake id of the last message we processed.
         // Discord ids are monotonically increasing, so `after` cleanly excludes
         // anything we've already handled.
@@ -228,18 +268,20 @@ impl Channel for DiscordChannel {
                             if is_seed_poll {
                                 continue;
                             }
-                            // Ignore bot messages (including our own replies) to
-                            // avoid the bot talking to itself.
-                            if message.author.bot.unwrap_or(false) {
+
+                            // Decide whether to reply: skips bot/empty messages,
+                            // and in Mentions mode skips anything that doesn't
+                            // @mention the bot. Returns the mention-stripped,
+                            // speaker-prefixed text to route, or None to ignore.
+                            let Some(routed_text) =
+                                decide_reply(&message, &me_id, self.group_reply_mode)
+                            else {
                                 continue;
-                            }
-                            if message.content.trim().is_empty() {
-                                continue;
-                            }
+                            };
 
                             let inbound = InboundMessage {
                                 chat_id: channel_id.clone(),
-                                text: message.content,
+                                text: routed_text,
                             };
 
                             let channel = Arc::clone(&self);
@@ -307,6 +349,55 @@ impl Channel for DiscordChannel {
     }
 }
 
+/// Decide whether — and in what form — to route an inbound Discord message to
+/// Core. Watched channels are always multi-user (guild) channels, so `mode`
+/// applies to all of them: `Mentions` only answers when the bot is `<@id>`
+/// mentioned; `All` answers every (non-bot) message. The bot's own mention is
+/// stripped and the author's name is prefixed so Core can attribute turns.
+///
+/// Returns the text to route, or `None` to ignore the message (bot author,
+/// empty content, or unaddressed in Mentions mode).
+fn decide_reply(message: &DiscordMessage, me_id: &str, mode: GroupReplyMode) -> Option<String> {
+    // Ignore bot messages (including our own replies) to avoid self-talk.
+    if message.author.bot.unwrap_or(false) {
+        return None;
+    }
+    let content = message.content.trim();
+    if content.is_empty() {
+        return None;
+    }
+
+    let mentioned = !me_id.is_empty()
+        && (message.mentions.iter().any(|user| user.id == me_id)
+            || content.contains(&format!("<@{me_id}>"))
+            || content.contains(&format!("<@!{me_id}>")));
+
+    if mode == GroupReplyMode::Mentions && !mentioned {
+        return None;
+    }
+
+    // Strip the bot's own mention so the agent sees a clean prompt.
+    let stripped = if me_id.is_empty() {
+        content.to_string()
+    } else {
+        content
+            .replace(&format!("<@{me_id}>"), "")
+            .replace(&format!("<@!{me_id}>"), "")
+    };
+    let stripped = stripped.trim();
+    if stripped.is_empty() {
+        return None;
+    }
+
+    // Prefix the speaker so Core can attribute turns in a multi-person channel.
+    let author = message.author.username.trim();
+    if author.is_empty() {
+        Some(stripped.to_string())
+    } else {
+        Some(format!("{author}: {stripped}"))
+    }
+}
+
 // ─── Discord REST API response types (only the fields we use) ──────────────────
 
 #[derive(Debug, Deserialize)]
@@ -314,11 +405,19 @@ struct DiscordMessage {
     id: String,
     #[serde(default)]
     content: String,
-    author: DiscordAuthor,
+    author: DiscordUser,
+    /// Users explicitly mentioned in the message — the authoritative source for
+    /// detecting whether the bot was addressed.
+    #[serde(default)]
+    mentions: Vec<DiscordUser>,
 }
 
 #[derive(Debug, Deserialize)]
-struct DiscordAuthor {
+struct DiscordUser {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    username: String,
     #[serde(default)]
     bot: Option<bool>,
 }
@@ -335,8 +434,77 @@ mod tests {
             system_prompt: None,
             agent_id: None,
             team_id: None,
+            group_reply_mode: GroupReplyMode::default(),
             core_url: "http://127.0.0.1:7980".to_string(),
         }
+    }
+
+    fn msg(content: &str, mentions: Vec<&str>) -> DiscordMessage {
+        DiscordMessage {
+            id: "1".to_string(),
+            content: content.to_string(),
+            author: DiscordUser {
+                id: "user-1".to_string(),
+                username: "Ada".to_string(),
+                bot: Some(false),
+            },
+            mentions: mentions
+                .into_iter()
+                .map(|id| DiscordUser {
+                    id: id.to_string(),
+                    username: String::new(),
+                    bot: None,
+                })
+                .collect(),
+        }
+    }
+
+    const BOT_ID: &str = "999";
+
+    #[test]
+    fn ignores_bot_authored_messages() {
+        let mut message = msg("hi", vec![]);
+        message.author.bot = Some(true);
+        assert!(decide_reply(&message, BOT_ID, GroupReplyMode::All).is_none());
+    }
+
+    #[test]
+    fn mentions_mode_ignores_unaddressed_message() {
+        let message = msg("just chatting", vec![]);
+        assert!(decide_reply(&message, BOT_ID, GroupReplyMode::Mentions).is_none());
+    }
+
+    #[test]
+    fn mentions_mode_replies_when_mentioned_and_strips_mention() {
+        let message = msg("<@999> what is 2+2", vec![BOT_ID]);
+        let routed = decide_reply(&message, BOT_ID, GroupReplyMode::Mentions);
+        assert_eq!(routed.as_deref(), Some("Ada: what is 2+2"));
+    }
+
+    #[test]
+    fn mentions_mode_detects_nickname_mention_form() {
+        // `<@!id>` is the nickname mention form; both must be recognised/stripped.
+        let message = msg("<@!999> hello", vec![]);
+        let routed = decide_reply(&message, BOT_ID, GroupReplyMode::Mentions);
+        assert_eq!(routed.as_deref(), Some("Ada: hello"));
+    }
+
+    #[test]
+    fn all_mode_replies_to_every_message() {
+        let message = msg("just chatting", vec![]);
+        let routed = decide_reply(&message, BOT_ID, GroupReplyMode::All);
+        assert_eq!(routed.as_deref(), Some("Ada: just chatting"));
+    }
+
+    #[test]
+    fn empty_bot_id_disables_mention_detection() {
+        let message = msg("<@999> hi", vec!["999"]);
+        assert!(decide_reply(&message, "", GroupReplyMode::Mentions).is_none());
+        // All mode still routes (mention detection irrelevant).
+        assert_eq!(
+            decide_reply(&message, "", GroupReplyMode::All).as_deref(),
+            Some("Ada: <@999> hi")
+        );
     }
 
     #[test]
@@ -360,6 +528,7 @@ mod tests {
             system_prompt: Some("be nice".to_string()),
             agent_id: None,
             team_id: None,
+            group_reply_mode: GroupReplyMode::default(),
             core_url: "http://127.0.0.1:7980".to_string(),
         };
         let channel = DiscordChannel::new(cfg, reqwest::Client::new()).unwrap();
@@ -378,6 +547,7 @@ mod tests {
             system_prompt: None,
             agent_id: Some("acp:pi".to_string()),
             team_id: None,
+            group_reply_mode: GroupReplyMode::default(),
             core_url: "http://127.0.0.1:7980".to_string(),
         };
         let channel = DiscordChannel::new(cfg, reqwest::Client::new()).unwrap();

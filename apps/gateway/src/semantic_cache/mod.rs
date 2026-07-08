@@ -9,6 +9,7 @@ use tracing::debug;
 use crate::config::{OpenAiProviderConfig, SemanticCacheConfig};
 
 struct Entry {
+    org_id: Option<String>,
     embedding: Vec<f32>,
     response: Value,
     inserted_at: Instant,
@@ -64,7 +65,11 @@ impl SemanticCache {
     }
 
     /// Look up a cached response whose embedding is within the similarity threshold.
-    pub fn lookup(&self, query: &[f32]) -> Option<Value> {
+    ///
+    /// `org_id` scopes the nearest-neighbor search to the caller's tenant so the
+    /// match can never cross orgs. `None` (no org) forms its own bucket and never
+    /// matches a real org's entries.
+    pub fn lookup(&self, org_id: Option<&str>, query: &[f32]) -> Option<Value> {
         let threshold = self.config.similarity_threshold;
         let now = Instant::now();
 
@@ -72,6 +77,9 @@ impl SemanticCache {
         let mut best_response: Option<Value> = None;
 
         for entry in self.store.iter() {
+            if entry.org_id.as_deref() != org_id {
+                continue;
+            }
             let age = now.duration_since(entry.inserted_at).as_secs();
             if age > self.ttl_secs {
                 continue;
@@ -91,12 +99,13 @@ impl SemanticCache {
         }
     }
 
-    /// Store a new embedding + response.
-    pub fn insert(&self, embedding: Vec<f32>, response: Value) {
+    /// Store a new embedding + response, tagged with the caller's tenant.
+    pub fn insert(&self, org_id: Option<String>, embedding: Vec<f32>, response: Value) {
         let key = self.next_key.fetch_add(1, Ordering::Relaxed);
         self.store.insert(
             key,
             Entry {
+                org_id,
                 embedding,
                 response,
                 inserted_at: Instant::now(),

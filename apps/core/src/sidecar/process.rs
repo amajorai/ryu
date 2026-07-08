@@ -85,6 +85,38 @@ impl ProcessHandle {
         Ok(())
     }
 
+    /// Like [`ProcessHandle::start_path_with_env`] but the child does NOT inherit
+    /// Core's full environment: it starts from a `env_clear()`ed command seeded
+    /// with a SCRUBBED copy of the parent env (secret-like keys dropped via
+    /// [`crate::sidecar::env_scrub::scrub_child_env`]), then layers `env` on top.
+    ///
+    /// Used as defense-in-depth for the gateway child on a remote data plane (WS1),
+    /// where the child must never inherit provider keys from Core's own process
+    /// env. `env_clear()` before seeding is load-bearing — without it the child
+    /// keeps the full inherited env and the scrub is a no-op.
+    pub async fn start_path_with_scrubbed_env(
+        &self,
+        program: &str,
+        args: &[String],
+        env: &[(String, String)],
+    ) -> Result<()> {
+        let mut command = tokio::process::Command::new(program);
+        command.args(args).kill_on_drop(true);
+        command.env_clear();
+        for (key, value) in crate::sidecar::env_scrub::scrub_child_env(std::env::vars(), &[]) {
+            command.env(key, value);
+        }
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let child = command
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("failed to spawn {program}: {e}"))?;
+        *self.child.lock().unwrap() = Some(child);
+        self.running.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
     pub async fn stop(&self) -> Result<()> {
         let child = { self.child.lock().unwrap().take() };
         if let Some(mut c) = child {

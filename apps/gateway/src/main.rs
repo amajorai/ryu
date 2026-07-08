@@ -114,16 +114,18 @@ async fn main() -> anyhow::Result<()> {
     // Security guard: the gateway is an LLM proxy. Binding to a non-loopback
     // interface without auth exposes a fully open, billable proxy to the network.
     // Default bind is 0.0.0.0:7981 and require_auth is only enabled when
-    // GATEWAY_MASTER_KEY is set, so warn loudly when both conditions hold.
+    // GATEWAY_MASTER_KEY is set. This is a HARD REFUSAL, not a warning (WS2): a
+    // publicly-reachable fleet replica must never boot without auth. A loopback
+    // bind keeps the old permissive behavior for local dev.
     let is_loopback_bind = bind_addr.starts_with("127.0.0.1")
         || bind_addr.starts_with("localhost")
         || bind_addr.starts_with("[::1]");
     if !is_loopback_bind && !config.auth.require_auth {
-        tracing::warn!(
-            bind = %bind_addr,
-            "gateway is bound to a non-loopback address with auth DISABLED — \
-             anyone who can reach this port can use your providers and spend your \
-             credits. Set GATEWAY_MASTER_KEY to require auth, or bind to 127.0.0.1."
+        anyhow::bail!(
+            "refusing to start: gateway is bound to a non-loopback address ({bind_addr}) \
+             with auth DISABLED — anyone who can reach this port could use your providers \
+             and spend your credits. Set GATEWAY_MASTER_KEY (require_auth) and/or populate \
+             auth.api_keys, or bind to 127.0.0.1 for local-only use."
         );
     }
 

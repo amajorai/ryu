@@ -16,6 +16,7 @@ use tower_http::cors::CorsLayer;
 pub mod activity_api;
 pub mod approvals_api;
 pub mod auto_title;
+pub mod canvas;
 pub mod chat_suggestions;
 pub mod conversations;
 pub mod dashboard_api;
@@ -679,6 +680,9 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/auth/login", post(auth_login))
         .route("/api/auth/status", get(auth_status))
         .route("/api/auth/logout", post(auth_logout))
+        .route("/api/auth/accounts", get(auth_accounts_list))
+        .route("/api/auth/accounts/switch", post(auth_accounts_switch))
+        .route("/api/auth/accounts/remove", post(auth_accounts_remove))
         // ── Ryu Hardware Protocol (RHP v1) public surface ────────────────────
         // The realtime device link: a device presents a PER-DEVICE Bearer token,
         // which `require_auth` (which only knows the global RYU_TOKEN) would
@@ -1063,6 +1067,19 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
                 .delete(delete_document),
         )
         .route("/api/spaces/:id/search", post(search_space))
+        // Wiki page-link graph: backlinks, outgoing links, and graph topology.
+        .route(
+            "/api/spaces/:id/documents/:doc_id/backlinks",
+            get(get_document_backlinks),
+        )
+        .route(
+            "/api/spaces/:id/documents/:doc_id/links",
+            get(get_document_links),
+        )
+        .route("/api/spaces/:id/graph", get(get_space_graph))
+        // Global document-link graph across every space (static prefix → own route
+        // so it never collides with `/api/spaces/:id`).
+        .route("/api/graph", get(get_global_graph))
         // Embedding-model config + re-index (global, not per-space → own prefix so
         // the literal segments never collide with `/api/spaces/:id`).
         .route(
@@ -1206,6 +1223,18 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/gateway/evals/run", post(gateway_run_evals))
         // ── Gateway audit proxy (M4 / #177) ─────────────────────────────────
         .route("/api/gateway/audit", get(gateway_audit))
+        // ── Canvas (node-based creative playground) ─────────────────────────
+        // Static collection route before the `:id` routes (convention).
+        .route(
+            "/api/canvases",
+            get(canvas::list_canvases).post(canvas::create_canvas),
+        )
+        .route(
+            "/api/canvases/:id",
+            get(canvas::get_canvas)
+                .put(canvas::save_canvas_handler)
+                .delete(canvas::delete_canvas),
+        )
         // ── Workflows (DAG engine) ──────────────────────────────────────────
         .route("/workflows", get(list_workflows).post(create_workflow))
         .route("/workflows/:id", get(get_workflow).delete(delete_workflow))
@@ -2106,23 +2135,165 @@ async fn auth_status(State(state): State<ServerState>) -> Json<serde_json::Value
     }))
 }
 
+#[derive(serde::Deserialize, Default)]
+struct AuthLogoutBody {
+    /// When true, wipe the whole vault (sign out of every account). Otherwise
+    /// only the active account is removed and the next one becomes active.
+    #[serde(default)]
+    all: bool,
+}
+
 #[utoipa::path(
     post,
     path = "/api/auth/logout",
     tag = "Auth",
-    summary = "Clear the stored token",
+    summary = "Sign out the active account (or all with { all: true })",
+    request_body = serde_json::Value,
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-async fn auth_logout(State(state): State<ServerState>) -> Json<serde_json::Value> {
-    if let Err(e) = crate::auth::clear_token() {
-        tracing::warn!("Failed to clear token from disk: {e}");
+async fn auth_logout(
+    State(state): State<ServerState>,
+    body: Option<Json<AuthLogoutBody>>,
+) -> Json<serde_json::Value> {
+    let all = body.map(|b| b.0.all).unwrap_or(false);
+
+    if all {
+        // Clear the entire vault and the legacy token, log fully out.
+        let vault = crate::auth::AccountVault::default();
+        if let Err(e) = crate::auth::save_accounts(&vault) {
+            tracing::warn!("Failed to clear account vault: {e}");
+        }
+        if let Err(e) = crate::auth::clear_token() {
+            tracing::warn!("Failed to clear token from disk: {e}");
+        }
+        let mut s = state.auth.lock().await;
+        s.status = crate::auth::AuthStatus::Idle;
+        s.token = None;
+        s.user_code = None;
+        s.verification_uri = None;
+        return Json(json!({ "success": true, "activeUserId": serde_json::Value::Null }));
     }
+
+    // Remove just the active account, falling to the next one if present.
+    let vault = crate::auth::load_accounts();
+    let Some(active_id) = vault.active_user_id.clone() else {
+        // No vault yet — treat as legacy single-token logout.
+        if let Err(e) = crate::auth::clear_token() {
+            tracing::warn!("Failed to clear token from disk: {e}");
+        }
+        let mut s = state.auth.lock().await;
+        s.status = crate::auth::AuthStatus::Idle;
+        s.token = None;
+        s.user_code = None;
+        s.verification_uri = None;
+        return Json(json!({ "success": true, "activeUserId": serde_json::Value::Null }));
+    };
+
+    let new_active = match crate::auth::remove_account(&active_id) {
+        Ok(id) => id,
+        Err(e) => return Json(json!({ "success": false, "error": e.to_string() })),
+    };
+
     let mut s = state.auth.lock().await;
-    s.status = crate::auth::AuthStatus::Idle;
-    s.token = None;
+    s.token = crate::auth::active_token();
+    s.status = if s.token.is_some() {
+        crate::auth::AuthStatus::Authenticated
+    } else {
+        crate::auth::AuthStatus::Idle
+    };
     s.user_code = None;
     s.verification_uri = None;
-    Json(json!({ "success": true }))
+    Json(json!({ "success": true, "activeUserId": new_active }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/auth/accounts",
+    tag = "Auth",
+    summary = "List signed-in accounts (tokens never included)",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn auth_accounts_list(State(_state): State<ServerState>) -> Json<serde_json::Value> {
+    let vault = crate::auth::load_accounts();
+    let active_id = vault.active_user_id.clone();
+    let accounts: Vec<serde_json::Value> = vault
+        .accounts
+        .iter()
+        .map(|a| {
+            json!({
+                "userId": a.user_id,
+                "email": a.email,
+                "name": a.name,
+                "image": a.image,
+                "active": Some(&a.user_id) == active_id.as_ref(),
+            })
+        })
+        .collect();
+    Json(json!({ "accounts": accounts, "activeUserId": active_id }))
+}
+
+#[derive(serde::Deserialize)]
+struct AccountRefBody {
+    #[serde(rename = "userId")]
+    user_id: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/accounts/switch",
+    tag = "Auth",
+    summary = "Switch the active account",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn auth_accounts_switch(
+    State(state): State<ServerState>,
+    Json(body): Json<AccountRefBody>,
+) -> Json<serde_json::Value> {
+    match crate::auth::switch_account(&body.user_id) {
+        Ok(_) => {
+            let mut s = state.auth.lock().await;
+            s.token = crate::auth::active_token();
+            s.status = if s.token.is_some() {
+                crate::auth::AuthStatus::Authenticated
+            } else {
+                crate::auth::AuthStatus::Idle
+            };
+            Json(json!({ "success": true }))
+        }
+        Err(e) => Json(json!({ "success": false, "error": e.to_string() })),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/accounts/remove",
+    tag = "Auth",
+    summary = "Sign out one account by userId",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn auth_accounts_remove(
+    State(state): State<ServerState>,
+    Json(body): Json<AccountRefBody>,
+) -> Json<serde_json::Value> {
+    match crate::auth::remove_account(&body.user_id) {
+        Ok(new_active) => {
+            let mut s = state.auth.lock().await;
+            s.token = crate::auth::active_token();
+            s.status = if s.token.is_some() {
+                crate::auth::AuthStatus::Authenticated
+            } else {
+                crate::auth::AuthStatus::Idle
+            };
+            if s.token.is_none() {
+                s.user_code = None;
+                s.verification_uri = None;
+            }
+            Json(json!({ "success": true, "activeUserId": new_active }))
+        }
+        Err(e) => Json(json!({ "success": false, "error": e.to_string() })),
+    }
 }
 
 #[utoipa::path(
@@ -9260,6 +9431,10 @@ struct SearchBody {
     query: String,
     #[serde(default = "default_search_limit")]
     limit: usize,
+    /// Override wiki link-expansion for this search (`None` = server default,
+    /// governed by `RYU_SPACES_LINK_EXPANSION`).
+    #[serde(default)]
+    link_expansion: Option<bool>,
 }
 
 fn default_search_limit() -> usize {
@@ -9292,7 +9467,11 @@ async fn search_space(
             }
         });
     }
-    match state.spaces.search(&id, &body.query, limit).await {
+    match state
+        .spaces
+        .search_ext(&id, &body.query, limit, body.link_expansion)
+        .await
+    {
         Ok(matches) => Json(json!({ "space_id": id, "matches": matches })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -9458,6 +9637,80 @@ async fn delete_document(
 ) -> axum::response::Response {
     match state.spaces.delete_document(&doc_id).await {
         Ok(removed) => Json(json!({ "success": true, "removed": removed })).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `GET /api/spaces/:id/documents/:doc_id/backlinks` — documents linking to this
+/// document (Obsidian/Notion "linked references"), each with a context snippet.
+#[utoipa::path(
+    get,
+    path = "/api/spaces/{id}/documents/{doc_id}/backlinks",
+    tag = "Spaces",
+    summary = "List backlinks to a document",
+    params(("id" = String, Path), ("doc_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_document_backlinks(
+    State(state): State<ServerState>,
+    axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
+) -> axum::response::Response {
+    match state.spaces.get_backlinks(&doc_id).await {
+        Ok(backlinks) => Json(json!({ "doc_id": doc_id, "backlinks": backlinks })).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `GET /api/spaces/:id/documents/:doc_id/links` — outgoing links from this
+/// document (resolved doc references and pending, not-yet-created targets).
+#[utoipa::path(
+    get,
+    path = "/api/spaces/{id}/documents/{doc_id}/links",
+    tag = "Spaces",
+    summary = "List outgoing links from a document",
+    params(("id" = String, Path), ("doc_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_document_links(
+    State(state): State<ServerState>,
+    axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
+) -> axum::response::Response {
+    match state.spaces.get_outgoing_links(&doc_id).await {
+        Ok(links) => Json(json!({ "doc_id": doc_id, "links": links })).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `GET /api/spaces/:id/graph` — the document-link graph for one space.
+#[utoipa::path(
+    get,
+    path = "/api/spaces/{id}/graph",
+    tag = "Spaces",
+    summary = "Document-link graph for a space",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_space_graph(
+    State(state): State<ServerState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    match state.spaces.space_graph(&id).await {
+        Ok(graph) => Json(graph).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `GET /api/graph` — the global document-link graph across every space.
+#[utoipa::path(
+    get,
+    path = "/api/graph",
+    tag = "Spaces",
+    summary = "Global document-link graph",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_global_graph(State(state): State<ServerState>) -> axum::response::Response {
+    match state.spaces.global_graph().await {
+        Ok(graph) => Json(graph).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }

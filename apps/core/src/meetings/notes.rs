@@ -288,7 +288,7 @@ mod tests {
         assert_eq!(chunks[0].chars().count(), 100);
         assert_eq!(chunks[1].chars().count(), 100);
         assert_eq!(chunks[2].chars().count(), 90); // 160..250
-        // Consecutive windows overlap (step 80 < window 100 → 20 char overlap).
+                                                   // Consecutive windows overlap (step 80 < window 100 → 20 char overlap).
         assert!(chunks[0].chars().count() + chunks[1].chars().count() > 180);
     }
 

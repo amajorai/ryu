@@ -428,6 +428,7 @@ mod tests {
             system_prompt: None,
             agent_id: None,
             team_id: None,
+            group_reply_mode: crate::config::GroupReplyMode::default(),
             core_url: "http://127.0.0.1:7980".to_string(),
         }
     }
@@ -453,6 +454,7 @@ mod tests {
             system_prompt: Some("be terse".to_string()),
             agent_id: None,
             team_id: None,
+            group_reply_mode: crate::config::GroupReplyMode::default(),
             core_url: "http://127.0.0.1:7980".to_string(),
         };
         let channel = SlackChannel::new(cfg, reqwest::Client::new()).unwrap();
@@ -470,6 +472,7 @@ mod tests {
             system_prompt: None,
             agent_id: Some("acp:pi".to_string()),
             team_id: None,
+            group_reply_mode: crate::config::GroupReplyMode::default(),
             core_url: "http://127.0.0.1:7980".to_string(),
         };
         let channel = SlackChannel::new(cfg, reqwest::Client::new()).unwrap();

@@ -2561,7 +2561,21 @@ pub fn ryu_pi_acp_cmd() -> Option<String> {
     }
     let gateway_base = crate::sidecar::gateway::gateway_url();
     let gateway_v1 = format!("{}/v1", gateway_base.trim_end_matches('/'));
-    let token = crate::sidecar::gateway::gateway_token().unwrap_or_else(|| "ryu-local".to_owned());
+    // Fail closed on a remote data plane (WS1): a hosted multi-tenant gateway must
+    // reject the shared "ryu-local" literal, so refuse to route Pi rather than
+    // present it. Only needed when gateway routing is on — otherwise the token is
+    // unused (Pi talks straight to its own provider) and no bearer is resolved.
+    let token = if gateway {
+        match crate::sidecar::gateway::gateway_bearer() {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!(error = %e, "ryu_pi_acp_cmd: no gateway bearer, refusing to route Pi through the gateway");
+                return None;
+            }
+        }
+    } else {
+        String::new()
+    };
 
     #[cfg(target_os = "windows")]
     {
@@ -2619,7 +2633,14 @@ pub fn ryu_pi_acp_cmd() -> Option<String> {
 fn codex_acp_cmd() -> String {
     let gateway_base = crate::sidecar::gateway::gateway_url();
     let gateway_v1 = format!("{}/v1", gateway_base.trim_end_matches('/'));
-    let token = crate::sidecar::gateway::gateway_token().unwrap_or_else(|| "ryu-local".to_owned());
+    // On a remote data plane (WS1) the shared "ryu-local" literal is rejected by
+    // the hosted multi-tenant gateway; log + degrade here (this is the rarely-used
+    // Codex API-key path, and the call site is a registry-entry builder that cannot
+    // propagate a Result) — the fleet's 401 is the fail-closed backstop.
+    let token = crate::sidecar::gateway::gateway_bearer().unwrap_or_else(|e| {
+        tracing::error!(error = %e, "codex_acp_cmd: no gateway bearer on remote data plane; hosted gateway will reject");
+        "ryu-local".to_owned()
+    });
     // Windows: inject env vars via `cmd /c set VAR=val&& ...` so the AcpAgent
     // subprocess inherits them. This mirrors pi_acp_cmd()'s approach.
     format!(
@@ -2631,7 +2652,14 @@ fn codex_acp_cmd() -> String {
 fn codex_acp_cmd() -> String {
     let gateway_base = crate::sidecar::gateway::gateway_url();
     let gateway_v1 = format!("{}/v1", gateway_base.trim_end_matches('/'));
-    let token = crate::sidecar::gateway::gateway_token().unwrap_or_else(|| "ryu-local".to_owned());
+    // On a remote data plane (WS1) the shared "ryu-local" literal is rejected by
+    // the hosted multi-tenant gateway; log + degrade here (this is the rarely-used
+    // Codex API-key path, and the call site is a registry-entry builder that cannot
+    // propagate a Result) — the fleet's 401 is the fail-closed backstop.
+    let token = crate::sidecar::gateway::gateway_bearer().unwrap_or_else(|e| {
+        tracing::error!(error = %e, "codex_acp_cmd: no gateway bearer on remote data plane; hosted gateway will reject");
+        "ryu-local".to_owned()
+    });
     // POSIX: prefix the command with inline env var assignments.
     format!("OPENAI_BASE_URL={gateway_v1} OPENAI_API_KEY={token} npx -y @agentclientprotocol/codex-acp@latest")
 }
@@ -2694,20 +2722,25 @@ pub fn claude_gateway_cmd(spawn_cmd: &str) -> String {
 /// Mirrors [`claude_gateway_cmd`]'s shell handling: on Windows it re-emits the
 /// command inside a single `cmd /c set VAR=val&& …` (stripping a leading `cmd /c`
 /// so it isn't doubled); on POSIX it prefixes inline `VAR=val` assignments.
-pub fn openai_gateway_cmd(spawn_cmd: &str) -> String {
+pub fn openai_gateway_cmd(spawn_cmd: &str) -> anyhow::Result<String> {
     let gateway_base = crate::sidecar::gateway::gateway_url();
     let gateway_v1 = format!("{}/v1", gateway_base.trim_end_matches('/'));
-    let token = crate::sidecar::gateway::gateway_token().unwrap_or_else(|| "ryu-local".to_owned());
+    // Fail closed on a remote data plane (WS1): refuse to point a BYO/registry ACP
+    // agent at a hosted multi-tenant gateway with the shared "ryu-local" bearer.
+    // On the normal local path this still yields the local gateway's dev bearer.
+    let token = crate::sidecar::gateway::gateway_bearer()?;
     #[cfg(target_os = "windows")]
     {
-        format!(
+        Ok(format!(
             "cmd /c set OPENAI_BASE_URL={gateway_v1}&& set OPENAI_API_KEY={token}&& {}",
             spawn_cmd.trim_start_matches("cmd /c ")
-        )
+        ))
     }
     #[cfg(not(target_os = "windows"))]
     {
-        format!("OPENAI_BASE_URL={gateway_v1} OPENAI_API_KEY={token} {spawn_cmd}")
+        Ok(format!(
+            "OPENAI_BASE_URL={gateway_v1} OPENAI_API_KEY={token} {spawn_cmd}"
+        ))
     }
 }
 
@@ -3626,7 +3659,7 @@ mod tests {
     #[test]
     fn openai_gateway_cmd_wraps_pi_when_requested() {
         let _env_guard = crate::sidecar::gateway::lock_gateway_env();
-        let cmd = openai_gateway_cmd(&pi_acp_cmd_gated());
+        let cmd = openai_gateway_cmd(&pi_acp_cmd_gated()).expect("local bearer");
         let gateway_base = crate::sidecar::gateway::gateway_url();
         let expected_v1 = format!("{}/v1", gateway_base.trim_end_matches('/'));
 
@@ -3647,7 +3680,7 @@ mod tests {
         let prev_gw = std::env::var("RYU_GATEWAY_URL").ok();
         std::env::set_var("RYU_GATEWAY_URL", "http://custom-gw.local:7777");
 
-        let cmd = openai_gateway_cmd(&pi_acp_cmd_gated());
+        let cmd = openai_gateway_cmd(&pi_acp_cmd_gated()).expect("local bearer");
 
         match prev_gw {
             Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),

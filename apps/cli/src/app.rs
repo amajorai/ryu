@@ -368,37 +368,9 @@ pub struct BtwOverlay {
     pub scroll: u16,
 }
 
-/// Hard cap on the client-driven goal continuation loop (matches the desktop's
-/// `MAX_GOAL_TURNS`): after this many judged turns the loop stops regardless.
-pub const MAX_GOAL_TURNS: u32 = 25;
-
-/// State of an active `/goal` (a persistent completion condition judged each
-/// turn by a separate model, Claude-Code-style). Core owns the goal + judge
-/// primitive; this drives the continuation loop client-side.
-#[derive(Default)]
-pub struct ChatGoal {
-    /// The completion condition. `None` = no active goal.
-    pub condition: Option<String>,
-    /// The judge's most recent reason.
-    pub last_reason: Option<String>,
-    /// Turns the judge has evaluated (server-reported).
-    pub turns: u32,
-    /// Client-side count of auto-continuations this goal has triggered. A local
-    /// backstop independent of the server's `turns` so a misbehaving judge
-    /// (e.g. always `turns:0, stop:false`) can't drive an unbounded send loop.
-    pub loop_count: u32,
-    /// Set once the judge decides the condition is met.
-    pub achieved: bool,
-    /// True while a judge call is in flight.
-    pub judging: bool,
-    /// When the goal was set (drives the elapsed timer).
-    pub started_at: Option<Instant>,
-    /// Last judge error, if any.
-    pub error: Option<String>,
-}
-
-/// Ephemeral result of a double-check review (shown in a dismissible overlay,
-/// never persisted — Core is stateless here).
+/// Ephemeral overlay showing out-of-band plugin notes streamed by Core's
+/// turn-hooks (double-check review, "Goal met.", verifier report). Notes arrive
+/// as `data-plugin_note` frames in the chat response; nothing is persisted.
 #[derive(Default)]
 pub struct DoubleCheckOverlay {
     pub open: bool,
@@ -494,6 +466,11 @@ pub struct App {
     pub chat: ChatState,
     /// Cached auth info, refreshed periodically.
     pub auth_info: Option<AuthInfo>,
+    /// Signed-in accounts (multi-account switcher), fetched from Core
+    /// `GET /api/auth/accounts`. Core owns the vault; this is a read cache.
+    pub accounts: Vec<crate::auth::Account>,
+    /// Highlighted row in the Account tab's accounts list.
+    pub account_index: usize,
     /// True while the browser OAuth login flow is in progress.
     pub login_pending: bool,
     /// Which sidebar tab is active on the main screen.
@@ -578,8 +555,8 @@ pub struct App {
     /// Ephemeral `/btw` side-question overlay state (Chat tab).
     pub btw: BtwOverlay,
     /// Stable conversation id for the current chat. Sent on every turn so Core
-    /// persists the conversation; `/goal`, `/double-check`, and sessions all key
-    /// off it. Reset to a fresh uuid on "new chat".
+    /// persists the conversation; goal/proof turn-hooks and sessions all key off
+    /// it. Reset to a fresh uuid on "new chat".
     pub conversation_id: String,
     /// ACP model override set via `/model <id>` (sent as `acp_model`). `None`
     /// leaves the agent's configured model in force.
@@ -587,11 +564,10 @@ pub struct App {
     /// Team to route the chat to via `@team` / `/team <id>` (sent as `team_id`).
     /// Mutually exclusive with `selected_agent` (team wins).
     pub selected_team: Option<String>,
-    /// Active `/goal` state + client-driven continuation loop.
-    pub chat_goal: ChatGoal,
     /// Whether the per-turn double-check review is armed (toggled with `/check`).
+    /// Sent as the `io.ryu.double-check` plugin flag so Core arms its turn-hook.
     pub double_check_on: bool,
-    /// Result overlay for the last double-check review.
+    /// Overlay for out-of-band plugin notes streamed by Core's turn-hooks.
     pub double_check: DoubleCheckOverlay,
     /// Read-only sessions (runs) overlay for the current conversation.
     pub sessions_overlay: SessionsOverlay,
@@ -863,6 +839,8 @@ impl App {
             core_connected: false,
             chat: ChatState::new(),
             auth_info: None,
+            accounts: Vec::new(),
+            account_index: 0,
             login_pending: false,
             active_tab: SidebarTab::Services,
             click_regions: ClickRegions::default(),
@@ -905,7 +883,6 @@ impl App {
             conversation_id: uuid::Uuid::new_v4().to_string(),
             selected_model: None,
             selected_team: None,
-            chat_goal: ChatGoal::default(),
             double_check_on: false,
             double_check: DoubleCheckOverlay::default(),
             sessions_overlay: SessionsOverlay::default(),

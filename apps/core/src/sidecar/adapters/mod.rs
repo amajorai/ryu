@@ -1070,11 +1070,14 @@ fn default_agent_route(reg: &ProviderRegistry) -> AgentRoute {
 /// gateway URL + token are injected as env vars into the Pi subprocess so every
 /// outbound model call the Pi process makes goes through the gateway's firewall,
 /// budget, and audit pipeline (U18/U28).
-fn ryu_agent_route(acp_registry: &AcpAgentRegistry, provider_reg: &ProviderRegistry) -> AgentRoute {
+fn ryu_agent_route(
+    acp_registry: &AcpAgentRegistry,
+    provider_reg: &ProviderRegistry,
+) -> Option<AgentRoute> {
     // Prefer Core's own managed Pi binary (~/.ryu/bin/pi). This is a separate
     // install from any Pi the user has on PATH — same relationship as OpenClaw to Pi.
     if let Some(cmd) = acp::ryu_pi_acp_cmd() {
-        return AgentRoute::Acp { spawn_cmd: cmd };
+        return Some(AgentRoute::Acp { spawn_cmd: cmd });
     }
 
     // Managed binary not installed yet (first run / setup pending). Fall back to
@@ -1094,8 +1097,21 @@ fn ryu_agent_route(acp_registry: &AcpAgentRegistry, provider_reg: &ProviderRegis
             let gateway = crate::pi_config::is_gateway_routing();
             let gateway_base = crate::sidecar::gateway::gateway_url();
             let gateway_v1 = format!("{}/v1", gateway_base.trim_end_matches('/'));
-            let token =
-                crate::sidecar::gateway::gateway_token().unwrap_or_else(|| "ryu-local".to_owned());
+            // Fail closed on a remote data plane (WS1): a hosted multi-tenant gateway
+            // must reject the shared "ryu-local" literal, so refuse to route this
+            // fallback Pi rather than present it. Only resolved when gateway routing
+            // is on (otherwise the token is unused and Pi talks straight to provider).
+            let token = if gateway {
+                match crate::sidecar::gateway::gateway_bearer() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::error!(error = %e, "ryu fallback: no gateway bearer, refusing to route fallback Pi through the gateway");
+                        return None;
+                    }
+                }
+            } else {
+                String::new()
+            };
             let gated_cmd = if cfg!(target_os = "windows") {
                 let gateway_env = if gateway {
                     format!("set OPENAI_BASE_URL={gateway_v1}&& set OPENAI_API_KEY={token}&& ")
@@ -1114,14 +1130,14 @@ fn ryu_agent_route(acp_registry: &AcpAgentRegistry, provider_reg: &ProviderRegis
                 };
                 format!("{gateway_env}PI_CODING_AGENT_DIR={config_dir} {spawn_cmd}")
             };
-            return AgentRoute::Acp {
+            return Some(AgentRoute::Acp {
                 spawn_cmd: gated_cmd,
-            };
+            });
         }
     }
 
     // No Pi available at all — fall back to the plain-LLM default.
-    default_agent_route(provider_reg)
+    Some(default_agent_route(provider_reg))
 }
 
 /// Resolve a chat request into a concrete [`AgentRoute`].
@@ -1151,7 +1167,7 @@ fn agent_route(
     // Ryu flagship: Pi engine with gateway on top. Checked before the generic
     // default so "ryu" never falls through to the plain-LLM path.
     if agent_id == Some("ryu") {
-        return Some(ryu_agent_route(acp_registry, provider_reg));
+        return ryu_agent_route(acp_registry, provider_reg);
     }
     if is_default_agent(agent_id) {
         return Some(default_agent_route(provider_reg));
@@ -1183,7 +1199,13 @@ fn agent_route(
             // egress is governed (the lever this whole feature exists for). When
             // off, run the command verbatim (its own provider calls, ungoverned).
             let spawn_cmd = if crate::agent_routing::is_gateway_routing(route_id) {
-                acp::openai_gateway_cmd(cmd)
+                match acp::openai_gateway_cmd(cmd) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!(error = %e, route_id, "agent_route: refusing gateway routing for BYO acp-exec agent without a bearer");
+                        return None;
+                    }
+                }
             } else {
                 cmd.to_owned()
             };
@@ -1258,7 +1280,13 @@ fn agent_route(
                 // agent at the gateway via the OpenAI base-URL swap. Only meaningful
                 // for agents whose client honours OPENAI_BASE_URL; a harmless no-op
                 // otherwise (e.g. Gemini/OpenClaw/Hermes).
-                acp::openai_gateway_cmd(spawn_cmd)
+                match acp::openai_gateway_cmd(spawn_cmd) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!(error = %e, route_id, "agent_route: refusing generic gateway routing for registry ACP agent without a bearer");
+                        return None;
+                    }
+                }
             } else {
                 spawn_cmd.clone()
             };

@@ -621,6 +621,10 @@ fn render_main_app(f: &mut Frame, app: &mut App) {
             if app.auth_info.is_some() {
                 vec![
                     ("tab", "switch", HintAction::SwitchTab),
+                    ("↑↓", "nav", HintAction::NavUp),
+                    ("enter", "switch acct", HintAction::Pick),
+                    ("a", "add", HintAction::Login),
+                    ("d", "sign out", HintAction::Logout),
                     ("r", "refresh", HintAction::Refresh),
                     ("L", "logout", HintAction::Logout),
                     ("q", "quit", HintAction::Quit),
@@ -1192,6 +1196,48 @@ fn render_account_content(f: &mut Frame, area: Rect, app: &mut App) {
                     Style::default().fg(FG),
                 ),
             ]));
+
+            // ── Multi-account switcher ──
+            if !app.accounts.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "  Accounts",
+                    Style::default().fg(FG).add_modifier(Modifier::BOLD),
+                )));
+                for (i, account) in app.accounts.iter().enumerate() {
+                    let selected = i == app.account_index;
+                    let marker = if account.active { "●" } else { " " };
+                    let marker_style = if account.active {
+                        Style::default().fg(SUCCESS)
+                    } else {
+                        Style::default().fg(MUTED)
+                    };
+                    let label = account
+                        .name
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .or(account.email.as_deref())
+                        .unwrap_or(account.user_id.as_str());
+                    let email_suffix = match (&account.name, &account.email) {
+                        (Some(n), Some(e)) if !n.is_empty() && n != e => format!("  {e}"),
+                        _ => String::new(),
+                    };
+                    let row_fg = if selected { HOVER_FG } else { FG };
+                    let row_bg = if selected { HOVER_BG } else { Color::Reset };
+                    lines.push(Line::from(vec![
+                        Span::styled(if selected { "  ▸ " } else { "    " }, marker_style),
+                        Span::styled(marker, marker_style),
+                        Span::styled(" ", Style::default().bg(row_bg)),
+                        Span::styled(label.to_owned(), Style::default().fg(row_fg).bg(row_bg)),
+                        Span::styled(email_suffix, Style::default().fg(MUTED).bg(row_bg)),
+                    ]));
+                }
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "  ↑/↓ move  ⏎ switch  a add account  d sign out  r refresh",
+                    Style::default().fg(MUTED),
+                )));
+            }
         }
         None => {
             lines.push(Line::from(""));
@@ -2351,12 +2397,10 @@ fn render_feature_tab(f: &mut Frame, area: Rect, app: &App, tab: SidebarTab) {
 // ── Chat tab content ──────────────────────────────────────────────────────────
 
 fn render_chat_content(f: &mut Frame, area: Rect, app: &mut App) {
-    // A status bar appears above the composer whenever a goal is active, the
-    // double-check is armed, or a model/team override is set.
-    let show_status = app.chat_goal.condition.is_some()
-        || app.double_check_on
-        || app.selected_model.is_some()
-        || app.selected_team.is_some();
+    // A status bar appears above the composer whenever the double-check is
+    // armed or a model/team override is set.
+    let show_status =
+        app.double_check_on || app.selected_model.is_some() || app.selected_team.is_some();
     let constraints: &[Constraint] = if show_status {
         &[
             Constraint::Length(2), // header
@@ -2426,7 +2470,7 @@ fn render_chat_content(f: &mut Frame, area: Rect, app: &mut App) {
         }
     }
     header_spans.push(Span::styled(
-        "  ·  ^p palette · ^a agent · /goal /check /model /team /sessions /btw",
+        "  ·  ^p palette · ^a agent · /goal /proof /check /model /team /sessions /btw",
         Style::default().fg(MUTED),
     ));
     f.render_widget(Paragraph::new(Line::from(header_spans)), header_area);
@@ -2585,46 +2629,10 @@ fn render_chat_content(f: &mut Frame, area: Rect, app: &mut App) {
     }
 }
 
-/// One-line status strip above the composer: active goal (+ live timer, turn
-/// count, latest judge reason), the double-check arm, and model/team overrides.
+/// One-line status strip above the composer: the double-check arm and
+/// model/team overrides.
 fn render_chat_status_bar(f: &mut Frame, area: Rect, app: &App) {
     let mut spans: Vec<Span> = Vec::new();
-    if let Some(cond) = &app.chat_goal.condition {
-        let icon = if app.chat_goal.achieved {
-            "✓"
-        } else if app.chat_goal.judging {
-            "…"
-        } else {
-            "◎"
-        };
-        let color = if app.chat_goal.achieved {
-            SUCCESS
-        } else {
-            ACCENT
-        };
-        let mut label = format!(" {icon} goal: {cond}");
-        if let Some(started) = app.chat_goal.started_at {
-            let secs = started.elapsed().as_secs();
-            label.push_str(&format!(
-                "  ({}m{:02}s · turn {}/{})",
-                secs / 60,
-                secs % 60,
-                app.chat_goal.turns,
-                crate::app::MAX_GOAL_TURNS
-            ));
-        }
-        spans.push(Span::styled(
-            label,
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        ));
-        if let Some(reason) = &app.chat_goal.last_reason {
-            let trimmed: String = reason.chars().take(60).collect();
-            spans.push(Span::styled(
-                format!(" — {trimmed}"),
-                Style::default().fg(MUTED),
-            ));
-        }
-    }
     if app.double_check_on {
         spans.push(Span::styled(
             "  ✓✓ double-check",
@@ -2640,7 +2648,8 @@ fn render_chat_status_bar(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-/// Centered overlay showing the last double-check review (verdict + critique).
+/// Centered overlay showing out-of-band plugin notes streamed by Core's
+/// turn-hooks (double-check review, "Goal met.", verifier report).
 fn render_double_check_overlay(f: &mut Frame, area: Rect, app: &App) {
     let width = (area.width.saturating_mul(7) / 10)
         .clamp(40, 100)
@@ -2657,12 +2666,7 @@ fn render_double_check_overlay(f: &mut Frame, area: Rect, app: &App) {
     };
     f.render_widget(Clear, popup);
 
-    let (title, title_color) = match (app.double_check.loading, app.double_check.ok) {
-        (true, _) => (" Double-check · reviewing… ", ACCENT),
-        (false, Some(true)) => (" Double-check · ✓ no issues ", SUCCESS),
-        (false, Some(false)) => (" Double-check · ⚠ issue flagged ", DANGER),
-        (false, None) => (" Double-check ", ACCENT),
-    };
+    let (title, title_color) = (" Plugin note ", ACCENT);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     if let Some(err) = &app.double_check.error {

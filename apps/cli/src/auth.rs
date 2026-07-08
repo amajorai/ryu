@@ -317,6 +317,75 @@ pub async fn revoke_all_other_sessions(backend_url: &str, token: &str) -> Result
     Ok(())
 }
 
+// ── Multi-account (Core owns the vault) ──────────────────────────────────
+
+/// One signed-in account as returned by Core's `/api/auth/accounts`. Tokens
+/// never leave the device, so this safe shape carries no token — only the
+/// fields the switcher renders plus the `active` marker.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Account {
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub image: Option<String>,
+    #[serde(default)]
+    pub active: bool,
+}
+
+/// `GET {core}/api/auth/accounts` — list every signed-in account. Core owns the
+/// vault; the CLI never stores accounts locally.
+pub async fn fetch_accounts() -> Result<Vec<Account>> {
+    let core = core_url();
+    let resp = HTTP
+        .get(format!("{core}/api/auth/accounts"))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .context("failed to reach Ryu Core")?;
+    let body = check_resp(resp).await?;
+    let accounts = body
+        .get("accounts")
+        .and_then(|a| a.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| serde_json::from_value::<Account>(v.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(accounts)
+}
+
+/// `POST {core}/api/auth/accounts/switch` — make `user_id` the active account.
+pub async fn switch_account(user_id: &str) -> Result<()> {
+    post_account_action("switch", user_id).await
+}
+
+/// `POST {core}/api/auth/accounts/remove` — sign one account out of the vault.
+pub async fn remove_account(user_id: &str) -> Result<()> {
+    post_account_action("remove", user_id).await
+}
+
+async fn post_account_action(action: &str, user_id: &str) -> Result<()> {
+    let core = core_url();
+    let resp = HTTP
+        .post(format!("{core}/api/auth/accounts/{action}"))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({ "userId": user_id }))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .context("failed to reach Ryu Core")?;
+    let body = check_resp(resp).await?;
+    if body.get("success").and_then(|v| v.as_bool()) == Some(false) {
+        anyhow::bail!("{}", extract_error(&body));
+    }
+    Ok(())
+}
+
 // ── Billing / subscription ───────────────────────────────────────────────
 
 pub async fn fetch_subscription_status(

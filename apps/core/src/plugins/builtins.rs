@@ -93,13 +93,31 @@ pub const CORE_PLUGINS: &[&str] = &[
     "io.ryu.sandbox",
     "io.ryu.engines",
     "io.ryu.durable",
+    "io.ryu.goal",
+    "io.ryu.proof",
+    "io.ryu.double-check",
 ];
 
 /// The subset of [`CORE_PLUGINS`] that should be **enabled by default** on a
 /// fresh install (seeded at startup when the install has no prior record). The
 /// opt-in Core plugins (firewall/routing/sandbox/headroom) are deliberately
 /// excluded — they only activate when the user enables them.
-pub const CORE_DEFAULT_ON: &[&str] = &["io.ryu.engines", "io.ryu.durable"];
+///
+/// The chat turn-hook plugins (`goal`/`proof`/`double-check`) ship default-on so
+/// their features (persistent goals, proof-of-work verification, answer review)
+/// work on **every surface** with zero setup, exactly like the built-in chat
+/// commands they replaced. This is only affordable because each declares a cheap
+/// `match` pre-gate (see [`crate::plugin_manifest::HookMatch`]): an idle hook
+/// costs a flag/prefix check or one KV read, never a sandbox spawn. They stay
+/// real, swappable plugins — a user can disable any of them, and the fixture is
+/// the reference a third party can fork.
+pub const CORE_DEFAULT_ON: &[&str] = &[
+    "io.ryu.engines",
+    "io.ryu.durable",
+    "io.ryu.goal",
+    "io.ryu.proof",
+    "io.ryu.double-check",
+];
 
 /// The [`crate::plugin_manifest::PluginTier`] of a plugin, derived from
 /// membership in [`CORE_PLUGINS`]. Anything not listed is Community.

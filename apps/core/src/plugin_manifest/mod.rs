@@ -305,6 +305,35 @@ pub struct TurnHookContribution {
     pub on: String,
     /// The JS hook body executed in the sandbox (returns a directive).
     pub code: String,
+    /// Optional cheap pre-gate. When present, [`crate::plugin_host`] evaluates it
+    /// in Rust **before** spawning the sandbox, so an idle hook (e.g. double-check
+    /// with its toggle off, or goal with no active condition) costs a flag/prefix
+    /// check or one KV read instead of a Deno process. This is what makes it safe
+    /// to ship these hooks **enabled by default** on every surface. Absent (or all
+    /// fields empty) → the hook always runs, preserving prior behaviour.
+    #[serde(default, rename = "match")]
+    pub run_when: Option<HookMatch>,
+}
+
+/// A declarative pre-gate for a [`TurnHookContribution`]. The conditions are
+/// OR-ed: the hook runs if **any** present condition matches. An empty match
+/// (every field default) means "always run". Kept intentionally small — richer
+/// matching belongs inside the hook JS, this only exists to skip the sandbox
+/// spawn on turns where the hook provably cannot act.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct HookMatch {
+    /// Run only if the request set this composer flag true (`ctx.flags[flag]`),
+    /// e.g. `"io.ryu.double-check"`.
+    #[serde(default)]
+    pub flag: Option<String>,
+    /// Run if the last user message (trimmed) starts with any of these prefixes,
+    /// e.g. `["/goal"]`. This is how a slash-command hook wakes up.
+    #[serde(default)]
+    pub commands: Vec<String>,
+    /// Run if the plugin has stored state for this conversation (its default KV
+    /// namespace has a value keyed by `conversation_id`), e.g. an active goal.
+    #[serde(default)]
+    pub stateful: bool,
 }
 
 impl Contributes {
@@ -417,7 +446,10 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // Turn-hook plugins (the migrated, formerly-hardcoded features). These ship
     // as built-in fixtures but are built exactly like a third-party plugin would
     // be: a manifest + an inline JS hook reaching Core only through the
-    // capability-gated plugin host. Community-tier (install-then-enable).
+    // capability-gated plugin host. `goal`/`proof`/`double-check` are Core-tier
+    // and default-on (see `plugins::builtins::CORE_DEFAULT_ON`) so their features
+    // work on every surface with zero setup, gated cheaply by each hook's `match`
+    // block; `advisor` stays Community (install-then-enable).
     include_str!("fixtures/double-check.plugin.json"),
     include_str!("fixtures/goal.plugin.json"),
     include_str!("fixtures/advisor.plugin.json"),
@@ -425,6 +457,11 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // judge, each round spawns an INDEPENDENT verifier sub-agent (grant
     // `hook:run-agent`) that gathers real evidence with tools before deciding.
     include_str!("fixtures/proof.plugin.json"),
+    // `rtk` surfaces the built-in RTK (Rust Token Killer) command-wrapping tool
+    // (`rtk__run`, a native provider in `sidecar/mcp/rtk.rs`) as an installable
+    // plugin: store presence + availability (detect-on-PATH) + the Phase-2
+    // auto-wrap settings. Community-tier, opt-in; the `rtk` binary is BYO.
+    include_str!("fixtures/rtk.plugin.json"),
 ];
 
 /// Loader that merges built-in manifests with user-installed ones from

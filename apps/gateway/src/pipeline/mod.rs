@@ -585,7 +585,7 @@ fn pre_process(
     };
 
     // Build exact-match cache key from the (possibly sanitized) body.
-    let cache_key = Cache::make_key(&decision.model, &body["messages"]);
+    let cache_key = Cache::make_key(ctx.org_id.as_deref(), &decision.model, &body["messages"]);
 
     Ok((decision, cache_key))
 }
@@ -637,7 +637,7 @@ pub async fn run(
     ) {
         let text = SemanticCache::messages_to_text(&body["messages"]);
         if let Ok(emb) = sc.get_embedding(&text, &state.http, openai_cfg).await {
-            if let Some(cached) = sc.lookup(&emb) {
+            if let Some(cached) = sc.lookup(ctx.org_id.as_deref(), &emb) {
                 debug!(request_id = %ctx.request_id, "semantic cache hit");
                 state.metrics.inc_semantic_cache_hit();
                 state.metrics.inc_cache_hit();
@@ -958,7 +958,7 @@ pub async fn run(
 
                 // 12b. Semantic cache store (if we fetched an embedding earlier)
                 if let (Some(sc), Some(emb)) = (&state.semantic_cache, semantic_embedding) {
-                    sc.insert(emb, response.clone());
+                    sc.insert(ctx.org_id.clone(), emb, response.clone());
                 }
 
                 // 13. Update audit token totals (per key) and budget counters

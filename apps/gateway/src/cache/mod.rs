@@ -26,9 +26,22 @@ impl Cache {
         }
     }
 
-    /// Build a deterministic cache key from the model and messages array.
-    pub fn make_key(model: &str, messages: &Value) -> String {
+    /// Build a deterministic cache key from the tenant, model and messages array.
+    ///
+    /// `org_id` scopes the key per tenant so one org can never be served
+    /// another org's cached response. A discriminant byte keeps `None` (no org,
+    /// e.g. single-tenant or master key) in its own bucket: it can never collide
+    /// with a real org, and two distinct orgs never share a key.
+    pub fn make_key(org_id: Option<&str>, model: &str, messages: &Value) -> String {
         let mut hasher = Sha256::new();
+        match org_id {
+            Some(org) => {
+                hasher.update([1u8]);
+                hasher.update(org.as_bytes());
+            }
+            None => hasher.update([0u8]),
+        }
+        hasher.update(b"\n");
         hasher.update(model.as_bytes());
         hasher.update(b"\n");
         // Use compact serialisation so key is stable regardless of JSON whitespace

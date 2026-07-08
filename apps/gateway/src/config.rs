@@ -65,6 +65,18 @@ pub struct GatewayConfig {
 
     #[serde(default)]
     pub credits: CreditsConfig,
+
+    /// Fleet mode (managed-cloud WS2). When true, this gateway is a publicly
+    /// reachable multi-tenant replica sitting behind a co-located load balancer /
+    /// reverse proxy, so external callers arrive over the loopback interface and
+    /// appear to the process as `127.0.0.1`. Under fleet mode the admin gate
+    /// (`/v1/config`, `/v1/audit`) DROPS loopback trust entirely — those
+    /// endpoints require the master key even from a loopback peer, because
+    /// "loopback" no longer implies "local operator". Off by default (loopback
+    /// trust preserved for local dev); set via `RYU_GATEWAY_FLEET`. Nothing
+    /// hardcoded.
+    #[serde(default)]
+    pub fleet: bool,
 }
 
 /// Platform-credits wallet debit hook (marketplace monetization #486, spec §4).
@@ -1449,6 +1461,7 @@ impl GatewayConfig {
                     system_prompt,
                     agent_id,
                     team_id,
+                    group_reply_mode: group_reply_mode_from_env("TELEGRAM"),
                     core_url,
                 });
             }
@@ -1499,6 +1512,7 @@ impl GatewayConfig {
                     system_prompt,
                     agent_id,
                     team_id,
+                    group_reply_mode: group_reply_mode_from_env("SLACK"),
                     core_url,
                 });
             }
@@ -1546,6 +1560,7 @@ impl GatewayConfig {
                     system_prompt,
                     agent_id,
                     team_id,
+                    group_reply_mode: group_reply_mode_from_env("DISCORD"),
                     core_url,
                 });
             }
@@ -1611,6 +1626,7 @@ impl GatewayConfig {
                     system_prompt,
                     agent_id,
                     team_id,
+                    group_reply_mode: group_reply_mode_from_env("WHATSAPP"),
                     core_url,
                 });
             }
@@ -1761,6 +1777,16 @@ impl GatewayConfig {
             }
         }
 
+        // Fleet mode (managed-cloud WS2). A publicly-exposed multi-tenant replica
+        // sets this so the admin gate stops trusting loopback peers (an external
+        // caller through the co-located LB looks like 127.0.0.1). Config-file
+        // (`fleet = true`) is primary; this env override flips it per deployment.
+        if let Ok(raw) = std::env::var("RYU_GATEWAY_FLEET") {
+            if let Some(enabled) = parse_bool_env(&raw) {
+                config.fleet = enabled;
+            }
+        }
+
         Ok(config)
     }
 }
@@ -1790,6 +1816,20 @@ pub struct ChannelsConfig {
     pub whatsapp: Option<WhatsAppChannelConfig>,
 }
 
+/// When a bot replies inside a GROUP/multi-user chat. Direct messages are always
+/// answered regardless; this only gates the noisy group case. Mirrors the
+/// control-plane `GROUP_REPLY_MODES` (`packages/db/src/models/channel.model.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GroupReplyMode {
+    /// Reply only when the bot is @mentioned, replied to, or addressed by a
+    /// command. The safe default — a group bot otherwise answers every message.
+    #[default]
+    Mentions,
+    /// Reply to every message in the group.
+    All,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TelegramChannelConfig {
     /// Bot token issued by @BotFather.
@@ -1817,6 +1857,10 @@ pub struct TelegramChannelConfig {
     /// and takes precedence over `agent_id`. Routed through `/api/channels/run`.
     #[serde(default)]
     pub team_id: Option<String>,
+    /// When the bot replies inside a group chat (DMs always reply). Mirrors the
+    /// control-plane `groupReplyMode`; defaults to mentions-only.
+    #[serde(default)]
+    pub group_reply_mode: GroupReplyMode,
     #[serde(default = "default_core_url")]
     pub core_url: String,
 }
@@ -1855,12 +1899,26 @@ pub struct SlackChannelConfig {
     /// and takes precedence over `agent_id`. Routed through `/api/channels/run`.
     #[serde(default)]
     pub team_id: Option<String>,
+    /// When the bot replies inside a group chat (DMs always reply). Mirrors the
+    /// control-plane `groupReplyMode`; defaults to mentions-only.
+    #[serde(default)]
+    pub group_reply_mode: GroupReplyMode,
     #[serde(default = "default_core_url")]
     pub core_url: String,
 }
 
 fn default_channel_model() -> String {
     "gpt-4o".to_string()
+}
+
+/// Read a channel's group-reply mode from `<PLATFORM>_GROUP_REPLY_MODE`
+/// (e.g. `TELEGRAM_GROUP_REPLY_MODE=all`). Unset or unrecognised → the default
+/// (mentions-only), so env bots keep the safe group behavior unless opted out.
+fn group_reply_mode_from_env(platform: &str) -> GroupReplyMode {
+    match std::env::var(format!("{platform}_GROUP_REPLY_MODE")) {
+        Ok(v) if v.trim().eq_ignore_ascii_case("all") => GroupReplyMode::All,
+        _ => GroupReplyMode::Mentions,
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1893,6 +1951,10 @@ pub struct DiscordChannelConfig {
     /// and takes precedence over `agent_id`. Routed through `/api/channels/run`.
     #[serde(default)]
     pub team_id: Option<String>,
+    /// When the bot replies inside a group chat (DMs always reply). Mirrors the
+    /// control-plane `groupReplyMode`; defaults to mentions-only.
+    #[serde(default)]
+    pub group_reply_mode: GroupReplyMode,
     #[serde(default = "default_core_url")]
     pub core_url: String,
 }
@@ -1943,6 +2005,10 @@ pub struct WhatsAppChannelConfig {
     /// and takes precedence over `agent_id`. Routed through `/api/channels/run`.
     #[serde(default)]
     pub team_id: Option<String>,
+    /// When the bot replies inside a group chat (DMs always reply). Mirrors the
+    /// control-plane `groupReplyMode`; defaults to mentions-only.
+    #[serde(default)]
+    pub group_reply_mode: GroupReplyMode,
     #[serde(default = "default_core_url")]
     pub core_url: String,
 }
@@ -2238,6 +2304,7 @@ impl Default for GatewayConfig {
             compression: CompressionConfig::default(),
             tools: ToolsConfig::default(),
             credits: CreditsConfig::default(),
+            fleet: false,
         }
     }
 }

@@ -129,7 +129,11 @@ async fn diarize_if_enabled(state: &ServerState, id: &str) {
     };
     let pcm = std::fs::read(crate::meetings::audio::pcm_path(id)).unwrap_or_default();
     for (seg_id, speaker) in crate::meetings::diarize::assign(&segments, &turns, &pcm) {
-        let _ = state.meetings.store.set_segment_speaker(seg_id, &speaker).await;
+        let _ = state
+            .meetings
+            .store
+            .set_segment_speaker(seg_id, &speaker)
+            .await;
     }
 }
 
@@ -278,7 +282,13 @@ pub async fn ingest_chunk(
 
     match state
         .meetings
-        .ingest_chunk(&id, bytes, filename, query.engine.as_deref(), query.offset_ms)
+        .ingest_chunk(
+            &id,
+            bytes,
+            filename,
+            query.engine.as_deref(),
+            query.offset_ms,
+        )
         .await
     {
         Ok(segment) => (StatusCode::OK, Json(json!({ "segment": segment }))),
@@ -330,10 +340,7 @@ pub async fn finalize_meeting(
 /// Shared finalize tail: generate notes (model/effort/prompt from prefs), run
 /// diarization if enabled, auto-title, and save into the Meetings Space. Used by
 /// both the live finalize and the import path.
-async fn finalize_and_save(
-    state: &ServerState,
-    id: &str,
-) -> (StatusCode, Json<serde_json::Value>) {
+async fn finalize_and_save(state: &ServerState, id: &str) -> (StatusCode, Json<serde_json::Value>) {
     let model = resolve_notes_model(state).await;
     let effort = resolve_notes_effort(state).await;
     let prompt = resolve_notes_prompt(state).await;
@@ -417,7 +424,12 @@ pub async fn import_meeting(
 
     let meeting = match state.meetings.start_import(title).await {
         Ok(m) => m,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e })),
+            )
+        }
     };
     let id = meeting.id.clone();
 
@@ -426,7 +438,13 @@ pub async fn import_meeting(
     for (offset_ms, wav) in crate::meetings::audio::window_wavs(&decoded, 30) {
         let _ = state
             .meetings
-            .ingest_chunk(&id, wav, "import.wav".to_string(), engine.as_deref(), Some(offset_ms))
+            .ingest_chunk(
+                &id,
+                wav,
+                "import.wav".to_string(),
+                engine.as_deref(),
+                Some(offset_ms),
+            )
             .await;
     }
 

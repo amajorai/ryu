@@ -531,47 +531,9 @@ pub async fn fetch_conversations(api_url: &str) -> anyhow::Result<Vec<Conversati
     Ok(convs)
 }
 
-// ── Chat: goal + sessions ─────────────────────────────────────────────────────
+// ── Chat: sessions ────────────────────────────────────────────────────────────
 //
-// Goal set/clear are quick awaited calls (the judge loop runs as a background
-// task in chat.rs). Sessions is a read-only run history for a conversation.
-
-/// Set or replace the goal on a conversation (`PUT .../goal`).
-pub async fn set_goal(
-    api_url: &str,
-    token: Option<&str>,
-    conversation_id: &str,
-    goal: &str,
-) -> anyhow::Result<()> {
-    let client = authed_client(token);
-    let body = serde_json::json!({ "goal": goal });
-    client
-        .put(format!(
-            "{api_url}/api/conversations/{conversation_id}/goal"
-        ))
-        .header("Content-Type", "application/json")
-        .body(body.to_string())
-        .send()
-        .await?
-        .error_for_status()?;
-    Ok(())
-}
-
-/// Clear an active goal on a conversation (`DELETE .../goal`).
-pub async fn clear_goal(
-    api_url: &str,
-    token: Option<&str>,
-    conversation_id: &str,
-) -> anyhow::Result<()> {
-    let client = authed_client(token);
-    client
-        .delete(format!(
-            "{api_url}/api/conversations/{conversation_id}/goal"
-        ))
-        .send()
-        .await?;
-    Ok(())
-}
+// Sessions is a read-only run history for a conversation.
 
 /// List a conversation's runs/sessions (`GET .../sessions`). Parsed leniently —
 /// Core's row shape evolves; only the few display fields are pulled out.

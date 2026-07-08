@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "ryu",
+  "owner": {
+    "name": "A Major Pte. Ltd.",
+    "url": "https://ryuhq.com"
+  },
+  "metadata": {
+    "description": "Ryu plugins for Claude Code: drive a local Ryu Core node from your terminal.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "ryu",
+      "source": "./claude-code",
+      "description": "Drive a local Ryu Core node from Claude Code: local models, agents, workflows, RAG Spaces, and any MCP server Ryu has registered.",
+      "category": "ai",
+      "keywords": ["ryu", "mcp", "local-ai", "agents", "rag"]
+    }
+  ]
+}

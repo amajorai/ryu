@@ -28,6 +28,9 @@ use crate::sidecar::active_engine::{is_local_engine, local_engine_url, ActiveEng
 /// the title call routes through the Gateway with this model id. When unset, the
 /// resident local engine is called directly.
 const AUTO_TITLE_MODEL_PREF: &str = "auto-title-model";
+/// Preference: reasoning/thinking effort for the override title model. Only
+/// forwarded on the Gateway (override) path; empty = the provider default.
+const AUTO_TITLE_EFFORT_PREF: &str = "auto-title-effort";
 /// Preference: master toggle for chat auto-rename. Defaults on.
 const AUTO_TITLE_ENABLED_PREF: &str = "auto-title-enabled";
 
@@ -153,7 +156,15 @@ async fn generate(state: &ServerState, system: &str, user_input: &str) -> Option
     if let Ok(Some(pref)) = state.preferences.get(AUTO_TITLE_MODEL_PREF).await {
         let model = pref.trim().to_string();
         if !model.is_empty() {
-            return gateway_title(state, &model, system, user_input).await;
+            let effort = state
+                .preferences
+                .get(AUTO_TITLE_EFFORT_PREF)
+                .await
+                .ok()
+                .flatten()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            return gateway_title(state, &model, effort.as_deref(), system, user_input).await;
         }
     }
     local_title(state, system, user_input).await
@@ -176,6 +187,7 @@ async fn local_title(state: &ServerState, system: &str, user_input: &str) -> Opt
         state,
         &format!("{base}/chat/completions"),
         &model,
+        None,
         system,
         user_input,
         None,
@@ -185,9 +197,11 @@ async fn local_title(state: &ServerState, system: &str, user_input: &str) -> Opt
 }
 
 /// Route through the Gateway with an explicit model id (power-user override).
+/// `effort` is forwarded as `reasoning_effort` (empty = provider default).
 async fn gateway_title(
     state: &ServerState,
     model: &str,
+    effort: Option<&str>,
     system: &str,
     user_input: &str,
 ) -> Option<String> {
@@ -199,6 +213,7 @@ async fn gateway_title(
         state,
         &format!("{base}/v1/chat/completions"),
         model,
+        effort,
         system,
         user_input,
         token.as_deref(),
@@ -214,11 +229,12 @@ async fn post_completion(
     state: &ServerState,
     url: &str,
     model: &str,
+    effort: Option<&str>,
     system: &str,
     user_input: &str,
     bearer: Option<&str>,
 ) -> Option<serde_json::Value> {
-    let payload = json!({
+    let mut payload = json!({
         "model": model,
         "stream": false,
         "max_tokens": 256,
@@ -227,6 +243,9 @@ async fn post_completion(
             { "role": "user", "content": user_input },
         ],
     });
+    if let Some(effort) = effort {
+        payload["reasoning_effort"] = json!(effort);
+    }
     let mut req = state
         .client
         .post(url)

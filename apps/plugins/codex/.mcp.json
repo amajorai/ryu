@@ -1,0 +1,12 @@
+{
+  "mcp_servers": {
+    "ryu": {
+      "command": "bun",
+      "args": ["run", "apps/mcp/src/index.ts"],
+      "env": {
+        "RYU_CORE_URL": "http://127.0.0.1:7980",
+        "RYU_CORE_TOKEN": ""
+      }
+    }
+  }
+}

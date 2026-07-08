@@ -24,7 +24,8 @@ use uuid::Uuid;
 
 use crate::{
     config::{
-        DiscordChannelConfig, SlackChannelConfig, TelegramChannelConfig, WhatsAppChannelConfig,
+        DiscordChannelConfig, GroupReplyMode, SlackChannelConfig, TelegramChannelConfig,
+        WhatsAppChannelConfig,
     },
     pipeline::{self, RequestContext},
     state::SharedState,
@@ -251,6 +252,10 @@ struct StoredBotConfig {
     team_id: Option<String>,
     model: Option<String>,
     system_prompt: Option<String>,
+    /// When the bot replies in a group chat (mentions-only vs all). Absent on
+    /// older control planes → serde default (mentions).
+    #[serde(default)]
+    group_reply_mode: GroupReplyMode,
 }
 
 /// Top-level response from `GET /api/channels/gateway/enabled`.
@@ -324,6 +329,7 @@ fn telegram_cfg_from_store(bot: &StoredBotConfig) -> Option<TelegramChannelConfi
         system_prompt: bot.system_prompt.clone(),
         agent_id: bot.agent_id.clone(),
         team_id: bot.team_id.clone(),
+        group_reply_mode: bot.group_reply_mode,
         core_url,
     })
 }
@@ -343,6 +349,7 @@ fn slack_cfg_from_store(bot: &StoredBotConfig) -> Option<SlackChannelConfig> {
         system_prompt: bot.system_prompt.clone(),
         agent_id: bot.agent_id.clone(),
         team_id: bot.team_id.clone(),
+        group_reply_mode: bot.group_reply_mode,
         core_url,
     })
 }
@@ -366,6 +373,7 @@ fn discord_cfg_from_store(bot: &StoredBotConfig) -> Option<DiscordChannelConfig>
         system_prompt: bot.system_prompt.clone(),
         agent_id: bot.agent_id.clone(),
         team_id: bot.team_id.clone(),
+        group_reply_mode: bot.group_reply_mode,
         core_url,
     })
 }
@@ -395,6 +403,7 @@ fn whatsapp_cfg_from_store(bot: &StoredBotConfig) -> Option<WhatsAppChannelConfi
         system_prompt: bot.system_prompt.clone(),
         agent_id: bot.agent_id.clone(),
         team_id: bot.team_id.clone(),
+        group_reply_mode: bot.group_reply_mode,
         core_url: "http://127.0.0.1:7980".to_string(),
     })
 }

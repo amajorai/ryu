@@ -173,12 +173,20 @@ fn redact_auth(a: &AuthConfig) -> AuthView {
 /// `require_auth` alone (a *base*-auth flag, not an admin gate) must not be the
 /// only thing standing between a remote caller and this surface.
 /// Whether an admin request may pass WITHOUT the master key. Pure decision so the
-/// mesh-neutralization (#478, B-9) is unit-testable. The only no-master-key path
-/// is a loopback peer in no-auth mode — and that loopback trust is neutralized
-/// when the mesh is on, because under userspace networking inbound tailnet peers
-/// appear as `127.0.0.1` and would otherwise fail the gate OPEN to the tailnet.
-fn admin_loopback_allowed(peer_is_loopback: bool, require_auth: bool, mesh_on: bool) -> bool {
-    !require_auth && peer_is_loopback && !mesh_on
+/// mesh-neutralization (#478, B-9) and the fleet-neutralization (managed-cloud
+/// WS2) are unit-testable. The only no-master-key path is a loopback peer in
+/// no-auth mode — and that loopback trust is neutralized when EITHER the mesh is
+/// on OR fleet mode is on, because in both cases an inbound peer can appear as
+/// `127.0.0.1` without being the local operator: under userspace mesh networking
+/// tailnet peers are loopback, and behind a co-located fleet LB/reverse-proxy
+/// external callers are loopback. Either would otherwise fail the gate OPEN.
+fn admin_loopback_allowed(
+    peer_is_loopback: bool,
+    require_auth: bool,
+    mesh_on: bool,
+    fleet_on: bool,
+) -> bool {
+    !require_auth && peer_is_loopback && !mesh_on && !fleet_on
 }
 
 fn require_local_admin(
@@ -195,6 +203,7 @@ fn require_local_admin(
         peer.ip().is_loopback(),
         require_auth,
         crate::tools::mesh_enabled(),
+        state.config.fleet,
     ) {
         return Err(GatewayError::Unauthorized(format!(
             "{action} requires the master key."
@@ -379,25 +388,34 @@ mod tests {
 
     #[test]
     fn loopback_no_auth_no_mesh_is_allowed() {
-        // The classic local-dev case: loopback peer, no base auth, mesh off.
-        assert!(admin_loopback_allowed(true, false, false));
+        // The classic local-dev case: loopback peer, no base auth, mesh off,
+        // fleet off.
+        assert!(admin_loopback_allowed(true, false, false, false));
     }
 
     #[test]
     fn mesh_neutralizes_loopback_trust() {
         // #478 B-9: under mesh a tailnet peer appears as 127.0.0.1, so loopback
         // trust must be neutralized — admin requires the master key.
-        assert!(!admin_loopback_allowed(true, false, true));
+        assert!(!admin_loopback_allowed(true, false, true, false));
+    }
+
+    #[test]
+    fn fleet_neutralizes_loopback_trust() {
+        // WS2: behind a co-located fleet LB an external caller appears as
+        // 127.0.0.1, so fleet mode drops loopback trust — admin requires the
+        // master key even for a loopback peer.
+        assert!(!admin_loopback_allowed(true, false, false, true));
     }
 
     #[test]
     fn remote_peer_never_loopback_allowed() {
-        assert!(!admin_loopback_allowed(false, false, false));
-        assert!(!admin_loopback_allowed(false, false, true));
+        assert!(!admin_loopback_allowed(false, false, false, false));
+        assert!(!admin_loopback_allowed(false, false, true, false));
     }
 
     #[test]
     fn require_auth_forces_master_key() {
-        assert!(!admin_loopback_allowed(true, true, false));
+        assert!(!admin_loopback_allowed(true, true, false, false));
     }
 }

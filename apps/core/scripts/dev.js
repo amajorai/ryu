@@ -1,8 +1,8 @@
 // Core dev script: sets shared CARGO_TARGET_DIR, kills stale exe, spawns cargo run.
 // Using a script (not inline shell) so CARGO_TARGET_DIR propagates to cargo run.
-const { execSync, spawn } = require("node:child_process");
-const { existsSync, openSync, closeSync } = require("node:fs");
-const path = require("node:path");
+import { execSync, spawn } from "node:child_process";
+import { closeSync, existsSync, openSync } from "node:fs";
+import path from "node:path";
 
 const sharedTarget = path.resolve(
 	import.meta.dirname,

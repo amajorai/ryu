@@ -442,18 +442,14 @@ fn renders_sessions_overlay() {
 }
 
 #[test]
-fn renders_chat_with_goal_and_overrides() {
-    // The chat status bar adds spans for goal / model / team overrides.
+fn renders_chat_with_overrides() {
+    // The chat status bar adds spans for the double-check arm / model / team.
     let mut app = populated();
     app.current_screen = Screen::Chat;
     app.active_tab = SidebarTab::Chat;
     app.double_check_on = true;
     app.selected_model = Some("claude-opus".into());
     app.selected_team = Some("research-team".into());
-    app.chat_goal.condition = Some("all tests pass".into());
-    app.chat_goal.turns = 3;
-    app.chat_goal.last_reason = Some("two tests still failing".into());
-    app.chat_goal.judging = true;
     app.chat.streaming = true;
     render_all_sizes(&mut app);
 }

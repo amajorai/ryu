@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "ryu",
+  "displayName": "Ryu",
+  "version": "0.1.0",
+  "description": "Drive a local Ryu Core node from Claude Code: local models, agents, workflows, RAG Spaces, and any MCP server Ryu has registered, all behind one bundled MCP bridge.",
+  "author": {
+    "name": "A Major Pte. Ltd.",
+    "url": "https://ryuhq.com"
+  },
+  "homepage": "https://ryuhq.com",
+  "repository": "https://github.com/amajor-hq/ryu",
+  "license": "Apache-2.0",
+  "keywords": ["ryu", "mcp", "local-ai", "agents", "llm", "rag"],
+  "mcpServers": "./.mcp.json",
+  "userConfig": {
+    "ryu_core_url": {
+      "type": "string",
+      "title": "Ryu Core URL",
+      "description": "Base URL of your running Ryu Core node. A local desktop or headless node listens on 127.0.0.1:7980.",
+      "default": "http://127.0.0.1:7980"
+    },
+    "ryu_core_token": {
+      "type": "string",
+      "title": "Ryu Core token",
+      "description": "Node-admittance bearer, only if your node requires auth. Leave blank for a local loopback node.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    }
+  }
+}

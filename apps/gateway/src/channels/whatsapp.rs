@@ -426,6 +426,7 @@ mod tests {
             system_prompt: None,
             agent_id: None,
             team_id: None,
+            group_reply_mode: crate::config::GroupReplyMode::default(),
             core_url: "http://127.0.0.1:7980".to_string(),
         }
     }

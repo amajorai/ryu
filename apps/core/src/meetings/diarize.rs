@@ -48,7 +48,10 @@ struct DiarizeResponse {
 }
 
 /// POST a WAV recording to the diarize sidecar and return its speaker turns.
-pub async fn diarize_wav(client: &reqwest::Client, wav: Vec<u8>) -> Result<Vec<SpeakerTurn>, String> {
+pub async fn diarize_wav(
+    client: &reqwest::Client,
+    wav: Vec<u8>,
+) -> Result<Vec<SpeakerTurn>, String> {
     let url = format!("{}/diarize", sidecar_url().trim_end_matches('/'));
     let part = reqwest::multipart::Part::bytes(wav)
         .file_name("meeting.wav")
@@ -221,8 +224,16 @@ mod tests {
         let mut frames = vec![(0i16, 9000i16); RATE as usize]; // 0–1s
         frames.extend(vec![(0i16, 9000i16); RATE as usize]); // 1–2s
         let turns = vec![
-            SpeakerTurn { start: 0.0, end: 1.0, speaker: "SPEAKER_05".into() },
-            SpeakerTurn { start: 1.0, end: 2.0, speaker: "SPEAKER_02".into() },
+            SpeakerTurn {
+                start: 0.0,
+                end: 1.0,
+                speaker: "SPEAKER_05".into(),
+            },
+            SpeakerTurn {
+                start: 1.0,
+                end: 2.0,
+                speaker: "SPEAKER_02".into(),
+            },
         ];
         let out = assign(&segs, &turns, &pcm(&frames));
         assert_eq!(

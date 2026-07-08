@@ -54,9 +54,12 @@ pub async fn query_audit(
     // `require_auth` alone (a *base*-auth flag) must not gate this admin surface.
     if !ctx.is_master_key {
         let require_auth = state.with_auth(|a| a.require_auth);
-        // Loopback trust neutralized under mesh (#478, B-9): userspace-networking
-        // tailnet peers appear as 127.0.0.1, so a bare loopback check fails OPEN.
-        let loopback_trusted = peer.ip().is_loopback() && !crate::tools::mesh_enabled();
+        // Loopback trust is neutralized under EITHER mesh (#478, B-9) or fleet
+        // mode (managed-cloud WS2): userspace-networking tailnet peers appear as
+        // 127.0.0.1, and a co-located fleet LB makes external callers appear as
+        // 127.0.0.1 too — a bare loopback check fails OPEN in both topologies.
+        let loopback_trusted =
+            peer.ip().is_loopback() && !crate::tools::mesh_enabled() && !state.config.fleet;
         if require_auth || !loopback_trusted {
             return Err(GatewayError::Unauthorized(
                 "Audit log access requires the master key.".to_string(),

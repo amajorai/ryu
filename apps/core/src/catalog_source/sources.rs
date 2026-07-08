@@ -2118,9 +2118,7 @@ fn gate_plugin_ui_code(id: &str, detail: &Value, signed: bool) -> Result<Option<
         );
     };
     if code.len() > MAX_UI_CODE_BYTES {
-        bail!(
-            "plugin `{id}` ui_code exceeds the {MAX_UI_CODE_BYTES}-byte cap; refusing install"
-        );
+        bail!("plugin `{id}` ui_code exceeds the {MAX_UI_CODE_BYTES}-byte cap; refusing install");
     }
     let actual = compute_ui_code_sha256(code);
     if actual != declared.to_ascii_lowercase() {
@@ -3468,7 +3466,10 @@ mod tests {
         let detail = plugin_detail(Some(&hash), None);
         let err = gate_plugin_ui_code("com.acme.plugin", &detail, true)
             .expect_err("declared hash with no served code must be rejected");
-        assert!(err.to_string().contains("no ui_code was served"), "got: {err}");
+        assert!(
+            err.to_string().contains("no ui_code was served"),
+            "got: {err}"
+        );
     }
 
     #[test]

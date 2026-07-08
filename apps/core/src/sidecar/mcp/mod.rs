@@ -21,6 +21,7 @@ pub mod delegate;
 pub mod exa;
 pub mod notify_tool;
 pub mod orchestrator;
+pub mod rtk;
 pub mod sandbox;
 pub mod search_conversations;
 pub mod shadow;
@@ -411,6 +412,7 @@ impl McpRegistry {
     pub fn contains_server(&self, name: &str) -> bool {
         if name == shadow::SERVER_NAME
             || name == spider::SERVER_NAME
+            || name == rtk::SERVER_NAME
             || name == exa::SERVER_NAME
             || name == web_fetch::SERVER_NAME
             || name == sandbox::SERVER_NAME
@@ -459,6 +461,18 @@ impl McpRegistry {
                 ),
                 enabled: true,
                 available: Some(spider_bin.exists()),
+            },
+            ServerSummary {
+                name: rtk::SERVER_NAME.to_owned(),
+                command: rtk::rtk_bin_path()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "rtk".to_owned()),
+                args: vec!["run".to_owned()],
+                description: Some(
+                    "Built-in RTK (Rust Token Killer): runs a dev command and returns a token-compressed version of its output. BYO — detected on PATH (or RYU_RTK_BIN). Degrades gracefully when not installed.".to_owned(),
+                ),
+                enabled: true,
+                available: Some(rtk::is_available()),
             },
             ServerSummary {
                 name: exa::SERVER_NAME.to_owned(),
@@ -694,6 +708,7 @@ impl McpRegistry {
 
         let mut all = shadow::tools();
         all.extend(spider::tools());
+        all.extend(rtk::tools());
         all.extend(exa::tools());
         // Built-in authenticated web fetch (Identity Vault credential consumer).
         all.extend(web_fetch::tools());
@@ -1028,6 +1043,24 @@ impl McpRegistry {
                 }
             }
             return spider::dispatch(tool, arguments).await;
+        }
+
+        // Built-in RTK provider: dispatched by shelling out to the `rtk` binary
+        // (detect-on-PATH). Degrades gracefully to `available: false` when absent.
+        if server == rtk::SERVER_NAME {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool {
+                    id: tool_id.to_owned(),
+                    server: server.to_owned(),
+                    name: tool.to_owned(),
+                    description: None,
+                    input_schema: None,
+                };
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            return rtk::dispatch(tool, arguments).await;
         }
 
         // Built-in Exa provider (U040): dispatched over HTTP with a BYOK key.
@@ -1663,12 +1696,12 @@ mod tests {
         assert!(!file.mcp_servers["git"].enabled);
         let reg = McpRegistry::from_servers(file.mcp_servers);
         assert_eq!(reg.len(), 2);
-        // Two config servers plus the 14 always-present built-in providers
-        // (shadow, spider, exa, web_fetch, sandbox, notify, channel,
+        // Two config servers plus the 15 always-present built-in providers
+        // (shadow, spider, rtk, exa, web_fetch, sandbox, notify, channel,
         // search_conversations, threads, delegate, orchestrator, skills, advisor,
         // ui) — all unconditionally listed by `server_summaries`.
         let summaries = reg.server_summaries();
-        assert_eq!(summaries.len(), 16);
+        assert_eq!(summaries.len(), 17);
         assert!(summaries.iter().any(|s| s.name == shadow::SERVER_NAME));
         assert!(summaries.iter().any(|s| s.name == spider::SERVER_NAME));
         assert!(summaries.iter().any(|s| s.name == exa::SERVER_NAME));

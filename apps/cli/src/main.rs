@@ -1536,7 +1536,6 @@ async fn run_palette_action(app: &mut App, action: PaletteAction) {
             app.conversation_id = uuid::Uuid::new_v4().to_string();
             app.chat.messages.clear();
             app.chat.error = None;
-            app.chat_goal = crate::app::ChatGoal::default();
             switch_tab(app, SidebarTab::Chat);
         }
         PaletteAction::Sessions => {
@@ -1805,6 +1804,9 @@ fn send_chat_message(
     if !app.chat.input.trim().is_empty() && !app.chat.streaming {
         let input = std::mem::take(&mut app.chat.input);
         app.chat.error = None;
+        // Fresh turn: clear any plugin notes from the previous turn so this
+        // turn's notes (double-check review, "Goal met.", …) start clean.
+        app.double_check = crate::app::DoubleCheckOverlay::default();
         app.chat.messages.push(chat::ChatMessage {
             role: chat::Role::User,
             content: input,
@@ -1834,6 +1836,7 @@ fn send_chat_message(
             conversation_id: Some(app.conversation_id.clone()),
             acp_model: app.selected_model.clone(),
             team_id: app.selected_team.clone(),
+            double_check: app.double_check_on,
         };
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<chat::ChatEvent>();
@@ -1880,9 +1883,12 @@ fn start_btw(
 /// dedicated channels/overlays.
 fn is_chat_slash_command(input: &str) -> bool {
     let verb = input.split_whitespace().next().unwrap_or("");
+    // NB: `/goal` and `/proof` are intentionally NOT intercepted — Core drives
+    // them as server-side plugin turn-hooks, so they pass through verbatim as a
+    // normal chat message and reach `/api/chat/stream` as the user's text.
     matches!(
         verb,
-        "/goal" | "/check" | "/double-check" | "/model" | "/team" | "/new" | "/newchat"
+        "/check" | "/double-check" | "/model" | "/team" | "/new" | "/newchat"
     )
 }
 
@@ -1894,14 +1900,6 @@ async fn handle_chat_command(app: &mut App, cmd: &str) {
         None => (cmd, ""),
     };
     match verb {
-        "/goal" => {
-            const CLEARS: &[&str] = &["clear", "stop", "off", "reset", "none", "cancel"];
-            if rest.is_empty() || CLEARS.contains(&rest) {
-                do_clear_goal(app).await;
-            } else {
-                do_set_goal(app, rest.to_string()).await;
-            }
-        }
         "/check" | "/double-check" => {
             app.double_check_on = !app.double_check_on;
         }
@@ -1924,32 +1922,9 @@ async fn handle_chat_command(app: &mut App, cmd: &str) {
             app.conversation_id = uuid::Uuid::new_v4().to_string();
             app.chat.messages.clear();
             app.chat.error = None;
-            app.chat_goal = crate::app::ChatGoal::default();
         }
         _ => {}
     }
-}
-
-/// Set (or replace) the active goal on the current conversation.
-async fn do_set_goal(app: &mut App, goal: String) {
-    let (url, token) = api::active_url_and_token();
-    match api::set_goal(&url, token.as_deref(), &app.conversation_id, &goal).await {
-        Ok(()) => {
-            app.chat_goal = crate::app::ChatGoal {
-                condition: Some(goal),
-                started_at: Some(Instant::now()),
-                ..Default::default()
-            };
-        }
-        Err(e) => app.chat_goal.error = Some(e.to_string()),
-    }
-}
-
-/// Clear the active goal on the current conversation.
-async fn do_clear_goal(app: &mut App) {
-    let (url, token) = api::active_url_and_token();
-    let _ = api::clear_goal(&url, token.as_deref(), &app.conversation_id).await;
-    app.chat_goal = crate::app::ChatGoal::default();
 }
 
 /// Open the read-only sessions (runs) overlay for the current conversation.
@@ -2435,7 +2410,9 @@ fn do_login(
     app: &mut App,
     login_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<auth::LoginEvent>>,
 ) {
-    if app.auth_info.is_none() && !app.login_pending {
+    // Multi-account: the device flow is additive (Core upserts into the vault
+    // and keeps existing accounts), so "add account" runs even while signed in.
+    if !app.login_pending {
         let backend_url =
             std::env::var("RYU_AUTH_URL").unwrap_or_else(|_| "http://localhost:3000".into());
         *login_rx = Some(auth::spawn_login_background(&backend_url));
@@ -2447,6 +2424,51 @@ fn do_logout(app: &mut App) {
     if app.auth_info.is_some() {
         let _ = auth::clear_token();
         app.auth_info = None;
+    }
+}
+
+/// Reload the multi-account list from Core and keep the highlight in range.
+async fn refresh_accounts(app: &mut App) {
+    if let Ok(accounts) = auth::fetch_accounts().await {
+        app.accounts = accounts;
+        if app.account_index >= app.accounts.len() {
+            app.account_index = app.accounts.len().saturating_sub(1);
+        }
+    }
+}
+
+/// Switch the active account to the highlighted row (no-op if already active).
+async fn do_switch_account(app: &mut App) {
+    let Some(account) = app.accounts.get(app.account_index) else {
+        return;
+    };
+    if account.active {
+        return;
+    }
+    let user_id = account.user_id.clone();
+    if auth::switch_account(&user_id).await.is_ok() {
+        // Core mirrors the new active token into ~/.ryu/auth.json, so the local
+        // auth view reflects the switch after a re-fetch.
+        refresh_accounts(app).await;
+        app.auth_info = auth::fetch_auth_info().await;
+    }
+}
+
+/// Sign the highlighted account out of the vault. Core falls back to another
+/// account if the removed one was active, else the CLI drops to logged-out.
+async fn do_remove_account(app: &mut App) {
+    let Some(account) = app.accounts.get(app.account_index) else {
+        return;
+    };
+    let user_id = account.user_id.clone();
+    if auth::remove_account(&user_id).await.is_ok() {
+        refresh_accounts(app).await;
+        if app.accounts.is_empty() {
+            let _ = auth::clear_token();
+            app.auth_info = None;
+        } else {
+            app.auth_info = auth::fetch_auth_info().await;
+        }
     }
 }
 
@@ -2716,13 +2738,10 @@ async fn run_app<B: ratatui::backend::Backend>(
 
     // Default chat routes through Ryu Core (/api/chat/stream), which selects its
     // built-in default agent when no agent_id is sent. Built from the active
-    // node's url so chat and the goal/double-check/session calls all hit the
-    // same Core. The legacy server /ai Gemini endpoint is not a shipped path.
+    // node's url so chat and the session calls all hit the same Core. The
+    // legacy server /ai Gemini endpoint is not a shipped path.
     let chat_url = format!("{}/api/chat/stream", app.api_url);
     let mut chat_rx: Option<tokio::sync::mpsc::UnboundedReceiver<chat::ChatEvent>> = None;
-    // Post-turn hook channels: goal-judge verdicts and double-check reviews.
-    let mut goal_rx: Option<tokio::sync::mpsc::UnboundedReceiver<chat::GoalEvent>> = None;
-    let mut dc_rx: Option<tokio::sync::mpsc::UnboundedReceiver<chat::DoubleCheckEvent>> = None;
     let mut login_rx: Option<tokio::sync::mpsc::UnboundedReceiver<auth::LoginEvent>> = None;
     // `/btw` side questions hit Core directly (always Core, never the /ai
     // playground) so the answer sees the same conversation the chat does.
@@ -2744,9 +2763,19 @@ async fn run_app<B: ratatui::backend::Backend>(
                         // Keep scroll pinned to bottom while streaming
                         app.chat.scroll = usize::MAX;
                     }
+                    Ok(chat::ChatEvent::PluginNote(text)) => {
+                        // Out-of-band note from a Core plugin turn-hook (double-check
+                        // review, "Goal met.", verifier report). Surface it in the
+                        // overlay, appending so multiple notes in one turn coexist.
+                        if !app.double_check.critique.is_empty() {
+                            app.double_check.critique.push('\n');
+                        }
+                        app.double_check.critique.push_str(&text);
+                        app.double_check.open = true;
+                        app.double_check.loading = false;
+                    }
                     Ok(chat::ChatEvent::Done) => {
                         app.chat.streaming = false;
-                        app.chat.turn_just_completed = true;
                         chat_rx = None;
                         break;
                     }
@@ -2762,109 +2791,6 @@ async fn run_app<B: ratatui::backend::Backend>(
                         chat_rx = None;
                         break;
                     }
-                }
-            }
-        }
-
-        // ── Post-turn hooks: goal judge + double-check ─────────────────
-        // Fire exactly once when an assistant turn finishes streaming.
-        if app.chat.turn_just_completed {
-            app.chat.turn_just_completed = false;
-            if app.double_check_on && dc_rx.is_none() {
-                app.double_check = crate::app::DoubleCheckOverlay {
-                    open: true,
-                    loading: true,
-                    ..Default::default()
-                };
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<chat::DoubleCheckEvent>();
-                dc_rx = Some(rx);
-                let (url, token) = api::active_url_and_token();
-                tokio::spawn(chat::double_check(
-                    url,
-                    app.conversation_id.clone(),
-                    token,
-                    tx,
-                ));
-            }
-            if app.chat_goal.condition.is_some() && !app.chat_goal.achieved && goal_rx.is_none() {
-                app.chat_goal.judging = true;
-                app.chat_goal.error = None;
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<chat::GoalEvent>();
-                goal_rx = Some(rx);
-                let (url, token) = api::active_url_and_token();
-                tokio::spawn(chat::judge_goal(
-                    url,
-                    app.conversation_id.clone(),
-                    token,
-                    tx,
-                ));
-            }
-        }
-
-        // ── Drain goal-judge verdicts (drives the continuation loop) ───
-        if let Some(rx) = &mut goal_rx {
-            match rx.try_recv() {
-                Ok(chat::GoalEvent::Verdict {
-                    met,
-                    reason,
-                    stop,
-                    turns,
-                }) => {
-                    app.chat_goal.judging = false;
-                    app.chat_goal.turns = turns;
-                    app.chat_goal.last_reason = Some(reason);
-                    goal_rx = None;
-                    if met {
-                        app.chat_goal.achieved = true;
-                    } else if !stop
-                        && app.chat_goal.turns < crate::app::MAX_GOAL_TURNS
-                        // Local backstop: never auto-continue past the cap even
-                        // if the server's `turns` never advances.
-                        && app.chat_goal.loop_count < crate::app::MAX_GOAL_TURNS
-                        && !app.chat.streaming
-                    {
-                        // Not met, keep going: nudge the agent toward the goal.
-                        app.chat_goal.loop_count += 1;
-                        app.chat.input = "Continue working toward the goal.".to_string();
-                        send_chat_message(&mut app, &chat_url, &mut chat_rx);
-                    }
-                }
-                Ok(chat::GoalEvent::Error(e)) => {
-                    app.chat_goal.judging = false;
-                    app.chat_goal.error = Some(e);
-                    goal_rx = None;
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
-                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                    app.chat_goal.judging = false;
-                    goal_rx = None;
-                }
-            }
-        }
-
-        // ── Drain double-check reviews ─────────────────────────────────
-        if let Some(rx) = &mut dc_rx {
-            match rx.try_recv() {
-                Ok(chat::DoubleCheckEvent::Result {
-                    ok,
-                    critique,
-                    model,
-                }) => {
-                    app.double_check.loading = false;
-                    app.double_check.ok = Some(ok);
-                    app.double_check.critique = critique;
-                    app.double_check.model = model;
-                    dc_rx = None;
-                }
-                Ok(chat::DoubleCheckEvent::Error(e)) => {
-                    app.double_check.loading = false;
-                    app.double_check.error = Some(e);
-                    dc_rx = None;
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
-                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                    app.double_check.loading = false;
-                    dc_rx = None;
                 }
             }
         }
@@ -2896,6 +2822,7 @@ async fn run_app<B: ratatui::backend::Backend>(
                 Ok(auth::LoginEvent::Success) => {
                     app.login_pending = false;
                     app.auth_info = auth::fetch_auth_info().await;
+                    refresh_accounts(&mut app).await;
                     login_rx = None;
                 }
                 Ok(auth::LoginEvent::Error(_)) => {
@@ -2938,6 +2865,9 @@ async fn run_app<B: ratatui::backend::Backend>(
                     let _ = api::fetch_install_status(&mut app).await;
                     if app.auth_info.is_none() {
                         app.auth_info = auth::fetch_auth_info().await;
+                    }
+                    if app.active_tab == SidebarTab::Account {
+                        refresh_accounts(&mut app).await;
                     }
                     if app.active_tab == SidebarTab::Apps {
                         refresh_catalog(&mut app).await;
@@ -3138,8 +3068,8 @@ async fn run_app<B: ratatui::backend::Backend>(
 
                     match app.active_tab {
                         SidebarTab::Chat => {
-                            // Double-check result overlay: dismiss with Esc/Enter/Space,
-                            // scroll the critique with Up/Down.
+                            // Plugin-note overlay: dismiss with Esc/Enter/Space,
+                            // scroll the notes with Up/Down.
                             if app.double_check.open {
                                 match (key.modifiers, key.code) {
                                     (_, KeyCode::Esc | KeyCode::Enter)
@@ -3359,8 +3289,30 @@ async fn run_app<B: ratatui::backend::Backend>(
                         }
                         SidebarTab::Account => match (key.modifiers, key.code) {
                             (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
+                            (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
+                                if app.account_index > 0 {
+                                    app.account_index -= 1;
+                                }
+                            }
+                            (KeyModifiers::NONE, KeyCode::Down | KeyCode::Char('j')) => {
+                                if !app.accounts.is_empty()
+                                    && app.account_index < app.accounts.len() - 1
+                                {
+                                    app.account_index += 1;
+                                }
+                            }
+                            (KeyModifiers::NONE, KeyCode::Enter) => {
+                                do_switch_account(&mut app).await;
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('a')) => {
+                                do_login(&mut app, &mut login_rx);
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('d') | KeyCode::Char('x')) => {
+                                do_remove_account(&mut app).await;
+                            }
                             (KeyModifiers::NONE, KeyCode::Char('r')) => {
                                 app.auth_info = auth::fetch_auth_info().await;
+                                refresh_accounts(&mut app).await;
                             }
                             (KeyModifiers::NONE, KeyCode::Char('l')) => {
                                 do_login(&mut app, &mut login_rx);

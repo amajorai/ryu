@@ -56,6 +56,27 @@ pub fn gateway_token() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Resolve the bearer Core presents to the gateway, fail-closed on a remote data
+/// plane (WS1).
+///
+/// On the normal local path a missing [`gateway_token`] falls back to the local
+/// gateway's `"ryu-local"` dev bearer (the local gateway accepts it). In
+/// [`remote_data_plane`] mode Core talks to a hosted, multi-tenant gateway fleet
+/// that MUST reject the shared `"ryu-local"` literal, so a missing token is a hard
+/// error instead of silently presenting a bearer the fleet would 401 — the caller
+/// fails closed with a clear reason rather than emitting the shared literal.
+pub fn gateway_bearer() -> anyhow::Result<String> {
+    if let Some(token) = gateway_token() {
+        return Ok(token);
+    }
+    if remote_data_plane() {
+        anyhow::bail!(
+            "remote data plane requires RYU_GATEWAY_TOKEN; refusing to present the shared \"ryu-local\" bearer to a hosted multi-tenant gateway"
+        );
+    }
+    Ok("ryu-local".to_owned())
+}
+
 /// Resolve the OpenAI-compatible base URL of the currently selected local
 /// engine, for registering it as the gateway's `local` provider (U19).
 ///
@@ -147,66 +168,17 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
         tracing::info!("gateway: routing policy plugin enabled, forcing smart routing on");
         env.push(("GATEWAY_SMART_ROUTING_ENABLED".to_owned(), "1".to_owned()));
     }
-    // Composio (#456 deep integration): inject the user's Composio API key so the
-    // gateway's tool loop is enabled — key presence alone flips
-    // `ComposioConfig.enabled` (apps/gateway/src/config.rs). Resolved from the
-    // in-process resolver (preferences-first, env fallback); this spawn path is
-    // sync, so it must not touch the async PreferencesStore. On a key change the
-    // preferences handler calls `GatewayManager::refresh()` to respawn with the
-    // new value.
-    if let Some(key) = crate::composio_auth::key() {
-        tracing::info!("gateway: Composio key present, enabling tool loop");
-        env.push(("COMPOSIO_API_KEY".to_owned(), key));
-    } else if managed_node() {
-        // On a managed node Composio is the expected zero-setup default (mirrors
-        // the OpenRouter block below); warn (do not fail) so an operator notices
-        // a missing credential. Resolved through the env fallback in
-        // `composio_auth::key()` (`RYU_COMPOSIO_API_KEY` / `COMPOSIO_API_KEY`),
-        // which a headless managed node sets — never the desktop UI.
-        tracing::warn!(
-            "gateway: managed node has no Composio key (set RYU_COMPOSIO_API_KEY); Composio tool loop will be inactive"
+    // Provider credentials (Composio / OpenRouter / Replicate / Fal). On a remote
+    // data plane (WS1) these keys live ONLY in the hosted gateway fleet — Core must
+    // hold and inject NONE of them, so skip the whole block without even resolving
+    // the local key prefs. (This is belt-and-suspenders: `start()` never spawns a
+    // local gateway in remote mode, so this env is not built there anyway.)
+    if remote_data_plane() {
+        tracing::info!(
+            "gateway: remote data plane — provider keys live in the hosted fleet, injecting none"
         );
-    }
-    // OpenRouter (A4 / #501): inject the resolved OpenRouter API key so the
-    // gateway activates its `openrouter` provider — key presence alone flips it
-    // on (apps/gateway/src/config.rs). Resolved through the same preferences-
-    // first/env-fallback resolver as Composio, so a key set in the desktop UI
-    // (persisted, never on Core's process env) still reaches the gateway. This
-    // is unconditional, not gated on `managed`: a key resolving means the
-    // operator/user wants OpenRouter, exactly like the Composio block above.
-    // The whole point on a MANAGED Ryu Cloud node is that the operator sets this
-    // once and every end user gets OpenRouter routing with zero setup.
-    if let Some(key) = crate::openrouter_auth::key() {
-        tracing::info!("gateway: OpenRouter key present, enabling openrouter provider");
-        env.push(("OPENROUTER_API_KEY".to_owned(), key));
-        // Managed nodes: privacy-by-default. Route only to OpenRouter providers
-        // that do not retain/train on prompts. Scoped to managed nodes so a
-        // self-host / BYOK user's own routing is never overridden, and skipped
-        // when the operator already pinned the policy explicitly.
-        if managed_node() && std::env::var_os("OPENROUTER_DATA_COLLECTION").is_none() {
-            tracing::info!("gateway: managed node — defaulting OpenRouter data_collection=deny");
-            env.push(("OPENROUTER_DATA_COLLECTION".to_owned(), "deny".to_owned()));
-        }
-    } else if managed_node() {
-        // On a managed node OpenRouter is the expected zero-setup default; warn
-        // (do not fail) so an operator notices a missing credential.
-        tracing::warn!(
-            "gateway: managed node has no OpenRouter key (set RYU_OPENROUTER_API_KEY); openrouter provider will be inactive"
-        );
-    }
-    // Cloud media providers (Replicate / Fal): inject the resolved keys so the
-    // gateway activates its `replicate` / `fal` providers for cloud image/video
-    // generation — key presence alone flips each on. Same preferences-first/env-
-    // fallback resolver as OpenRouter above, so a key set in the desktop UI (BYOK)
-    // or by a managed-node operator both reach the gateway. On a managed node the
-    // operator sets these once and every end user gets cloud media with zero setup.
-    if let Some(key) = crate::replicate_auth::key() {
-        tracing::info!("gateway: Replicate key present, enabling replicate media provider");
-        env.push(("REPLICATE_API_KEY".to_owned(), key));
-    }
-    if let Some(key) = crate::fal_auth::key() {
-        tracing::info!("gateway: Fal key present, enabling fal media provider");
-        env.push(("FAL_API_KEY".to_owned(), key));
+    } else {
+        push_provider_key_env(&mut env);
     }
     // Unified tool gateway (#475): point the gateway's `providers.core` at this
     // Core instance so the gateway's search-based tool loop and `/v1/exec/tool`
@@ -304,6 +276,74 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
     env
 }
 
+/// Resolve and inject the local provider-credential env (Composio / OpenRouter /
+/// Replicate / Fal) onto the gateway spawn env. Only called on a LOCAL data plane
+/// (see [`gateway_spawn_env`]) — on a remote data plane the keys live only in the
+/// hosted fleet and this is never called, so no local key pref is even resolved.
+fn push_provider_key_env(env: &mut Vec<(String, String)>) {
+    // Composio (#456 deep integration): inject the user's Composio API key so the
+    // gateway's tool loop is enabled — key presence alone flips
+    // `ComposioConfig.enabled` (apps/gateway/src/config.rs). Resolved from the
+    // in-process resolver (preferences-first, env fallback); this spawn path is
+    // sync, so it must not touch the async PreferencesStore. On a key change the
+    // preferences handler calls `GatewayManager::refresh()` to respawn with the
+    // new value.
+    if let Some(key) = crate::composio_auth::key() {
+        tracing::info!("gateway: Composio key present, enabling tool loop");
+        env.push(("COMPOSIO_API_KEY".to_owned(), key));
+    } else if managed_node() {
+        // On a managed node Composio is the expected zero-setup default (mirrors
+        // the OpenRouter block below); warn (do not fail) so an operator notices
+        // a missing credential. Resolved through the env fallback in
+        // `composio_auth::key()` (`RYU_COMPOSIO_API_KEY` / `COMPOSIO_API_KEY`),
+        // which a headless managed node sets — never the desktop UI.
+        tracing::warn!(
+            "gateway: managed node has no Composio key (set RYU_COMPOSIO_API_KEY); Composio tool loop will be inactive"
+        );
+    }
+    // OpenRouter (A4 / #501): inject the resolved OpenRouter API key so the
+    // gateway activates its `openrouter` provider — key presence alone flips it
+    // on (apps/gateway/src/config.rs). Resolved through the same preferences-
+    // first/env-fallback resolver as Composio, so a key set in the desktop UI
+    // (persisted, never on Core's process env) still reaches the gateway. This
+    // is unconditional, not gated on `managed`: a key resolving means the
+    // operator/user wants OpenRouter, exactly like the Composio block above.
+    // The whole point on a MANAGED Ryu Cloud node is that the operator sets this
+    // once and every end user gets OpenRouter routing with zero setup.
+    if let Some(key) = crate::openrouter_auth::key() {
+        tracing::info!("gateway: OpenRouter key present, enabling openrouter provider");
+        env.push(("OPENROUTER_API_KEY".to_owned(), key));
+        // Managed nodes: privacy-by-default. Route only to OpenRouter providers
+        // that do not retain/train on prompts. Scoped to managed nodes so a
+        // self-host / BYOK user's own routing is never overridden, and skipped
+        // when the operator already pinned the policy explicitly.
+        if managed_node() && std::env::var_os("OPENROUTER_DATA_COLLECTION").is_none() {
+            tracing::info!("gateway: managed node — defaulting OpenRouter data_collection=deny");
+            env.push(("OPENROUTER_DATA_COLLECTION".to_owned(), "deny".to_owned()));
+        }
+    } else if managed_node() {
+        // On a managed node OpenRouter is the expected zero-setup default; warn
+        // (do not fail) so an operator notices a missing credential.
+        tracing::warn!(
+            "gateway: managed node has no OpenRouter key (set RYU_OPENROUTER_API_KEY); openrouter provider will be inactive"
+        );
+    }
+    // Cloud media providers (Replicate / Fal): inject the resolved keys so the
+    // gateway activates its `replicate` / `fal` providers for cloud image/video
+    // generation — key presence alone flips each on. Same preferences-first/env-
+    // fallback resolver as OpenRouter above, so a key set in the desktop UI (BYOK)
+    // or by a managed-node operator both reach the gateway. On a managed node the
+    // operator sets these once and every end user gets cloud media with zero setup.
+    if let Some(key) = crate::replicate_auth::key() {
+        tracing::info!("gateway: Replicate key present, enabling replicate media provider");
+        env.push(("REPLICATE_API_KEY".to_owned(), key));
+    }
+    if let Some(key) = crate::fal_auth::key() {
+        tracing::info!("gateway: Fal key present, enabling fal media provider");
+        env.push(("FAL_API_KEY".to_owned(), key));
+    }
+}
+
 /// Env var enabling the credits debit hook in Core. Default off, so a fresh
 /// local install never tries to debit a wallet. The gateway also reads
 /// `GATEWAY_CREDITS_ENABLED` directly, but Core gates the whole block on a
@@ -340,6 +380,22 @@ pub const ENV_MANAGED_NODE: &str = "RYU_MANAGED_NODE";
 /// system-info surface share one definition.
 pub fn managed_node() -> bool {
     env_truthy(ENV_MANAGED_NODE)
+}
+
+/// Env var flagging this Core node's model-call data plane as **remote** (WS1):
+/// model traffic routes to a separate hosted gateway fleet rather than a local
+/// gateway. Default off. Set truthy (`1` / `true` / `yes`) on a node whose keys
+/// live only in the remote fleet.
+pub const ENV_GATEWAY_REMOTE: &str = "RYU_GATEWAY_REMOTE";
+
+/// Whether Core's model-call data plane is remote (WS1). True when
+/// [`ENV_GATEWAY_REMOTE`] is truthy, OR this is a [`managed_node`]: a managed Ryu
+/// Cloud node routes model traffic to the hosted gateway fleet, so a managed node
+/// IS a remote-data-plane node. When true it means: do NOT spawn a local gateway,
+/// keys live ONLY in the remote fleet (inject none), and `RYU_GATEWAY_URL` +
+/// `RYU_GATEWAY_TOKEN` are required so Core has a governed endpoint to reach.
+pub fn remote_data_plane() -> bool {
+    env_truthy(ENV_GATEWAY_REMOTE) || managed_node()
 }
 
 /// Whether truthy: `1` / `true` / `yes` (case-insensitive). Anything else is
@@ -496,6 +552,28 @@ impl GatewayManager {
     /// `Ok(false)` when Core is configured to use an external gateway (caller
     /// should not assume it is up), and `Err` when a managed spawn failed.
     pub async fn start(&self) -> anyhow::Result<bool> {
+        // Remote data plane (WS1): a managed/remote Ryu Cloud node routes every
+        // model call to a separate hosted gateway fleet, so Core must NOT spawn a
+        // local (keyed) gateway — the same effect as an externally managed gateway,
+        // but the keys live only in the fleet. Require the remote endpoint + token
+        // so chat has a governed place to go; without both Core has no data plane,
+        // so fail with a clear startup error rather than silently degrading.
+        if remote_data_plane() {
+            let has_url = std::env::var(ENV_GATEWAY_URL)
+                .ok()
+                .filter(|s| !s.is_empty())
+                .is_some();
+            if !has_url || gateway_token().is_none() {
+                anyhow::bail!(
+                    "remote data plane (RYU_GATEWAY_REMOTE / managed node) requires both RYU_GATEWAY_URL and RYU_GATEWAY_TOKEN to be set; refusing to spawn a local keyed gateway"
+                );
+            }
+            tracing::info!(
+                url = %gateway_url(),
+                "gateway: remote data plane — routing to the hosted gateway fleet, not spawning a local gateway"
+            );
+            return Ok(false);
+        }
         if !is_managed() {
             tracing::info!(
                 url = %gateway_url(),
@@ -524,10 +602,20 @@ impl GatewayManager {
         // engine so a model bound to it routes through the gateway to that
         // engine (U19).
         let env = gateway_spawn_env();
-        self.handle
-            .start_path_with_env(&bin, &[format!("--bind={bind}")], &env)
-            .await
-            .map_err(|e| anyhow::anyhow!("failed to spawn ryu-gateway ({bin}): {e}"))?;
+        let args = [format!("--bind={bind}")];
+        // Defense-in-depth (WS1): `start()` returns early on a remote data plane,
+        // so this spawn is only reached on a LOCAL plane where the gateway legitimately
+        // inherits provider creds. Should a gateway child ever be spawned in remote
+        // mode, route its env through the scrub allowlist so it cannot inherit a
+        // provider key from Core's own process env.
+        let spawned = if remote_data_plane() {
+            self.handle
+                .start_path_with_scrubbed_env(&bin, &args, &env)
+                .await
+        } else {
+            self.handle.start_path_with_env(&bin, &args, &env).await
+        };
+        spawned.map_err(|e| anyhow::anyhow!("failed to spawn ryu-gateway ({bin}): {e}"))?;
 
         // Wait for health, polling for a short window.
         for _ in 0..30 {

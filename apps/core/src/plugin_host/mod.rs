@@ -105,6 +105,9 @@ pub struct HookPlugin {
     pub code: String,
     /// The capabilities the plugin was granted (its manifest `permission_grants`).
     pub grants: HashSet<String>,
+    /// Optional cheap pre-gate (from the manifest). Evaluated in Rust before the
+    /// sandbox spawn so an idle hook never pays for a Deno process.
+    pub run_when: Option<crate::plugin_manifest::HookMatch>,
 }
 
 /// The turn boundary string for the post-assistant-turn hook.
@@ -155,6 +158,7 @@ pub async fn collect_enabled_hooks(state: &ServerState) -> Vec<HookPlugin> {
                 on: hook.on.clone(),
                 code: hook.code.clone(),
                 grants: grants.clone(),
+                run_when: hook.run_when.clone(),
             });
         }
     }
@@ -185,12 +189,92 @@ pub async fn run_hooks(
         if hook.on != ON_POST_ASSISTANT_TURN {
             continue;
         }
+        // Cheap pre-gate: skip the sandbox spawn when the hook provably can't act
+        // this turn. This is what makes default-on hooks free on the hot path.
+        if !hook_should_run(state, hook, ctx).await {
+            continue;
+        }
         let directive = run_hook(state, hook, ctx).await;
         if !matches!(directive, HookDirective::None) {
             directives.push(directive);
         }
     }
     directives
+}
+
+/// Evaluate a hook's declarative `match` gate in Rust, before any sandbox spawn.
+/// No `match` (or an all-empty one) → always run. Otherwise the present
+/// conditions are OR-ed: a matching composer flag, a matching slash-command
+/// prefix on the last user turn, or existing per-conversation plugin state each
+/// wake the hook. Fail-open: any lookup error resolves to "run" so a gate glitch
+/// never silently disables a feature.
+async fn hook_should_run(state: &ServerState, hook: &HookPlugin, ctx: &HookContext) -> bool {
+    let Some(m) = &hook.run_when else {
+        return true;
+    };
+    // Decide everything that does not need a storage read first (pure + tested).
+    match gate_without_storage(m, ctx) {
+        GateVerdict::Run => true,
+        GateVerdict::Skip => false,
+        GateVerdict::CheckStateful => {
+            let Some(conv) = ctx.conversation_id.as_deref().filter(|c| !c.is_empty()) else {
+                return false;
+            };
+            let Some(store) = crate::plugin_storage::global() else {
+                return false;
+            };
+            match store.get(&hook.plugin_id, "default", conv).await {
+                Ok(Some(_)) => true,
+                Ok(None) => false,
+                // Fail-open on a storage error: run rather than silently drop.
+                Err(_) => true,
+            }
+        }
+    }
+}
+
+/// The pure (storage-free) part of the gate. Separated so the flag/command logic
+/// is unit-testable without a [`ServerState`].
+#[derive(Debug, PartialEq)]
+enum GateVerdict {
+    /// A flag/command condition matched (or no condition was declared): run now.
+    Run,
+    /// Conditions were declared, none matched, and no stateful check applies: skip.
+    Skip,
+    /// Nothing matched yet but the hook is stateful — the caller must read the KV.
+    CheckStateful,
+}
+
+fn gate_without_storage(m: &crate::plugin_manifest::HookMatch, ctx: &HookContext) -> GateVerdict {
+    let mut declared = false;
+
+    if let Some(flag) = m.flag.as_deref().filter(|f| !f.is_empty()) {
+        declared = true;
+        if ctx.flags.get(flag).copied().unwrap_or(false) {
+            return GateVerdict::Run;
+        }
+    }
+
+    if !m.commands.is_empty() {
+        declared = true;
+        if let Some(last_user) = ctx.transcript.iter().rev().find(|msg| msg.role == "user") {
+            let text = last_user.content.trim();
+            if m.commands.iter().any(|c| text.starts_with(c.as_str())) {
+                return GateVerdict::Run;
+            }
+        }
+    }
+
+    if m.stateful {
+        return GateVerdict::CheckStateful;
+    }
+
+    // A match block with no recognised condition means "always run".
+    if declared {
+        GateVerdict::Skip
+    } else {
+        GateVerdict::Run
+    }
 }
 
 /// Run one hook in the sandbox and parse its directive. Any failure (Deno
@@ -330,6 +414,98 @@ mod tests {
     #[test]
     fn directive_default_is_none() {
         assert_eq!(HookDirective::default(), HookDirective::None);
+    }
+
+    // ── Cheap pre-gate (`match`) ──────────────────────────────────────────────
+
+    use crate::plugin_manifest::HookMatch;
+
+    fn ctx_with(user: Option<&str>, flags: &[(&str, bool)]) -> HookContext {
+        let mut transcript = Vec::new();
+        if let Some(u) = user {
+            transcript.push(HookMessage {
+                role: "user".into(),
+                content: u.into(),
+            });
+        }
+        transcript.push(HookMessage {
+            role: "assistant".into(),
+            content: "…".into(),
+        });
+        HookContext {
+            conversation_id: Some("c1".into()),
+            transcript,
+            flags: flags.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn gate_flag_on_runs_off_skips() {
+        let m = HookMatch {
+            flag: Some("io.ryu.double-check".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            gate_without_storage(&m, &ctx_with(None, &[("io.ryu.double-check", true)])),
+            GateVerdict::Run
+        );
+        // Off / absent flag → skip (double-check must not spawn Deno every turn).
+        assert_eq!(
+            gate_without_storage(&m, &ctx_with(None, &[("io.ryu.double-check", false)])),
+            GateVerdict::Skip
+        );
+        assert_eq!(
+            gate_without_storage(&m, &ctx_with(None, &[])),
+            GateVerdict::Skip
+        );
+    }
+
+    #[test]
+    fn gate_command_prefix_matches_last_user_turn() {
+        let m = HookMatch {
+            commands: vec!["/goal".into()],
+            stateful: true,
+            ..Default::default()
+        };
+        // `/goal write tests` → the command wakes it immediately.
+        assert_eq!(
+            gate_without_storage(&m, &ctx_with(Some("/goal write tests"), &[])),
+            GateVerdict::Run
+        );
+        // `/goal clear` also starts with `/goal`.
+        assert_eq!(
+            gate_without_storage(&m, &ctx_with(Some("/goal clear"), &[])),
+            GateVerdict::Run
+        );
+        // No command this turn but the hook is stateful → defer to the KV read.
+        assert_eq!(
+            gate_without_storage(&m, &ctx_with(Some("hello"), &[])),
+            GateVerdict::CheckStateful
+        );
+    }
+
+    #[test]
+    fn gate_command_does_not_match_unrelated_slash() {
+        let m = HookMatch {
+            commands: vec!["/goal".into()],
+            ..Default::default()
+        };
+        // `/proof …` is a different plugin's command; goal must not wake for it,
+        // and with no stateful flag that means Skip.
+        assert_eq!(
+            gate_without_storage(&m, &ctx_with(Some("/proof the build passes"), &[])),
+            GateVerdict::Skip
+        );
+    }
+
+    #[test]
+    fn gate_empty_or_absent_always_runs() {
+        // An empty match block is "always run" (backward compatible).
+        assert_eq!(
+            gate_without_storage(&HookMatch::default(), &ctx_with(None, &[])),
+            GateVerdict::Run
+        );
     }
 
     // ── Live sandbox tests (run only when the Deno binary is on PATH) ──────────

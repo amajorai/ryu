@@ -1,0 +1,31 @@
+{
+  "name": "ryu",
+  "version": "0.1.0",
+  "description": "Drive a local Ryu Core node from Codex: local models, agents, workflows, RAG Spaces, and any MCP server Ryu has registered, all behind one bundled MCP bridge.",
+  "author": {
+    "name": "A Major Pte. Ltd.",
+    "url": "https://ryuhq.com"
+  },
+  "homepage": "https://ryuhq.com",
+  "repository": "https://github.com/amajor-hq/ryu",
+  "license": "Apache-2.0",
+  "keywords": ["ryu", "mcp", "local-ai", "agents", "llm", "rag"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Ryu",
+    "shortDescription": "Local Ryu Core, in Codex",
+    "longDescription": "Connects Codex to a running Ryu Core node so it can search and serve local models, list agents and teams, run workflows, search the user's memory and knowledge Spaces, and reach any MCP server Ryu has registered.",
+    "developerName": "A Major Pte. Ltd.",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://ryuhq.com",
+    "defaultPrompt": [
+      "Check my Ryu node status and what model it is serving.",
+      "Search Ryu's model catalog for a coding model and activate it.",
+      "Ask my Ryu node a question.",
+      "List and run a workflow on my Ryu node.",
+      "Search my Ryu memory and Spaces for a topic."
+    ]
+  }
+}

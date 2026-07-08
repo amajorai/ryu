@@ -134,11 +134,7 @@ pub fn resample_to_16k(decoded: &DecodedWav) -> DecodedWav {
         let idx = src.floor() as usize;
         let frac = src - idx as f64;
         for c in 0..ch {
-            let a = decoded
-                .samples
-                .get(idx * ch + c)
-                .copied()
-                .unwrap_or(0) as f64;
+            let a = decoded.samples.get(idx * ch + c).copied().unwrap_or(0) as f64;
             let b = decoded
                 .samples
                 .get((idx + 1) * ch + c)

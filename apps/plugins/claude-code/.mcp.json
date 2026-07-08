@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ryu": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PROJECT_DIR}/apps/mcp/src/index.ts"],
+      "env": {
+        "RYU_CORE_URL": "${user_config.ryu_core_url}",
+        "RYU_CORE_TOKEN": "${user_config.ryu_core_token}"
+      }
+    }
+  }
+}

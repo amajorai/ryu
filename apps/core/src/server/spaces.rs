@@ -153,6 +153,59 @@ pub struct DocumentContent {
     pub parent_id: Option<String>,
 }
 
+/// An inter-document link (wiki `[[Title]]` or mention `[[@Title]]`). Used for the
+/// outgoing-links list and, with `src_title`/`snippet` populated, for backlinks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocLink {
+    pub src_doc_id: String,
+    /// `None` when the target page does not exist yet (a *pending* link).
+    pub dst_doc_id: Option<String>,
+    pub dst_title: String,
+    /// `"wiki"` or `"mention"`.
+    pub kind: String,
+    /// Title of the source document (populated for backlinks).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub src_title: Option<String>,
+    /// A short context line around the link (populated for backlinks).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+}
+
+/// A node in the document-link graph. `id` is a document id, or a synthetic
+/// `pending:<lowercased-title>` id for a not-yet-created target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocGraphNode {
+    pub id: String,
+    pub title: String,
+    /// `"page"`, `"database"`, or `"pending"`.
+    pub kind: String,
+    pub space_id: String,
+    pub pending: bool,
+}
+
+/// An edge in the document-link graph. `kind` is `"wiki"`, `"mention"`, or
+/// `"parent"` (the `parent_id` database→row-page hierarchy).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocGraphEdge {
+    pub src: String,
+    pub dst: String,
+    pub kind: String,
+}
+
+/// The document-link graph for a Space (or, globally, across all Spaces).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DocGraph {
+    pub nodes: Vec<DocGraphNode>,
+    pub edges: Vec<DocGraphEdge>,
+}
+
+/// A parsed link occurrence extracted from a document's markdown source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedLink {
+    title: String,
+    kind: &'static str,
+}
+
 /// Current embedding model identity for a Space store.
 #[derive(Debug, Clone, Serialize)]
 pub struct EmbeddingModelInfo {
@@ -269,6 +322,168 @@ fn extract_entities(text: &str) -> Vec<String> {
         }
     }
     entities
+}
+
+// ── Wiki page-link extraction ───────────────────────────────────────────────────
+
+/// Extract inter-document links from a markdown `source`.
+///
+/// Three forms are recognized, all emitted by (or accepted into) Ryu's editor so
+/// the round-trip is deterministic:
+/// - Raw wiki syntax `[[Title]]` / `[[Title|Alias]]` → a **wiki** link, and
+///   `[[@Title]]` → a **mention** link (Obsidian-style, e.g. pasted markdown).
+/// - The editor's canonical markdown-link serialization `[display](<wikilink:Title>)`
+///   → **wiki**, and `[display](<mention:Title>)` → **mention** (angle brackets and
+///   percent-encoding both tolerated; the target title is url-decoded).
+///
+/// The alias / display text is ignored for resolution; only the target title
+/// matters. Duplicate (title, kind) pairs within one document are collapsed.
+fn extract_doc_links(source: &str) -> Vec<ParsedLink> {
+    // Built once per call (called once per document save, never in a hot loop).
+    let raw_re = regex::Regex::new(r"\[\[\s*(@)?\s*([^\[\]|]+?)\s*(?:\|[^\[\]]*)?\]\]")
+        .expect("static wikilink regex is valid");
+    // `[text](<wikilink:Title>)` or `[text](mention:Title)` — angle brackets optional.
+    let link_re = regex::Regex::new(r"\]\(\s*<?\s*(wikilink|mention):([^)>]+?)\s*>?\s*\)")
+        .expect("static doc-link regex is valid");
+
+    let mut seen: std::collections::HashSet<(String, &'static str)> =
+        std::collections::HashSet::new();
+    let mut out = Vec::new();
+    let mut push = |title: String, kind: &'static str, out: &mut Vec<ParsedLink>| {
+        if title.is_empty() {
+            return;
+        }
+        if seen.insert((title.to_lowercase(), kind)) {
+            out.push(ParsedLink { title, kind });
+        }
+    };
+
+    for caps in raw_re.captures_iter(source) {
+        let kind = if caps.get(1).is_some() {
+            "mention"
+        } else {
+            "wiki"
+        };
+        let title = caps.get(2).map(|m| m.as_str().trim().to_string());
+        if let Some(title) = title {
+            push(title, kind, &mut out);
+        }
+    }
+    for caps in link_re.captures_iter(source) {
+        let kind = if &caps[1] == "mention" {
+            "mention"
+        } else {
+            "wiki"
+        };
+        let raw = caps[2].trim();
+        let title = urlencoding::decode(raw)
+            .map(|c| c.into_owned())
+            .unwrap_or_else(|_| raw.to_string());
+        push(title.trim().to_string(), kind, &mut out);
+    }
+    out
+}
+
+/// Return a short one-line snippet of `source` containing `title`, for backlink
+/// context. Falls back to the first non-empty line when no direct hit is found.
+fn link_snippet(source: &str, title: &str) -> Option<String> {
+    let needle = title.to_lowercase();
+    for line in source.lines() {
+        if line.to_lowercase().contains(&needle) {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                return Some(truncate_snippet(trimmed));
+            }
+        }
+    }
+    source
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(truncate_snippet)
+}
+
+fn truncate_snippet(line: &str) -> String {
+    const MAX: usize = 160;
+    if line.chars().count() <= MAX {
+        return line.to_string();
+    }
+    let truncated: String = line.chars().take(MAX).collect();
+    format!("{truncated}…")
+}
+
+/// Synthetic node id for a pending (not-yet-created) link target, scoped by space
+/// so it never collides across Spaces in the global graph.
+fn pending_node_id(space_id: &str, title: &str) -> String {
+    format!("pending:{space_id}:{}", title.to_lowercase())
+}
+
+/// Whether link-expansion retrieval is on by default. Swappable via the
+/// `RYU_SPACES_LINK_EXPANSION` env var (set to `0`/`false`/`off` to disable),
+/// per the "nothing hardcoded, everything a swappable default" rule.
+fn link_expansion_default() -> bool {
+    !matches!(
+        std::env::var("RYU_SPACES_LINK_EXPANSION").ok().as_deref(),
+        Some("0") | Some("false") | Some("off")
+    )
+}
+
+/// Replace `src_doc_id`'s outgoing document links, parsed from its markdown
+/// `source`, resolving each target title to a document id in the same space
+/// (case-insensitive, excluding the source itself). Unmatched targets are stored
+/// with `dst_doc_id = NULL` (a pending link). Idempotent: existing links for this
+/// source are deleted first, so re-saving re-derives the full set.
+fn store_doc_links(
+    conn: &Connection,
+    space_id: &str,
+    src_doc_id: &str,
+    source: &str,
+    now: i64,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM document_links WHERE src_doc_id = ?1",
+        params![src_doc_id],
+    )
+    .context("clearing old document links")?;
+    for link in extract_doc_links(source) {
+        let dst_doc_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM documents
+                 WHERE space_id = ?1 AND title = ?2 COLLATE NOCASE AND id != ?3
+                 LIMIT 1",
+                params![space_id, link.title, src_doc_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("resolving link target")?;
+        let id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO document_links
+                 (id, space_id, src_doc_id, dst_doc_id, dst_title, link_kind, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, space_id, src_doc_id, dst_doc_id, link.title, link.kind, now],
+        )
+        .context("inserting document link")?;
+    }
+    Ok(())
+}
+
+/// Back-fill pending links whose target title now matches a document. Called when
+/// a document is created or renamed so inbound `[[Title]]` links resolve
+/// automatically (Obsidian's pending-page-becomes-real behaviour).
+fn reresolve_pending_links(
+    conn: &Connection,
+    space_id: &str,
+    doc_id: &str,
+    doc_title: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE document_links SET dst_doc_id = ?1
+         WHERE space_id = ?2 AND dst_doc_id IS NULL AND dst_title = ?3 COLLATE NOCASE",
+        params![doc_id, space_id, doc_title],
+    )
+    .context("re-resolving pending links")?;
+    Ok(())
 }
 
 // ── Insertion-ordered set (used in graph_search BFS) ──────────────────────────
@@ -542,6 +757,34 @@ impl SpaceStore {
             "CREATE INDEX IF NOT EXISTS idx_documents_parent ON documents(parent_id, created_at);",
         );
 
+        // Wiki page-link graph (Obsidian/Notion-style backlinks + graph view).
+        // A `document_links` row records that `src_doc_id` links to a target. When
+        // the target title matches an existing document in the same space,
+        // `dst_doc_id` is set; otherwise it is NULL — a *pending* link to a page
+        // that does not exist yet (created on click). This is distinct from the
+        // chunk-level `graph_nodes`/`graph_edges` entity graph: this graph is
+        // document-to-document and drives backlinks, the graph view, and
+        // link-expansion in retrieval. `link_kind` is `'wiki'` (`[[Title]]`) or
+        // `'mention'` (`[[@Title]]`). Titles are matched case-insensitively.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS document_links (
+                 id          TEXT PRIMARY KEY,
+                 space_id    TEXT NOT NULL,
+                 src_doc_id  TEXT NOT NULL,
+                 dst_doc_id  TEXT,
+                 dst_title   TEXT NOT NULL,
+                 link_kind   TEXT NOT NULL DEFAULT 'wiki',
+                 created_at  INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_document_links_src
+                 ON document_links(space_id, src_doc_id);
+             CREATE INDEX IF NOT EXISTS idx_document_links_dst
+                 ON document_links(space_id, dst_doc_id);
+             CREATE INDEX IF NOT EXISTS idx_document_links_title
+                 ON document_links(space_id, dst_title COLLATE NOCASE);",
+        )
+        .context("initializing document_links schema")?;
+
         // Multi-user tenancy (collaboration epic, Phase 0): the verified human
         // owner of the document, the org it belongs to, its sharing visibility,
         // and an optional owning team. Guarded by a PRAGMA table_info existence
@@ -720,6 +963,11 @@ impl SpaceStore {
         )
         .context("bumping space updated_at")?;
 
+        // Wiki page-links: store this document's outgoing links, and resolve any
+        // pending inbound links now that this title exists.
+        store_doc_links(&tx, space_id, &document_id, content, now)?;
+        reresolve_pending_links(&tx, space_id, &document_id, title)?;
+
         tx.commit().context("committing ingest transaction")?;
         Ok(document_id)
     }
@@ -786,6 +1034,8 @@ impl SpaceStore {
             params![now, space_id],
         )
         .context("bumping space updated_at")?;
+        // A new page may satisfy pending `[[Title]]` links from other documents.
+        reresolve_pending_links(&conn, space_id, &document_id, title)?;
         Ok(document_id)
     }
 
@@ -933,6 +1183,20 @@ impl SpaceStore {
             "UPDATE spaces SET updated_at = ?1 WHERE id = ?2",
             params![now, space_id],
         )?;
+
+        // Wiki page-links. Re-derive this document's outgoing links from the new
+        // source. On a rename, inbound links that were resolved to this doc by its
+        // *old* title no longer match → unresolve them (back to pending); then
+        // re-resolve any pending links that match the *new* title.
+        store_doc_links(&tx, &space_id, doc_id, source, now)?;
+        tx.execute(
+            "UPDATE document_links SET dst_doc_id = NULL
+             WHERE dst_doc_id = ?1 AND dst_title != ?2 COLLATE NOCASE",
+            params![doc_id, title],
+        )
+        .context("unresolving stale inbound links on rename")?;
+        reresolve_pending_links(&tx, &space_id, doc_id, title)?;
+
         tx.commit().context("committing update transaction")?;
         Ok(())
     }
@@ -973,6 +1237,23 @@ impl SpaceStore {
         let removed = tx
             .execute("DELETE FROM documents WHERE id = ?1", params![doc_id])
             .context("deleting document")?;
+
+        // Wiki page-links have no FK cascade (plain-text ids): drop each removed
+        // document's outgoing links, and turn inbound links back into pending
+        // (`dst_doc_id → NULL`) so a re-created page re-resolves them later.
+        for id in std::iter::once(doc_id.to_string()).chain(child_ids.iter().cloned()) {
+            tx.execute(
+                "DELETE FROM document_links WHERE src_doc_id = ?1",
+                params![id],
+            )
+            .context("deleting outbound links")?;
+            tx.execute(
+                "UPDATE document_links SET dst_doc_id = NULL WHERE dst_doc_id = ?1",
+                params![id],
+            )
+            .context("unresolving inbound links")?;
+        }
+
         tx.commit().context("committing delete transaction")?;
         Ok(removed > 0)
     }
@@ -991,6 +1272,18 @@ impl SpaceStore {
         query: &str,
         limit: usize,
     ) -> Result<Vec<ChunkMatch>> {
+        self.search_ext(space_id, query, limit, None).await
+    }
+
+    /// Like [`search`](Self::search) but with an explicit `link_expansion`
+    /// override (`None` = use the `RYU_SPACES_LINK_EXPANSION` default).
+    pub async fn search_ext(
+        &self,
+        space_id: &str,
+        query: &str,
+        limit: usize,
+        link_expansion: Option<bool>,
+    ) -> Result<Vec<ChunkMatch>> {
         let mode = self.space_mode(space_id).await?;
         // Over-fetch candidates so the neural reranker (bge cross-encoder, served
         // by the lazily-started `llamacpp-rerank` sidecar) has a fuller set to
@@ -1000,10 +1293,41 @@ impl SpaceStore {
         let candidate_limit = limit
             .saturating_mul(RERANK_FANOUT)
             .clamp(limit, RERANK_MAX_CANDIDATES);
-        let candidates = match mode {
+        let mut candidates = match mode {
             RetrievalMode::Vector => self.vector_search(space_id, query, candidate_limit).await?,
             RetrievalMode::Graph => self.graph_search(space_id, query, candidate_limit).await?,
         };
+
+        // Wiki GraphRAG: expand seed hits along resolved `[[page]]` links so the
+        // reranker sees context from documents the hits reference, not only the
+        // closest vectors. Applies to both retrieval modes; fail-open.
+        if link_expansion.unwrap_or_else(link_expansion_default) {
+            const LINK_HOPS: usize = 2;
+            const LINK_PER_DOC_CHUNKS: usize = 3;
+            let mut seed_doc_ids: Vec<String> = Vec::new();
+            let mut seen_docs: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for c in &candidates {
+                if seen_docs.insert(c.document_id.clone()) {
+                    seed_doc_ids.push(c.document_id.clone());
+                }
+            }
+            match self
+                .expand_by_links(space_id, &seed_doc_ids, LINK_HOPS, LINK_PER_DOC_CHUNKS)
+                .await
+            {
+                Ok(extra) => {
+                    let existing: std::collections::HashSet<String> =
+                        candidates.iter().map(|c| c.chunk_id.clone()).collect();
+                    for c in extra {
+                        if !existing.contains(&c.chunk_id) {
+                            candidates.push(c);
+                        }
+                    }
+                }
+                Err(e) => tracing::debug!("Spaces link-expansion skipped ({e:#})"),
+            }
+        }
+
         Ok(self.apply_reranking(query, candidates, limit).await)
     }
 
@@ -1190,6 +1514,228 @@ impl SpaceStore {
             }
         }
         Ok(results)
+    }
+
+    /// Documents that link **to** `doc_id` (backlinks / "linked references").
+    /// Each result carries the source document's title and a context snippet.
+    pub async fn get_backlinks(&self, doc_id: &str) -> Result<Vec<DocLink>> {
+        let conn = self.conn.lock().await;
+        let target_title: String = conn
+            .query_row(
+                "SELECT title FROM documents WHERE id = ?1",
+                params![doc_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("reading target title")?
+            .unwrap_or_default();
+        let mut stmt = conn.prepare(
+            "SELECT l.src_doc_id, l.dst_title, l.link_kind, d.title, d.source
+             FROM document_links l
+             JOIN documents d ON d.id = l.src_doc_id
+             WHERE l.dst_doc_id = ?1
+             ORDER BY d.title ASC",
+        )?;
+        let rows = stmt.query_map(params![doc_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (src_doc_id, dst_title, kind, src_title, source) = row?;
+            let snippet = link_snippet(&source, &target_title);
+            out.push(DocLink {
+                src_doc_id,
+                dst_doc_id: Some(doc_id.to_string()),
+                dst_title,
+                kind,
+                src_title: Some(src_title),
+                snippet,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Outgoing links **from** `doc_id` (resolved doc refs + pending titles).
+    pub async fn get_outgoing_links(&self, doc_id: &str) -> Result<Vec<DocLink>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT dst_doc_id, dst_title, link_kind
+             FROM document_links WHERE src_doc_id = ?1
+             ORDER BY dst_title ASC",
+        )?;
+        let rows = stmt.query_map(params![doc_id], |row| {
+            Ok(DocLink {
+                src_doc_id: doc_id.to_string(),
+                dst_doc_id: row.get(0)?,
+                dst_title: row.get(1)?,
+                kind: row.get(2)?,
+                src_title: None,
+                snippet: None,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Build the document-link graph. `space_filter = Some(id)` scopes to one
+    /// Space; `None` returns the global graph across every Space. Nodes are
+    /// documents plus synthetic *pending* nodes for unresolved link targets;
+    /// edges are wiki/mention links and the `parent_id` hierarchy.
+    async fn build_graph(&self, space_filter: Option<&str>) -> Result<DocGraph> {
+        let conn = self.conn.lock().await;
+        let mut graph = DocGraph::default();
+
+        // Nodes: every document (top-level and child row-pages are all real pages).
+        let mut doc_stmt = conn.prepare(
+            "SELECT id, space_id, title, kind, parent_id FROM documents
+             WHERE (?1 IS NULL OR space_id = ?1)",
+        )?;
+        let doc_rows = doc_stmt.query_map(params![space_filter], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })?;
+        for row in doc_rows {
+            let (id, space_id, title, kind, parent_id) = row?;
+            graph.nodes.push(DocGraphNode {
+                id: id.clone(),
+                title,
+                kind,
+                space_id,
+                pending: false,
+            });
+            // parent_id hierarchy edge (database → row page).
+            if let Some(parent) = parent_id {
+                graph.edges.push(DocGraphEdge {
+                    src: parent,
+                    dst: id,
+                    kind: "parent".to_string(),
+                });
+            }
+        }
+
+        // Link edges + pending nodes.
+        let mut seen_pending: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut link_stmt = conn.prepare(
+            "SELECT space_id, src_doc_id, dst_doc_id, dst_title, link_kind
+             FROM document_links WHERE (?1 IS NULL OR space_id = ?1)",
+        )?;
+        let link_rows = link_stmt.query_map(params![space_filter], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        for row in link_rows {
+            let (space_id, src, dst_doc_id, dst_title, kind) = row?;
+            let dst = match dst_doc_id {
+                Some(id) => id,
+                None => {
+                    let pending_id = pending_node_id(&space_id, &dst_title);
+                    if seen_pending.insert(pending_id.clone()) {
+                        graph.nodes.push(DocGraphNode {
+                            id: pending_id.clone(),
+                            title: dst_title,
+                            kind: "pending".to_string(),
+                            space_id,
+                            pending: true,
+                        });
+                    }
+                    pending_id
+                }
+            };
+            graph.edges.push(DocGraphEdge { src, dst, kind });
+        }
+        Ok(graph)
+    }
+
+    /// The document-link graph for one Space.
+    pub async fn space_graph(&self, space_id: &str) -> Result<DocGraph> {
+        self.build_graph(Some(space_id)).await
+    }
+
+    /// The global document-link graph across all Spaces.
+    pub async fn global_graph(&self) -> Result<DocGraph> {
+        self.build_graph(None).await
+    }
+
+    /// Follow resolved wiki links out from `seed_doc_ids` up to `hops` and return
+    /// a capped number of chunks from each newly-reached document. This is the
+    /// "wiki GraphRAG" expansion: it surfaces context from pages the seed hits
+    /// link to, even when those pages are not the closest vectors. Fail-open:
+    /// callers treat an error as "no expansion".
+    async fn expand_by_links(
+        &self,
+        space_id: &str,
+        seed_doc_ids: &[String],
+        hops: usize,
+        per_doc_cap: usize,
+    ) -> Result<Vec<ChunkMatch>> {
+        if seed_doc_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().await;
+        let mut visited: std::collections::HashSet<String> = seed_doc_ids.iter().cloned().collect();
+        let mut frontier: Vec<String> = seed_doc_ids.to_vec();
+        let mut reached: Vec<String> = Vec::new();
+        for _ in 0..hops {
+            if frontier.is_empty() {
+                break;
+            }
+            let mut next = Vec::new();
+            for doc in &frontier {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT dst_doc_id FROM document_links
+                     WHERE space_id = ?1 AND src_doc_id = ?2 AND dst_doc_id IS NOT NULL",
+                )?;
+                let rows = stmt.query_map(params![space_id, doc], |row| row.get::<_, String>(0))?;
+                for row in rows {
+                    let d = row?;
+                    if visited.insert(d.clone()) {
+                        next.push(d.clone());
+                        reached.push(d);
+                    }
+                }
+            }
+            frontier = next;
+        }
+
+        let mut out = Vec::new();
+        for doc in &reached {
+            let mut stmt = conn.prepare(
+                "SELECT id, document_id, content FROM chunks
+                 WHERE document_id = ?1 ORDER BY ordinal LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![doc, per_doc_cap as i64], |row| {
+                Ok(ChunkMatch {
+                    chunk_id: row.get(0)?,
+                    document_id: row.get(1)?,
+                    content: row.get(2)?,
+                    // Synthetic: link-reached chunks re-scored by the reranker.
+                    distance: 1.0,
+                })
+            })?;
+            for row in rows {
+                out.push(row?);
+            }
+        }
+        Ok(out)
     }
 
     /// Delete a Space, its documents, chunks, and their vectors. Returns true if
@@ -1751,6 +2297,168 @@ mod tests {
         assert!(store.delete_document(&doc).await.unwrap());
         assert!(store.get_document(&doc).await.unwrap().is_none());
         assert!(!store.delete_document(&doc).await.unwrap());
+    }
+
+    // ── Wiki page-links: extraction, backlinks, graph, link-expansion ───────────
+
+    #[test]
+    fn extract_doc_links_parses_wiki_and_mention() {
+        let src = "Intro. See [[Design Doc]] and [[Roadmap|our plan]].\n\
+                   Ping [[@Alice]] about it. Repeat [[Design Doc]] again.";
+        let links = extract_doc_links(src);
+        // Dedup by (title, kind): Design Doc appears twice → one entry.
+        assert_eq!(links.len(), 3);
+        assert!(links
+            .iter()
+            .any(|l| l.title == "Design Doc" && l.kind == "wiki"));
+        assert!(links
+            .iter()
+            .any(|l| l.title == "Roadmap" && l.kind == "wiki"));
+        assert!(links
+            .iter()
+            .any(|l| l.title == "Alice" && l.kind == "mention"));
+    }
+
+    #[test]
+    fn extract_doc_links_parses_editor_link_forms() {
+        // The editor's canonical serialization: markdown links with a scheme.
+        let src = "See [Design Doc](<wikilink:Design Doc>) and \
+                   [@Bob](mention:Bob) plus [Encoded](<wikilink:Two%20Words>).";
+        let links = extract_doc_links(src);
+        assert!(links
+            .iter()
+            .any(|l| l.title == "Design Doc" && l.kind == "wiki"));
+        assert!(links
+            .iter()
+            .any(|l| l.title == "Bob" && l.kind == "mention"));
+        // Percent-encoding is decoded back to the real title.
+        assert!(links
+            .iter()
+            .any(|l| l.title == "Two Words" && l.kind == "wiki"));
+    }
+
+    #[tokio::test]
+    async fn wiki_links_resolve_and_backlinks_round_trip() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let space = store.create_space("Wiki", None).await.unwrap();
+        let a = store.create_page(&space, "Alpha").await.unwrap();
+        let b = store.create_page(&space, "Bravo").await.unwrap();
+        store
+            .update_document(&a, "Alpha", "Alpha links to [[Bravo]] here.")
+            .await
+            .unwrap();
+
+        // Outgoing link from A resolves to B.
+        let out = store.get_outgoing_links(&a).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].dst_doc_id.as_deref(), Some(b.as_str()));
+        assert_eq!(out[0].dst_title, "Bravo");
+
+        // Backlink on B points to A with a snippet.
+        let back = store.get_backlinks(&b).await.unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].src_doc_id, a);
+        assert_eq!(back[0].src_title.as_deref(), Some("Alpha"));
+        assert!(back[0].snippet.as_deref().unwrap_or("").contains("Bravo"));
+    }
+
+    #[tokio::test]
+    async fn pending_link_resolves_when_target_created() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let space = store.create_space("Wiki", None).await.unwrap();
+        let a = store.create_page(&space, "Alpha").await.unwrap();
+        store
+            .update_document(&a, "Alpha", "Refers to [[Ghost]] which is missing.")
+            .await
+            .unwrap();
+
+        // Unresolved → pending link + a pending node in the graph.
+        let out = store.get_outgoing_links(&a).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert!(out[0].dst_doc_id.is_none());
+        let graph = store.space_graph(&space).await.unwrap();
+        assert!(graph.nodes.iter().any(|n| n.pending && n.title == "Ghost"));
+
+        // Creating the target page back-fills the pending link.
+        let ghost = store.create_page(&space, "Ghost").await.unwrap();
+        let out = store.get_outgoing_links(&a).await.unwrap();
+        assert_eq!(out[0].dst_doc_id.as_deref(), Some(ghost.as_str()));
+        let graph = store.space_graph(&space).await.unwrap();
+        assert!(!graph.nodes.iter().any(|n| n.pending));
+    }
+
+    #[tokio::test]
+    async fn rename_target_unresolves_then_reresolves() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let space = store.create_space("Wiki", None).await.unwrap();
+        let a = store.create_page(&space, "Alpha").await.unwrap();
+        let b = store.create_page(&space, "Bravo").await.unwrap();
+        store
+            .update_document(&a, "Alpha", "Points at [[Bravo]].")
+            .await
+            .unwrap();
+        assert_eq!(store.get_backlinks(&b).await.unwrap().len(), 1);
+
+        // Rename B → its inbound link (matched by old title) unresolves to pending.
+        store.update_document(&b, "Charlie", "").await.unwrap();
+        assert!(store.get_backlinks(&b).await.unwrap().is_empty());
+        assert!(store.get_outgoing_links(&a).await.unwrap()[0]
+            .dst_doc_id
+            .is_none());
+
+        // Point A at the new title → re-resolves.
+        store
+            .update_document(&a, "Alpha", "Points at [[Charlie]].")
+            .await
+            .unwrap();
+        assert_eq!(store.get_backlinks(&b).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn expand_by_links_reaches_linked_document_chunks() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let space = store.create_space("Wiki", None).await.unwrap();
+        let a = store.create_page(&space, "Alpha").await.unwrap();
+        let b = store.create_page(&space, "Bravo").await.unwrap();
+        store
+            .update_document(&a, "Alpha", "Alpha content links [[Bravo]].")
+            .await
+            .unwrap();
+        store
+            .update_document(&b, "Bravo", "Bravo has unique zephyr content.")
+            .await
+            .unwrap();
+
+        // Seeded at A, expansion reaches B's chunks.
+        let reached = store
+            .expand_by_links(&space, &[a.clone()], 2, 3)
+            .await
+            .unwrap();
+        assert!(reached.iter().any(|c| c.document_id == b));
+
+        // A document with no outgoing links reaches nothing.
+        let none = store.expand_by_links(&space, &[b], 2, 3).await.unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_document_turns_inbound_links_pending() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let space = store.create_space("Wiki", None).await.unwrap();
+        let a = store.create_page(&space, "Alpha").await.unwrap();
+        let b = store.create_page(&space, "Bravo").await.unwrap();
+        store
+            .update_document(&a, "Alpha", "See [[Bravo]].")
+            .await
+            .unwrap();
+        assert!(store.delete_document(&b).await.unwrap());
+
+        // A's link survives but is now pending (target gone).
+        let out = store.get_outgoing_links(&a).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert!(out[0].dst_doc_id.is_none());
+        let graph = store.space_graph(&space).await.unwrap();
+        assert!(graph.nodes.iter().any(|n| n.pending && n.title == "Bravo"));
     }
 
     #[tokio::test]

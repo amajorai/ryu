@@ -1,0 +1,36 @@
+{
+  "id": "io.ryu.rtk",
+  "name": "RTK (Rust Token Killer)",
+  "version": "1.0.0",
+  "runnables": [],
+  "permission_grants": [],
+  "activation_events": [],
+  "contributes": {
+    "settings_tabs": [
+      {
+        "id": "rtk.settings",
+        "title": "RTK",
+        "fields": [
+          {
+            "type": "toggle",
+            "pref_key": "rtk-wrap-pi",
+            "label": "Auto-wrap the Ryu (Pi) agent's commands",
+            "description": "When on, Ryu configures RTK's PreToolUse hook for the Pi agent so its shell commands are token-compressed automatically. Requires rtk on PATH."
+          },
+          {
+            "type": "toggle",
+            "pref_key": "rtk-wrap-claude",
+            "label": "Auto-wrap Claude Code's commands",
+            "description": "Same, for the Claude Code agent."
+          },
+          {
+            "type": "textarea",
+            "pref_key": "rtk-exclude-commands",
+            "label": "Commands to never wrap",
+            "placeholder": "curl, playwright"
+          }
+        ]
+      }
+    ]
+  }
+}
