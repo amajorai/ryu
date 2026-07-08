@@ -1,4 +1,6 @@
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use axum::body::Body;
 use bytes::Bytes;
@@ -6,23 +8,43 @@ use futures_util::{StreamExt, TryStreamExt};
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
-use crate::error::GatewayError;
+use crate::{error::GatewayError, quota::ProviderQuotas};
 
-use super::Provider;
+use super::{parse_rate_limit, Provider};
 
 pub struct AnthropicProvider {
     client: reqwest::Client,
-    api_key: String,
+    /// Account rotation set (#4). See `OpenAiProvider::keys`.
+    keys: Vec<String>,
+    cursor: AtomicUsize,
     base_url: String,
+    quota: Arc<ProviderQuotas>,
 }
 
 impl AnthropicProvider {
-    pub fn new(client: reqwest::Client, api_key: String, base_url: String) -> Self {
+    pub fn new(
+        client: reqwest::Client,
+        keys: Vec<String>,
+        base_url: String,
+        quota: Arc<ProviderQuotas>,
+    ) -> Self {
         Self {
             client,
-            api_key,
+            keys,
+            cursor: AtomicUsize::new(0),
             base_url,
+            quota,
         }
+    }
+
+    /// The next account key in round-robin order.
+    fn next_key(&self) -> String {
+        let n = self.keys.len();
+        if n <= 1 {
+            return self.keys.first().cloned().unwrap_or_default();
+        }
+        let i = self.cursor.fetch_add(1, Ordering::Relaxed) % n;
+        self.keys[i].clone()
     }
 
     fn messages_url(&self) -> String {
@@ -148,37 +170,76 @@ impl Provider for AnthropicProvider {
                 model, "sending non-streaming request"
             );
 
-            let resp = self
-                .client
-                .post(self.messages_url())
-                .header("x-api-key", &self.api_key)
-                .header("anthropic-version", "2023-06-01")
-                .json(&payload)
-                .send()
-                .await
-                .map_err(|e| {
-                    GatewayError::ProviderError(format!("Anthropic request failed: {e}"))
+            let url = self.messages_url();
+            // Account rotation (#4): rotate keys on a 429 before failing over.
+            let attempts = self.keys.len().max(1);
+            let mut last_err: Option<GatewayError> = None;
+            for _ in 0..attempts {
+                let key = self.next_key();
+                let resp = self
+                    .client
+                    .post(&url)
+                    .header("x-api-key", &key)
+                    .header("anthropic-version", "2023-06-01")
+                    .json(&payload)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        GatewayError::ProviderError(format!("Anthropic request failed: {e}"))
+                    })?;
+
+                let status = resp.status();
+                let rate_limit = parse_rate_limit(resp.headers());
+
+                if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    let retry_after = rate_limit.as_ref().and_then(|r| r.retry_after);
+                    let reset_at = rate_limit.as_ref().and_then(|r| r.reset_at);
+                    self.quota
+                        .record_rate_limited("anthropic", retry_after, reset_at);
+                    let _ = resp.text().await;
+                    warn!(provider = "anthropic", "provider rate limited (429)");
+                    let e = GatewayError::ProviderRateLimited {
+                        provider: "anthropic".to_string(),
+                        retry_after,
+                        reset_at,
+                    };
+                    if attempts > 1 {
+                        last_err = Some(e);
+                        continue;
+                    }
+                    return Err(e);
+                }
+
+                let json: Value = resp.json().await.map_err(|e| {
+                    GatewayError::ProviderError(format!("Anthropic response parse error: {e}"))
                 })?;
 
-            let status = resp.status();
-            let json: Value = resp.json().await.map_err(|e| {
-                GatewayError::ProviderError(format!("Anthropic response parse error: {e}"))
-            })?;
+                if !status.is_success() {
+                    let msg = json["error"]["message"]
+                        .as_str()
+                        .unwrap_or("unknown error")
+                        .to_string();
+                    warn!(provider = "anthropic", status = %status, error = %msg, "provider returned error");
+                    return Err(GatewayError::ProviderError(format!(
+                        "Anthropic error {status}: {msg}"
+                    )));
+                }
 
-            if !status.is_success() {
-                let msg = json["error"]["message"]
-                    .as_str()
-                    .unwrap_or("unknown error")
-                    .to_string();
-                warn!(provider = "anthropic", status = %status, error = %msg, "provider returned error");
-                return Err(GatewayError::ProviderError(format!(
-                    "Anthropic error {status}: {msg}"
-                )));
+                if let Some(info) = rate_limit.as_ref() {
+                    self.quota.record_success("anthropic", info);
+                }
+
+                // Requested model (before routing) for response shaping
+                let requested_model = body["model"].as_str().unwrap_or(model);
+                return Ok(self.from_anthropic_response(&json, requested_model));
             }
-
-            // Requested model (before routing) for response shaping
-            let requested_model = body["model"].as_str().unwrap_or(model);
-            Ok(self.from_anthropic_response(&json, requested_model))
+            Err(
+                last_err.unwrap_or_else(|| GatewayError::ProviderRateLimited {
+                    provider: "anthropic".to_string(),
+                    retry_after: None,
+                    reset_at: None,
+                }),
+            )
         })
     }
 
@@ -192,32 +253,69 @@ impl Provider for AnthropicProvider {
             payload["stream"] = Value::Bool(true);
             debug!(provider = "anthropic", model, "sending streaming request");
 
-            let resp = self
-                .client
-                .post(self.messages_url())
-                .header("x-api-key", &self.api_key)
-                .header("anthropic-version", "2023-06-01")
-                .json(&payload)
-                .send()
-                .await
-                .map_err(|e| {
-                    GatewayError::ProviderError(format!("Anthropic stream request failed: {e}"))
-                })?;
+            let url = self.messages_url();
+            let attempts = self.keys.len().max(1);
+            let mut last_err: Option<GatewayError> = None;
+            for _ in 0..attempts {
+                let key = self.next_key();
+                let resp = self
+                    .client
+                    .post(&url)
+                    .header("x-api-key", &key)
+                    .header("anthropic-version", "2023-06-01")
+                    .json(&payload)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        GatewayError::ProviderError(format!("Anthropic stream request failed: {e}"))
+                    })?;
 
-            if !resp.status().is_success() {
                 let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                return Err(GatewayError::ProviderError(format!(
-                    "Anthropic stream error {status}: {text}"
-                )));
+                let rate_limit = parse_rate_limit(resp.headers());
+
+                if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    let retry_after = rate_limit.as_ref().and_then(|r| r.retry_after);
+                    let reset_at = rate_limit.as_ref().and_then(|r| r.reset_at);
+                    self.quota
+                        .record_rate_limited("anthropic", retry_after, reset_at);
+                    let _ = resp.text().await;
+                    let e = GatewayError::ProviderRateLimited {
+                        provider: "anthropic".to_string(),
+                        retry_after,
+                        reset_at,
+                    };
+                    if attempts > 1 {
+                        last_err = Some(e);
+                        continue;
+                    }
+                    return Err(e);
+                }
+
+                if !status.is_success() {
+                    let text = resp.text().await.unwrap_or_default();
+                    return Err(GatewayError::ProviderError(format!(
+                        "Anthropic stream error {status}: {text}"
+                    )));
+                }
+
+                if let Some(info) = rate_limit.as_ref() {
+                    self.quota.record_success("anthropic", info);
+                }
+
+                let requested_model = body["model"].as_str().unwrap_or(model).to_string();
+
+                // Translate Anthropic SSE events → OpenAI SSE events on the fly.
+                let raw_stream = resp.bytes_stream();
+                let translated = translate_anthropic_stream(raw_stream, requested_model);
+                return Ok(Body::from_stream(translated));
             }
-
-            let requested_model = body["model"].as_str().unwrap_or(model).to_string();
-
-            // Translate Anthropic SSE events → OpenAI SSE events on the fly.
-            let raw_stream = resp.bytes_stream();
-            let translated = translate_anthropic_stream(raw_stream, requested_model);
-            Ok(Body::from_stream(translated))
+            Err(
+                last_err.unwrap_or_else(|| GatewayError::ProviderRateLimited {
+                    provider: "anthropic".to_string(),
+                    retry_after: None,
+                    reset_at: None,
+                }),
+            )
         })
     }
 }

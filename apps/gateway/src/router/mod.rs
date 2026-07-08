@@ -275,6 +275,15 @@ impl ModelRouter {
                 chain.push(p.clone());
             }
         }
+        // Cost-tier ordering (#2): after the primary, demote providers by their
+        // configured tier (subscription 0 → cheap 1 → free 2). Stable sort keeps
+        // the operator's `fallback_chain` order within a tier. The primary stays
+        // pinned first regardless of its own tier. Empty map ⇒ no reordering.
+        if !self.config.provider_tiers.is_empty() && chain.len() > 2 {
+            let primary_first = chain.remove(0);
+            chain.sort_by_key(|p| self.config.provider_tiers.get(p).copied().unwrap_or(0));
+            chain.insert(0, primary_first);
+        }
         chain
     }
 
@@ -343,11 +352,66 @@ mod tests {
     use crate::config::{EvalRoutingConfig, ModalityMapping};
     use std::collections::HashMap;
 
+    fn tiered_router(chain: Vec<ProviderKind>, tiers: &[(ProviderKind, u8)]) -> ModelRouter {
+        ModelRouter::new(RoutingConfig {
+            fallback_chain: chain,
+            provider_tiers: tiers.iter().cloned().collect(),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn fallback_chain_pins_primary_then_sorts_by_tier() {
+        // Configured chain lists cheap(1) BEFORE sub(0); tier sort must reorder
+        // them behind the pinned primary. Primary is OpenRouter (free, tier 2).
+        let r = tiered_router(
+            vec![
+                ProviderKind::OpenRouter,
+                ProviderKind::Local,
+                ProviderKind::OpenAi,
+            ],
+            &[
+                (ProviderKind::OpenAi, 0),
+                (ProviderKind::Local, 1),
+                (ProviderKind::OpenRouter, 2),
+            ],
+        );
+        let chain = r.fallback_chain(&ProviderKind::OpenRouter);
+        // Primary stays first even though it is the most expensive tier; the rest
+        // demote sub(0) → cheap(1).
+        assert_eq!(
+            chain,
+            vec![
+                ProviderKind::OpenRouter,
+                ProviderKind::OpenAi,
+                ProviderKind::Local
+            ]
+        );
+    }
+
+    #[test]
+    fn fallback_chain_empty_tiers_preserves_order() {
+        let r = tiered_router(
+            vec![ProviderKind::Local, ProviderKind::OpenAi],
+            &[], // no tiers configured
+        );
+        let chain = r.fallback_chain(&ProviderKind::Anthropic);
+        assert_eq!(
+            chain,
+            vec![
+                ProviderKind::Anthropic,
+                ProviderKind::Local,
+                ProviderKind::OpenAi
+            ]
+        );
+    }
+
     fn ab_router(explore_ratio: f32) -> ModelRouter {
         let config = RoutingConfig {
             default_provider: ProviderKind::OpenAi,
             model_map: HashMap::new(),
             fallback_chain: Vec::new(),
+            provider_tiers: HashMap::new(),
             eval_routing: EvalRoutingConfig {
                 enabled: true,
                 candidates: vec![ProviderKind::OpenAi, ProviderKind::Anthropic],
@@ -486,6 +550,7 @@ mod tests {
             default_provider: ProviderKind::Local,
             model_map: HashMap::new(),
             fallback_chain: Vec::new(),
+            provider_tiers: HashMap::new(),
             eval_routing: EvalRoutingConfig::default(),
             modality_map,
             smart_routing: Default::default(),
@@ -550,6 +615,7 @@ mod tests {
             default_provider: ProviderKind::Local,
             model_map: HashMap::new(),
             fallback_chain: Vec::new(),
+            provider_tiers: HashMap::new(),
             eval_routing: EvalRoutingConfig::default(),
             modality_map,
             smart_routing: Default::default(),

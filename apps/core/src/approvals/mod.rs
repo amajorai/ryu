@@ -67,6 +67,10 @@ pub enum ApprovalKind {
     /// A skill the continual-learning loop distilled from a conversation, awaiting
     /// the user's OK before it joins the active skill library.
     SkillSynthesis,
+    /// A fix the self-healing loop proposed for a failed run, awaiting the user's
+    /// OK before it re-runs (unless auto-decide is on). A terminal "attempts
+    /// exhausted" review item is the same kind with no attached action.
+    HealFix,
 }
 
 /// The lifecycle of a request. Only `Pending` ever transitions (idempotency).
@@ -118,6 +122,14 @@ pub enum PendingAction {
     /// full validated `SKILL.md` so the write is deferred until approve — a
     /// rejected suggestion never touches the skill library.
     ActivateSkill { slug: String, skill_md: String },
+    /// Re-run a failed run with the self-healing loop's corrected prompt on
+    /// approve. Executes on a fresh `healrun_`-prefixed conversation (the
+    /// never-heal-a-heal marker) via the same agent runner the original used.
+    HealRerun {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
+        prompt: String,
+    },
     /// Execute a gated agent tool call on approve. Captures the full re-dispatch
     /// context so the approved run is identical to the one that was gated; run
     /// through the registry's no-gate entry so it never re-raises an approval.
@@ -292,6 +304,51 @@ impl ApprovalRequest {
         req.source_ref = Some(format!("skill:{slug}"));
         req.conversation_id = Some(conversation_id.to_owned());
         req.risk_tags = vec!["learning".to_owned(), "skill".to_owned(), "auto".to_owned()];
+        req
+    }
+
+    /// Build a request for a self-healing fix: re-run a failed conversation with a
+    /// corrected prompt. `diagnosis` is the LLM's read of why it failed (shown as
+    /// the summary); the corrected prompt rides in the action so it only runs on
+    /// approve. Deduped on the source conversation id so one failed run can't pile
+    /// up duplicate heal requests.
+    pub fn for_heal_fix(
+        conversation_id: &str,
+        agent_id: Option<String>,
+        diagnosis: &str,
+        corrected_prompt: String,
+    ) -> Self {
+        let mut req = Self::new(
+            ApprovalKind::HealFix,
+            "Auto-fix a failed run".to_owned(),
+            format!(
+                "A run failed and Ryu proposed a fix. Diagnosis: {diagnosis}\n\nApprove to re-run it with the corrected instruction."
+            ),
+            Some(PendingAction::HealRerun {
+                agent_id: agent_id.clone(),
+                prompt: corrected_prompt,
+            }),
+        );
+        req.source_ref = Some(conversation_id.to_owned());
+        req.conversation_id = Some(conversation_id.to_owned());
+        req.agent_id = agent_id;
+        req.risk_tags = vec!["heal".to_owned(), "auto".to_owned()];
+        req
+    }
+
+    /// Build a terminal "attempts exhausted" review item for a run the self-healing
+    /// loop gave up on. Same kind as [`Self::for_heal_fix`] but with **no action** —
+    /// it's a notice for manual review, never an auto-re-run.
+    pub fn for_heal_exhausted(conversation_id: &str, note: &str) -> Self {
+        let mut req = Self::new(
+            ApprovalKind::HealFix,
+            "A failing run needs your attention".to_owned(),
+            format!("Ryu tried to auto-fix a failed run but gave up. {note}"),
+            None,
+        );
+        req.source_ref = Some(format!("heal-exhausted:{conversation_id}"));
+        req.conversation_id = Some(conversation_id.to_owned());
+        req.risk_tags = vec!["heal".to_owned(), "exhausted".to_owned()];
         req
     }
 }
@@ -615,6 +672,16 @@ impl ApprovalEngine {
                 }
                 Ok(None)
             }
+            PendingAction::HealRerun { agent_id, prompt } => {
+                // The `healrun_` prefix is the never-heal-a-heal marker: the heal
+                // engine drops any failed event on a conversation with this prefix,
+                // so a heal-run that itself fails cannot trigger another heal.
+                let run_id = format!("healrun_{}", uuid::Uuid::new_v4().simple());
+                if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
+                    runner.run(agent_id.clone(), run_id, prompt.clone()).await?;
+                }
+                Ok(None)
+            }
             PendingAction::ActivateSkill { slug, skill_md } => {
                 let skills = self.skills.as_ref().ok_or_else(|| {
                     anyhow::anyhow!("no skills registry attached; cannot activate approved skill")
@@ -798,6 +865,36 @@ mod tests {
             }
             _ => panic!("expected an ActivateSkill action carrying the deferred skill"),
         }
+    }
+
+    #[test]
+    fn for_heal_fix_defers_rerun_and_dedups_on_conversation() {
+        let req = ApprovalRequest::for_heal_fix(
+            "conv_42",
+            Some("ryu".to_owned()),
+            "the tool call used a bad path",
+            "Retry, but read ./data/report.md with an absolute path.".to_owned(),
+        );
+        assert_eq!(req.kind, ApprovalKind::HealFix);
+        // Dedup + correlation both key on the source conversation.
+        assert_eq!(req.source_ref.as_deref(), Some("conv_42"));
+        assert_eq!(req.conversation_id.as_deref(), Some("conv_42"));
+        match req.action {
+            Some(PendingAction::HealRerun { ref agent_id, ref prompt }) => {
+                assert_eq!(agent_id.as_deref(), Some("ryu"));
+                assert!(prompt.contains("absolute path"));
+            }
+            _ => panic!("expected a HealRerun action carrying the corrected prompt"),
+        }
+    }
+
+    #[test]
+    fn for_heal_exhausted_has_no_action() {
+        let req = ApprovalRequest::for_heal_exhausted("conv_42", "gave up after 2 tries");
+        assert_eq!(req.kind, ApprovalKind::HealFix);
+        // Terminal review item — never auto-runs anything.
+        assert!(req.action.is_none());
+        assert!(req.risk_tags.iter().any(|t| t == "exhausted"));
     }
 
     #[tokio::test]

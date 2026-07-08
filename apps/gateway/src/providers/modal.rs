@@ -60,7 +60,7 @@ impl Provider for ModalProvider {
                 .await
                 .map_err(|e| GatewayError::ProviderError(format!("modal request failed: {e}")))?;
 
-            check_response_status(resp, "modal").await
+            check_response_status(resp, "modal", None).await
         })
     }
 
@@ -86,7 +86,7 @@ impl Provider for ModalProvider {
                     GatewayError::ProviderError(format!("modal stream request failed: {e}"))
                 })?;
 
-            let resp = check_stream_status(resp, "modal").await?;
+            let resp = check_stream_status(resp, "modal", None).await?;
             Ok(Body::from_stream(resp.bytes_stream()))
         })
     }

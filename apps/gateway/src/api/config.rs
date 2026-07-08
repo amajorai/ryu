@@ -71,6 +71,9 @@ struct RoutingView {
     default_provider: ProviderKind,
     model_map: std::collections::HashMap<String, ModelMappingView>,
     fallback_chain: Vec<ProviderKind>,
+    /// Cost-tier ordering (#2). Not a secret; returned so the desktop tier editor
+    /// can read-modify-write the full routing object.
+    provider_tiers: std::collections::HashMap<ProviderKind, u8>,
     /// Classifier-driven routing (custom routing instructions). Carries no
     /// secrets, so it is returned verbatim for the UI to read + edit.
     smart_routing: SmartRoutingConfig,
@@ -98,6 +101,10 @@ struct ProvidersView {
 struct ProviderView {
     api_key: String,
     base_url: String,
+    /// Number of configured accounts for round-robin rotation (#4). The key
+    /// values stay redacted (env-managed); only the count is exposed so the
+    /// desktop can show "N accounts configured".
+    api_key_count: usize,
 }
 
 #[derive(Serialize)]
@@ -124,10 +131,12 @@ fn redact_providers(p: &ProvidersConfig) -> ProvidersView {
         openai: p.openai.as_ref().map(|c| ProviderView {
             api_key: "***".to_string(),
             base_url: c.base_url.clone(),
+            api_key_count: c.all_keys().iter().filter(|k| !k.is_empty()).count(),
         }),
         anthropic: p.anthropic.as_ref().map(|c| ProviderView {
             api_key: "***".to_string(),
             base_url: c.base_url.clone(),
+            api_key_count: c.all_keys().iter().filter(|k| !k.is_empty()).count(),
         }),
         local: p.local.as_ref().map(|c| LocalView {
             base_url: c.base_url.clone(),
@@ -135,6 +144,7 @@ fn redact_providers(p: &ProvidersConfig) -> ProvidersView {
         openrouter: p.openrouter.as_ref().map(|c| ProviderView {
             api_key: "***".to_string(),
             base_url: c.base_url.clone(),
+            api_key_count: c.all_keys().iter().filter(|k| !k.is_empty()).count(),
         }),
         core: p.core.as_ref().map(|c| CoreView {
             base_url: c.base_url.clone(),
@@ -143,6 +153,7 @@ fn redact_providers(p: &ProvidersConfig) -> ProvidersView {
         modal: p.modal.as_ref().map(|c| ProviderView {
             api_key: "***".to_string(),
             base_url: c.base_url.clone(),
+            api_key_count: usize::from(!c.api_key.is_empty()),
         }),
         genai: p.genai.as_ref().map(|c| GenAiView {
             keys: c.keys.keys().cloned().collect(),
@@ -246,6 +257,7 @@ pub async fn get_config(
             })
             .collect(),
         fallback_chain: routing.fallback_chain.clone(),
+        provider_tiers: routing.provider_tiers.clone(),
         smart_routing: routing.smart_routing.clone(),
     };
 

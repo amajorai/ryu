@@ -19,6 +19,7 @@ mod passthrough;
 mod pipeline;
 mod policy;
 mod providers;
+mod quota;
 mod rate_limit;
 mod reporter;
 mod router;

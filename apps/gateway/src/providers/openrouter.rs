@@ -1,10 +1,12 @@
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use axum::body::Body;
 use serde_json::{json, Value};
 use tracing::debug;
 
-use crate::error::GatewayError;
+use crate::{error::GatewayError, quota::ProviderQuotas};
 
 use super::{
     chat_completions_url, check_response_status, check_stream_status, discover_openai_models,
@@ -97,7 +99,9 @@ impl OpenRouterOptions {
 /// just with two extra identification headers and ryu's managed [`OpenRouterOptions`].
 pub struct OpenRouterProvider {
     client: reqwest::Client,
-    api_key: String,
+    /// Account rotation set (#4). See `OpenAiProvider::keys`.
+    keys: Vec<String>,
+    cursor: AtomicUsize,
     base_url: String,
     /// Sent as HTTP-Referer for OpenRouter usage attribution.
     site_url: String,
@@ -105,25 +109,44 @@ pub struct OpenRouterProvider {
     site_name: String,
     /// Managed server-side options injected into every request.
     options: OpenRouterOptions,
+    quota: Arc<ProviderQuotas>,
 }
 
 impl OpenRouterProvider {
     pub fn new(
         client: reqwest::Client,
-        api_key: String,
+        keys: Vec<String>,
         base_url: String,
         site_url: String,
         site_name: String,
         options: OpenRouterOptions,
+        quota: Arc<ProviderQuotas>,
     ) -> Self {
         Self {
             client,
-            api_key,
+            keys,
+            cursor: AtomicUsize::new(0),
             base_url,
             site_url,
             site_name,
             options,
+            quota,
         }
+    }
+
+    /// The next account key in round-robin order.
+    fn next_key(&self) -> String {
+        let n = self.keys.len();
+        if n <= 1 {
+            return self.keys.first().cloned().unwrap_or_default();
+        }
+        let i = self.cursor.fetch_add(1, Ordering::Relaxed) % n;
+        self.keys[i].clone()
+    }
+
+    /// The primary account key, for non-rotating calls (model discovery, media).
+    fn primary_key(&self) -> &str {
+        self.keys.first().map(String::as_str).unwrap_or("")
     }
 }
 
@@ -136,7 +159,8 @@ impl Provider for OpenRouterProvider {
         &'a self,
     ) -> Pin<Box<dyn std::future::Future<Output = Option<Vec<Value>>> + Send + 'a>> {
         Box::pin(async move {
-            let json = discover_openai_models(&self.client, &self.base_url, &self.api_key).await?;
+            let json =
+                discover_openai_models(&self.client, &self.base_url, self.primary_key()).await?;
             models_from_response(json)
         })
     }
@@ -155,20 +179,39 @@ impl Provider for OpenRouterProvider {
                 model, "sending non-streaming request"
             );
 
-            let resp = self
-                .client
-                .post(chat_completions_url(&self.base_url))
-                .bearer_auth(&self.api_key)
-                .header("HTTP-Referer", &self.site_url)
-                .header("X-Title", &self.site_name)
-                .json(&payload)
-                .send()
-                .await
-                .map_err(|e| {
-                    GatewayError::ProviderError(format!("openrouter request failed: {e}"))
-                })?;
+            let url = chat_completions_url(&self.base_url);
+            let attempts = self.keys.len().max(1);
+            let mut last_err: Option<GatewayError> = None;
+            for _ in 0..attempts {
+                let key = self.next_key();
+                let resp = self
+                    .client
+                    .post(&url)
+                    .bearer_auth(&key)
+                    .header("HTTP-Referer", &self.site_url)
+                    .header("X-Title", &self.site_name)
+                    .json(&payload)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        GatewayError::ProviderError(format!("openrouter request failed: {e}"))
+                    })?;
 
-            check_response_status(resp, "openrouter").await
+                match check_response_status(resp, "openrouter", Some(&self.quota)).await {
+                    Err(e @ GatewayError::ProviderRateLimited { .. }) if attempts > 1 => {
+                        last_err = Some(e);
+                        continue;
+                    }
+                    other => return other,
+                }
+            }
+            Err(
+                last_err.unwrap_or_else(|| GatewayError::ProviderRateLimited {
+                    provider: "openrouter".to_string(),
+                    retry_after: None,
+                    reset_at: None,
+                }),
+            )
         })
     }
 
@@ -184,21 +227,42 @@ impl Provider for OpenRouterProvider {
             self.options.apply(&mut payload);
             debug!(provider = "openrouter", model, "sending streaming request");
 
-            let resp = self
-                .client
-                .post(chat_completions_url(&self.base_url))
-                .bearer_auth(&self.api_key)
-                .header("HTTP-Referer", &self.site_url)
-                .header("X-Title", &self.site_name)
-                .json(&payload)
-                .send()
-                .await
-                .map_err(|e| {
-                    GatewayError::ProviderError(format!("openrouter stream request failed: {e}"))
-                })?;
+            let url = chat_completions_url(&self.base_url);
+            let attempts = self.keys.len().max(1);
+            let mut last_err: Option<GatewayError> = None;
+            for _ in 0..attempts {
+                let key = self.next_key();
+                let resp = self
+                    .client
+                    .post(&url)
+                    .bearer_auth(&key)
+                    .header("HTTP-Referer", &self.site_url)
+                    .header("X-Title", &self.site_name)
+                    .json(&payload)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        GatewayError::ProviderError(format!(
+                            "openrouter stream request failed: {e}"
+                        ))
+                    })?;
 
-            let resp = check_stream_status(resp, "openrouter").await?;
-            Ok(Body::from_stream(resp.bytes_stream()))
+                match check_stream_status(resp, "openrouter", Some(&self.quota)).await {
+                    Err(e @ GatewayError::ProviderRateLimited { .. }) if attempts > 1 => {
+                        last_err = Some(e);
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                    Ok(resp) => return Ok(Body::from_stream(resp.bytes_stream())),
+                }
+            }
+            Err(
+                last_err.unwrap_or_else(|| GatewayError::ProviderRateLimited {
+                    provider: "openrouter".to_string(),
+                    retry_after: None,
+                    reset_at: None,
+                }),
+            )
         })
     }
 
@@ -237,7 +301,7 @@ impl Provider for OpenRouterProvider {
             let resp = self
                 .client
                 .post(chat_completions_url(&self.base_url))
-                .bearer_auth(&self.api_key)
+                .bearer_auth(self.primary_key())
                 .header("HTTP-Referer", &self.site_url)
                 .header("X-Title", &self.site_name)
                 .json(&payload)
@@ -247,7 +311,7 @@ impl Provider for OpenRouterProvider {
                     GatewayError::ProviderError(format!("openrouter image request failed: {e}"))
                 })?;
 
-            let json = check_response_status(resp, "openrouter").await?;
+            let json = check_response_status(resp, "openrouter", None).await?;
             Ok(extract_chat_images(&json))
         })
     }

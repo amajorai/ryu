@@ -14,6 +14,7 @@ use crate::{
     metrics::Metrics,
     policy::EffectivePolicy,
     providers::ProviderRegistry,
+    quota::ProviderQuotas,
     rate_limit::RateLimiter,
     router::{smart::SmartRouter, ModelRouter},
     semantic_cache::SemanticCache,
@@ -34,6 +35,11 @@ pub struct AppState {
     pub rate_limiter: RateLimiter,
     pub cache: Cache,
     pub circuit_breaker: CircuitBreakers,
+    /// Live per-provider upstream quota / rate-limit snapshots (#3). Providers
+    /// write into it on each completion; `/metrics` reads it for the desktop
+    /// cost/quota dashboard. A shared `Arc` so the provider structs can hold a
+    /// handle.
+    pub quota: Arc<ProviderQuotas>,
     /// Priority admission queue for the resident local engine (interactive ahead
     /// of background fan-out). Inert for remote providers and when disabled.
     /// A startup snapshot of `config.concurrency` (applies on the next restart).
@@ -78,7 +84,8 @@ pub type SharedState = Arc<AppState>;
 
 impl AppState {
     pub fn new(config: GatewayConfig) -> Self {
-        let providers = ProviderRegistry::new(&config.providers);
+        let quota = Arc::new(ProviderQuotas::new());
+        let providers = ProviderRegistry::new(&config.providers, Arc::clone(&quota));
         let router = ModelRouter::new(config.routing.clone());
         let smart_router = SmartRouter::new(config.routing.smart_routing.clone());
         let firewall = FirewallScanner::new(config.firewall.clone());
@@ -134,6 +141,7 @@ impl AppState {
             rate_limiter,
             cache,
             circuit_breaker,
+            quota,
             admission,
             skills,
             audit,
@@ -231,7 +239,8 @@ impl AppState {
     /// after the fact. All other fields are set to their defaults.
     #[cfg(test)]
     pub fn new_for_test(config: GatewayConfig, audit: AuditLogger, evals: EvalsRunner) -> Self {
-        let providers = ProviderRegistry::new(&config.providers);
+        let quota = Arc::new(ProviderQuotas::new());
+        let providers = ProviderRegistry::new(&config.providers, Arc::clone(&quota));
         let router = ModelRouter::new(config.routing.clone());
         let smart_router = SmartRouter::new(config.routing.smart_routing.clone());
         let firewall = FirewallScanner::new(config.firewall.clone());
@@ -256,6 +265,7 @@ impl AppState {
             rate_limiter,
             cache,
             circuit_breaker,
+            quota,
             admission,
             skills,
             audit,

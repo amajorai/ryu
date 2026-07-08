@@ -58,7 +58,7 @@ impl Provider for LocalProvider {
             )
             .await?;
 
-            check_response_status(resp, "local").await
+            check_response_status(resp, "local", None).await
         })
     }
 
@@ -84,7 +84,7 @@ impl Provider for LocalProvider {
             )
             .await?;
 
-            let resp = check_stream_status(resp, "local").await?;
+            let resp = check_stream_status(resp, "local", None).await?;
             Ok(Body::from_stream(resp.bytes_stream()))
         })
     }

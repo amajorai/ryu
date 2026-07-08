@@ -1465,6 +1465,13 @@ pub async fn run_acp_instance(
     // `build_session_from`, per turn below).
     let is_claude_code =
         spawn_cmd.contains("claude-code-acp") || spawn_cmd.contains("claude-agent-acp");
+    // The flagship managed `ryu` agent: pi-acp pointed at Ryu's ISOLATED config dir
+    // (`PI_CODING_AGENT_DIR` → `~/.ryu/pi-agent`). Only this Pi reads the managed
+    // `auth.json`, so it is the only agent whose subscription OAuth logins we
+    // proactively refresh before a turn — never bare `acp:pi` (the user's own
+    // `~/.pi`) or any other engine. Both platforms carry the `PI_CODING_AGENT_DIR`
+    // substring (POSIX inline `VAR=…`, Windows `set VAR=…`), see `ryu_pi_acp_cmd`.
+    let is_managed_pi = spawn_cmd.contains("pi-acp") && spawn_cmd.contains("PI_CODING_AGENT_DIR");
 
     let agent = AcpAgent::from_str(&spawn_cmd)
         .map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?
@@ -1646,6 +1653,17 @@ pub async fn run_acp_instance(
                     // Ryu-tool permission prompt reaches the live turn's consumer.
                     if let Ok(mut g) = sink.lock() {
                         *g = Some(tx.clone());
+                    }
+
+                    // Proactively refresh the managed Pi's subscription OAuth
+                    // logins (Claude Pro/Max, ChatGPT) before the turn, so a
+                    // long-running / long-idle chat doesn't die when an access token
+                    // expired since the last turn. Scoped to the managed Pi's own
+                    // isolated auth.json (never the user's CLI creds) and strictly
+                    // best-effort — failures are logged inside and never block the
+                    // turn. Cheap when nothing is near expiry (a plain file read).
+                    if is_managed_pi {
+                        crate::pi_config::refresh_pi_oauth_logins().await;
                     }
 
                     // Apply the user's chosen session controls before prompting.

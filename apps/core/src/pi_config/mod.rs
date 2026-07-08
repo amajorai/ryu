@@ -675,6 +675,280 @@ fn clear_auth_key(auth_key: &str) -> Result<()> {
     Ok(())
 }
 
+// ── OAuth subscription token refresh ──────────────────────────────────────────
+
+/// Seconds of skew before an access token's `expires_at` at which we proactively
+/// refresh. A turn that starts inside this window would likely 401 partway
+/// through, so we mint a fresh token first.
+const OAUTH_REFRESH_SKEW_SECS: u64 = 60;
+
+/// Static OAuth-refresh parameters for a subscription provider the managed Pi can
+/// log into (`type:"oauth"` in `auth.json`).
+///
+/// **Provenance / trust (read before touching these values).** Pi does not vendor
+/// its own login source into this repo, so the endpoints + client ids below could
+/// NOT be verified against an in-repo file. They are the *public* PKCE client
+/// identifiers the underlying CLIs (Claude Code, Codex) use for subscription login
+/// — public, non-secret values (a PKCE public client carries no client secret, so
+/// nothing secret is hardcoded here). Two things bound the blast radius of a stale
+/// value: (1) both token endpoints live on the vendor's own first-party domain
+/// (`console.anthropic.com` / `auth.openai.com`) — the same origins Ryu already
+/// talks to for subscription usage (`crate::usage::{claude,codex}`) — so a wrong
+/// value fails the refresh loudly instead of leaking the refresh token to a third
+/// party; and (2) a *failed* refresh does not consume the (single-use) refresh
+/// token, so a wrong id degrades to a no-op, never a logout. Every field is
+/// overridable at runtime (the "nothing hardcoded" knob) via the env vars named
+/// below, so a rotated id/endpoint is corrected without a rebuild.
+struct OAuthProvider {
+    /// The `auth.json` key whose oauth entry this refreshes.
+    auth_key: &'static str,
+    /// OAuth 2.0 token endpoint (RFC 6749 §6, `grant_type=refresh_token`).
+    token_url: &'static str,
+    /// Public PKCE client id.
+    client_id: &'static str,
+    /// `scope` to echo on refresh when the provider requires it (`""` = omit).
+    scope: &'static str,
+    /// Env var overriding `token_url` (nothing hardcoded).
+    token_url_env: &'static str,
+    /// Env var overriding `client_id`.
+    client_id_env: &'static str,
+}
+
+/// The subscription providers whose Pi oauth login Ryu can refresh. See
+/// [`OAuthProvider`] for the trust/provenance rationale behind these constants.
+const OAUTH_PROVIDERS: &[OAuthProvider] = &[
+    // Claude Pro/Max — stored under the `anthropic` auth key (see `PROVIDERS`).
+    OAuthProvider {
+        auth_key: "anthropic",
+        token_url: "https://console.anthropic.com/v1/oauth/token",
+        client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+        scope: "",
+        token_url_env: "RYU_PI_OAUTH_ANTHROPIC_TOKEN_URL",
+        client_id_env: "RYU_PI_OAUTH_ANTHROPIC_CLIENT_ID",
+    },
+    // ChatGPT / Codex subscription — Pi's codex login stores it under `openai-codex`;
+    // the plain `openai` key is listed too so an oauth login persisted there also
+    // refreshes. Both use the same public Codex PKCE client.
+    OAuthProvider {
+        auth_key: "openai-codex",
+        token_url: "https://auth.openai.com/oauth/token",
+        client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
+        scope: "openid profile email",
+        token_url_env: "RYU_PI_OAUTH_OPENAI_TOKEN_URL",
+        client_id_env: "RYU_PI_OAUTH_OPENAI_CLIENT_ID",
+    },
+    OAuthProvider {
+        auth_key: "openai",
+        token_url: "https://auth.openai.com/oauth/token",
+        client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
+        scope: "openid profile email",
+        token_url_env: "RYU_PI_OAUTH_OPENAI_TOKEN_URL",
+        client_id_env: "RYU_PI_OAUTH_OPENAI_CLIENT_ID",
+    },
+    // TODO(github-copilot): Copilot's credential is a bespoke GitHub device →
+    // Copilot-token exchange, NOT a plain OAuth refresh grant, and no authoritative
+    // endpoint/client is vendored in-repo to verify against — so it is deliberately
+    // left unwired (`refresh_oauth` warns + returns `Ok(false)`) rather than guessed.
+];
+
+fn oauth_provider(auth_key: &str) -> Option<&'static OAuthProvider> {
+    OAUTH_PROVIDERS.iter().find(|p| p.auth_key == auth_key)
+}
+
+/// Current unix time in whole seconds. This is real runtime Rust (not a workflow
+/// script), so `SystemTime` is the correct clock.
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Read an oauth entry's expiry as unix *seconds*. Prefers `expires_at` (seconds —
+/// the shape this module writes back); tolerates `expires` in milliseconds (the
+/// opencode/Pi on-disk convention) so a token Pi itself wrote is not needlessly
+/// re-refreshed every turn. Values in the millisecond range (≫ a plausible seconds
+/// timestamp) are divided down.
+fn oauth_expires_at(entry: &Value) -> Option<u64> {
+    if let Some(secs) = entry.get("expires_at").and_then(Value::as_u64) {
+        return Some(secs);
+    }
+    entry.get("expires").and_then(Value::as_u64).map(|v| {
+        // ~1e11 cleanly separates seconds (now ≈ 1.7e9) from milliseconds (≈ 1.7e12).
+        if v > 100_000_000_000 {
+            v / 1000
+        } else {
+            v
+        }
+    })
+}
+
+/// Whether an oauth entry's access token is expired or close enough to expiry
+/// (within [`OAUTH_REFRESH_SKEW_SECS`]) to warrant a refresh now. A missing expiry
+/// is treated as expired (refresh), per the fail-safe default.
+fn oauth_needs_refresh(entry: &Value) -> bool {
+    match oauth_expires_at(entry) {
+        Some(expires_at) => expires_at <= now_unix().saturating_add(OAUTH_REFRESH_SKEW_SECS),
+        None => true,
+    }
+}
+
+/// Merge a refreshed `{access, refresh?, expires_at}` back into the provider's
+/// oauth entry and persist the whole `auth.json` (`0600` on Unix), leaving every
+/// other field (`type`, account id, scopes, …) intact — mirroring
+/// [`clear_auth_key`]'s read-modify-write of the same file.
+fn persist_oauth_refresh(
+    auth_key: &str,
+    access: &str,
+    refresh: Option<&str>,
+    expires_at: Option<u64>,
+) -> Result<()> {
+    ensure_dir()?;
+    let mut auth = read_auth();
+    let entry = auth
+        .entry(auth_key.to_owned())
+        .or_insert_with(|| json!({ "type": "oauth" }));
+    let obj = entry
+        .as_object_mut()
+        .context("refresh_oauth: stored auth entry is not a JSON object")?;
+    obj.insert("access".to_owned(), Value::String(access.to_owned()));
+    if let Some(refresh) = refresh {
+        obj.insert("refresh".to_owned(), Value::String(refresh.to_owned()));
+    }
+    if let Some(expires_at) = expires_at {
+        obj.insert("expires_at".to_owned(), json!(expires_at));
+    }
+    let body = serde_json::to_string_pretty(&auth).context("serialize auth.json")?;
+    write_secret_file(&auth_path(), &body)
+}
+
+/// Refresh the OAuth access token for a Pi subscription login stored in
+/// `auth.json`, if one exists and is at/near expiry. Returns `Ok(true)` when a new
+/// access token was minted and persisted, `Ok(false)` when nothing needed doing
+/// (not an oauth entry, still fresh, or the provider has no known refresh flow).
+///
+/// This targets the managed Pi's OWN isolated `auth.json` (`~/.ryu/pi-agent`),
+/// NEVER the user's `~/.claude` / `~/.codex`. That distinction is what makes
+/// refreshing safe here: unlike the read-only usage feature (`crate::usage`, which
+/// must not refresh a shared, single-use CLI token or it would log the real CLI
+/// out with `refresh_token_reused`), rotating a token in Ryu's private copy only
+/// affects this copy. pi-acp also spawns a fresh Pi process per `session/new` (one
+/// per turn), so a refresh made just before the turn lands before any Pi process
+/// holds the token — no double-refresh race with Pi's own client.
+pub async fn refresh_oauth(auth_key: &str) -> Result<bool> {
+    let Some(entry) = read_auth().get(auth_key).cloned() else {
+        return Ok(false);
+    };
+    // Only oauth entries carry a refresh token; api-key entries never expire.
+    let Some(refresh) = entry
+        .get("refresh")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return Ok(false);
+    };
+    if !oauth_needs_refresh(&entry) {
+        return Ok(false);
+    }
+
+    let Some(provider) = oauth_provider(auth_key) else {
+        tracing::warn!(
+            auth_key,
+            "refresh_oauth: no known OAuth refresh flow for this provider — skipping (TODO: wire it)"
+        );
+        return Ok(false);
+    };
+
+    // Resolve endpoint + client id, honoring the env overrides (nothing hardcoded).
+    let token_url = std::env::var(provider.token_url_env)
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| provider.token_url.to_owned());
+    let client_id = std::env::var(provider.client_id_env)
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| provider.client_id.to_owned());
+
+    // OAuth 2.0 refresh grant (RFC 6749 §6), sent as JSON — the body shape both the
+    // Claude and Codex token endpoints accept.
+    let mut body = json!({
+        "grant_type": "refresh_token",
+        "refresh_token": refresh,
+        "client_id": client_id,
+    });
+    if !provider.scope.is_empty() {
+        body["scope"] = Value::String(provider.scope.to_owned());
+    }
+
+    let resp = reqwest::Client::new()
+        .post(&token_url)
+        .timeout(std::time::Duration::from_secs(15))
+        .json(&body)
+        .send()
+        .await
+        .with_context(|| format!("refresh_oauth: POST {token_url}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        // A failed refresh does NOT consume the single-use refresh token, so the
+        // stored credential is left untouched and Pi can still refresh on its own.
+        let detail = resp.text().await.unwrap_or_default();
+        anyhow::bail!("refresh_oauth: {auth_key} token endpoint returned {status}: {detail}");
+    }
+    let tokens: Value = resp
+        .json()
+        .await
+        .context("refresh_oauth: parse token response")?;
+
+    let Some(access) = tokens
+        .get("access_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        anyhow::bail!("refresh_oauth: {auth_key} token response carried no access_token");
+    };
+    // Providers MAY rotate the refresh token; keep the existing one if they didn't.
+    let rotated_refresh = tokens
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let expires_at = tokens
+        .get("expires_in")
+        .and_then(Value::as_u64)
+        .map(|secs| now_unix().saturating_add(secs));
+
+    persist_oauth_refresh(auth_key, access, rotated_refresh, expires_at)?;
+    tracing::info!(
+        auth_key,
+        "refresh_oauth: minted a fresh subscription access token"
+    );
+    Ok(true)
+}
+
+/// Best-effort proactive refresh of every subscription OAuth login the managed Pi
+/// might use this turn. Called just before a Ryu/Pi ACP turn is sent (see
+/// `acp::run_acp_instance`) so a long-running / long-idle chat whose access token
+/// expired since the previous turn gets a fresh one before Pi makes its first model
+/// call. NEVER fails the turn: each provider is refreshed independently and errors
+/// are logged, not propagated. The common case is cheap — a provider with no oauth
+/// entry, or a still-fresh token, returns after a single `auth.json` read with no
+/// network call.
+pub async fn refresh_pi_oauth_logins() {
+    for provider in OAUTH_PROVIDERS {
+        if let Err(e) = refresh_oauth(provider.auth_key).await {
+            tracing::warn!(
+                auth_key = provider.auth_key,
+                error = %e,
+                "refresh_pi_oauth_logins: refresh failed (continuing)"
+            );
+        }
+    }
+}
+
 /// Remove a custom-provider entry from `models.json`.
 fn remove_models_provider(id: &str) -> Result<()> {
     let mut models = read_models();

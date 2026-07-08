@@ -27,6 +27,7 @@ mod finetune;
 mod hardware;
 mod hf_auth;
 mod identity;
+mod healing;
 mod identity_verify;
 mod inference;
 mod learning;
@@ -958,6 +959,9 @@ async fn main() {
     // Publish the state for the scheduler's continual-learning job (it has no
     // `State` extractor), mirroring the monitor/quest/identity-health engines.
     crate::learning::set_global_state(server_state.clone());
+    // Self-healing loop: watch the run-status bus and diagnose/propose fixes for
+    // failed runs (auto-apply or queue to the approvals inbox, per `healing.*`).
+    crate::healing::HealEngine::new(server_state.clone()).spawn();
     let auth_token = std::env::var("RYU_TOKEN").ok();
 
     // Fire the `onStartup` activation event (#443) now that `ServerState` exists.

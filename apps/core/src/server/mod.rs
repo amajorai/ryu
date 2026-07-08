@@ -25,6 +25,7 @@ pub mod finetune;
 pub mod git;
 pub mod hardware_api;
 pub mod hardware_ws;
+pub mod healing_api;
 pub mod identity_api;
 pub mod learning;
 pub mod media;
@@ -1178,6 +1179,16 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/learn/cycle", post(learning::cycle))
         .route("/api/learn/exclude", post(learning::exclude))
         .route("/api/experience/list", get(learning::list))
+        // ── Self-healing loop (diagnose + fix failed runs) ──
+        .route(
+            "/api/healing/config",
+            get(healing_api::config).post(healing_api::set_config),
+        )
+        .route("/api/healing/status", get(healing_api::status))
+        .route(
+            "/api/healing/simulate-failure",
+            post(healing_api::simulate_failure),
+        )
         // ── Generative-media data path (image/video) — proxies to sd-server ──
         .route("/api/images/generate", post(media::generate_image))
         .route("/api/video/generate", post(media::generate_video))

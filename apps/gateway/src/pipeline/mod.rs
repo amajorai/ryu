@@ -1074,9 +1074,18 @@ pub async fn run(
                 });
             }
             Err(e) => {
-                state.circuit_breaker.record_failure(provider.name());
-                state.metrics.inc_provider_error(provider.name());
-                warn!(provider = %provider.name(), error = %e, "provider failed, trying fallback");
+                // A pure upstream rate-limit (429, after in-provider account
+                // rotation exhausted all keys) means "busy, try the next tier",
+                // not "broken" — demote down the cost-tier chain WITHOUT tripping
+                // the circuit breaker. All other errors penalize the provider.
+                if matches!(e, GatewayError::ProviderRateLimited { .. }) {
+                    state.metrics.inc_provider_error(provider.name());
+                    warn!(provider = %provider.name(), error = %e, "provider rate limited, demoting to next tier");
+                } else {
+                    state.circuit_breaker.record_failure(provider.name());
+                    state.metrics.inc_provider_error(provider.name());
+                    warn!(provider = %provider.name(), error = %e, "provider failed, trying fallback");
+                }
                 if Some(provider_kind) == primary_provider.as_ref() {
                     primary_skipped = true;
                 }
@@ -1434,13 +1443,24 @@ pub async fn run_stream(
                 });
             }
             Err(e) => {
-                state.circuit_breaker.record_failure(provider.name());
-                state.metrics.inc_provider_error(provider.name());
-                warn!(
-                    provider = %provider.name(),
-                    error = %e,
-                    "stream provider failed, trying fallback"
-                );
+                // See the non-stream arm: a 429 demotes tiers without a circuit
+                // penalty; other errors trip the breaker as before.
+                if matches!(e, GatewayError::ProviderRateLimited { .. }) {
+                    state.metrics.inc_provider_error(provider.name());
+                    warn!(
+                        provider = %provider.name(),
+                        error = %e,
+                        "stream provider rate limited, demoting to next tier"
+                    );
+                } else {
+                    state.circuit_breaker.record_failure(provider.name());
+                    state.metrics.inc_provider_error(provider.name());
+                    warn!(
+                        provider = %provider.name(),
+                        error = %e,
+                        "stream provider failed, trying fallback"
+                    );
+                }
                 if Some(provider_kind) == primary_provider_stream.as_ref() {
                     primary_skipped_stream = true;
                 }

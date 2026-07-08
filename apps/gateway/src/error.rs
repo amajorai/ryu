@@ -26,6 +26,19 @@ pub enum GatewayError {
     #[error("Provider error: {0}")]
     ProviderError(String),
 
+    /// An upstream *provider* returned HTTP 429. Distinct from the gateway's own
+    /// inbound [`GatewayError::RateLimited`]: this is a capacity signal the
+    /// pipeline acts on — it demotes down the cost-tier fallback chain and rotates
+    /// to the next account WITHOUT tripping the provider's circuit breaker (a
+    /// rate-limit means "busy", not "broken"), and feeds `retry_after`/`reset_at`
+    /// into the quota store. Stable code: `provider_rate_limited`.
+    #[error("Provider rate limited: {provider}")]
+    ProviderRateLimited {
+        provider: String,
+        retry_after: Option<u64>,
+        reset_at: Option<u64>,
+    },
+
     #[error("Circuit open for provider: {0}")]
     CircuitOpen(&'static str),
 
@@ -75,6 +88,11 @@ impl IntoResponse for GatewayError {
             GatewayError::ProviderError(msg) => {
                 (StatusCode::BAD_GATEWAY, "provider_error", msg.as_str())
             }
+            GatewayError::ProviderRateLimited { .. } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "provider_rate_limited",
+                "Upstream provider rate limit reached. Please retry after a moment.",
+            ),
             GatewayError::CircuitOpen(provider) => {
                 (StatusCode::SERVICE_UNAVAILABLE, "circuit_open", *provider)
             }

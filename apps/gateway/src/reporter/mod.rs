@@ -13,6 +13,7 @@ use tracing::{debug, warn};
 
 use crate::{
     audit::{AuditEntry, AuditQuery},
+    config::ControlPlaneConfig,
     state::SharedState,
 };
 
@@ -83,17 +84,26 @@ struct UserDailyBucket {
     /// Per-transport request counts. Gateway-observed rows are exact; ACP rows can
     /// be added later by Core/app-observed usage events.
     by_transport: HashMap<String, u64>,
+    /// Real per-model spend for the day (#9): summed per-row using the
+    /// control-plane price table (falls back to the flat rate when a model isn't
+    /// priced), rather than one flat estimate over the aggregated token totals.
+    cost_micro: u64,
 }
 
 impl UserDailyBucket {
     /// Fold a single audit row (already known to carry a `user_id`) into the bucket.
-    fn absorb(&mut self, entry: &AuditEntry) {
+    fn absorb(&mut self, entry: &AuditEntry, cp: &ControlPlaneConfig) {
         self.input_tokens = self.input_tokens.saturating_add(entry.input_tokens);
         self.output_tokens = self.output_tokens.saturating_add(entry.output_tokens);
         if entry.event_type == "model_call" {
             self.request_count = self.request_count.saturating_add(1);
             *self.by_model.entry(entry.model.clone()).or_insert(0) += 1;
             *self.by_transport.entry("gateway".to_string()).or_insert(0) += 1;
+            self.cost_micro = self.cost_micro.saturating_add(cp.cost_for(
+                &entry.model,
+                entry.input_tokens,
+                entry.output_tokens,
+            ));
         }
         if let Some(skill_ids) = &entry.skill_ids {
             for skill in skill_ids
@@ -157,7 +167,7 @@ fn build_user_daily(state: &SharedState, entries: &[AuditEntry]) -> Vec<Value> {
         buckets
             .entry((user_id, day.to_string()))
             .or_default()
-            .absorb(entry);
+            .absorb(entry, &state.config.control_plane);
     }
 
     buckets
@@ -171,10 +181,8 @@ fn build_user_daily(state: &SharedState, entries: &[AuditEntry]) -> Vec<Value> {
                 "requestCount": bucket.request_count,
                 "sessionCount": bucket.sessions.len() as u64,
                 "agentSeconds": bucket.agent_ms / MS_PER_SEC,
-                // Per-row provider cost isn't recorded; reuse the same flat token
-                // estimate the aggregate report uses so the field is populated
-                // consistently rather than sent as zero.
-                "costMicroUsd": cost_micro_usd(state, bucket.input_tokens, bucket.output_tokens),
+                // Real per-model spend (#9), summed per row via the price table.
+                "costMicroUsd": bucket.cost_micro,
                 "byFeature": bucket.by_feature_json(),
                 "byModel": bucket.by_model,
                 "bySkill": bucket.by_skill,
@@ -197,17 +205,24 @@ struct AgentDailyBucket {
     agent_ms: u64,
     /// Per-model request counts.
     by_model: HashMap<String, u64>,
+    /// Real per-model spend for the day (#9). See [`UserDailyBucket::cost_micro`].
+    cost_micro: u64,
 }
 
 impl AgentDailyBucket {
     /// Fold a single audit row (already known to carry both a `user_id` and an
     /// `agent_id`) into the bucket.
-    fn absorb(&mut self, entry: &AuditEntry) {
+    fn absorb(&mut self, entry: &AuditEntry, cp: &ControlPlaneConfig) {
         self.input_tokens = self.input_tokens.saturating_add(entry.input_tokens);
         self.output_tokens = self.output_tokens.saturating_add(entry.output_tokens);
         if entry.event_type == "model_call" {
             self.request_count = self.request_count.saturating_add(1);
             *self.by_model.entry(entry.model.clone()).or_insert(0) += 1;
+            self.cost_micro = self.cost_micro.saturating_add(cp.cost_for(
+                &entry.model,
+                entry.input_tokens,
+                entry.output_tokens,
+            ));
         }
         if let Some(session) = &entry.session_id {
             self.sessions.insert(session.clone());
@@ -237,7 +252,7 @@ fn build_agent_daily(state: &SharedState, entries: &[AuditEntry]) -> Vec<Value> 
         buckets
             .entry((user_id, agent_id, day.to_string()))
             .or_default()
-            .absorb(entry);
+            .absorb(entry, &state.config.control_plane);
     }
 
     buckets
@@ -252,10 +267,8 @@ fn build_agent_daily(state: &SharedState, entries: &[AuditEntry]) -> Vec<Value> 
                 "requestCount": bucket.request_count,
                 "sessionCount": bucket.sessions.len() as u64,
                 "agentSeconds": bucket.agent_ms / MS_PER_SEC,
-                // Per-row provider cost isn't recorded; reuse the same flat token
-                // estimate the aggregate report uses so the field is populated
-                // consistently rather than sent as zero.
-                "costMicroUsd": cost_micro_usd(state, bucket.input_tokens, bucket.output_tokens),
+                // Real per-model spend (#9), summed per row via the price table.
+                "costMicroUsd": bucket.cost_micro,
                 "byModel": bucket.by_model,
             })
         })

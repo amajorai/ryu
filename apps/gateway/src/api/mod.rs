@@ -21,6 +21,11 @@ pub fn router(state: SharedState) -> Router {
     Router::new()
         // OpenAI-compatible chat endpoint
         .route("/v1/chat/completions", post(chat::chat_completions))
+        // Cursor alias (#7). Cursor's "Override OpenAI Base URL" already emits the
+        // OpenAI `/v1/chat/completions` shape, so this is a labelled alias to the
+        // same governed pipeline — point Cursor at `<gateway>/v1/cursor`. Leaves a
+        // seam for full Cursor-protocol translation if ever needed.
+        .route("/v1/cursor/chat/completions", post(chat::chat_completions))
         // OpenAI-compatible multimodal endpoints (routed through the same pipeline)
         .route(
             "/v1/images/generations",

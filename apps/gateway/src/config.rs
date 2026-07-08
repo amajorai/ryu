@@ -373,6 +373,52 @@ pub struct ControlPlaneConfig {
     /// used to attribute spend. Default: 2000 (= $0.002 / 1k tokens).
     #[serde(default = "default_cost_per_1k_micro_usd")]
     pub cost_per_1k_micro_usd: u64,
+
+    /// Per-model price table (#9). Keyed by model id (exact, then longest-prefix
+    /// match, e.g. `"claude-sonnet"`). When a model matches, spend is attributed
+    /// with real input/output rates instead of the flat `cost_per_1k_micro_usd`.
+    /// Empty (the default) keeps the flat estimate — nothing hardcoded, fully
+    /// swappable per deployment.
+    #[serde(default)]
+    pub model_pricing: HashMap<String, ModelPrice>,
+}
+
+/// Real input/output pricing for one model, in micro-USD per 1000 tokens.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ModelPrice {
+    /// micro-USD per 1000 input (prompt) tokens.
+    pub input_per_1k_micro_usd: u64,
+    /// micro-USD per 1000 output (completion) tokens.
+    pub output_per_1k_micro_usd: u64,
+}
+
+impl ControlPlaneConfig {
+    /// Estimated spend in micro-USD for one call. Uses the per-model price table
+    /// when the model matches (exact, then longest-prefix), else the flat
+    /// `cost_per_1k_micro_usd` fallback.
+    pub fn cost_for(&self, model: &str, input: u64, output: u64) -> u64 {
+        if let Some(p) = self.price_for_model(model) {
+            let i = input.saturating_mul(p.input_per_1k_micro_usd) / 1000;
+            let o = output.saturating_mul(p.output_per_1k_micro_usd) / 1000;
+            return i.saturating_add(o);
+        }
+        (input.saturating_add(output)).saturating_mul(self.cost_per_1k_micro_usd) / 1000
+    }
+
+    /// Exact match first, then the longest matching prefix (so `"claude-sonnet"`
+    /// covers `"claude-sonnet-4-5-20250929"`).
+    fn price_for_model(&self, model: &str) -> Option<&ModelPrice> {
+        if let Some(p) = self.model_pricing.get(model) {
+            return Some(p);
+        }
+        let mut best: Option<(&String, &ModelPrice)> = None;
+        for (k, v) in &self.model_pricing {
+            if model.starts_with(k.as_str()) && best.map_or(true, |(bk, _)| k.len() > bk.len()) {
+                best = Some((k, v));
+            }
+        }
+        best.map(|(_, v)| v)
+    }
 }
 
 fn default_control_plane_url() -> String {
@@ -398,6 +444,7 @@ impl Default for ControlPlaneConfig {
             audit_limit: default_report_audit_limit(),
             shared_budget_id: None,
             cost_per_1k_micro_usd: default_cost_per_1k_micro_usd(),
+            model_pricing: HashMap::new(),
         }
     }
 }
@@ -427,8 +474,21 @@ pub struct ProvidersConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OpenAiProviderConfig {
     pub api_key: String,
+    /// Additional accounts for round-robin rotation (#4, multi-account). When a
+    /// key hits an upstream 429 the provider rotates to the next before failing
+    /// over to the cost-tier chain. Empty → single-account (uses `api_key`).
+    #[serde(default)]
+    pub api_keys: Vec<String>,
     #[serde(default = "openai_base_url")]
     pub base_url: String,
+}
+
+impl OpenAiProviderConfig {
+    /// The full account rotation set: the extra `api_keys` when present, else the
+    /// single `api_key`. Empty strings are dropped.
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
 }
 
 fn openai_base_url() -> String {
@@ -438,12 +498,43 @@ fn openai_base_url() -> String {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AnthropicProviderConfig {
     pub api_key: String,
+    /// Additional accounts for round-robin rotation (#4). See
+    /// [`OpenAiProviderConfig::api_keys`].
+    #[serde(default)]
+    pub api_keys: Vec<String>,
     #[serde(default = "anthropic_base_url")]
     pub base_url: String,
 }
 
+impl AnthropicProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+
 fn anthropic_base_url() -> String {
     "https://api.anthropic.com".to_string()
+}
+
+/// Merge a primary key + an optional extra-accounts list into the rotation set,
+/// preferring the explicit list and always including the primary. Blank entries
+/// are dropped so a stray empty string never becomes a "key". Falls back to a
+/// single empty string only if nothing is configured (keeps the provider
+/// constructible; the upstream call then fails auth as before).
+fn all_provider_keys(primary: &str, extra: &[String]) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    if !primary.is_empty() {
+        keys.push(primary.to_string());
+    }
+    for k in extra {
+        if !k.is_empty() && !keys.contains(k) {
+            keys.push(k.clone());
+        }
+    }
+    if keys.is_empty() {
+        keys.push(String::new());
+    }
+    keys
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -459,6 +550,10 @@ fn local_base_url() -> String {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OpenRouterProviderConfig {
     pub api_key: String,
+    /// Additional accounts for round-robin rotation (#4). See
+    /// [`OpenAiProviderConfig::api_keys`].
+    #[serde(default)]
+    pub api_keys: Vec<String>,
     #[serde(default = "openrouter_base_url")]
     pub base_url: String,
     #[serde(default = "openrouter_site_url")]
@@ -495,6 +590,12 @@ pub struct OpenRouterProviderConfig {
     /// selection through the pipeline is the follow-up to the provisioning loop.
     #[serde(default)]
     pub org_api_keys: std::collections::HashMap<String, String>,
+}
+
+impl OpenRouterProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
 }
 
 fn openrouter_base_url() -> String {
@@ -658,6 +759,15 @@ pub struct RoutingConfig {
     /// Fallback chain when the primary provider is unavailable
     #[serde(default)]
     pub fallback_chain: Vec<ProviderKind>,
+
+    /// Cost-tier ordering for the fallback chain (#2). Lower = preferred:
+    /// subscription (0) → cheap (1) → free (2). After the primary provider, the
+    /// chain is stably sorted by tier so a rate-limited/failed primary demotes
+    /// down the cost ladder instead of round-robining at random. Absent entries
+    /// default to tier 0. Empty map (the default) preserves the flat
+    /// `fallback_chain` order exactly — nothing hardcoded.
+    #[serde(default)]
+    pub provider_tiers: HashMap<ProviderKind, u8>,
 
     /// Eval-driven (A/B) routing. When enabled, requests are split across a set
     /// of candidate providers and the winner is biased toward whichever candidate
@@ -1010,6 +1120,22 @@ fn env_bool(name: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
+/// Parse a comma-separated env var into a list of API keys for multi-account
+/// rotation (#4), e.g. `OPENAI_API_KEYS=sk-a,sk-b,sk-c`. Blank entries dropped;
+/// unset → empty (single-account, uses the scalar `*_API_KEY`).
+fn env_keys(name: &str) -> Vec<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| {
+            v.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RateLimitConfig {
     #[serde(default = "default_true")]
@@ -1299,6 +1425,7 @@ impl GatewayConfig {
             let base_url = std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| openai_base_url());
             config.providers.openai = Some(OpenAiProviderConfig {
                 api_key: key,
+                api_keys: env_keys("OPENAI_API_KEYS"),
                 base_url,
             });
         }
@@ -1309,6 +1436,7 @@ impl GatewayConfig {
                 std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| anthropic_base_url());
             config.providers.anthropic = Some(AnthropicProviderConfig {
                 api_key: key,
+                api_keys: env_keys("ANTHROPIC_API_KEYS"),
                 base_url,
             });
         }
@@ -1349,6 +1477,7 @@ impl GatewayConfig {
             let usage_accounting = env_bool("OPENROUTER_USAGE_ACCOUNTING", true);
             config.providers.openrouter = Some(OpenRouterProviderConfig {
                 api_key: key,
+                api_keys: env_keys("OPENROUTER_API_KEYS"),
                 base_url,
                 site_url,
                 site_name,
@@ -2306,6 +2435,60 @@ impl Default for GatewayConfig {
             credits: CreditsConfig::default(),
             fleet: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod capacity_config_tests {
+    use super::{ControlPlaneConfig, ModelPrice, OpenAiProviderConfig};
+    use std::collections::HashMap;
+
+    #[test]
+    fn all_keys_falls_back_to_single_key() {
+        let c = OpenAiProviderConfig {
+            api_key: "sk-primary".into(),
+            api_keys: vec![],
+            base_url: super::openai_base_url(),
+        };
+        assert_eq!(c.all_keys(), vec!["sk-primary".to_string()]);
+    }
+
+    #[test]
+    fn all_keys_merges_and_dedupes() {
+        let c = OpenAiProviderConfig {
+            api_key: "sk-a".into(),
+            api_keys: vec!["sk-b".into(), "sk-a".into(), "".into()],
+            base_url: super::openai_base_url(),
+        };
+        // Primary first, extras appended, dupes + blanks dropped.
+        assert_eq!(c.all_keys(), vec!["sk-a".to_string(), "sk-b".to_string()]);
+    }
+
+    #[test]
+    fn cost_for_uses_flat_rate_without_a_price_table() {
+        let cp = ControlPlaneConfig::default(); // 2000 micro-USD / 1k combined
+                                                // 500 in + 500 out = 1000 tokens ⇒ 2000 micro-USD.
+        assert_eq!(cp.cost_for("gpt-4o", 500, 500), 2000);
+    }
+
+    #[test]
+    fn cost_for_prefers_per_model_prefix_pricing() {
+        let mut pricing = HashMap::new();
+        pricing.insert(
+            "claude-sonnet".to_string(),
+            ModelPrice {
+                input_per_1k_micro_usd: 3000,
+                output_per_1k_micro_usd: 15000,
+            },
+        );
+        let cp = ControlPlaneConfig {
+            model_pricing: pricing,
+            ..Default::default()
+        };
+        // Longest-prefix match on the versioned id: 1k in (3000) + 1k out (15000).
+        assert_eq!(cp.cost_for("claude-sonnet-4-5-20250929", 1000, 1000), 18000);
+        // An unpriced model falls back to the flat 2000/1k rate.
+        assert_eq!(cp.cost_for("gpt-4o", 1000, 0), 2000);
     }
 }
 

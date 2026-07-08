@@ -9,9 +9,11 @@ pub mod openrouter;
 pub mod replicate;
 
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
+use reqwest::header::HeaderMap;
 use serde_json::Value;
 use tracing::warn;
 
@@ -19,6 +21,7 @@ use crate::{
     config::{ProviderKind, ProvidersConfig},
     error::GatewayError,
     jobs::VideoJob,
+    quota::{ProviderQuotas, RateLimitInfo},
 };
 
 pub use anthropic::AnthropicProvider;
@@ -44,18 +47,26 @@ pub struct ProviderRegistry {
 }
 
 impl ProviderRegistry {
-    pub fn new(config: &ProvidersConfig) -> Self {
+    pub fn new(config: &ProvidersConfig, quota: Arc<ProviderQuotas>) -> Self {
         let client = build_client();
 
-        let openai = config
-            .openai
-            .as_ref()
-            .map(|c| OpenAiProvider::new(client.clone(), c.api_key.clone(), c.base_url.clone()));
+        let openai = config.openai.as_ref().map(|c| {
+            OpenAiProvider::new(
+                client.clone(),
+                c.all_keys(),
+                c.base_url.clone(),
+                Arc::clone(&quota),
+            )
+        });
 
-        let anthropic = config
-            .anthropic
-            .as_ref()
-            .map(|c| AnthropicProvider::new(client.clone(), c.api_key.clone(), c.base_url.clone()));
+        let anthropic = config.anthropic.as_ref().map(|c| {
+            AnthropicProvider::new(
+                client.clone(),
+                c.all_keys(),
+                c.base_url.clone(),
+                Arc::clone(&quota),
+            )
+        });
 
         let local = config
             .local
@@ -72,11 +83,12 @@ impl ProviderRegistry {
             };
             OpenRouterProvider::new(
                 client.clone(),
-                c.api_key.clone(),
+                c.all_keys(),
                 c.base_url.clone(),
                 c.site_url.clone(),
                 c.site_name.clone(),
                 options,
+                Arc::clone(&quota),
             )
         });
 
@@ -224,32 +236,137 @@ pub(super) fn models_from_response(json: Value) -> Option<Vec<Value>> {
     (!models.is_empty()).then_some(models)
 }
 
-/// Check a streaming response for a non-2xx status and return an error.
+/// Parse the common rate-limit / quota headers a provider may return. Handles
+/// OpenAI's `x-ratelimit-*`, Anthropic's `anthropic-ratelimit-*`, and the
+/// standard `retry-after`. Returns `None` when nothing usable is present.
+pub(super) fn parse_rate_limit(headers: &HeaderMap) -> Option<RateLimitInfo> {
+    let retry_after = header_u64(headers, &["retry-after"]);
+    let remaining = header_u64(
+        headers,
+        &[
+            "x-ratelimit-remaining-tokens",
+            "x-ratelimit-remaining-requests",
+            "anthropic-ratelimit-tokens-remaining",
+            "anthropic-ratelimit-requests-remaining",
+            "x-ratelimit-remaining",
+        ],
+    );
+    let limit = header_u64(
+        headers,
+        &[
+            "x-ratelimit-limit-tokens",
+            "x-ratelimit-limit-requests",
+            "anthropic-ratelimit-tokens-limit",
+            "anthropic-ratelimit-requests-limit",
+            "x-ratelimit-limit",
+        ],
+    );
+    // A concrete reset instant is provider-specific and fiddly (OpenAI uses a
+    // duration like "6m0s", Anthropic an RFC3339 timestamp). For v1 we derive the
+    // reset from `retry-after` when present (now + retry_after); the raw reset
+    // header parsing can be layered in later without changing the shape.
+    let reset_at = retry_after.map(|s| now_secs().saturating_add(s));
+
+    let info = RateLimitInfo {
+        remaining,
+        limit,
+        reset_at,
+        retry_after,
+    };
+    info.is_some().then_some(info)
+}
+
+/// Read the first present header from `keys` as a `u64` (trimmed). Non-numeric or
+/// missing values are skipped so a malformed header never poisons the signal.
+fn header_u64(headers: &HeaderMap, keys: &[&str]) -> Option<u64> {
+    for k in keys {
+        if let Some(v) = headers.get(*k).and_then(|v| v.to_str().ok()) {
+            if let Ok(n) = v.trim().parse::<u64>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Check a streaming response for a non-2xx status and return an error. An HTTP
+/// 429 becomes the typed [`GatewayError::ProviderRateLimited`] (so the pipeline
+/// can rotate accounts / demote tier without penalizing the circuit breaker) and
+/// is recorded into the quota sink when one is provided.
 pub(super) async fn check_stream_status(
     resp: reqwest::Response,
     provider: &str,
+    quota: Option<&ProviderQuotas>,
 ) -> Result<reqwest::Response, GatewayError> {
-    if resp.status().is_success() {
+    let status = resp.status();
+    let rate_limit = parse_rate_limit(resp.headers());
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        let retry_after = rate_limit.as_ref().and_then(|r| r.retry_after);
+        let reset_at = rate_limit.as_ref().and_then(|r| r.reset_at);
+        if let Some(q) = quota {
+            q.record_rate_limited(provider, retry_after, reset_at);
+        }
+        return Err(GatewayError::ProviderRateLimited {
+            provider: provider.to_string(),
+            retry_after,
+            reset_at,
+        });
+    }
+    if status.is_success() {
+        if let (Some(q), Some(info)) = (quota, rate_limit.as_ref()) {
+            q.record_success(provider, info);
+        }
         return Ok(resp);
     }
-    let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     Err(GatewayError::ProviderError(format!(
         "{provider} stream error {status}: {body}"
     )))
 }
 
-/// Check a completed response for a non-2xx status, parse and return the JSON body.
+/// Check a completed response for a non-2xx status, parse and return the JSON
+/// body. An HTTP 429 becomes the typed [`GatewayError::ProviderRateLimited`]; any
+/// rate-limit headers (on success or 429) are recorded into the quota sink when
+/// provided.
 pub(super) async fn check_response_status(
     resp: reqwest::Response,
     provider: &str,
+    quota: Option<&ProviderQuotas>,
 ) -> Result<Value, GatewayError> {
     let status = resp.status();
+    let rate_limit = parse_rate_limit(resp.headers());
+
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        let retry_after = rate_limit.as_ref().and_then(|r| r.retry_after);
+        let reset_at = rate_limit.as_ref().and_then(|r| r.reset_at);
+        if let Some(q) = quota {
+            q.record_rate_limited(provider, retry_after, reset_at);
+        }
+        // Drain the body best-effort for the log; it is not surfaced to the caller.
+        let _ = resp.text().await;
+        tracing::warn!(provider, status = %status, "provider rate limited (429)");
+        return Err(GatewayError::ProviderRateLimited {
+            provider: provider.to_string(),
+            retry_after,
+            reset_at,
+        });
+    }
+
     let json: Value = resp.json().await.map_err(|e| {
         GatewayError::ProviderError(format!("{provider} response parse error: {e}"))
     })?;
 
     if status.is_success() {
+        if let (Some(q), Some(info)) = (quota, rate_limit.as_ref()) {
+            q.record_success(provider, info);
+        }
         return Ok(json);
     }
 
@@ -484,6 +601,40 @@ fn collect_media_urls(value: &Value, out: &mut Vec<Value>, seen: &mut Vec<String
 /// Whether a string looks like a fetchable media URL or an inline data URI.
 fn is_media_url(s: &str) -> bool {
     s.starts_with("http://") || s.starts_with("https://") || s.starts_with("data:")
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::parse_rate_limit;
+    use reqwest::header::HeaderMap;
+
+    #[test]
+    fn parses_remaining_limit_and_retry_after() {
+        let mut h = HeaderMap::new();
+        h.insert("x-ratelimit-remaining-tokens", "1200".parse().unwrap());
+        h.insert("x-ratelimit-limit-tokens", "10000".parse().unwrap());
+        h.insert("retry-after", "30".parse().unwrap());
+        let info = parse_rate_limit(&h).expect("some");
+        assert_eq!(info.remaining, Some(1200));
+        assert_eq!(info.limit, Some(10000));
+        assert_eq!(info.retry_after, Some(30));
+        // reset_at is derived from retry-after (now + 30), so it must be in the future.
+        assert!(info.reset_at.unwrap() >= 30);
+    }
+
+    #[test]
+    fn none_when_no_rate_limit_headers() {
+        let mut h = HeaderMap::new();
+        h.insert("content-type", "application/json".parse().unwrap());
+        assert!(parse_rate_limit(&h).is_none());
+    }
+
+    #[test]
+    fn ignores_malformed_numeric_headers() {
+        let mut h = HeaderMap::new();
+        h.insert("x-ratelimit-remaining", "not-a-number".parse().unwrap());
+        assert!(parse_rate_limit(&h).is_none());
+    }
 }
 
 #[cfg(test)]

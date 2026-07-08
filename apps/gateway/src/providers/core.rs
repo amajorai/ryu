@@ -58,7 +58,7 @@ impl Provider for CoreProvider {
             )
             .await?;
 
-            check_response_status(resp, "core").await
+            check_response_status(resp, "core", None).await
         })
     }
 
@@ -88,7 +88,7 @@ impl Provider for CoreProvider {
             )
             .await?;
 
-            let resp = check_stream_status(resp, "core").await?;
+            let resp = check_stream_status(resp, "core", None).await?;
             Ok(Body::from_stream(resp.bytes_stream()))
         })
     }

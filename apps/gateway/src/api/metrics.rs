@@ -10,11 +10,15 @@ pub async fn get_metrics(State(state): State<SharedState>) -> Json<Value> {
 
     let evals_arg = Some((&scores, cfg.enabled, cfg.sample_rate, sampled));
     let provider_health = state.circuit_breaker.snapshot();
-    Json(
-        state
-            .metrics
-            .snapshot_with_evals_and_health(evals_arg, Some(&provider_health)),
-    )
+    let mut snapshot = state
+        .metrics
+        .snapshot_with_evals_and_health(evals_arg, Some(&provider_health));
+    // Per-provider upstream quota / rate-limit countdowns (#3) for the desktop
+    // cost/quota dashboard. Additive: absent when no provider has reported yet.
+    if let Some(obj) = snapshot.as_object_mut() {
+        obj.insert("provider_quota".to_string(), state.quota.snapshot());
+    }
+    Json(snapshot)
 }
 
 /// Live admission-queue depth for the gated local engine — in-flight vs queued
