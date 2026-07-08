@@ -110,11 +110,13 @@ hardcoded third party). The reply is parsed into:
 ```
 
 Nothing is hardcoded. The model, effort, and system prompt resolve from preferences
-(`meeting-notes-model`, `meeting-notes-effort`, `meeting-notes-prompt`) then env then
-`DEFAULT_LLM_MODEL`; the default prompt is `DEFAULT_NOTES_PROMPT` in
-`apps/core/src/meetings/notes.rs`. An empty transcript skips the model call entirely. Parsing is
-fail-soft: if the reply contains no parseable JSON, the whole reply is kept as the `summary` rather
-than discarding the model's work.
+(`meeting-notes-model`, `meeting-notes-effort`, `meeting-notes-prompt`, `meeting-notes-template`)
+then env then `DEFAULT_LLM_MODEL`. A custom prompt wins; otherwise the selected template's prompt is
+used (built-ins in `apps/core/src/meetings/templates.rs`, resolved by `templates::prompt_for`),
+falling back to the `default` template. Long transcripts are summarized with a map-reduce pass
+(chunk → condense → combine) so they can't overflow the model's context. An empty transcript skips
+the model call entirely. Parsing is fail-soft: if the reply contains no parseable JSON, the whole
+reply is kept as the `summary` rather than discarding the model's work.
 
 ## Mic-in-use detection
 

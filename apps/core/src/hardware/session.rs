@@ -246,7 +246,7 @@ impl HardwareSession {
         match self
             .deps
             .meetings
-            .ingest_chunk(&meeting_id, wav, "ambient.wav".to_string(), None)
+            .ingest_chunk(&meeting_id, wav, "ambient.wav".to_string(), None, None)
             .await
         {
             Ok(segment) => Ok(vec![SessionOutput::control(RhpServerMsg::AmbientAck {

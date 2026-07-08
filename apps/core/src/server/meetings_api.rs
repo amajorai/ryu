@@ -18,10 +18,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::ServerState;
-use crate::meetings::{
-    notes::{MeetingNotes, DEFAULT_NOTES_PROMPT},
-    Meeting, MeetingSource,
-};
+use crate::meetings::{notes::MeetingNotes, templates, Meeting, MeetingSource};
 
 /// The Space that auto-saved meeting notes land in. Reusing the Spaces feature
 /// gives editing (the PlateJS markdown editor) + RAG search for free — the only
@@ -31,8 +28,10 @@ const MEETINGS_SPACE_NAME: &str = "Meetings";
 const NOTES_MODEL_PREF: &str = "meeting-notes-model";
 const NOTES_EFFORT_PREF: &str = "meeting-notes-effort";
 const NOTES_PROMPT_PREF: &str = "meeting-notes-prompt";
+const NOTES_TEMPLATE_PREF: &str = "meeting-notes-template";
 const DETECTION_APPS_PREF: &str = "meeting-detection-apps";
 const DETECTION_ENABLED_PREF: &str = "meeting-detection-enabled";
+const DIARIZATION_ENABLED_PREF: &str = "meeting-diarization-enabled";
 
 /// Default processes whose mic use is treated as "you're in a meeting". The
 /// detector (Shadow) matches a foreground/mic-owning process against this list;
@@ -73,6 +72,8 @@ async fn resolve_notes_effort(state: &ServerState) -> String {
         .unwrap_or_default()
 }
 
+/// Resolve the notes system prompt. A user's fully custom prompt wins; otherwise
+/// the selected template's prompt is used; otherwise the default template.
 async fn resolve_notes_prompt(state: &ServerState) -> String {
     if let Ok(Some(pref)) = state.preferences.get(NOTES_PROMPT_PREF).await {
         let trimmed = pref.trim();
@@ -80,7 +81,56 @@ async fn resolve_notes_prompt(state: &ServerState) -> String {
             return trimmed.to_string();
         }
     }
-    DEFAULT_NOTES_PROMPT.to_string()
+    let template_id = state
+        .preferences
+        .get(NOTES_TEMPLATE_PREF)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    templates::prompt_for(&template_id)
+}
+
+/// `GET /api/meetings/templates` — the built-in notes templates for the picker.
+pub async fn list_templates() -> Json<serde_json::Value> {
+    Json(templates::catalog_json())
+}
+
+/// Run diarization on a finalized meeting's persisted audio when the toggle is on,
+/// writing speaker labels onto the transcript segments. Best-effort throughout: a
+/// disabled toggle, a missing sidecar, or no persisted audio all just no-op.
+async fn diarize_if_enabled(state: &ServerState, id: &str) {
+    let enabled = state
+        .preferences
+        .get(DIARIZATION_ENABLED_PREF)
+        .await
+        .ok()
+        .flatten()
+        .map(|v| v.trim() == "true")
+        .unwrap_or(false);
+    if !enabled {
+        return;
+    }
+    let wav = match crate::meetings::audio::read_pcm_as_wav(id) {
+        Ok(Some(w)) => w,
+        _ => return,
+    };
+    let client = reqwest::Client::new();
+    let turns = match crate::meetings::diarize::diarize_wav(&client, wav).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("meetings: diarization skipped for {id}: {e}");
+            return;
+        }
+    };
+    let segments = match state.meetings.store.list_segments(id).await {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let pcm = std::fs::read(crate::meetings::audio::pcm_path(id)).unwrap_or_default();
+    for (seg_id, speaker) in crate::meetings::diarize::assign(&segments, &turns, &pcm) {
+        let _ = state.meetings.store.set_segment_speaker(seg_id, &speaker).await;
+    }
 }
 
 // ---- meetings CRUD --------------------------------------------------------
@@ -182,11 +232,15 @@ pub async fn delete_meeting(
     }
 }
 
-/// Optional `?engine=` selector mirroring the voice transcribe route.
+/// Optional `?engine=` selector (mirroring the voice transcribe route) and
+/// `?offset_ms=` — the chunk's sample-accurate position from the recorder, used
+/// to time the transcript segment instead of wall-clock.
 #[derive(Debug, Deserialize)]
 pub struct ChunkQuery {
     #[serde(default)]
     pub engine: Option<String>,
+    #[serde(default)]
+    pub offset_ms: Option<i64>,
 }
 
 /// `POST /api/meetings/:id/chunk` — ingest one captured WAV chunk (multipart
@@ -224,7 +278,7 @@ pub async fn ingest_chunk(
 
     match state
         .meetings
-        .ingest_chunk(&id, bytes, filename, query.engine.as_deref())
+        .ingest_chunk(&id, bytes, filename, query.engine.as_deref(), query.offset_ms)
         .await
     {
         Ok(segment) => (StatusCode::OK, Json(json!({ "segment": segment }))),
@@ -270,13 +324,28 @@ pub async fn finalize_meeting(
     State(state): State<ServerState>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let model = resolve_notes_model(&state).await;
-    let effort = resolve_notes_effort(&state).await;
-    let prompt = resolve_notes_prompt(&state).await;
-    let mut meeting = match state.meetings.finalize(&id, &model, &effort, &prompt).await {
+    finalize_and_save(&state, &id).await
+}
+
+/// Shared finalize tail: generate notes (model/effort/prompt from prefs), run
+/// diarization if enabled, auto-title, and save into the Meetings Space. Used by
+/// both the live finalize and the import path.
+async fn finalize_and_save(
+    state: &ServerState,
+    id: &str,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let model = resolve_notes_model(state).await;
+    let effort = resolve_notes_effort(state).await;
+    let prompt = resolve_notes_prompt(state).await;
+    let mut meeting = match state.meetings.finalize(id, &model, &effort, &prompt).await {
         Ok(m) => m,
         Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "error": e }))),
     };
+
+    // Speaker diarization (opt-in) — label the transcript's segments before the
+    // notes are rendered into the Space. Best-effort: a missing sidecar or a
+    // disabled toggle just leaves speakers unlabeled.
+    diarize_if_enabled(state, id).await;
 
     // Auto-name the meeting from its summary with the default local model, unless
     // the user already chose a title. Best-effort; on success update the local
@@ -284,22 +353,84 @@ pub async fn finalize_meeting(
     if !meeting.title_custom {
         if let Some(summary) = meeting.notes.as_ref().map(|n| n.summary.clone()) {
             if let Some(new_title) =
-                super::auto_title::auto_title_meeting(&state, &id, &summary).await
+                super::auto_title::auto_title_meeting(state, id, &summary).await
             {
                 meeting.title = new_title;
             }
         }
     }
 
-    let final_meeting = match save_notes_to_space(&state, &meeting).await {
+    let final_meeting = match save_notes_to_space(state, &meeting).await {
         Some((space_id, doc_id)) => state
             .meetings
-            .attach_space(&id, &space_id, &doc_id)
+            .attach_space(id, &space_id, &doc_id)
             .await
             .unwrap_or(meeting),
         None => meeting,
     };
     (StatusCode::OK, Json(json!({ "meeting": final_meeting })))
+}
+
+/// Multipart field parse for import; everything but `file` is optional.
+/// `POST /api/meetings/import` — create a meeting from an uploaded audio file
+/// (WAV v1), transcribe it window-by-window through the same pipeline as a live
+/// recording, then finalize (notes + optional diarization + Space save).
+pub async fn import_meeting(
+    State(state): State<ServerState>,
+    mut multipart: Multipart,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let mut audio: Option<Vec<u8>> = None;
+    let mut engine: Option<String> = None;
+    let mut title = String::new();
+    while let Ok(Some(field)) = multipart.next_field().await {
+        match field.name() {
+            Some("file") => {
+                if let Ok(bytes) = field.bytes().await {
+                    audio = Some(bytes.to_vec());
+                }
+            }
+            Some("engine") => engine = field.text().await.ok().filter(|s| !s.is_empty()),
+            Some("title") => title = field.text().await.unwrap_or_default(),
+            _ => {}
+        }
+    }
+    let Some(bytes) = audio else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "missing `file` field (the audio to import)" })),
+        );
+    };
+
+    // WAV-only in v1. Real-world files (mp3/m4a/mov) need an ffmpeg decode step,
+    // which is gated/optional — reject clearly rather than mis-transcribing.
+    let decoded = match crate::meetings::audio::decode_wav(&bytes) {
+        Ok(d) => crate::meetings::audio::resample_to_16k(&d),
+        Err(_) => {
+            return (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                Json(json!({
+                    "error": "import currently accepts WAV files only; convert mp3/m4a to WAV first"
+                })),
+            )
+        }
+    };
+
+    let meeting = match state.meetings.start_import(title).await {
+        Ok(m) => m,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))),
+    };
+    let id = meeting.id.clone();
+
+    // Feed the file through the live-chunk pipeline (transcribe + persist stereo),
+    // one 30 s window at a time, with real offsets.
+    for (offset_ms, wav) in crate::meetings::audio::window_wavs(&decoded, 30) {
+        let _ = state
+            .meetings
+            .ingest_chunk(&id, wav, "import.wav".to_string(), engine.as_deref(), Some(offset_ms))
+            .await;
+    }
+
+    finalize_and_save(&state, &id).await
 }
 
 /// Write a finalized meeting's notes (+ transcript) into the Meetings Space as a

@@ -14,18 +14,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::sidecar::gateway::{gateway_token, gateway_url};
 
-/// The default system prompt used when no `meeting-notes-prompt` preference is
-/// set. Asks for a single strict-JSON object so the parse is reliable.
-pub const DEFAULT_NOTES_PROMPT: &str = "You are an expert meeting-notes assistant. \
-You are given a raw, possibly imperfect speech-to-text transcript of a meeting. \
-Write concise, useful notes. Respond with ONLY a single JSON object, no prose, no \
-markdown fences, with exactly these keys: \
-\"summary\" (a short paragraph), \
-\"key_points\" (array of strings), \
-\"action_items\" (array of strings, each ideally naming an owner if one is clear), \
-\"decisions\" (array of strings). \
-Use empty arrays when a section has nothing. Do not invent content that is not \
-supported by the transcript.";
+/// The default system prompt (base contract + the `default` template's guidance),
+/// used when no `meeting-notes-prompt` / template preference is set.
+pub fn default_notes_prompt() -> String {
+    super::templates::prompt_for("default")
+}
+
+/// Above this many characters a transcript is summarized with a map-reduce pass
+/// instead of a single call, so a long meeting can't overflow the model's context
+/// window. ~12k chars ≈ 4k tokens — conservative for even a small local default
+/// like Gemma. Overridable via `RYU_MEETING_NOTES_MAX_CHARS`.
+const DEFAULT_MAX_CHARS: usize = 12_000;
+/// Characters of overlap between map chunks so a point split across a boundary
+/// isn't lost.
+const CHUNK_OVERLAP_CHARS: usize = 500;
 
 /// Structured notes derived from a transcript.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -46,7 +48,9 @@ pub struct MeetingNotes {
 }
 
 /// Generate notes from `transcript` using `model` (and optional `effort`) via the
-/// gateway, applying `system_prompt`. Returns the parsed notes, or an error
+/// gateway, applying `system_prompt`. For long transcripts this runs a map-reduce
+/// pass (condense each chunk, then summarize the condensations) so the meeting
+/// can't overflow the model's context. Returns the parsed notes, or an error
 /// string the caller can surface.
 pub async fn generate_notes(
     client: &reqwest::Client,
@@ -55,6 +59,51 @@ pub async fn generate_notes(
     system_prompt: &str,
     transcript: &str,
 ) -> Result<MeetingNotes, String> {
+    let max_chars = std::env::var("RYU_MEETING_NOTES_MAX_CHARS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 1000)
+        .unwrap_or(DEFAULT_MAX_CHARS);
+
+    let reduce_input;
+    let input: &str = if transcript.chars().count() <= max_chars {
+        transcript
+    } else {
+        // MAP: condense each overlapping chunk to compact plain-text notes.
+        let chunks = chunk_transcript(transcript, max_chars, CHUNK_OVERLAP_CHARS);
+        let total = chunks.len();
+        let mut partials = Vec::with_capacity(total);
+        for (i, chunk) in chunks.iter().enumerate() {
+            let partial = summarize_chunk(client, model, effort, i + 1, total, chunk).await?;
+            partials.push(format!("[Part {}/{}]\n{}", i + 1, total, partial.trim()));
+        }
+        // REDUCE: the final structured pass runs over the ordered condensations,
+        // which re-derives action items/decisions across the whole meeting.
+        reduce_input = format!(
+            "The following are ordered partial notes from consecutive segments of \
+one long meeting. Synthesize them into a single coherent set of notes, merging \
+duplicates and consolidating action items and decisions across all parts:\n\n{}",
+            partials.join("\n\n")
+        );
+        &reduce_input
+    };
+
+    let text = complete(client, model, effort, system_prompt, input).await?;
+    let mut notes = parse_notes(&text);
+    notes.generated_at = chrono::Utc::now().to_rfc3339();
+    notes.model = model.to_string();
+    Ok(notes)
+}
+
+/// One gateway chat completion: `system_prompt` + the given user content. Returns
+/// the assistant's raw text.
+async fn complete(
+    client: &reqwest::Client,
+    model: &str,
+    effort: &str,
+    system_prompt: &str,
+    user_content: &str,
+) -> Result<String, String> {
     let base = gateway_url();
     let base = base.trim_end_matches('/');
     let mut payload = serde_json::json!({
@@ -62,7 +111,7 @@ pub async fn generate_notes(
         "stream": false,
         "messages": [
             { "role": "system", "content": system_prompt },
-            { "role": "user", "content": format!("Transcript:\n\n{transcript}") },
+            { "role": "user", "content": format!("Transcript:\n\n{user_content}") },
         ],
     });
     let effort = effort.trim();
@@ -88,18 +137,56 @@ pub async fn generate_notes(
         .json()
         .await
         .map_err(|e| format!("response was not valid JSON: {e}"))?;
-    let text = body
+    Ok(body
         .get("choices")
         .and_then(|c| c.get(0))
         .and_then(|c| c.get("message"))
         .and_then(|m| m.get("content"))
         .and_then(|t| t.as_str())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .to_string())
+}
 
-    let mut notes = parse_notes(text);
-    notes.generated_at = chrono::Utc::now().to_rfc3339();
-    notes.model = model.to_string();
-    Ok(notes)
+/// The MAP step: condense one transcript chunk to compact plain-text notes,
+/// preserving specifics (names, numbers, dates, owners) for the reduce step.
+async fn summarize_chunk(
+    client: &reqwest::Client,
+    model: &str,
+    effort: &str,
+    part: usize,
+    total: usize,
+    chunk: &str,
+) -> Result<String, String> {
+    let system = format!(
+        "You are condensing part {part} of {total} of a long meeting transcript. \
+Write compact plain-text notes (bullet points, no preamble, no JSON) capturing \
+what was discussed, every decision, and every action item with its owner. Keep \
+all specifics — names, numbers, dates, commitments. Do not add a heading."
+    );
+    complete(client, model, effort, &system, chunk).await
+}
+
+/// Split `transcript` into chunks of about `max_chars`, each overlapping the
+/// previous by `overlap` characters. Splits on a character boundary; a later pass
+/// could snap to sentence ends, but overlap already guards against mid-sentence
+/// cuts losing content.
+fn chunk_transcript(transcript: &str, max_chars: usize, overlap: usize) -> Vec<String> {
+    let chars: Vec<char> = transcript.chars().collect();
+    if chars.len() <= max_chars {
+        return vec![transcript.to_string()];
+    }
+    let step = max_chars.saturating_sub(overlap).max(1);
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < chars.len() {
+        let end = (start + max_chars).min(chars.len());
+        chunks.push(chars[start..end].iter().collect());
+        if end == chars.len() {
+            break;
+        }
+        start += step;
+    }
+    chunks
 }
 
 /// Parse the model's reply into structured notes. The model is asked for a bare
@@ -183,5 +270,30 @@ mod tests {
     fn ignores_braces_inside_strings() {
         let notes = parse_notes(r#"{"summary":"use a } brace","key_points":[]}"#);
         assert_eq!(notes.summary, "use a } brace");
+    }
+
+    #[test]
+    fn short_transcript_is_one_chunk() {
+        let chunks = chunk_transcript("hello world", 100, 10);
+        assert_eq!(chunks, vec!["hello world".to_string()]);
+    }
+
+    #[test]
+    fn long_transcript_chunks_with_overlap() {
+        let text: String = "a".repeat(250);
+        let chunks = chunk_transcript(&text, 100, 20);
+        // step = 80 → windows [0,100), [80,180), [160,250) → 3 chunks; the third
+        // already reaches the end, so the loop stops.
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].chars().count(), 100);
+        assert_eq!(chunks[1].chars().count(), 100);
+        assert_eq!(chunks[2].chars().count(), 90); // 160..250
+        // Consecutive windows overlap (step 80 < window 100 → 20 char overlap).
+        assert!(chunks[0].chars().count() + chunks[1].chars().count() > 180);
+    }
+
+    #[test]
+    fn default_prompt_comes_from_template() {
+        assert!(default_notes_prompt().starts_with("You are an expert"));
     }
 }

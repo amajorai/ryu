@@ -30,7 +30,8 @@
   "type": "module",
   "scripts": {
     "predev": "node scripts/free-ports.mjs",
-    "mirror:ryu": "bash tools/mirror-push.sh",
+    "polar:provision": "bun run scripts/polar/provision-products.ts",
+    "polar:provision-extras": "bun run scripts/polar/provision-extras.ts",
     "mirror:satellites": "bash tools/mirror-satellites.sh",
     "mirror:public": "bash tools/mirror-push.sh && bash tools/mirror-satellites.sh",
     "release:local": "bash scripts/release/release-local.sh",

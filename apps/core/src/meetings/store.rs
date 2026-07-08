@@ -201,6 +201,18 @@ impl MeetingStore {
         })
     }
 
+    /// Set (or overwrite) a segment's speaker label — used by diarization once the
+    /// finished recording has been split into speaker turns.
+    pub async fn set_segment_speaker(&self, segment_id: i64, speaker: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE segments SET speaker = ?2 WHERE id = ?1",
+            params![segment_id, speaker],
+        )
+        .context("updating segment speaker")?;
+        Ok(())
+    }
+
     /// All transcript segments for a meeting, in capture order (oldest first).
     pub async fn list_segments(&self, meeting_id: &str) -> Result<Vec<Segment>> {
         let conn = self.conn.lock().await;

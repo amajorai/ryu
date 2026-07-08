@@ -2848,40 +2848,56 @@ fn version_probe_for_registry(registry_id: &str) -> Option<AgentVersionProbe> {
     })
 }
 
+/// Convert a registry row into a catalog entry. Every registry agent is listed
+/// so the catalog mirrors the upstream ACP registry — including agents Core
+/// cannot auto-run on this platform (e.g. a binary-only distribution with no
+/// build for the host OS/arch). Those get an empty ACP spawn command plus a hint
+/// telling the user to add a custom `acp-exec:` command; the catalog derives an
+/// `available` flag from the empty spawn command so the UI disables one-click
+/// install without hiding the agent.
 fn entry_from_registry(
     agent: &crate::sidecar::agents::acp_registry::RegistryAgent,
-) -> Option<AcpAgentEntry> {
+) -> AcpAgentEntry {
     use crate::sidecar::agents::acp_registry::{self, registry_gateway_bypass};
-    let plan = acp_registry::spawn_plan_for(agent)?;
+    let plan = acp_registry::spawn_plan_for(agent);
     let id = acp_registry::canonical_agent_id(&agent.id);
-    let install_hint = if plan.direct_archive.is_some() {
-        "Downloads the agent from the official ACP registry on install".to_owned()
-    } else if agent.distribution.uvx.is_some() {
-        "Self-fetches via uvx on first run (install `uv` from https://docs.astral.sh/uv/)"
-            .to_owned()
-    } else {
-        "Self-fetches via npx on first run".to_owned()
+    let install_hint = match &plan {
+        Some(p) if p.direct_archive.is_some() => {
+            "Downloads the agent from the official ACP registry on install".to_owned()
+        }
+        Some(_) if agent.distribution.uvx.is_some() => {
+            "Self-fetches via uvx on first run (install `uv` from https://docs.astral.sh/uv/)"
+                .to_owned()
+        }
+        Some(_) => "Self-fetches via npx on first run".to_owned(),
+        None => format!(
+            "No prebuilt package for this platform. Add a custom ACP command \
+             (acp-exec:) in the agent's settings to run {}.",
+            agent.name
+        ),
     };
-    Some(AcpAgentEntry {
+    let (spawn_cmd, direct_archive) = match plan {
+        Some(p) => (p.spawn_cmd, p.direct_archive),
+        None => (String::new(), None),
+    };
+    AcpAgentEntry {
         id,
         registry_id: Some(agent.id.clone()),
         name: agent.name.clone(),
         description: agent.description.clone(),
         detect_binary: acp_registry::underlying_cli_probe(&agent.id).map(|(b, _)| b),
         install_hint,
-        transport: AgentTransport::Acp {
-            spawn_cmd: plan.spawn_cmd,
-        },
+        transport: AgentTransport::Acp { spawn_cmd },
         recommended: false,
         gateway_bypass: registry_gateway_bypass(&agent.id),
         archive_spec: None,
-        direct_archive: plan.direct_archive,
+        direct_archive,
         bridge_version: Some(agent.version.clone()),
         icon_url: Some(crate::sidecar::agents::acp_registry::icon_url_for_agent(
             agent,
         )),
         version_probe: version_probe_for_registry(&agent.id),
-    })
+    }
 }
 
 /// All installable agents from the official ACP registry CDN, minus the
@@ -2893,7 +2909,7 @@ fn registry_driven_entries() -> Vec<AcpAgentEntry> {
     load_registry_agents()
         .iter()
         .filter(|a| !skip.contains(a.id.as_str()))
-        .filter_map(entry_from_registry)
+        .map(entry_from_registry)
         .collect()
 }
 

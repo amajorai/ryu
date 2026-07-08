@@ -15,10 +15,20 @@
  *                   stored as `pending` until a moderator approves it.
  */
 
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { commandDev } from "./cli/dev.ts";
 import { PluginManifestSchema } from "./manifest.ts";
+
+// Lower-case hex `sha256(utf8_bytes(code))`. This is the EXACT encoding Core
+// recomputes on install (`hex::encode(Sha256::digest(utf8))`), so the hash written
+// into the signed manifest verifies byte-for-byte on the Rust side. The `code`
+// passed here MUST be the same UTF-8 string stored/served/fetched, so the two ends
+// hash identical bytes (never re-minify between pack/publish and install).
+function uiCodeSha256(code: string): string {
+	return createHash("sha256").update(code, "utf8").digest("hex");
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -133,13 +143,22 @@ async function commandPack(rawDir: string): Promise<void> {
 	const uiEntry = companionUiEntry(manifest);
 	const uiCode = uiEntry ? await bundleUiEntry(dir, uiEntry) : null;
 
+	// Bind the bundled code to the manifest by its sha256. The hash goes INTO the
+	// manifest (the surface Core signs on publish, and the corruption self-check on
+	// local install-bundle reads); the `ui_code` blob rides alongside as payload.
+	const manifestWithHash = uiCode
+		? { ...manifest, ui_code_sha256: uiCodeSha256(uiCode) }
+		: manifest;
+
 	// Emit bundle into <dir>/dist/plugin.bundle.json
 	const outDir = join(dir, "dist");
 	if (!existsSync(outDir)) {
 		mkdirSync(outDir, { recursive: true });
 	}
 	const outPath = join(outDir, "plugin.bundle.json");
-	const bundle = uiCode ? { ...manifest, ui_code: uiCode } : manifest;
+	const bundle = uiCode
+		? { ...manifestWithHash, ui_code: uiCode }
+		: manifestWithHash;
 	writeFileSync(outPath, JSON.stringify(bundle, null, 2), "utf8");
 
 	const codeNote = uiCode ? ` (+${uiCode.length}B ui_code)` : "";
@@ -184,17 +203,31 @@ async function commandPublish(rawDir: string): Promise<void> {
 	const token = authToken();
 	const kind = SDK_PUBLISH_KIND;
 
+	// Compute the carriage payload the SAME way `pack` does — bundle the companion
+	// UI entry and hash it INLINE (never depend on a possibly-stale dist/). The
+	// hash is injected into the manifest object BEFORE it is sent for signing, so
+	// the Gateway signs a manifest that already binds the code; the `ui_code` blob
+	// is sent as a sibling (unsigned payload, integrity via the signed hash).
+	const uiEntry = companionUiEntry(manifest);
+	const uiCode = uiEntry ? await bundleUiEntry(dir, uiEntry) : null;
+	const manifestWithHash = uiCode
+		? { ...manifest, ui_code_sha256: uiCodeSha256(uiCode) }
+		: manifest;
+
 	const url = `${publishBaseUrl()}/api/marketplace/publish`;
 	const body = {
 		id: manifest.id,
 		kind,
 		name: manifest.name,
 		version: manifest.version,
-		manifest,
+		manifest: manifestWithHash,
 		// The descriptor is the manifest itself for a plugin/skill Plugin; Core maps
 		// it on install. Grants are read from the manifest server-side too.
-		descriptor: manifest,
+		descriptor: manifestWithHash,
 		grants: manifest.permission_grants ?? [],
+		// The bundled UI code rides OUTSIDE the signed manifest as payload; the
+		// server stores it and serves it on detail. Omitted for manifest-only.
+		...(uiCode ? { ui_code: uiCode } : {}),
 	};
 
 	let resp: Response;

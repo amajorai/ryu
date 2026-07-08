@@ -729,9 +729,9 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         )
         .route("/api/models/device", get(models_device))
         .route("/api/models/llmfit-estimate", get(models_llmfit_estimate))
+        .route("/api/models/context-window", get(models_context_window))
         .route("/api/models/engines", get(models_engines))
         .route("/api/models/installed", get(models_installed))
-        .route("/api/models/context-window", get(models_context_window))
         // Live hardware snapshot for this node (CPU/RAM/disk/GPU) — backs the
         // desktop node selector's per-node "what's this machine" view.
         .route("/api/system/info", get(system_info_handler))
@@ -804,6 +804,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             post(fire_activation_event_handler),
         )
         .route("/api/plugins/install-bundle", post(install_app_bundle))
+        .route(
+            "/api/plugins/catalog/install",
+            post(install_plugin_from_catalog),
+        )
         .route("/api/plugins/:id/install", post(install_app_handler))
         .route("/api/plugins/:id/enable", post(enable_app_handler))
         .route("/api/plugins/:id/disable", post(disable_app_handler))
@@ -1350,6 +1354,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/meetings/detection-config",
             get(meetings_api::get_detection_config).put(meetings_api::put_detection_config),
         )
+        .route("/api/meetings/templates", get(meetings_api::list_templates))
+        .route("/api/meetings/import", post(meetings_api::import_meeting))
         .route(
             "/api/meetings",
             get(meetings_api::list_meetings).post(meetings_api::create_meeting),
@@ -4171,45 +4177,111 @@ async fn install_app_bundle(
             }
         };
 
+    // Corruption self-check (advisory, NOT a trust boundary): a LOCAL bundle
+    // carries no gateway signature, so this is not the marketplace integrity gate.
+    // But `ryu pack` writes `ui_code_sha256` into the manifest, so if present it
+    // must match the bundled code — a mismatch means a corrupted/edited bundle and
+    // installing it would silently run code the manifest does not describe.
+    if let Some(declared) = manifest
+        .ui_code_sha256
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        match ui_code.as_deref() {
+            Some(code) => {
+                use sha2::{Digest, Sha256};
+                let actual = hex::encode(Sha256::digest(code.as_bytes()));
+                if actual != declared.to_ascii_lowercase() {
+                    return json_error(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        format!(
+                            "bundle ui_code hash mismatch (manifest declares {declared}, code hashes to {actual}); refusing corrupted bundle"
+                        ),
+                    );
+                }
+            }
+            None => {
+                return json_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "bundle manifest declares ui_code_sha256 but carries no ui_code".to_owned(),
+                );
+            }
+        }
+    }
+
+    match persist_installed_plugin(&state, manifest, ui_code).await {
+        Ok(body) => Json(body).into_response(),
+        Err((status, msg)) => json_error(status, msg),
+    }
+}
+
+/// Maximum size of a plugin's bundled sandboxed-UI code (4 MiB). Enforced at both
+/// the install boundary here and the marketplace integrity gate
+/// (`catalog_source::sources`), so a pathological bundle is refused before storage.
+const MAX_UI_CODE_BYTES: usize = 4 * 1024 * 1024;
+
+/// `{ id }` body for [`install_plugin_from_catalog`].
+#[derive(serde::Deserialize)]
+struct PluginCatalogInstallBody {
+    id: String,
+}
+
+/// Shared sink that persists a validated plugin manifest (+ optional
+/// pre-validated `ui_code`) to disk and the lifecycle store, then hot-reloads.
+/// Used by BOTH the local install-bundle path ([`install_app_bundle`]) and the
+/// marketplace catalog-install path ([`install_plugin_from_catalog`]) so the two
+/// never drift.
+///
+/// The caller owns any TRUST decision about `ui_code` (the local path trusts the
+/// caller; the marketplace path has already run the signed-hash integrity gate in
+/// `install_descriptor`). This function only validates id/semver/runnables,
+/// enforces the size cap, rejects a duplicate id, writes the manifest WITHOUT the
+/// `ui_code` (the loader contract), records the lifecycle row, and stores
+/// `ui_code` on that row via the same `set_ui_code` sink the `ui-bundle` endpoint
+/// reads. Returns the success JSON body, or `(status, msg)` on any failure.
+async fn persist_installed_plugin(
+    state: &ServerState,
+    manifest: crate::plugin_manifest::PluginManifest,
+    ui_code: Option<String>,
+) -> Result<serde_json::Value, (StatusCode, String)> {
+    // Validate the id BEFORE it is ever used as a filesystem path component.
     if let Err(e) = crate::plugin_manifest::validate_plugin_id(&manifest.id) {
-        return json_error(StatusCode::UNPROCESSABLE_ENTITY, e);
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, e));
     }
     if semver::Version::parse(&manifest.version).is_err() {
-        return json_error(
+        return Err((
             StatusCode::UNPROCESSABLE_ENTITY,
             format!(
                 "manifest version '{}' is not valid semver",
                 manifest.version
             ),
-        );
+        ));
     }
     for entry in &manifest.runnables {
         if let Err(e) = crate::plugin_manifest::schema::validate_runnable(entry) {
-            return json_error(
+            return Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
                 format!("Invalid runnable '{}': {e}", entry.id),
-            );
+            ));
         }
     }
-
-    // Cap the bundled code so a pathological bundle can't bloat the DB unbounded.
-    const MAX_UI_CODE_BYTES: usize = 4 * 1024 * 1024;
     if let Some(code) = &ui_code {
         if code.len() > MAX_UI_CODE_BYTES {
-            return json_error(
+            return Err((
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "ui_code bundle is too large".to_owned(),
-            );
+            ));
         }
     }
 
     {
         let manifests = state.app_manifests.read().await;
         if manifests.iter().any(|m| m.id == manifest.id) {
-            return json_error(
+            return Err((
                 StatusCode::CONFLICT,
                 format!("Plugin '{}' is already installed", manifest.id),
-            );
+            ));
         }
     }
 
@@ -4217,29 +4289,28 @@ async fn install_app_bundle(
     // `ui_code` blob — the code lives on the lifecycle record, not the on-disk
     // manifest (which is the loader's contract + keeps manifests small).
     let plugin_dir = crate::plugin_manifest::PluginManifestLoader::plugins_dir().join(&manifest.id);
-    if let Err(e) = tokio::fs::create_dir_all(&plugin_dir).await {
-        return json_error(
+    tokio::fs::create_dir_all(&plugin_dir).await.map_err(|e| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to create plugin directory: {e}"),
-        );
-    }
-    let manifest_json = match serde_json::to_string_pretty(&manifest) {
-        Ok(s) => s,
-        Err(e) => {
-            return json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to serialize manifest: {e}"),
-            );
-        }
-    };
-    if let Err(e) = tokio::fs::write(plugin_dir.join("plugin.json"), &manifest_json).await {
-        return json_error(
+        )
+    })?;
+    let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to write manifest: {e}"),
-        );
-    }
+            format!("Failed to serialize manifest: {e}"),
+        )
+    })?;
+    tokio::fs::write(plugin_dir.join("plugin.json"), &manifest_json)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to write manifest: {e}"),
+            )
+        })?;
 
-    reload_manifests_inner(&state).await;
+    reload_manifests_inner(state).await;
 
     // Create the lifecycle record (installed, disabled) and store the ui_code.
     if let Err(e) = crate::plugins::lifecycle::install_app(&state.app_store, &manifest).await {
@@ -4249,23 +4320,106 @@ async fn install_app_bundle(
         } else {
             StatusCode::INTERNAL_SERVER_ERROR
         };
-        return json_error(status, msg);
+        return Err((status, msg));
     }
     if let Some(code) = &ui_code {
         if let Err(e) = state.app_store.set_ui_code(&manifest.id, Some(code)).await {
-            return json_error(
+            return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to store ui_code: {e}"),
-            );
+            ));
         }
     }
 
-    Json(json!({
+    Ok(json!({
         "success": true,
         "app": { "id": manifest.id, "name": manifest.name, "version": manifest.version },
         "has_ui": ui_code.is_some(),
     }))
-    .into_response()
+}
+
+/// `POST /api/plugins/catalog/install { id }` — the marketplace/URL sink for a
+/// signed Plugin (the missing CODE CARRIAGE endpoint). Resolves the active Plugin
+/// catalog source's `install_descriptor` for `id`, which (in `catalog_source`)
+/// runs `verify_manifest_signature` AND the fail-closed ui_code integrity gate
+/// (`sha256(ui_code)` must match the SIGNED manifest's `ui_code_sha256`, else the
+/// resolve errors and nothing is installed). Only the VALIDATED manifest + ui_code
+/// reach here (in `descriptor.raw`), so this handler just persists them through
+/// the SAME sink `install-bundle` uses. An unsigned item resolves with `ui_code`
+/// null (a benign summary). The buyer bearer is forwarded for paid plugins (#491).
+async fn install_plugin_from_catalog(
+    State(state): State<ServerState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<PluginCatalogInstallBody>,
+) -> axum::response::Response {
+    use crate::catalog_source::CatalogKind;
+
+    let id = body.id.trim().to_string();
+    if id.is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "`id` must not be empty".to_owned());
+    }
+
+    // Forward the caller's bearer to the marketplace install handoff (#491) so a
+    // PAID plugin is denied unless the buyer org holds a license.
+    let buyer_token = buyer_bearer_from_headers(&headers);
+
+    let Some(source) = state
+        .catalog_sources
+        .get_active(CatalogKind::Plugin, &state.preferences)
+        .await
+    else {
+        return json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no active plugin catalog source".to_owned(),
+        );
+    };
+
+    // Resolve the descriptor: fetch detail → verify signature → ui_code integrity
+    // gate (all fail-closed inside `install_descriptor`).
+    let descriptor = match crate::catalog_source::with_buyer_token(
+        buyer_token,
+        source.install_descriptor(&state.client, &id),
+    )
+    .await
+    {
+        Ok(d) => d,
+        Err(e) => return json_error(StatusCode::BAD_GATEWAY, e.to_string()),
+    };
+    if descriptor.kind != CatalogKind::Plugin {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            format!("resolved item `{id}` is not a plugin"),
+        );
+    }
+
+    // The VALIDATED manifest + ui_code ride in `descriptor.raw` (the integrity gate
+    // has already run; `ui_code` is null for an unsigned/manifest-only item).
+    let manifest_value = descriptor
+        .raw
+        .get("manifest")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let ui_code = descriptor
+        .raw
+        .get("ui_code")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+
+    let manifest: crate::plugin_manifest::PluginManifest =
+        match serde_json::from_value(manifest_value) {
+            Ok(m) => m,
+            Err(e) => {
+                return json_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("Invalid manifest JSON: {e}"),
+                );
+            }
+        };
+
+    match persist_installed_plugin(&state, manifest, ui_code).await {
+        Ok(body) => Json(body).into_response(),
+        Err((status, msg)) => json_error(status, msg),
+    }
 }
 
 /// `GET /api/plugins/:id/ui-bundle` — serve an ENABLED plugin's bundled
@@ -5591,6 +5745,17 @@ async fn list_agent_catalog(State(state): State<ServerState>) -> Json<serde_json
                 let registry_id = entry.as_ref().and_then(|e| e.registry_id.clone());
                 let registry_bridge_version = entry.as_ref().and_then(|e| e.bridge_version.clone());
                 let icon_url = entry.as_ref().and_then(|e| e.icon_url.clone());
+                // A registry agent with no host spawn plan is listed but not
+                // one-click installable: its ACP transport carries an empty
+                // spawn command. Non-ACP transports (OpenAI-compat) are always
+                // available. Absent entries default to available.
+                let available = entry.as_ref().is_none_or(|e| {
+                    !matches!(
+                        &e.transport,
+                        crate::sidecar::adapters::acp::AgentTransport::Acp { spawn_cmd }
+                            if spawn_cmd.trim().is_empty()
+                    )
+                });
 
                 let (
                     installed_version,
@@ -5647,6 +5812,7 @@ async fn list_agent_catalog(State(state): State<ServerState>) -> Json<serde_json
                     "recommended": i.recommended,
                     "detected": i.installed,
                     "added": added,
+                    "available": available,
                     "gateway_bypass": i.gateway_bypass,
                     "engine": i.engine,
                     "transport": i.transport,

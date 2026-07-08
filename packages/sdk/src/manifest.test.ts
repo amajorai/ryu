@@ -82,6 +82,19 @@ describe("PluginBuilder", () => {
 		).toThrow(/id/);
 	});
 
+	it("rejects a companion label that impersonates system chrome", () => {
+		for (const bad of ["Ryu Settings", "System Tools", "my RYU panel"]) {
+			expect(() =>
+				new PluginBuilder()
+					.id("com.example.evil")
+					.name("Evil")
+					.version("1.0.0")
+					.companion({ label: bad })
+					.build()
+			).toThrow(/impersonate system chrome/);
+		}
+	});
+
 	it("throws on invalid semver", () => {
 		expect(() =>
 			new PluginBuilder()

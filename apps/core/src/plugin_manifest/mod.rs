@@ -123,6 +123,16 @@ pub struct PluginManifest {
     /// Semver version string (e.g. `"1.0.0"`).
     pub version: String,
 
+    /// Lower-case hex `sha256(utf8_bytes(ui_code))` binding the plugin's bundled
+    /// sandboxed-UI code to this manifest. Because the Gateway signs the manifest
+    /// verbatim (canonical key-sorted encoding), this hash is INSIDE the signed
+    /// surface while the `ui_code` blob itself rides OUTSIDE it as payload; the
+    /// install path recomputes the hash over the fetched code and rejects a
+    /// mismatch fail-closed. Absent for a manifest-only plugin (no bundled UI) and
+    /// for unsigned seed items. Written by `ryu pack`/`ryu publish`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_code_sha256: Option<String>,
+
     /// The Runnables this app bundles. Each entry uses [`RunnableEntry`] from the
     /// [`schema`] submodule so heterogeneous Runnables (agents, workflows, tools,
     /// skills, companions, channels, engines, policies) can be listed together with
@@ -569,6 +579,24 @@ impl PluginManifestLoader {
                 .map_err(|e| format!("app '{}' (source: {source}): {e}", manifest.id))?;
         }
 
+        // Manifest-level companion surface: anti-impersonation on the visible label
+        // (same rule as the companion *runnable* config and the desktop route-title
+        // gate) so a plugin's panel can never pose as first-party Ryu/system chrome.
+        if let Some(companion) = &manifest.companion {
+            if companion.label.trim().is_empty() {
+                return Err(format!(
+                    "app '{}' companion label must not be empty (source: {source})",
+                    manifest.id
+                ));
+            }
+            if crate::plugin_manifest::schema::label_impersonates_system_chrome(&companion.label) {
+                return Err(format!(
+                    "app '{}' companion label '{}' must not impersonate system chrome (must not contain 'ryu' or 'system') (source: {source})",
+                    manifest.id, companion.label
+                ));
+            }
+        }
+
         // Contribution cross-validation: every id referenced in `contributes`
         // must resolve to a runnable declared in this manifest (declare-by-id).
         if let Some(contributes) = &manifest.contributes {
@@ -674,6 +702,36 @@ mod tests {
 
     fn loader_parse(raw: &str) -> Result<PluginManifest, String> {
         PluginManifestLoader::parse_and_validate(raw, "<test>", &mut HashSet::new())
+    }
+
+    // ── companion label anti-impersonation ───────────────────────────────────
+
+    #[test]
+    fn loader_rejects_companion_label_impersonating_system_chrome() {
+        let raw = r#"{
+            "id": "com.example.evil",
+            "name": "Evil",
+            "version": "1.0.0",
+            "runnables": [],
+            "companion": { "label": "Ryu Settings" }
+        }"#;
+        let err = loader_parse(raw).unwrap_err();
+        assert!(
+            err.contains("impersonate system chrome"),
+            "expected impersonation rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn loader_accepts_benign_companion_label() {
+        let raw = r#"{
+            "id": "com.example.good",
+            "name": "Good",
+            "version": "1.0.0",
+            "runnables": [],
+            "companion": { "label": "Research Assistant" }
+        }"#;
+        assert!(loader_parse(raw).is_ok());
     }
 
     // ── app id validation (path-traversal hardening) ─────────────────────────

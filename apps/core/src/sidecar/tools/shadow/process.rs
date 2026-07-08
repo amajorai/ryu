@@ -58,12 +58,15 @@ impl ShadowProcess {
         self.cleanup_orphan().await;
         self.state = ProcessState::Starting;
 
-        let mut child = Command::new(&self.binary_path)
+        let mut command = Command::new(&self.binary_path);
+        command
             .args(["start", "--port", &self.port.to_string()])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(false)
-            .spawn()?;
+            .kill_on_drop(false);
+        Self::apply_llm_env(&mut command);
+
+        let mut child = command.spawn()?;
 
         // Write PID file so we can recover from a crash on next start.
         if let Some(pid) = child.id() {
@@ -95,6 +98,34 @@ impl ShadowProcess {
         self.child = Some(child);
         self.state = ProcessState::Running;
         Ok(())
+    }
+
+    /// Point Shadow's LLM egress at the governed Gateway instead of its own
+    /// built-in default (Ollama on `localhost:11434`, which does not exist on a
+    /// fresh install). Shadow reads `SHADOW_LLM_{BASE_URL,MODEL,API_KEY}` in
+    /// `apps/shadow/src/config.rs`; its OpenAI-compat client calls
+    /// `{base_url}/chat/completions`, so we append `/v1`. This makes every
+    /// Shadow LLM path — activity chat, meeting summaries, proactive engine, and
+    /// journal-card narration — flow through the same firewall/budget/audit as
+    /// Core's own chat. Any var an operator already exported wins (BYO).
+    fn apply_llm_env(command: &mut Command) {
+        let base_url = format!(
+            "{}/v1",
+            crate::sidecar::gateway::gateway_url().trim_end_matches('/')
+        );
+        if std::env::var_os("SHADOW_LLM_BASE_URL").is_none() {
+            command.env("SHADOW_LLM_BASE_URL", base_url);
+        }
+        if std::env::var_os("SHADOW_LLM_MODEL").is_none() {
+            // Mirror the model id Core's own OpenAI-compat chat sends; the
+            // gateway router maps it to the active local engine.
+            command.env("SHADOW_LLM_MODEL", "default");
+        }
+        if std::env::var_os("SHADOW_LLM_API_KEY").is_none() {
+            if let Some(token) = crate::sidecar::gateway::gateway_token() {
+                command.env("SHADOW_LLM_API_KEY", token);
+            }
+        }
     }
 
     /// Gracefully stop the process: SIGTERM → 5 s wait → SIGKILL.

@@ -68,12 +68,37 @@ export type RunnableMeta = z.infer<typeof RunnableMetaSchema>;
 // ── CompanionSurface ─────────────────────────────────────────────────────────
 
 /**
+ * True when a companion `label` impersonates first-party Ryu/system chrome.
+ *
+ * Mirrors Core's `label_impersonates_system_chrome`
+ * (`apps/core/src/plugin_manifest/schema.rs`) and the desktop `validatePluginRoute`
+ * title gate (`apps/desktop/src/contributions/host/rpc.ts`): a plugin's visible
+ * label may not contain `"ryu"` or `"system"` (case-insensitive), so a third-party
+ * companion can never pose as built-in UI. The desktop host's mandatory,
+ * non-removable `"Plugin ·"` attribution prefix is the primary guarantee; this is
+ * defense in depth enforced at the authoring seam so a hostile label is rejected
+ * before `ryu pack`/publish rather than at load.
+ */
+export function labelImpersonatesSystemChrome(label: string): boolean {
+	const lower = label.toLowerCase();
+	return lower.includes("ryu") || lower.includes("system");
+}
+
+/**
  * Optional in-desktop overlay / sidebar panel descriptor. Mirrors
  * `CompanionSurface` in `apps/core/src/plugin_manifest/mod.rs`.
  */
 export const CompanionSurfaceSchema = z.object({
-	/** Display label for the companion panel tab or tooltip. */
-	label: z.string().min(1),
+	/** Display label for the companion panel tab or tooltip. Anti-impersonation:
+	 *  may not pose as first-party Ryu/system chrome (see
+	 *  {@link labelImpersonatesSystemChrome}). */
+	label: z
+		.string()
+		.min(1)
+		.refine((value) => !labelImpersonatesSystemChrome(value), {
+			message:
+				"companion label must not impersonate system chrome (must not contain 'ryu' or 'system')",
+		}),
 	/** Icon identifier resolved by the desktop shell. */
 	icon: z.string().optional(),
 	/** Keyboard shortcut string (e.g. `"ctrl+shift+r"`). */
@@ -146,6 +171,17 @@ export const PluginManifestSchema = z.object({
 			/^\d+\.\d+\.\d+(?:-[\w.]+)?(?:\+[\w.]+)?$/,
 			"version must be a valid semver string (e.g. 1.0.0)"
 		),
+
+	/**
+	 * Lower-case hex `sha256(utf8_bytes(ui_code))` binding the plugin's bundled
+	 * sandboxed-UI code to this manifest. `ryu pack` / `ryu publish` compute it and
+	 * write it here BEFORE the manifest is signed, so the hash rides INSIDE the
+	 * Gateway-signed surface while the `ui_code` blob rides OUTSIDE it as payload;
+	 * Core's install path recomputes the hash over the fetched code and rejects a
+	 * mismatch fail-closed. Absent for a manifest-only plugin (no bundled UI).
+	 * Mirrors Core's `PluginManifest.ui_code_sha256`.
+	 */
+	ui_code_sha256: z.string().nullish(),
 
 	/** The Runnables this plugin bundles. */
 	runnables: z.array(RunnableMetaSchema).default([]),

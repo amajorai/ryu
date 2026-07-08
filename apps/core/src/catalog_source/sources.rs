@@ -1628,12 +1628,18 @@ impl RyuMarketplaceSource {
     /// - gateway unreachable          -> reject (fail closed) when a signature is
     ///   present, so a tampered manifest cannot install merely because the
     ///   verifier is down.
+    ///
+    /// Returns `Ok(true)` when a signature was present AND verified valid, and
+    /// `Ok(false)` when the item is unsigned (allowed as a benign summary). The
+    /// caller uses this boolean to drive the fail-closed ui_code carriage ladder
+    /// (`gate_plugin_ui_code`): runnable code is carried ONLY off a valid
+    /// signature, never off an unattested self-declared hash.
     async fn verify_manifest_signature(
         &self,
         client: &reqwest::Client,
         id: &str,
         detail: &Value,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let signature = detail
             .get("signature")
             .and_then(|s| s.as_str())
@@ -1646,7 +1652,7 @@ impl RyuMarketplaceSource {
                 kind = self.kind.as_str(),
                 "Ryu Marketplace item has no signature; installing unverified (unsigned item)"
             );
-            return Ok(());
+            return Ok(false);
         };
 
         let manifest = detail.get("manifest").cloned().unwrap_or(Value::Null);
@@ -1691,7 +1697,7 @@ impl RyuMarketplaceSource {
             .await
             .map_err(|e| anyhow::anyhow!("parsing verify response for `{id}`: {e}"))?;
         if body.get("valid").and_then(|v| v.as_bool()) == Some(true) {
-            Ok(())
+            Ok(true)
         } else {
             bail!("manifest signature is invalid for `{id}`; refusing install (tampered manifest)")
         }
@@ -1876,13 +1882,19 @@ impl RyuMarketplaceSource {
                 })
             }
             CatalogKind::Plugin => {
-                // Plugin: no Core install path yet — surface the manifest only.
+                // Plugin: carry ONLY the signed manifest here. The unsigned
+                // server-served `uiCode` blob is deliberately NOT copied into
+                // `raw` — `install_descriptor` overwrites `raw` with the manifest
+                // plus the VALIDATED ui_code (or null) after the signature +
+                // sha256 integrity gate. Never surface unvalidated code.
                 Ok(InstallDescriptor {
                     kind: CatalogKind::Plugin,
                     source_id: self.id.clone(),
                     repo_id: id.to_string(),
                     files: Vec::new(),
-                    raw: detail.clone(),
+                    raw: serde_json::json!({
+                        "manifest": detail.get("manifest").cloned().unwrap_or(Value::Null),
+                    }),
                 })
             }
             CatalogKind::Knowledge => {
@@ -2019,10 +2031,105 @@ impl CatalogSource for RyuMarketplaceSource {
     ) -> Result<InstallDescriptor> {
         let detail = self.fetch_detail(client, id).await?;
         // Verify-on-install (#468): reject a tampered manifest before mapping it
-        // onto an install descriptor.
-        self.verify_manifest_signature(client, id, &detail).await?;
-        self.detail_to_descriptor(id, &detail)
+        // onto an install descriptor. `signed` is true only when a signature was
+        // present AND verified valid.
+        let signed = self.verify_manifest_signature(client, id, &detail).await?;
+        let mut descriptor = self.detail_to_descriptor(id, &detail)?;
+        // Plugin CODE CARRIAGE: bind the bundled UI code to the signed manifest
+        // via its sha256. The code rides OUTSIDE the signed manifest (server
+        // top-level `uiCode`); its integrity comes from `manifest.ui_code_sha256`
+        // (which IS signed). The gate is fail-closed: a valid signature +
+        // declared-hash mismatch (a registry-tamper / MITM that swapped the code
+        // after signing) is a hard reject; an unsigned item carries no code. Only
+        // the VALIDATED code reaches `raw`.
+        if self.kind == CatalogKind::Plugin {
+            let ui_code = gate_plugin_ui_code(id, &detail, signed)?;
+            let manifest = detail.get("manifest").cloned().unwrap_or(Value::Null);
+            descriptor.raw = serde_json::json!({
+                "manifest": manifest,
+                "ui_code": ui_code,
+            });
+        }
+        Ok(descriptor)
     }
+}
+
+/// Maximum size of a plugin's bundled sandboxed-UI code, enforced fail-closed at
+/// the integrity gate (mirrors the Core install cap so a pathological bundle is
+/// refused before it is ever stored). 4 MiB.
+const MAX_UI_CODE_BYTES: usize = 4 * 1024 * 1024;
+
+/// Lower-case hex `sha256(utf8_bytes(s))`. The SDK (`ryu pack`) hashes the exact
+/// same UTF-8 bytes with the same lower-case-hex encoding, so JS and Rust agree
+/// byte-for-byte. Reuses the existing `sha2`/`hex` deps — no hand-rolled crypto.
+fn compute_ui_code_sha256(s: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(s.as_bytes()))
+}
+
+/// The fail-closed ui_code carriage ladder for a Plugin marketplace/URL install.
+///
+/// The trust decision (carrying/running code REQUIRES a valid signature attesting
+/// the hash — never a self-declared hash on an unsigned item):
+/// - unsigned (`signed == false`)                         -> `Ok(None)` (benign
+///   summary; NEVER run code off an unattested hash, even if it "matches").
+/// - signed, manifest declares no `ui_code_sha256`         -> `Ok(None)` (a
+///   manifest-only plugin: nothing to carry).
+/// - signed, hash declared, code served, hashes MATCH      -> `Ok(Some(code))`.
+/// - signed, hash declared, code MISSING or hash MISMATCH  -> `Err` (HARD reject —
+///   active tampering: the code was stripped/swapped after signing; the whole
+///   install fails and stores nothing).
+///
+/// `detail` is the raw server-shaped detail document: the declared hash is read
+/// from the SIGNED `detail["manifest"]["ui_code_sha256"]` (snake, as the SDK wrote
+/// it into the signed surface) and the code blob from the UNSIGNED top-level
+/// `detail["uiCode"]` (camel, as the control plane serves it).
+fn gate_plugin_ui_code(id: &str, detail: &Value, signed: bool) -> Result<Option<String>> {
+    // The declared hash lives INSIDE the signed manifest object.
+    let declared = detail
+        .get("manifest")
+        .and_then(|m| m.get("ui_code_sha256"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    // The code blob rides OUTSIDE the manifest, as the server's top-level `uiCode`.
+    let code = detail
+        .get("uiCode")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+
+    if !signed {
+        // Unsigned item: install the manifest as a benign summary but NEVER carry
+        // code — nothing attests the declared hash, so a matching hash is not
+        // trust, it is self-attestation (a bypass).
+        return Ok(None);
+    }
+    // From here the signature was present AND verified valid.
+    let Some(declared) = declared else {
+        // Signed manifest declaring no code hash: a manifest-only plugin.
+        return Ok(None);
+    };
+    // A declared hash means code existed at signing time. Missing code now = the
+    // code was stripped after signing (tamper) -> hard reject.
+    let Some(code) = code else {
+        bail!(
+            "plugin `{id}` manifest declares ui_code_sha256 but no ui_code was served; \
+             refusing install (code stripped after signing)"
+        );
+    };
+    if code.len() > MAX_UI_CODE_BYTES {
+        bail!(
+            "plugin `{id}` ui_code exceeds the {MAX_UI_CODE_BYTES}-byte cap; refusing install"
+        );
+    }
+    let actual = compute_ui_code_sha256(code);
+    if actual != declared.to_ascii_lowercase() {
+        bail!(
+            "plugin `{id}` ui_code hash mismatch (signed manifest declares {declared}, \
+             served code hashes to {actual}); refusing install (tampered code)"
+        );
+    }
+    Ok(Some(code.to_string()))
 }
 
 // ── integrations.sh source (Plugin kind) ────────────────────────────────────
@@ -3276,7 +3383,117 @@ mod tests {
         let r = src
             .verify_manifest_signature(&client, "owner/skill", &detail)
             .await;
-        assert!(r.is_ok(), "unsigned item should install unverified");
+        assert_eq!(
+            r.ok(),
+            Some(false),
+            "unsigned item should install unverified (signed=false)"
+        );
+    }
+
+    // ── Plugin CODE CARRIAGE: ed25519-signed code-integrity gate ──────────────
+    //
+    // These prove the whole point of the carriage: a registry-tamper / MITM that
+    // swaps `ui_code` AFTER the manifest was signed is REJECTED fail-closed on
+    // install, because the hash of the swapped code no longer matches the
+    // signed-manifest's `ui_code_sha256`. `compute_ui_code_sha256` mirrors the
+    // SDK's `sha256(utf8(ui_code))` lower-case-hex exactly, so JS-signed hashes
+    // verify byte-for-byte here.
+
+    /// Build a server-shaped `catalog/detail` document (the EXACT keys the control
+    /// plane serves): the declared hash inside the signed `manifest`, the code as
+    /// the unsigned top-level `uiCode`.
+    fn plugin_detail(ui_code_sha256: Option<&str>, ui_code: Option<&str>) -> serde_json::Value {
+        let mut manifest = serde_json::Map::new();
+        manifest.insert("id".into(), serde_json::json!("com.acme.plugin"));
+        manifest.insert("name".into(), serde_json::json!("Acme"));
+        manifest.insert("version".into(), serde_json::json!("1.0.0"));
+        if let Some(h) = ui_code_sha256 {
+            manifest.insert("ui_code_sha256".into(), serde_json::json!(h));
+        }
+        let mut detail = serde_json::Map::new();
+        detail.insert("manifest".into(), serde_json::Value::Object(manifest));
+        if let Some(c) = ui_code {
+            detail.insert("uiCode".into(), serde_json::json!(c));
+        }
+        serde_json::Value::Object(detail)
+    }
+
+    #[test]
+    fn ui_code_sha256_matches_known_vector() {
+        // Cross-language golden: `sha256("abc")` lower-case hex. The SDK computes
+        // the SAME value via `createHash("sha256").update(code,"utf8").digest("hex")`,
+        // so a hash written into a JS-signed manifest verifies here byte-for-byte.
+        assert_eq!(
+            compute_ui_code_sha256("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn gate_carries_code_when_signed_and_hash_matches() {
+        let code = "export function activate(ctx){ return ctx; }";
+        let hash = compute_ui_code_sha256(code);
+        let detail = plugin_detail(Some(&hash), Some(code));
+        let carried = gate_plugin_ui_code("com.acme.plugin", &detail, true)
+            .expect("signed + matching hash must carry the code");
+        assert_eq!(
+            carried.as_deref(),
+            Some(code),
+            "the exact signed code must be carried"
+        );
+    }
+
+    #[test]
+    fn gate_rejects_tampered_code_fail_closed() {
+        // The load-bearing security assertion: the manifest was signed over the
+        // hash of the ORIGINAL code, but the served code was swapped (MITM /
+        // registry tamper). Install MUST hard-fail — not silently drop the code.
+        let original = "export function activate(ctx){ return ctx; }";
+        let hash = compute_ui_code_sha256(original);
+        let tampered = "export function activate(ctx){ steal(ctx); }";
+        let detail = plugin_detail(Some(&hash), Some(tampered));
+        let err = gate_plugin_ui_code("com.acme.plugin", &detail, true)
+            .expect_err("signed manifest + swapped code must be rejected fail-closed");
+        assert!(
+            err.to_string().contains("hash mismatch"),
+            "reject reason must name the hash mismatch, got: {err}"
+        );
+    }
+
+    #[test]
+    fn gate_rejects_stripped_code_fail_closed() {
+        // A signed manifest declares a code hash but the code blob was removed
+        // after signing — also active tampering, also a hard reject.
+        let hash = compute_ui_code_sha256("some code");
+        let detail = plugin_detail(Some(&hash), None);
+        let err = gate_plugin_ui_code("com.acme.plugin", &detail, true)
+            .expect_err("declared hash with no served code must be rejected");
+        assert!(err.to_string().contains("no ui_code was served"), "got: {err}");
+    }
+
+    #[test]
+    fn gate_never_carries_code_for_unsigned_item() {
+        // The bypass guard: an UNSIGNED item that self-declares a matching hash
+        // must NOT run its code — nothing attests the hash. Benign summary only.
+        let code = "export function activate(){}";
+        let hash = compute_ui_code_sha256(code);
+        let detail = plugin_detail(Some(&hash), Some(code));
+        let carried = gate_plugin_ui_code("com.acme.plugin", &detail, false)
+            .expect("unsigned item installs as a summary (no error)");
+        assert_eq!(
+            carried, None,
+            "unsigned self-declared hash must never carry code"
+        );
+    }
+
+    #[test]
+    fn gate_signed_manifest_only_plugin_carries_nothing() {
+        // A signed plugin with no bundled UI (no ui_code_sha256) is fine and
+        // simply carries no code.
+        let detail = plugin_detail(None, None);
+        let carried = gate_plugin_ui_code("com.acme.plugin", &detail, true)
+            .expect("signed manifest-only plugin is valid");
+        assert_eq!(carried, None);
     }
 
     // ── OKF knowledge-bundle source (Knowledge kind) ──────────────────────────

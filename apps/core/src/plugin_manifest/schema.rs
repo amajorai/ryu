@@ -233,6 +233,22 @@ pub struct RunnableEntry {
     pub config: Option<serde_json::Value>,
 }
 
+// ── Anti-impersonation ────────────────────────────────────────────────────────
+
+/// True when a companion **label** impersonates first-party Ryu/system chrome.
+///
+/// Mirrors the desktop `validatePluginRoute` title check (`rpc.ts`): a plugin's
+/// visible label may not contain `"ryu"` or `"system"` (case-insensitive), so a
+/// third-party companion can never pose as built-in UI in the panel tab. The
+/// desktop host also prepends a mandatory, non-removable `"Plugin ·"` attribution
+/// prefix (`PluginHostPanel.tsx`) — that prefix is the primary guarantee; this
+/// check is defense in depth enforced at the manifest seam, so a hostile label is
+/// rejected at load rather than relying on the renderer alone.
+pub fn label_impersonates_system_chrome(label: &str) -> bool {
+    let lower = label.to_lowercase();
+    lower.contains("ryu") || lower.contains("system")
+}
+
 // ── Validation ────────────────────────────────────────────────────────────────
 
 /// Validate a [`RunnableEntry`] against its per-kind contract.
@@ -338,6 +354,16 @@ pub fn validate_runnable(entry: &RunnableEntry) -> Result<(), String> {
             if cfg.label.trim().is_empty() {
                 return Err(format!(
                     "runnable '{}' (kind=companion): 'label' must not be empty",
+                    entry.id
+                ));
+            }
+            // Anti-impersonation: the visible label may not pose as first-party
+            // Ryu/system chrome (mirrors the desktop `validatePluginRoute` title
+            // gate). The mandatory "Plugin ·" attribution prefix is the primary
+            // guarantee; this rejects a hostile label at the manifest seam.
+            if label_impersonates_system_chrome(&cfg.label) {
+                return Err(format!(
+                    "runnable '{}' (kind=companion): 'label' must not impersonate system chrome (must not contain 'ryu' or 'system')",
                     entry.id
                 ));
             }
@@ -508,6 +534,28 @@ mod tests {
     fn companion_with_label_is_valid() {
         let cfg = json!({ "label": "Research Panel", "icon": "magnifying-glass" });
         assert!(validate_runnable(&entry("c", RunnableKind::Companion, Some(cfg))).is_ok());
+    }
+
+    #[test]
+    fn companion_label_impersonating_system_chrome_errors() {
+        for bad in ["Ryu Settings", "system tools", "RYU", "My System Panel"] {
+            let cfg = json!({ "label": bad });
+            let err = validate_runnable(&entry("c", RunnableKind::Companion, Some(cfg)))
+                .unwrap_err();
+            assert!(
+                err.contains("impersonate system chrome"),
+                "label '{bad}' should be rejected, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn label_impersonates_system_chrome_matches_route_title_rule() {
+        assert!(label_impersonates_system_chrome("Ryu"));
+        assert!(label_impersonates_system_chrome("system"));
+        assert!(label_impersonates_system_chrome("A RYU Panel"));
+        assert!(!label_impersonates_system_chrome("Research Assistant"));
+        assert!(!label_impersonates_system_chrome("Advisor"));
     }
 
     // ── channel ───────────────────────────────────────────────────────────────

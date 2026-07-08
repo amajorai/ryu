@@ -20,8 +20,11 @@
 //! `POST /api/meetings/detect`; Core debounces it and broadcasts a `detected`
 //! event, which the island surfaces as a "start notes?" prompt.
 
+pub mod audio;
+pub mod diarize;
 pub mod notes;
 pub mod store;
+pub mod templates;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -226,14 +229,54 @@ impl MeetingEngine {
         Ok(meeting)
     }
 
-    /// Ingest one captured audio chunk: transcribe it (whisper default, or the
-    /// requested engine), append it as a transcript segment, and broadcast it.
+    /// Create a meeting for an **imported** audio file. Like [`Self::start`] but it
+    /// does not drive Shadow capture — the audio comes from the uploaded file,
+    /// which the caller feeds through [`Self::ingest_chunk`] window by window.
+    pub async fn start_import(&self, title: String) -> Result<Meeting, String> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let user_titled = !title.trim().is_empty();
+        let meeting = Meeting {
+            id: format!("mtg_{}", uuid::Uuid::new_v4().simple()),
+            title: if user_titled {
+                title
+            } else {
+                default_title(None)
+            },
+            title_custom: user_titled,
+            app: Some("import".to_string()),
+            source: MeetingSource::Manual,
+            status: MeetingStatus::Recording,
+            started_at: now.clone(),
+            ended_at: None,
+            participants: Vec::new(),
+            notes: None,
+            space_id: None,
+            doc_id: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        self.store
+            .upsert_meeting(&meeting)
+            .await
+            .map_err(|e| e.to_string())?;
+        self.store.emit(MeetingEvent::Started {
+            meeting: meeting.clone(),
+        });
+        Ok(meeting)
+    }
+
+    /// Ingest one captured audio chunk: downmix it to mono for transcription
+    /// (whisper default, or the requested engine), persist the stereo audio for
+    /// later diarization, append the text as a transcript segment, and broadcast
+    /// it. `offset_ms` is the chunk's sample-accurate position from Shadow; when
+    /// absent (e.g. a GUI-mic feed) we fall back to wall-clock since start.
     pub async fn ingest_chunk(
         &self,
         meeting_id: &str,
         wav: Vec<u8>,
         filename: String,
         engine: Option<&str>,
+        offset_ms: Option<i64>,
     ) -> Result<Segment, String> {
         let meeting = self
             .store
@@ -242,7 +285,24 @@ impl MeetingEngine {
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("meeting '{meeting_id}' not found"))?;
 
-        let text = crate::server::voice::transcribe_wav(&self.http, wav, filename, engine).await?;
+        // Decode once, then fan out: mono for whisper, stereo (16 kHz) persisted
+        // for diarization. A decode failure falls back to sending the raw bytes so
+        // an odd WAV still transcribes.
+        let mono_wav = match audio::decode_wav(&wav) {
+            Ok(decoded) => {
+                if decoded.rate == audio::TARGET_RATE {
+                    let stereo = audio::to_stereo_i16(&decoded);
+                    if let Err(e) = audio::append_pcm(meeting_id, &stereo) {
+                        tracing::debug!("meetings: persisting chunk audio failed: {e:#}");
+                    }
+                }
+                audio::to_mono_wav(&decoded).unwrap_or(wav)
+            }
+            Err(_) => wav,
+        };
+
+        let text =
+            crate::server::voice::transcribe_wav(&self.http, mono_wav, filename, engine).await?;
         let text = text.trim().to_string();
         // Whisper emits blank/placeholder text for silence; skip empty segments so
         // the transcript stays clean.
@@ -250,7 +310,7 @@ impl MeetingEngine {
             return Err("empty transcription (silence)".to_string());
         }
 
-        let t_offset_ms = millis_since(&meeting.started_at);
+        let t_offset_ms = offset_ms.unwrap_or_else(|| millis_since(&meeting.started_at));
         let segment = self
             .store
             .insert_segment(meeting_id, t_offset_ms, None, &text)
@@ -393,6 +453,8 @@ impl MeetingEngine {
     }
 
     pub async fn delete(&self, id: &str) -> Result<bool, String> {
+        // Best-effort: drop the persisted diarization audio alongside the row.
+        audio::remove_pcm(id);
         self.store
             .delete_meeting(id)
             .await
