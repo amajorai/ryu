@@ -32,8 +32,19 @@ use crate::server::ServerState;
 // Preference keys (dot-namespaced; defaults live in the resolvers, not the store)
 // ---------------------------------------------------------------------------
 
-/// Global opt-in for turning conversations into learning data. Default OFF.
+/// Global opt-in for the **training** path — turning conversations into PRM-scored
+/// experience samples and fine-tune data. Default OFF (explicit consent: the PRM
+/// judge can route off-device). Gates sweep/score/cycle + the scheduled retrain.
 pub const LEARNING_ENABLED_PREF: &str = "learning.enabled";
+/// Opt-in for the **local skills** loop — distilling reusable skills from
+/// conversations and proposing them in the approval inbox. Default ON. Entirely
+/// on-device and inbox-gated (no conversation text ever leaves the machine), so it
+/// is the safe "grows with you" default, kept separate from the training opt-in.
+pub const LEARNING_SKILLS_ENABLED_PREF: &str = "learning.skills-enabled";
+/// Unix-seconds watermark for the autonomous skills pass: only conversations
+/// updated after this are considered, so a chat is never re-distilled until it
+/// gets new activity.
+pub const LEARNING_SKILLS_WATERMARK_PREF: &str = "learning.skills-last-synth-at";
 /// Per-conversation exclude: key is `learning.exclude.<conversation_id>`.
 pub const LEARNING_EXCLUDE_PREFIX: &str = "learning.exclude.";
 /// PRM (judge) model id routed through the Gateway.
@@ -51,6 +62,11 @@ pub const LEARNING_MIN_REWARD_PREF: &str = "learning.min-reward";
 pub const LEARNING_BASE_MODEL_PREF: &str = "learning.base-model";
 /// Current skill-library generation; bumped when auto-evolution lands a skill.
 pub const LEARNING_SKILL_GENERATION_PREF: &str = "learning.skill-generation";
+/// Whether an autonomously-synthesized skill must be approved in the inbox before
+/// it joins the active library. Default ON — the loop *proposes*, the user
+/// *disposes*. A deliberate `force` synth ("make a skill from this chat") always
+/// bypasses the gate. Set falsy to restore silent auto-activation.
+pub const LEARNING_REQUIRE_APPROVAL_PREF: &str = "learning.require-approval";
 
 /// Optional idle/sleep-window bounds (UTC hour, 0-23) for the scheduled cycle.
 pub const LEARNING_SLEEP_START_PREF: &str = "learning.sleep-start";
@@ -96,6 +112,7 @@ pub struct ModelSource {
 #[derive(Debug, Clone, Serialize)]
 pub struct LearningConfig {
     pub enabled: bool,
+    pub skills_enabled: bool,
     pub prm_model: String,
     pub prm_via_byo: bool,
     pub synth_model: String,
@@ -134,6 +151,26 @@ pub async fn resolve_enabled(state: &ServerState) -> bool {
     std::env::var("RYU_LEARNING_ENABLED")
         .map(|v| truthy(&v))
         .unwrap_or(false)
+}
+
+/// Local skills-loop opt-in. Default ON — on-device, inbox-gated, no data egress,
+/// so it's safe to run without the explicit consent the training path requires.
+pub async fn resolve_skills_enabled(state: &ServerState) -> bool {
+    if let Some(v) = pref(state, LEARNING_SKILLS_ENABLED_PREF).await {
+        return truthy(&v);
+    }
+    std::env::var("RYU_LEARNING_SKILLS_ENABLED")
+        .map(|v| truthy(&v))
+        .unwrap_or(true)
+}
+
+/// Whether an autonomously-synthesized skill needs inbox approval before it goes
+/// live. Default ON. A `force` synth bypasses this at the call site.
+pub async fn resolve_require_approval(state: &ServerState) -> bool {
+    match pref(state, LEARNING_REQUIRE_APPROVAL_PREF).await {
+        Some(v) => truthy(&v),
+        None => true,
+    }
 }
 
 /// Per-conversation opt-out. Honored even when the global toggle is on.
@@ -286,6 +323,7 @@ pub async fn resolve_config(state: &ServerState) -> LearningConfig {
     let synth = resolve_synth(state).await;
     LearningConfig {
         enabled: resolve_enabled(state).await,
+        skills_enabled: resolve_skills_enabled(state).await,
         prm_model: prm.model,
         prm_via_byo: prm.url.is_some(),
         synth_model: synth.model,
@@ -644,12 +682,13 @@ pub async fn synthesize_skill(
     conversation_id: &str,
     force: bool,
 ) -> Result<SynthOutcome> {
-    if !(force || resolve_enabled(state).await) {
+    // Gated by the *skills* opt-in (default ON, on-device), not the training
+    // opt-in — distilling a local skill never sends conversation text off-device.
+    if !(force || resolve_skills_enabled(state).await) {
         return Ok(SynthOutcome {
             created: false,
             slug: None,
-            reason: "learning is disabled (global opt-in off); pass force for an explicit one-off"
-                .to_string(),
+            reason: "skill learning is disabled; pass force for an explicit one-off".to_string(),
         });
     }
     if resolve_excluded(state, conversation_id).await {
@@ -706,6 +745,38 @@ pub async fn synthesize_skill(
     crate::skills::parse_skill_md(&slug, &skill_md)
         .map_err(|e| anyhow::anyhow!("synthesized skill failed validation: {e}"))?;
 
+    // Gate autonomous synthesis behind the approval inbox: the loop *proposes* a
+    // skill and the user approves it before it joins the active library (the
+    // Hermes `skills.write_approval` stage→review→approve model). A deliberate
+    // `force` synth (the user explicitly asked to make a skill from this chat)
+    // skips the gate. Falls back to direct activation when no approval engine is
+    // wired (headless/tests) or the user opted out via the pref. Nothing is
+    // written to disk until approve, so a rejected suggestion never touches the
+    // library.
+    if !force && resolve_require_approval(state).await {
+        if let Some(engine) = crate::approvals::global_engine() {
+            let req = crate::approvals::ApprovalRequest::for_skill_synthesis(
+                &slug,
+                &name,
+                &description,
+                conversation_id,
+                skill_md,
+            );
+            let queued = engine
+                .request_deduped(req)
+                .await
+                .map_err(|e| anyhow::anyhow!("queueing synthesized skill for approval: {e}"))?;
+            return Ok(SynthOutcome {
+                created: false,
+                slug: Some(slug),
+                reason: match queued {
+                    Some(_) => "skill queued for your approval in the inbox".to_string(),
+                    None => "skill already awaiting approval in the inbox".to_string(),
+                },
+            });
+        }
+    }
+
     write_skill(&slug, &skill_md).await?;
     crate::skills::set_active(&slug, true);
     state.skills.reload();
@@ -725,6 +796,15 @@ pub async fn synthesize_skill(
     })
 }
 
+/// Materialize an approved synthesized skill: write its `SKILL.md` into the
+/// library. Public so the approval engine can install a learning-proposed skill
+/// when the user approves it in the inbox (the write is deferred until approve so
+/// a rejected suggestion never lands on disk). The caller flips it active +
+/// reloads the registry; this only writes the file.
+pub async fn write_synthesized_skill(slug: &str, contents: &str) -> Result<()> {
+    write_skill(slug, contents).await
+}
+
 /// Atomically write `<skills_dir>/<slug>/SKILL.md` (tmp + rename), mirroring the
 /// catalog installer so a concurrent registry reload never sees a half-written
 /// file.
@@ -742,6 +822,54 @@ async fn write_skill(slug: &str, contents: &str) -> Result<()> {
         .await
         .with_context(|| format!("renaming into {}", final_path.display()))?;
     Ok(())
+}
+
+/// Autonomous local skills pass (the default "grows with you" loop). For each
+/// conversation updated since the last watermark, distill a skill and propose it
+/// in the approval inbox (deduped by slug so a chat never spams). Bounded to `max`
+/// conversations per call so it can never flood the local model or the inbox.
+/// On-device only; gated by the skills opt-in (default ON) and completely
+/// independent of the training path. Returns the number of skills proposed.
+pub async fn run_skills_pass(state: &ServerState, max: usize) -> Result<usize> {
+    if !resolve_skills_enabled(state).await {
+        return Ok(0);
+    }
+    let watermark: i64 = pref(state, LEARNING_SKILLS_WATERMARK_PREF)
+        .await
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let mut convos = state
+        .conversations
+        .list_conversations()
+        .await
+        .context("listing conversations for the skills pass")?;
+    // Only chats with new activity, oldest-first so the watermark advances
+    // monotonically and we never skip a conversation when there are more than
+    // `max` fresh ones.
+    convos.retain(|c| c.updated_at > watermark);
+    convos.sort_by_key(|c| c.updated_at);
+
+    let mut proposed = 0usize;
+    let mut high = watermark;
+    for c in convos.into_iter().take(max) {
+        high = high.max(c.updated_at);
+        match synthesize_skill(state, &c.id, false).await {
+            // `slug` is Some whenever a reusable skill was produced (queued for
+            // approval or, with the gate off, activated). None = nothing reusable.
+            Ok(outcome) if outcome.slug.is_some() => proposed += 1,
+            Ok(_) => {}
+            Err(e) => tracing::warn!("skills pass: synth for {} failed: {e:#}", c.id),
+        }
+    }
+    // Advance the watermark past everything we looked at so a no-skill chat isn't
+    // re-processed until it gets new activity.
+    if high > watermark {
+        let _ = state
+            .preferences
+            .set(LEARNING_SKILLS_WATERMARK_PREF, &high.to_string())
+            .await;
+    }
+    Ok(proposed)
 }
 
 // ---------------------------------------------------------------------------

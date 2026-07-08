@@ -81,7 +81,10 @@ impl Engine {
             // yet verified here, so they are treated conservatively as `Other`
             // (only the standard OpenAI fields are emitted — never a non-standard
             // sampler that could 400). Promote to a dedicated arm once verified.
-            "mlx-vlm" | "mlxvlm" | "omlx" => Self::Other,
+            // apfel (Apple Foundation Models) is likewise `Other`: it accepts only
+            // the standard OpenAI fields and REJECTS penalty params, so the
+            // standard-only body is the safe surface (no launch flags either).
+            "mlx-vlm" | "mlxvlm" | "omlx" | "apfel" => Self::Other,
             _ => Self::Other,
         }
     }
@@ -836,6 +839,10 @@ mod tests {
         assert_eq!(Engine::from_name("vllm"), Engine::Vllm);
         assert_eq!(Engine::from_name("sglang"), Engine::Sglang);
         assert_eq!(Engine::from_name("mlx"), Engine::Mlx);
+        // apfel (Apple Foundation Models) is deliberately `Other`: it accepts only
+        // standard OpenAI sampling fields (and rejects penalty params), so the
+        // standard-only body is the safe surface.
+        assert_eq!(Engine::from_name("apfel"), Engine::Other);
         assert!(Engine::LlamaCpp.is_local());
         assert!(Engine::Mlx.is_local());
         assert!(!Engine::Other.is_local());

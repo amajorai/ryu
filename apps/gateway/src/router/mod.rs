@@ -55,6 +55,10 @@ impl ModelRouter {
             ("phi".to_string(), ProviderKind::Local),
             ("qwen".to_string(), ProviderKind::Local),
             ("deepseek".to_string(), ProviderKind::Local),
+            // Apple Foundation Models, served on-device by the `apfel` local
+            // engine (Core makes it the resident local engine, so LOCAL_LLM_URL
+            // points at apfel's :11434). apfel validates this exact id.
+            ("apple-foundationmodel".to_string(), ProviderKind::Local),
         ];
 
         Self {
@@ -359,6 +363,17 @@ mod tests {
     fn eval_route_disabled_returns_none() {
         let router = ModelRouter::new(RoutingConfig::default());
         assert!(router.eval_route("gpt-4o", |_| Some(0.5)).is_none());
+    }
+
+    #[test]
+    fn apple_foundationmodel_routes_to_local() {
+        // Apple Foundation Models are served on-device by Core's `apfel` local
+        // engine, so the built-in prefix must send this exact id to the Local
+        // provider (which forwards to LOCAL_LLM_URL → apfel:11434).
+        let router = ModelRouter::new(RoutingConfig::default());
+        let decision = router.route("apple-foundationmodel");
+        assert_eq!(decision.provider, ProviderKind::Local);
+        assert_eq!(decision.model, "apple-foundationmodel");
     }
 
     #[test]

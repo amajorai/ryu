@@ -1,3 +1,4 @@
+pub mod apfel;
 pub mod docker_model_runner;
 pub mod llamacpp;
 pub mod mlx;
@@ -13,6 +14,7 @@ pub mod unsloth;
 pub mod vllm;
 pub mod whispercpp;
 
+pub use apfel::ApfelManager;
 pub use docker_model_runner::DockerModelRunnerManager;
 pub use llamacpp::LlamaCppManager;
 pub use mlx::MlxManager;

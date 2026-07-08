@@ -71,7 +71,7 @@ pub fn required_platforms(name: &str) -> &'static [&'static str] {
         // MLX is Apple's array framework — Apple Silicon macOS only. The vision
         // (mlx-vlm) and oMLX engines build on the same framework, so they share
         // the gate.
-        "mlx" | "mlx-vlm" | "omlx" => &["macos"],
+        "mlx" | "mlx-vlm" | "omlx" | "apfel" => &["macos"],
         // Tailscale mesh daemon (#478): there is no auto-download yet — the
         // sidecar PATH-adopts an official client install on every platform. This
         // `[linux]` label reserves the future Linux-only downloader and gates the
@@ -96,11 +96,52 @@ pub fn required_platforms(name: &str) -> &'static [&'static str] {
 pub fn supported_on_node(name: &str) -> bool {
     match name {
         "mlx" | "mlx-vlm" | "omlx" => cfg!(target_os = "macos") && cfg!(target_arch = "aarch64"),
+        // Apple Foundation Models (via apfel) need Apple Silicon AND macOS 26+.
+        // Unlike the MLX engines this has a RUNTIME component: the OS version is
+        // not knowable at compile time. `apfel`'s `/health` verifies the deeper
+        // preconditions at start (Apple Intelligence enabled, model downloaded);
+        // this gate answers only "is this Mac new enough to possibly run it".
+        "apfel" => {
+            cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") && macos_at_least_26()
+        }
         other => {
             let platforms = required_platforms(other);
             platforms.is_empty() || platforms.contains(&std::env::consts::OS)
         }
     }
+}
+
+/// Whether this node runs macOS 26 (Tahoe) or newer — the floor for Apple
+/// Intelligence's on-device Foundation Models. Resolved once via
+/// `sw_vers -productVersion` and cached, because [`supported_on_node`] is called
+/// synchronously on hot paths (catalog listing, model-fit verdicts, engine
+/// picking). Non-macOS nodes never reach this (guarded by the `cfg!` above), but
+/// the probe fails safe to `false` if `sw_vers` is unavailable or unparseable.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn macos_at_least_26() -> bool {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .trim()
+                    .split('.')
+                    .next()
+                    .and_then(|major| major.parse::<u32>().ok())
+            })
+            .map(|major| major >= 26)
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+fn macos_at_least_26() -> bool {
+    false
 }
 
 pub fn static_registry() -> Vec<CatalogEntry> {
@@ -275,6 +316,22 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             deprecated: false,
             recommended: false,
         },
+        // Apple Foundation Models via apfel — an adopt-a-binary engine that serves
+        // Apple's on-device `SystemLanguageModel` (Apple Intelligence) as an
+        // OpenAI-compatible server (`apfel --serve`). Downloads no weights (the
+        // model is part of the OS); PATH-detected or `brew install apfel`. Gated to
+        // Apple Silicon macOS 26+ (see `supported_on_node`).
+        CatalogEntry {
+            name: "apfel",
+            display_name: "Apple Intelligence",
+            description: "On-device Apple Foundation Models · OpenAI-compatible (apfel) · no API key, no download · Apple Silicon macOS 26+ with Apple Intelligence · ~3B params, 4096-token context",
+            category: SidecarCategory::Provider,
+            source: SidecarSource::Github {
+                repo: "Arthur-Ficial/apfel",
+            },
+            deprecated: false,
+            recommended: false,
+        },
         // NOTE: the local embeddings server (`llamacpp-embed`) is intentionally
         // NOT a catalog/Store entry — it is backing infrastructure, not a
         // user-pickable engine. It auto-starts (startup_order) and serves the
@@ -411,12 +468,12 @@ mod tests {
     #[test]
     fn registry_has_correct_count() {
         let r = static_registry();
-        // 20 base entries + 4 sandbox backends (wasmtime, docker, microsandbox,
+        // 21 base entries + 4 sandbox backends (wasmtime, docker, microsandbox,
         // opensandbox). The nano/pico/nemo/iron-claw + temporal + qmd rows were
-        // dropped and unsloth/docker-model-runner added since the old count of 30.
-        // NOTE: this is a global count over a shared tree — if a concurrent feature
-        // adds a catalog row, rebase this number with it.
-        assert_eq!(r.len(), 24);
+        // dropped and unsloth/docker-model-runner/apfel added since the old count
+        // of 30. NOTE: this is a global count over a shared tree — if a concurrent
+        // feature adds a catalog row, rebase this number with it.
+        assert_eq!(r.len(), 25);
     }
 
     #[test]
@@ -500,9 +557,9 @@ mod tests {
         assert_eq!(agents.len(), 2);
         // agentbrowser, spider, llmfit, shadow, ghost, unsloth.
         assert_eq!(tools.len(), 6);
-        // llamacpp, ollama, vllm, sglang, mlx, mlx-vlm, omlx (last three Apple
-        // Silicon only), docker-model-runner (adopt-only).
-        assert_eq!(providers.len(), 8);
+        // llamacpp, ollama, vllm, sglang, mlx, mlx-vlm, omlx (Apple Silicon only),
+        // docker-model-runner (adopt-only), apfel (Apple FM, Apple Silicon macOS 26+).
+        assert_eq!(providers.len(), 9);
         // whisper.cpp + OuteTTS + Ryu TTS multi-engine sidecar (parakeet is a
         // model, not a Store engine entry).
         assert_eq!(voice.len(), 3);

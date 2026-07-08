@@ -84,12 +84,18 @@ pub struct VideoSlot {
     pub provider: Option<String>,
 }
 
-/// Memory / Spaces slot: which Space(s) the agent reads and writes.
+/// Memory / Spaces slot: which Space(s) and memory levels the agent may access.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct MemorySlot {
-    /// Space IDs the agent is allowed to read from during retrieval.
+    /// Space IDs the agent is allowed to read from during retrieval. Empty means
+    /// no Spaces are injected into chat (the safe default).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub space_ids: Vec<String>,
+    /// Memory scope levels the agent may recall from: any subset of
+    /// `["user", "node", "project"]`. An **empty** list means "all three levels"
+    /// (the back-compat default for agents configured before this existed).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub read_levels: Vec<String>,
     /// Whether the agent may write new memories during a session.
     #[serde(default)]
     pub write_enabled: bool,
@@ -1397,6 +1403,7 @@ mod tests {
         };
         let mem = MemorySlot {
             space_ids: vec!["space_abc".into()],
+            read_levels: vec!["user".into(), "project".into()],
             write_enabled: true,
         };
         let persona = PersonaSlot {

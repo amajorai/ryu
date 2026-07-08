@@ -969,6 +969,11 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/channels/run", post(channel_run))
         .route("/api/retrieval/index", post(index_retrieval_chunk))
         .route("/api/retrieval/search", post(search_retrieval))
+        .route("/api/memory", get(list_memory).post(create_memory))
+        .route(
+            "/api/memory/:id",
+            get(get_memory).put(update_memory).delete(delete_memory),
+        )
         // ── Danger zone: irreversible bulk "delete all X" (settings) ─────────
         .route("/api/data/counts", get(data_admin::data_counts))
         .route("/api/data/clear", post(data_admin::data_clear))
@@ -1176,6 +1181,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/workspace/new-folder",
             post(git::create_project_folder),
         )
+        .route("/api/workspace/list", get(git::list_directory))
         // ── Worktree diff (read-only, Unit U011) ────────────────────────────
         .route("/api/worktree/:run_id/diff", get(worktree_diff_handler))
         // ── Worktree status (persistent-session: is a worktree live?) ───────
@@ -2188,6 +2194,10 @@ async fn route_single_turn(
     // Resolve auto-recall (U17) config from prefs/env. Default ON; encoded as
     // `Some`/`None` so a disabled feature does zero work inside route_chat_stream.
     let recall = if resolve_auto_recall_enabled(state).await {
+        // Resolve the active agent's memory access from its MemorySlot: which
+        // scope levels it may recall and which Spaces it may inject. Missing agent
+        // / slot => empty vecs, which mean "all levels, no Spaces" (back-compat).
+        let (read_levels, space_ids) = resolve_memory_access(state, req.agent_id.as_deref()).await;
         Some(crate::sidecar::adapters::AutoRecallConfig {
             retrieval: state.retrieval.clone(),
             top_k: resolve_auto_recall_top_k(state).await,
@@ -2195,6 +2205,8 @@ async fn route_single_turn(
             // OFF, only contributes when explicitly enabled. Resolved here so a
             // disabled feature does zero FTS work inside route_chat_stream.
             fts_enabled: resolve_fts_recall_enabled(state).await,
+            read_levels,
+            space_ids,
         })
     } else {
         None
@@ -2217,6 +2229,31 @@ async fn route_single_turn(
         ctx_window,
     )
     .await
+}
+
+/// Resolve an agent's memory access — the scope levels it may recall from and the
+/// Space ids it may inject — from its persisted `MemorySlot`. Returns
+/// `(read_levels, space_ids)`; both empty when the agent, or its memory slot, is
+/// absent (meaning "all levels, no Spaces", the back-compat default enforced in
+/// `run_auto_recall`).
+async fn resolve_memory_access(
+    state: &ServerState,
+    agent_id: Option<&str>,
+) -> (Vec<String>, Vec<String>) {
+    let Some(id) = agent_id.filter(|s| !s.is_empty()) else {
+        return (Vec::new(), Vec::new());
+    };
+    match state.agent_store.get(id).await {
+        Ok(Some(agent)) => match agent.memory {
+            Some(slot) => (slot.read_levels, slot.space_ids),
+            None => (Vec::new(), Vec::new()),
+        },
+        Ok(None) => (Vec::new(), Vec::new()),
+        Err(e) => {
+            tracing::warn!("resolve_memory_access: agent lookup failed for {id}: {e:#}");
+            (Vec::new(), Vec::new())
+        }
+    }
 }
 
 /// Build the post-assistant-turn hook context from the persisted transcript
@@ -3305,6 +3342,199 @@ async fn search_retrieval(
     };
     match state.retrieval.retrieve(&body.query, &opts).await {
         Ok(chunks) => Json(json!({ "chunks": chunks })).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+// ── Memory management API (/api/memory) ──────────────────────────────────────
+// First-class CRUD over long-term memory so the desktop Memory Library can
+// browse, classify, and curate facts. Writes keep the retrieval index in sync so
+// a created/edited fact is immediately RAG-retrievable (and a deleted one gone).
+
+#[derive(serde::Deserialize)]
+struct MemoryListQuery {
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    scope_id: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(serde::Deserialize)]
+struct CreateMemoryBody {
+    content: String,
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    scope_id: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    importance: Option<i32>,
+    #[serde(default)]
+    when_to_use: Option<String>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    #[serde(default)]
+    agent_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateMemoryBody {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    scope: Option<String>,
+    /// Present-with-null clears the project/node id; absent leaves it unchanged.
+    #[serde(default, deserialize_with = "double_option")]
+    scope_id: Option<Option<String>>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    importance: Option<i32>,
+    #[serde(default, deserialize_with = "double_option")]
+    when_to_use: Option<Option<String>>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+}
+
+/// Distinguish "field absent" from "field present and null" for patch semantics.
+fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    serde::Deserialize::deserialize(deserializer).map(Some)
+}
+
+/// Best-effort: mirror a memory entry into the retrieval index so it is
+/// immediately RAG-retrievable. Logs and continues on failure (fail-open).
+async fn index_memory_entry(state: &ServerState, entry: &memory::LongTermEntry) {
+    if let Err(e) = state
+        .retrieval
+        .index_memory_chunk(
+            &entry.id,
+            &entry.content,
+            entry.scope.as_str(),
+            entry.scope_id.as_deref(),
+            entry.category.as_str(),
+            entry.importance,
+        )
+        .await
+    {
+        tracing::warn!(
+            "memory: indexing entry {} failed (search may lag): {e:#}",
+            entry.id
+        );
+    }
+}
+
+async fn list_memory(
+    State(state): State<ServerState>,
+    axum::extract::Query(q): axum::extract::Query<MemoryListQuery>,
+) -> axum::response::Response {
+    let filter = memory::MemoryFilter {
+        scope: q.scope.as_deref().map(memory::MemoryScope::from_str),
+        scope_id: q.scope_id,
+        category: q.category.as_deref().map(memory::MemoryCategory::from_str),
+        limit: q.limit,
+    };
+    match state.memory.list(&filter).await {
+        Ok(entries) => Json(json!({ "memories": entries })).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn create_memory(
+    State(state): State<ServerState>,
+    Json(body): Json<CreateMemoryBody>,
+) -> axum::response::Response {
+    let new = memory::NewMemory {
+        content: body.content,
+        scope: body
+            .scope
+            .as_deref()
+            .map(memory::MemoryScope::from_str)
+            .unwrap_or_default(),
+        scope_id: body.scope_id,
+        category: body
+            .category
+            .as_deref()
+            .map(memory::MemoryCategory::from_str)
+            .unwrap_or_default(),
+        importance: body.importance.unwrap_or(memory::DEFAULT_IMPORTANCE),
+        when_to_use: body.when_to_use,
+        tags: body.tags.unwrap_or_default(),
+        author_agent_id: body.agent_id.clone(),
+    };
+    let agent = body.agent_id.unwrap_or_else(|| "default".to_string());
+    match state
+        .memory
+        .record_full(memory::LOCAL_USER, &agent, new)
+        .await
+    {
+        Ok(Some(id)) => match state.memory.get(&id).await {
+            Ok(Some(entry)) => {
+                index_memory_entry(&state, &entry).await;
+                (StatusCode::CREATED, Json(json!({ "memory": entry }))).into_response()
+            }
+            _ => Json(json!({ "id": id })).into_response(),
+        },
+        Ok(None) => json_error(StatusCode::BAD_REQUEST, "content is empty".to_string()),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn get_memory(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    match state.memory.get(&id).await {
+        Ok(Some(entry)) => Json(json!({ "memory": entry })).into_response(),
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "memory not found".to_string()),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn update_memory(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateMemoryBody>,
+) -> axum::response::Response {
+    let patch = memory::MemoryPatch {
+        content: body.content,
+        scope: body.scope.as_deref().map(memory::MemoryScope::from_str),
+        scope_id: body.scope_id,
+        category: body
+            .category
+            .as_deref()
+            .map(memory::MemoryCategory::from_str),
+        importance: body.importance,
+        when_to_use: body.when_to_use,
+        tags: body.tags,
+    };
+    match state.memory.update(&id, patch).await {
+        Ok(Some(entry)) => {
+            index_memory_entry(&state, &entry).await;
+            Json(json!({ "memory": entry })).into_response()
+        }
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "memory not found".to_string()),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn delete_memory(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    match state.memory.delete(&id).await {
+        Ok(removed) => {
+            let _ = state.retrieval.remove_chunk(&id).await;
+            Json(json!({ "success": true, "removed": removed })).into_response()
+        }
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
@@ -11556,6 +11786,18 @@ async fn install_sidecar(
                     crate::downloads::DownloadKind::Engine,
                     "oMLX".to_string(),
                     async { crate::sidecar::providers::omlx::installer::ensure_installed().await },
+                )
+                .await
+                .map(|_| "installed".to_string()),
+            // apfel is adopt-a-binary (Apple Foundation Models): PATH-detect an
+            // existing install, else best-effort `brew install apfel`. Nothing to
+            // download — Apple FM ships with the OS.
+            "apfel" => downloads
+                .register_indeterminate(
+                    "engine:apfel".to_string(),
+                    crate::downloads::DownloadKind::Engine,
+                    "Apple Intelligence".to_string(),
+                    async { crate::sidecar::providers::apfel::installer::ensure_installed().await },
                 )
                 .await
                 .map(|_| "installed".to_string()),

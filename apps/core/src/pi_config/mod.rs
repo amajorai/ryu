@@ -342,7 +342,14 @@ fn gateway_openai_patch(model: Option<&str>) -> Map<String, Value> {
         })
         .unwrap_or_default();
     let default_local = default_gateway_model();
-    for candidate in [Some(default_local.as_str()), model] {
+    // On Apple Silicon macOS 26+, advertise Apple's on-device Foundation Model
+    // (served by the `apfel` engine) so it shows up as a selectable model in the
+    // ryu/Pi composer. Node-gated so it never appears on machines that can't run
+    // it; picking it triggers the apfel engine swap (see
+    // `adapters::sync_ryu_local_engine`).
+    let apple_fm = crate::catalog::registry::supported_on_node("apfel")
+        .then_some(crate::sidecar::providers::apfel::APPLE_FM_MODEL_ID);
+    for candidate in [Some(default_local.as_str()), apple_fm, model] {
         if let Some(id) = candidate.map(str::trim).filter(|s| !s.is_empty()) {
             if let Some(existing) = entries
                 .iter_mut()

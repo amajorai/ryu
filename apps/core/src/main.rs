@@ -79,11 +79,12 @@ use sidecar::{
     install_state::InstallStatusStore,
     onboarding::SetupManager,
     providers::{
-        llamacpp::LlamaCppEmbedManager, llamacpp::LlamaCppManager, llamacpp::LlamaCppRerankManager,
-        mlx::MlxManager, mlx_vlm::MlxVlmManager, ollama::OllamaManager, omlx::OmlxManager,
-        outetts::OuteTtsManager, parakeet::ParakeetManager, ryutts::RyuTtsManager,
-        sdcpp::StableDiffusionManager, sglang::SglangManager, unsloth::UnslothManager,
-        vllm::VllmManager, whispercpp::WhisperCppManager, DockerModelRunnerManager,
+        apfel::ApfelManager, llamacpp::LlamaCppEmbedManager, llamacpp::LlamaCppManager,
+        llamacpp::LlamaCppRerankManager, mlx::MlxManager, mlx_vlm::MlxVlmManager,
+        ollama::OllamaManager, omlx::OmlxManager, outetts::OuteTtsManager,
+        parakeet::ParakeetManager, ryutts::RyuTtsManager, sdcpp::StableDiffusionManager,
+        sglang::SglangManager, unsloth::UnslothManager, vllm::VllmManager,
+        whispercpp::WhisperCppManager, DockerModelRunnerManager,
     },
     tailscale::TailscaleManager,
     tools::{ghost::GhostManager, llmfit::LlmFit, shadow::ShadowManager, spider::SpiderManager},
@@ -243,6 +244,11 @@ async fn main() {
         // Docker Model Runner — adopt-only: Ryu downloads/spawns nothing, it just
         // routes to Docker's built-in OpenAI-compatible model server on :12434.
         Arc::new(DockerModelRunnerManager::new()),
+        // apfel — Apple Foundation Models (Apple Silicon macOS 26+). Adopt-a-binary
+        // (PATH/`brew`), serves Apple Intelligence as an OpenAI-compat local engine.
+        // Registered on every platform so the catalog shows it (disabled) off a
+        // supported Mac; the node-gate refuses to run/install it elsewhere.
+        Arc::new(ApfelManager::new()),
         // Voice engines (STT/TTS) — opt-in, run alongside the resident chat engine.
         Arc::new(WhisperCppManager::new().with_downloads(download_center.clone())),
         Arc::new(ParakeetManager::new().with_downloads(download_center.clone())),
@@ -299,6 +305,12 @@ async fn main() {
         // re-seed the installed set on restart. `start_all` skips non-resident
         // local engines, so listing it here has no spawn cost.
         "docker-model-runner".into(),
+        // apfel (Apple Foundation Models). Like docker-model-runner it never
+        // auto-spawns (`start_all` skips non-resident local engines), but it MUST
+        // be in startup_order so `seed_installed_from_disk` re-seeds a persisted
+        // install on restart — otherwise a Mac that chose Apple Intelligence would
+        // lose the selection across Core restarts.
+        "apfel".into(),
         // Finally agents
         "zeroclaw".into(),
         "openclaw".into(),
@@ -738,7 +750,8 @@ async fn main() {
         crate::approvals::ApprovalEngine::new(approval_store, reqwest::Client::new())
             .with_monitors(monitor_engine.store.clone())
             .with_registry(Arc::clone(&mcp_registry))
-            .with_preferences(preferences.clone());
+            .with_preferences(preferences.clone())
+            .with_skills(skill_registry.clone());
     crate::approvals::set_global_engine(approval_engine.clone());
     {
         let sweep_engine = approval_engine.clone();

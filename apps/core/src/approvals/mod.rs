@@ -64,6 +64,9 @@ pub enum ApprovalKind {
     ScheduledRun,
     /// An externally-triggered run (Composio / webhook) flagged for approval.
     TriggerRun,
+    /// A skill the continual-learning loop distilled from a conversation, awaiting
+    /// the user's OK before it joins the active skill library.
+    SkillSynthesis,
 }
 
 /// The lifecycle of a request. Only `Pending` ever transitions (idempotency).
@@ -111,6 +114,10 @@ pub enum PendingAction {
     },
     /// Run an agent prompt from a fired trigger.
     TriggerAgent { agent_id: String, prompt: String },
+    /// Add a learning-synthesized skill to the library on approve. Carries the
+    /// full validated `SKILL.md` so the write is deferred until approve — a
+    /// rejected suggestion never touches the skill library.
+    ActivateSkill { slug: String, skill_md: String },
     /// Execute a gated agent tool call on approve. Captures the full re-dispatch
     /// context so the approved run is identical to the one that was gated; run
     /// through the registry's no-gate entry so it never re-raises an approval.
@@ -249,6 +256,44 @@ impl ApprovalRequest {
         req.risk_tags = vec!["workflow".to_owned()];
         req
     }
+
+    /// Build a request for a skill the continual-learning loop synthesized. The
+    /// full validated `skill_md` rides in the action so approve materializes it
+    /// and reject discards it — the library is untouched until the user says yes.
+    /// The `auto` tag mirrors Hermes' `[auto]` origin marker (an autonomously
+    /// proposed skill, not a user-requested one).
+    pub fn for_skill_synthesis(
+        slug: &str,
+        name: &str,
+        description: &str,
+        conversation_id: &str,
+        skill_md: String,
+    ) -> Self {
+        let summary = if description.is_empty() {
+            format!(
+                "Ryu distilled a reusable skill (\"{name}\") from one of your conversations. Approve to add it to your skill library so future chats can use it."
+            )
+        } else {
+            format!(
+                "{description}\n\nRyu distilled this reusable skill from one of your conversations. Approve to add it to your skill library."
+            )
+        };
+        let mut req = Self::new(
+            ApprovalKind::SkillSynthesis,
+            format!("Learned skill: {name}"),
+            summary,
+            Some(PendingAction::ActivateSkill {
+                slug: slug.to_owned(),
+                skill_md,
+            }),
+        );
+        // Dedup on the skill slug so re-synthesizing the same conversation can't
+        // pile up duplicate pending suggestions for one skill.
+        req.source_ref = Some(format!("skill:{slug}"));
+        req.conversation_id = Some(conversation_id.to_owned());
+        req.risk_tags = vec!["learning".to_owned(), "skill".to_owned(), "auto".to_owned()];
+        req
+    }
 }
 
 /// Events fanned out to SSE subscribers.
@@ -273,6 +318,10 @@ pub struct ApprovalEngine {
     registry: Option<std::sync::Arc<crate::sidecar::mcp::McpRegistry>>,
     /// Preferences store, read for the global `approval-mode` (Layer B).
     preferences: Option<crate::server::preferences::PreferencesStore>,
+    /// Skills registry (cloned — shares the inner `Arc`), used to *materialize* an
+    /// approved [`PendingAction::ActivateSkill`]: write the deferred `SKILL.md`,
+    /// flip it active, and hot-reload. Optional so the engine works in tests.
+    skills: Option<crate::skills::SkillRegistry>,
 }
 
 impl ApprovalEngine {
@@ -283,6 +332,7 @@ impl ApprovalEngine {
             monitors: None,
             registry: None,
             preferences: None,
+            skills: None,
         }
     }
 
@@ -310,6 +360,14 @@ impl ApprovalEngine {
         preferences: crate::server::preferences::PreferencesStore,
     ) -> Self {
         self.preferences = Some(preferences);
+        self
+    }
+
+    /// Attach the skills registry so an approved learning-synthesized skill can be
+    /// written + activated + hot-reloaded. Builder-style; without it an
+    /// `ActivateSkill` approval fails with a clear error on approve.
+    pub fn with_skills(mut self, skills: crate::skills::SkillRegistry) -> Self {
+        self.skills = Some(skills);
         self
     }
 
@@ -557,6 +615,19 @@ impl ApprovalEngine {
                 }
                 Ok(None)
             }
+            PendingAction::ActivateSkill { slug, skill_md } => {
+                let skills = self.skills.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("no skills registry attached; cannot activate approved skill")
+                })?;
+                // Deferred write happens now (on approve) so a rejected suggestion
+                // never landed on disk. Then flip active + hot-reload the registry.
+                crate::learning::write_synthesized_skill(slug, skill_md)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("writing approved skill `{slug}`: {e}"))?;
+                crate::skills::set_active(slug, true);
+                skills.reload();
+                Ok(Some(format!("Added the skill \"{slug}\" to your library.")))
+            }
             PendingAction::ToolCall {
                 tool_id,
                 arguments,
@@ -699,6 +770,48 @@ mod tests {
         assert_eq!(req.source_ref.as_deref(), Some("gmail__send_email"));
         assert!(matches!(req.action, Some(PendingAction::ToolCall { .. })));
         assert!(req.risk_tags.iter().any(|t| t == "send"));
+    }
+
+    #[test]
+    fn for_skill_synthesis_defers_write_and_dedups_on_slug() {
+        let req = ApprovalRequest::for_skill_synthesis(
+            "summarize-arxiv",
+            "Summarize arXiv papers",
+            "Fetch and condense a paper by id.",
+            "conv_123",
+            "---\nname: Summarize arXiv papers\n---\nsteps".to_owned(),
+        );
+        assert_eq!(req.kind, ApprovalKind::SkillSynthesis);
+        // Dedup key is the slug so re-synthesis can't pile up duplicates.
+        assert_eq!(req.source_ref.as_deref(), Some("skill:summarize-arxiv"));
+        assert_eq!(req.conversation_id.as_deref(), Some("conv_123"));
+        // The `auto` tag mirrors Hermes' `[auto]` origin marker.
+        assert!(req.risk_tags.iter().any(|t| t == "auto"));
+        // The full SKILL.md rides in the action so nothing is written until approve.
+        match req.action {
+            Some(PendingAction::ActivateSkill {
+                ref slug,
+                ref skill_md,
+            }) => {
+                assert_eq!(slug, "summarize-arxiv");
+                assert!(skill_md.contains("Summarize arXiv papers"));
+            }
+            _ => panic!("expected an ActivateSkill action carrying the deferred skill"),
+        }
+    }
+
+    #[tokio::test]
+    async fn activate_skill_without_registry_is_a_clear_error() {
+        // Approving a skill-synthesis request with no skills registry attached must
+        // fail loudly (recorded as the row's error), never silently swallow it.
+        let store = ApprovalStore::open_in_memory().unwrap();
+        let engine = ApprovalEngine::new(store, reqwest::Client::new());
+        let action = PendingAction::ActivateSkill {
+            slug: "x".to_owned(),
+            skill_md: "---\nname: X\n---\n".to_owned(),
+        };
+        let err = engine.execute_action(&action).await.unwrap_err();
+        assert!(err.to_string().contains("no skills registry"));
     }
 
     #[tokio::test]

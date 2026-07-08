@@ -279,6 +279,14 @@ pub(crate) async fn run_target(target: &JobTarget) -> Result<Option<String>, Str
         JobTarget::LearningCycle => {
             let state = crate::learning::global_state()
                 .ok_or_else(|| "learning state not initialized".to_string())?;
+            // Local skills pass first — on-device + inbox-gated, so it runs on the
+            // default skills opt-in and does NOT wait on the training opt-in or the
+            // sleep window. Bounded per tick; failures are logged, not fatal.
+            match crate::learning::run_skills_pass(&state, 5).await {
+                Ok(n) if n > 0 => tracing::info!("learning: proposed {n} skill(s) to the inbox"),
+                Ok(_) => {}
+                Err(e) => tracing::warn!("learning: skills pass failed: {e:#}"),
+            }
             // No-op quietly unless the user opted in; if a sleep window is set,
             // only fire within it (Core has no keyboard-idle signal — this is the
             // pragmatic "idle window" gate, MetaClaw-style). The job is ticked

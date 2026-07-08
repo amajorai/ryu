@@ -583,6 +583,82 @@ pub async fn create_project_folder(Json(body): Json<NewFolderBody>) -> axum::res
     }
 }
 
+#[derive(Deserialize)]
+pub struct ListDirQuery {
+    /// Absolute directory to list. When absent/empty, defaults to the node's home.
+    path: Option<String>,
+}
+
+/// `GET /api/workspace/list?path=<abs>` — list the sub-directories of a folder ON
+/// THE NODE, so the desktop can present a node-aware folder picker (the native OS
+/// dialog only sees the desktop host, which is wrong when the node is remote).
+///
+/// Placement rationale: this is Core — it reads *what is* on the node's own
+/// filesystem, no policy. Read-only: it returns directory names only, never file
+/// contents. `~` is expanded; a missing/blank path defaults to the home directory.
+/// Returns `{ path, parent, home, entries: [{ name, path }] }` (directories only,
+/// sorted, hidden entries excluded).
+pub async fn list_directory(Query(q): Query<ListDirQuery>) -> axum::response::Response {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"));
+    let raw = q.path.unwrap_or_default();
+    let trimmed = raw.trim();
+    let target = if trimmed.is_empty() {
+        home.clone()
+    } else if let Some(rest) = trimmed.strip_prefix("~") {
+        home.join(rest.trim_start_matches(['/', '\\']))
+    } else {
+        std::path::PathBuf::from(trimmed)
+    };
+
+    // Canonicalize so `..` segments resolve and the returned path is absolute.
+    let target = std::fs::canonicalize(&target).unwrap_or(target);
+    if !target.is_dir() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("Not a directory: {}", target.display()) })),
+        )
+            .into_response();
+    }
+
+    let read = match std::fs::read_dir(&target) {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": format!("Cannot read directory: {e}") })),
+            )
+                .into_response();
+        }
+    };
+
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    for item in read.flatten() {
+        let name = item.file_name().to_string_lossy().into_owned();
+        // Skip hidden/system entries, and anything that isn't a directory.
+        if name.starts_with('.') {
+            continue;
+        }
+        if item.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            entries.push(json!({ "name": name, "path": item.path().to_string_lossy() }));
+        }
+    }
+    entries.sort_by(|a, b| {
+        a["name"]
+            .as_str()
+            .unwrap_or("")
+            .to_lowercase()
+            .cmp(&b["name"].as_str().unwrap_or("").to_lowercase())
+    });
+
+    Json(json!({
+        "path": target.to_string_lossy(),
+        "parent": target.parent().map(|p| p.to_string_lossy().into_owned()),
+        "home": home.to_string_lossy(),
+        "entries": entries,
+    }))
+    .into_response()
+}
+
 /// Validate a project-folder name is a single, safe path segment.
 fn validate_folder_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
@@ -636,5 +712,63 @@ mod tests {
         assert!(validate_folder_name("a\\b").is_err());
         assert!(validate_folder_name("foo..bar").is_err());
         assert!(validate_folder_name("bad\nname").is_err());
+    }
+
+    async fn body_json(resp: axum::response::Response) -> (StatusCode, serde_json::Value) {
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, value)
+    }
+
+    #[tokio::test]
+    async fn list_directory_returns_child_dirs_and_hides_files_and_dotfiles() {
+        // A temp dir with two sub-folders, one file, and one hidden folder.
+        let base = std::env::temp_dir().join(format!("ryu_listdir_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("alpha")).unwrap();
+        std::fs::create_dir_all(base.join("beta")).unwrap();
+        std::fs::create_dir_all(base.join(".hidden")).unwrap();
+        std::fs::write(base.join("readme.txt"), b"x").unwrap();
+
+        let resp = list_directory(Query(ListDirQuery {
+            path: Some(base.to_string_lossy().into_owned()),
+        }))
+        .await;
+        let (status, json) = body_json(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        let names: Vec<String> = json["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap().to_string())
+            .collect();
+        // Only the two visible sub-directories, sorted; no file, no dotfile.
+        assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
+        assert!(json["parent"].is_string());
+        assert!(json["home"].is_string());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn list_directory_404s_on_missing_path() {
+        let resp = list_directory(Query(ListDirQuery {
+            path: Some("/no/such/ryu/dir/xyz".to_string()),
+        }))
+        .await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn list_directory_defaults_to_home_when_path_absent() {
+        let resp = list_directory(Query(ListDirQuery { path: None })).await;
+        let (status, json) = body_json(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        // Home is a real directory, so listing it succeeds and echoes the home path.
+        let home = dirs::home_dir().unwrap().to_string_lossy().into_owned();
+        assert_eq!(json["path"].as_str().unwrap(), home);
     }
 }

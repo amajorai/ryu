@@ -28,6 +28,8 @@ pub const LOCAL_ENGINES: &[&str] = &[
     "mlx-vlm",
     "omlx",
     "docker-model-runner",
+    // Apple Foundation Models via the `apfel` server (Apple Silicon macOS 26+).
+    "apfel",
 ];
 
 /// True if `name` is one of the swappable local inference engines.
@@ -60,6 +62,9 @@ pub fn local_engine_base_url(name: &str) -> Option<&'static str> {
         // `{base}/v1/chat/completions` join resolve to DMR's real endpoint, so no
         // routing code special-cases it. Adopt-only — Docker owns the process.
         "docker-model-runner" => Some("http://127.0.0.1:12434/engines"),
+        // apfel serves Apple Foundation Models on :11434 (shared with Ollama —
+        // the two never reside at once; `apfel` has no `--port` override).
+        "apfel" => Some("http://127.0.0.1:11434"),
         _ => None,
     }
 }
@@ -90,6 +95,9 @@ pub fn local_engine_url(name: &str) -> Option<&'static str> {
         // Docker Model Runner's OpenAI-compat API is under `/engines/v1`; the
         // gateway appends `/chat/completions`, yielding the correct DMR path.
         "docker-model-runner" => Some("http://127.0.0.1:12434/engines/v1"),
+        // apfel (Apple Foundation Models) — OpenAI-compat on :11434. Shares the
+        // port with Ollama; safe, the two never reside at once.
+        "apfel" => Some("http://127.0.0.1:11434/v1"),
         _ => None,
     }
 }
@@ -148,6 +156,7 @@ mod tests {
         assert!(is_local_engine("mlx-vlm"));
         assert!(is_local_engine("omlx"));
         assert!(is_local_engine("docker-model-runner"));
+        assert!(is_local_engine("apfel"));
     }
 
     #[test]

@@ -56,6 +56,17 @@ pub struct RetrievableChunk {
     /// Space identifier when `source == Space`; `None` for memory.
     pub space_id: Option<String>,
     pub content: String,
+    /// Memory scope level (`"user"`/`"node"`/`"project"`) for `Memory` chunks;
+    /// `None` for Space/OKF. Legacy memory chunks (pre-scoping) are treated as
+    /// `"user"` by the level filter.
+    #[serde(default)]
+    pub mem_scope: Option<String>,
+    /// Project folder path when `mem_scope == "project"`.
+    #[serde(default)]
+    pub mem_scope_id: Option<String>,
+    /// 1..=5 importance for `Memory` chunks; used to boost ranking.
+    #[serde(default)]
+    pub mem_importance: i32,
 }
 
 /// A retrieved chunk paired with its relevance score (higher is more relevant).
@@ -78,6 +89,16 @@ pub struct RetrievalOptions {
     pub space_ids: Option<Vec<String>>,
     /// Whether to include memory (U11) in the search.
     pub include_memory: bool,
+    /// Memory scope levels the caller (agent) may read (`"user"`/`"node"`/
+    /// `"project"`). `None` searches every level (unconfigured / back-compat);
+    /// `Some` restricts memory chunks to the listed levels.
+    #[serde(default)]
+    pub read_levels: Option<Vec<String>>,
+    /// The active project folder path. Project-scoped memory chunks are only
+    /// matched when their `mem_scope_id` equals this. `None` excludes all
+    /// project-scoped memory.
+    #[serde(default)]
+    pub project_id: Option<String>,
     /// Drop chunks whose relevance falls below this score (0.0 keeps everything).
     pub min_score: f32,
     /// How many candidates to collect before reranking. Must be >= top_k.
@@ -91,6 +112,8 @@ impl Default for RetrievalOptions {
             top_k: DEFAULT_TOP_K,
             space_ids: None,
             include_memory: true,
+            read_levels: None,
+            project_id: None,
             min_score: 0.0,
             rerank_candidates: None,
         }
@@ -99,6 +122,14 @@ impl Default for RetrievalOptions {
 
 /// Default number of chunks injected when a request does not specify `top_k`.
 pub const DEFAULT_TOP_K: usize = 5;
+
+/// Default importance for a memory chunk missing the column (mid of the 1..=5 scale).
+pub const DEFAULT_MEM_IMPORTANCE: i32 = 3;
+
+/// Per-importance-point nudge to a memory chunk's relevance score. Small enough
+/// that a genuinely more-similar chunk still wins, but a high-importance fact
+/// breaks near-ties in its favour.
+const IMPORTANCE_BOOST_STEP: f32 = 0.02;
 
 // ── Embedder ────────────────────────────────────────────────────────────────
 
@@ -644,10 +675,17 @@ impl RetrievalStore {
                  content         TEXT NOT NULL,
                  embedding       BLOB NOT NULL,
                  embedding_model TEXT NOT NULL DEFAULT '',
-                 created_at      INTEGER NOT NULL
+                 created_at      INTEGER NOT NULL,
+                 -- Memory-scope metadata (NULL for Space/OKF chunks). Denormalized
+                 -- from `memory_entries` so the level/project filter runs in-query.
+                 mem_scope       TEXT,
+                 mem_scope_id    TEXT,
+                 mem_category    TEXT,
+                 mem_importance  INTEGER NOT NULL DEFAULT 3
              );
              CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source);
              CREATE INDEX IF NOT EXISTS idx_chunks_space  ON chunks(space_id);
+             CREATE INDEX IF NOT EXISTS idx_chunks_mem_scope ON chunks(mem_scope, mem_scope_id);
 
              -- Filterable metadata sidecar for OKF (Open Knowledge Format) chunks.
              -- One row per indexed chunk; `chunk_id` joins back to `chunks.id`.
@@ -680,6 +718,16 @@ impl RetrievalStore {
             "ALTER TABLE chunks ADD COLUMN embedding_model TEXT NOT NULL DEFAULT ''",
             [],
         );
+
+        // Migration for DBs created before the memory-scope columns existed.
+        // Duplicate-column errors on fresh DBs (CREATE above) are ignored.
+        let _ = conn.execute("ALTER TABLE chunks ADD COLUMN mem_scope TEXT", []);
+        let _ = conn.execute("ALTER TABLE chunks ADD COLUMN mem_scope_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE chunks ADD COLUMN mem_category TEXT", []);
+        let _ = conn.execute(
+            "ALTER TABLE chunks ADD COLUMN mem_importance INTEGER NOT NULL DEFAULT 3",
+            [],
+        );
         Ok(())
     }
 
@@ -710,6 +758,56 @@ impl RetrievalStore {
             params![id, source.as_str(), space_id, content, blob, model, now],
         )
         .context("indexing chunk")?;
+        Ok(())
+    }
+
+    /// Index a memory fact with its scope metadata so the level/project filter can
+    /// run in-query. Same upsert semantics as [`index_chunk`](Self::index_chunk)
+    /// but for `ChunkSource::Memory`, carrying `mem_scope`/`mem_scope_id`/
+    /// `mem_category`/`mem_importance`.
+    pub async fn index_memory_chunk(
+        &self,
+        id: &str,
+        content: &str,
+        scope: &str,
+        scope_id: Option<&str>,
+        category: &str,
+        importance: i32,
+    ) -> Result<()> {
+        let embedding = self.embedder.embed(content).await?;
+        let blob = encode_embedding(&embedding);
+        let model = self.embedder.model_id().to_string();
+        let now = chrono::Utc::now().timestamp_millis();
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO chunks
+                (id, source, space_id, content, embedding, embedding_model, created_at,
+                 mem_scope, mem_scope_id, mem_category, mem_importance)
+             VALUES (?1, 'memory', NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(id) DO UPDATE SET
+                 source          = 'memory',
+                 space_id        = NULL,
+                 content         = excluded.content,
+                 embedding       = excluded.embedding,
+                 embedding_model = excluded.embedding_model,
+                 created_at      = excluded.created_at,
+                 mem_scope       = excluded.mem_scope,
+                 mem_scope_id    = excluded.mem_scope_id,
+                 mem_category    = excluded.mem_category,
+                 mem_importance  = excluded.mem_importance",
+            params![
+                id,
+                content,
+                blob,
+                model,
+                now,
+                scope,
+                scope_id,
+                category,
+                importance.clamp(1, 5),
+            ],
+        )
+        .context("indexing memory chunk")?;
         Ok(())
     }
 
@@ -861,6 +959,14 @@ impl RetrievalStore {
         Ok(removed)
     }
 
+    /// Remove a single indexed chunk by id (e.g. when a memory fact is deleted).
+    /// Returns whether a row was removed. Safe to call for an unknown id.
+    pub async fn remove_chunk(&self, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let removed = conn.execute("DELETE FROM chunks WHERE id = ?1", params![id])?;
+        Ok(removed > 0)
+    }
+
     /// Return the cross-link edges preserved for a bundle: `(concept_path,
     /// link_target)` pairs, deduplicated, for progressive-disclosure traversal.
     pub async fn okf_links(&self, bundle_id: &str) -> Result<Vec<OkfEdge>> {
@@ -1003,7 +1109,12 @@ impl RetrievalStore {
         let mut scored: Vec<ScoredChunk> = candidates
             .into_iter()
             .map(|(chunk, embedding)| {
-                let score = cosine_similarity(&query_embedding, &embedding);
+                let mut score = cosine_similarity(&query_embedding, &embedding);
+                // Nudge memory chunks by importance so high-value facts break ties.
+                if chunk.source == ChunkSource::Memory {
+                    score += (chunk.mem_importance - DEFAULT_MEM_IMPORTANCE) as f32
+                        * IMPORTANCE_BOOST_STEP;
+                }
                 ScoredChunk {
                     id: chunk.id,
                     source: chunk.source,
@@ -1042,7 +1153,8 @@ impl RetrievalStore {
         let conn = self.conn.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT id, source, space_id, content, embedding FROM chunks \
+                "SELECT id, source, space_id, content, embedding, \
+                        mem_scope, mem_scope_id, mem_importance FROM chunks \
                  WHERE embedding_model = ?1",
             )
             .context("preparing candidate query")?;
@@ -1057,6 +1169,11 @@ impl RetrievalStore {
                         source,
                         space_id,
                         content: row.get(3)?,
+                        mem_scope: row.get(5)?,
+                        mem_scope_id: row.get(6)?,
+                        mem_importance: row
+                            .get::<_, Option<i32>>(7)?
+                            .unwrap_or(DEFAULT_MEM_IMPORTANCE),
                     },
                     decode_embedding(&blob),
                 ))
@@ -1078,7 +1195,7 @@ impl RetrievalStore {
 /// memory toggle with the Space selection.
 fn chunk_matches(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bool {
     match chunk.source {
-        ChunkSource::Memory => opts.include_memory,
+        ChunkSource::Memory => opts.include_memory && memory_level_matches(chunk, opts),
         ChunkSource::Space => match &opts.space_ids {
             // `None` => search all Spaces.
             None => true,
@@ -1089,6 +1206,26 @@ fn chunk_matches(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bool {
                 .is_some_and(|sid| ids.iter().any(|want| want == sid)),
         },
     }
+}
+
+/// Whether a `Memory` chunk passes the caller's level + active-project filter.
+/// Legacy chunks with no `mem_scope` are treated as `"user"` (broadly visible).
+/// `read_levels == None` allows every level (unconfigured / back-compat).
+/// Project-scoped chunks require `mem_scope_id == opts.project_id`.
+fn memory_level_matches(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bool {
+    let scope = chunk.mem_scope.as_deref().unwrap_or("user");
+    if let Some(levels) = &opts.read_levels {
+        if !levels.iter().any(|l| l == scope) {
+            return false;
+        }
+    }
+    if scope == "project" {
+        return match (chunk.mem_scope_id.as_deref(), opts.project_id.as_deref()) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        };
+    }
+    true
 }
 
 /// Encode an embedding as little-endian f32 bytes for BLOB storage.
@@ -1413,12 +1550,91 @@ mod tests {
             include_memory: false,
             min_score: 0.0,
             rerank_candidates: None,
+            ..Default::default()
         };
         let hits = store.retrieve("oven bread bake", &opts).await.unwrap();
         assert!(!hits.is_empty());
         assert!(hits
             .iter()
             .all(|c| c.space_id.as_deref() == Some("recipes")));
+    }
+
+    /// Memory-scope filter: a project-scoped memory chunk is only retrieved when
+    /// the caller's `read_levels` includes `project` AND `project_id` matches; a
+    /// user-only caller never sees it.
+    #[tokio::test]
+    async fn memory_level_filter_gates_project_scope() {
+        let store = RetrievalStore::open_in_memory().unwrap();
+        store
+            .index_memory_chunk(
+                "mu",
+                "the user prefers concise answers",
+                "user",
+                None,
+                "preference",
+                3,
+            )
+            .await
+            .unwrap();
+        store
+            .index_memory_chunk(
+                "mp",
+                "this project uses pnpm and vitest",
+                "project",
+                Some("/proj/x"),
+                "project_context",
+                4,
+            )
+            .await
+            .unwrap();
+
+        // User-only agent: never sees the project chunk, even inside project X.
+        let user_only = RetrievalOptions {
+            top_k: 10,
+            read_levels: Some(vec!["user".to_owned()]),
+            project_id: Some("/proj/x".to_owned()),
+            ..Default::default()
+        };
+        let hits = store
+            .retrieve("what does the project use", &user_only)
+            .await
+            .unwrap();
+        assert!(
+            hits.iter().all(|c| c.id != "mp"),
+            "project chunk must be hidden from a user-only agent"
+        );
+
+        // Project-enabled agent in project X: the project chunk is retrievable.
+        let in_x = RetrievalOptions {
+            top_k: 10,
+            read_levels: Some(vec!["user".to_owned(), "project".to_owned()]),
+            project_id: Some("/proj/x".to_owned()),
+            ..Default::default()
+        };
+        let hits_x = store
+            .retrieve("what does the project use", &in_x)
+            .await
+            .unwrap();
+        assert!(
+            hits_x.iter().any(|c| c.id == "mp"),
+            "project chunk must surface inside its project"
+        );
+
+        // Same agent in a DIFFERENT project: the project chunk is excluded.
+        let in_y = RetrievalOptions {
+            top_k: 10,
+            read_levels: Some(vec!["user".to_owned(), "project".to_owned()]),
+            project_id: Some("/proj/y".to_owned()),
+            ..Default::default()
+        };
+        let hits_y = store
+            .retrieve("what does the project use", &in_y)
+            .await
+            .unwrap();
+        assert!(
+            hits_y.iter().all(|c| c.id != "mp"),
+            "project chunk must not leak into another project"
+        );
     }
 
     #[tokio::test]
@@ -1432,6 +1648,7 @@ mod tests {
             include_memory: true,
             min_score: 0.0,
             rerank_candidates: None,
+            ..Default::default()
         };
         let hits = store.retrieve("dark mode", &opts).await.unwrap();
         assert!(hits.iter().all(|c| c.source == ChunkSource::Memory));

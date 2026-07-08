@@ -13,7 +13,8 @@ use crate::agents::{AgentStore, PersonaSlot};
 use crate::registry::ProviderRegistry;
 use crate::server::conversations::{ConversationStore, MessageSearchHit};
 use crate::server::memory::{
-    MemoryStore, DEFAULT_LONG_TERM_LIMIT, DEFAULT_SHORT_TERM_LIMIT, LOCAL_USER,
+    MemoryCategory, MemoryScope, MemoryStore, NewMemory, DEFAULT_LONG_TERM_LIMIT,
+    DEFAULT_SHORT_TERM_LIMIT, LOCAL_USER,
 };
 use crate::server::retrieval::{ChunkSource, RetrievalOptions, RetrievalStore, ScoredChunk};
 use crate::server::trace::{hash_args, TraceStore};
@@ -1565,6 +1566,47 @@ fn long_term_agent_scope(agent_id: Option<&str>) -> String {
         .to_owned()
 }
 
+/// Auto-classify a captured fact from its text and the active project.
+///
+/// A cheap, deterministic first pass (no model call): the scope **level** comes
+/// from context — inside a working folder (`project_id`) a fact is Project-scoped
+/// to that folder, otherwise User-scoped; the **category** is a keyword heuristic.
+/// This is intentionally conservative; users refine level/category/importance/tags
+/// in the desktop Memory Library, and a Gateway classifier can replace the
+/// heuristic later without changing callers. Importance defaults to the mid of the
+/// 1..=5 scale.
+fn infer_new_memory(content: &str, project_id: Option<&str>, agent_id: Option<&str>) -> NewMemory {
+    let lower = content.to_lowercase();
+    let category = if lower.contains("prefer")
+        || lower.contains("i like")
+        || lower.contains("i want")
+        || lower.contains("don't")
+        || lower.contains("do not")
+        || lower.contains("always")
+        || lower.contains("never")
+    {
+        MemoryCategory::Preference
+    } else if project_id.is_some() {
+        MemoryCategory::ProjectContext
+    } else {
+        MemoryCategory::UserFact
+    };
+    let (scope, scope_id) = match project_id.filter(|p| !p.trim().is_empty()) {
+        Some(p) => (MemoryScope::Project, Some(p.to_string())),
+        None => (MemoryScope::User, None),
+    };
+    NewMemory {
+        content: content.to_string(),
+        scope,
+        scope_id,
+        category,
+        importance: crate::server::memory::DEFAULT_IMPORTANCE,
+        when_to_use: None,
+        tags: Vec::new(),
+        author_agent_id: agent_id.map(str::to_string),
+    }
+}
+
 /// Build the long-term-memory system message from recalled entries, or `None`
 /// when memory is disabled or empty. Injected as a leading `system` message on
 /// both the OpenAI-compat and ACP paths.
@@ -1654,6 +1696,16 @@ pub struct AutoRecallConfig {
     /// also runs a keyword FTS pass over past messages and merges its hits into the
     /// past-chat set (deduped by message id). When `false`, no FTS work is done.
     pub fts_enabled: bool,
+    /// Memory scope levels the active agent may recall from (subset of
+    /// `["user", "node", "project"]`). **Empty** means all three levels (the
+    /// back-compat default for an unconfigured agent). Resolved from the agent's
+    /// `MemorySlot.read_levels` at the call site.
+    pub read_levels: Vec<String>,
+    /// Space IDs the active agent may inject into chat, from its
+    /// `MemorySlot.space_ids`. **Empty** means no Spaces are auto-injected (the
+    /// prior behaviour). This is what finally wires the agent→Spaces allowlist
+    /// into retrieval (it was previously hardcoded to none).
+    pub space_ids: Vec<String>,
 }
 
 /// Truncate a snippet to `AUTO_RECALL_SNIPPET_CHARS` on a char boundary, adding
@@ -1742,11 +1794,11 @@ fn drop_recency_dupes(
 /// loop never aborts); enumeration is capped at [`MEMORY_BACKFILL_LIMIT`]; the
 /// whole call already runs inside the [`AUTO_RECALL_TIMEOUT`] budget. Never
 /// panics or propagates.
-async fn backfill_memory_facts(memory: &MemoryStore, retrieval: &RetrievalStore, scope: &str) {
-    let facts = match memory
-        .recall(LOCAL_USER, scope, MEMORY_BACKFILL_LIMIT)
-        .await
-    {
+/// Enumerates facts across ALL scope levels (per-agent/level filtering happens at
+/// retrieve time, using the chunk's denormalized `mem_scope`/`mem_scope_id`), so a
+/// fact recorded at any level becomes searchable once indexed.
+async fn backfill_memory_facts(memory: &MemoryStore, retrieval: &RetrievalStore) {
+    let facts = match memory.all_for_backfill(MEMORY_BACKFILL_LIMIT).await {
         Ok(f) => f,
         Err(e) => {
             tracing::warn!(
@@ -1772,7 +1824,14 @@ async fn backfill_memory_facts(memory: &MemoryStore, retrieval: &RetrievalStore,
             continue;
         }
         if let Err(e) = retrieval
-            .index_chunk(&fact.id, ChunkSource::Memory, None, &fact.content)
+            .index_memory_chunk(
+                &fact.id,
+                &fact.content,
+                fact.scope.as_str(),
+                fact.scope_id.as_deref(),
+                fact.category.as_str(),
+                fact.importance,
+            )
             .await
         {
             tracing::warn!(
@@ -1795,13 +1854,15 @@ async fn backfill_memory_facts(memory: &MemoryStore, retrieval: &RetrievalStore,
 ///   include-filter).
 ///
 /// `recency_ids` are the long-term fact ids the recency path injected this turn
-/// (empty when `enable_long_term` is off — see the call site). `memory_scope` is
-/// the `(LOCAL_USER, scope)` agent scope, the SAME one the recency path used.
+/// (empty when `enable_long_term` is off — see the call site). `project_id` is the
+/// active working folder (from the request's `cwd`): project-scoped memory only
+/// matches when it equals this. The agent's readable levels + Space allowlist come
+/// from `cfg.read_levels` / `cfg.space_ids`.
 async fn run_auto_recall(
     cfg: &AutoRecallConfig,
     conversations: &ConversationStore,
     memory: &MemoryStore,
-    memory_scope: &str,
+    project_id: Option<&str>,
     recency_ids: &std::collections::HashSet<String>,
     query: &str,
     current_conversation_id: Option<&str>,
@@ -1812,16 +1873,24 @@ async fn run_auto_recall(
 
     // Bridge long-term facts into the retrieval index BEFORE retrieving, so a
     // just-recorded fact is searchable this turn. Bounded + fail-open.
-    backfill_memory_facts(memory, &cfg.retrieval, memory_scope).await;
+    backfill_memory_facts(memory, &cfg.retrieval).await;
 
-    // Memory half (Spaces excluded). Fetch more than top_k so dropping the
-    // recency-injected facts still leaves room for the ones the recency window
-    // MISSED.
+    // Memory + Space half, gated by the agent's readable levels + Space allowlist
+    // and the active project. Fetch more than top_k so dropping the recency-injected
+    // facts still leaves room for the ones the recency window MISSED.
     let memory_chunks = {
         let opts = RetrievalOptions {
             top_k: cfg.top_k + recency_ids.len(),
-            space_ids: Some(Vec::new()),
+            // Empty allowlist => no Spaces (prior behaviour); non-empty => those.
+            space_ids: Some(cfg.space_ids.clone()),
             include_memory: true,
+            // Empty => all levels (unconfigured agent); non-empty => those levels.
+            read_levels: if cfg.read_levels.is_empty() {
+                None
+            } else {
+                Some(cfg.read_levels.clone())
+            },
+            project_id: project_id.map(str::to_string),
             ..RetrievalOptions::default()
         };
         match cfg.retrieval.retrieve(query, &opts).await {
@@ -2922,7 +2991,7 @@ pub async fn route_chat_stream(
                 cfg,
                 &conversations,
                 &memory,
-                &memory_scope,
+                req.cwd.as_deref(),
                 &recency_fact_ids,
                 &user_text,
                 req.conversation_id.as_deref(),
@@ -2948,10 +3017,17 @@ pub async fn route_chat_stream(
     };
 
     // Record the user's turn into long-term memory when opted in, so it informs
-    // future sessions. No-op (and nothing is stored) when disabled.
+    // future sessions. No-op (and nothing is stored) when disabled. Metadata is
+    // auto-classified from the text + active project (`cwd`); users can edit any
+    // field later in the desktop Memory Library.
     if req.enable_long_term && !user_text.is_empty() {
         let scope = long_term_agent_scope(effective_agent_id.as_deref());
-        if let Err(e) = memory.record(LOCAL_USER, &scope, &user_text).await {
+        let new = infer_new_memory(
+            &user_text,
+            req.cwd.as_deref(),
+            effective_agent_id.as_deref(),
+        );
+        if let Err(e) = memory.record_full(LOCAL_USER, &scope, new).await {
             tracing::warn!("failed to record long-term memory: {e:#}");
         }
     }
@@ -4028,6 +4104,97 @@ fn build_acp_prompt(
     prompt
 }
 
+/// Keep the resident local engine aligned with the flagship `ryu` agent's model
+/// pick. Today only Apple Foundation Models needs this: `apple-foundationmodel`
+/// is served by the `apfel` engine, and apfel validates the request's model id
+/// (unlike llama.cpp/Ollama, which ignore it), so that engine MUST be resident
+/// for the pick to route on-device. Switching to any other model restores the
+/// previously-active (model-store) local engine, else the default GGUF engine.
+///
+/// Runs in the background: a first-time pick may need to install apfel
+/// (PATH-detect / `brew install`), and blocking the turn on that would stall the
+/// composer. The swap catches up within a moment — the current turn may warm up
+/// on the prior engine. A no-op outside a live server (tests/headless), where
+/// [`crate::learning::global_state`] is unset.
+fn sync_ryu_local_engine(model: String) {
+    use crate::sidecar::providers::apfel;
+    tokio::spawn(async move {
+        let Some(state) = crate::learning::global_state() else {
+            return;
+        };
+
+        let picks_apple = model == apfel::APPLE_FM_MODEL_ID;
+        let resident = state.manager.active_local_engine().await;
+
+        // The engine this pick requires (None ⇒ leave the resident engine as-is).
+        let target: Option<String> = if picks_apple {
+            if !crate::catalog::registry::supported_on_node("apfel") {
+                tracing::warn!(
+                    "ryu picked Apple Intelligence but this node cannot run it — ignoring"
+                );
+                return;
+            }
+            Some("apfel".to_string())
+        } else if resident.as_deref() == Some("apfel") {
+            Some(restore_local_engine(&state).await)
+        } else {
+            None
+        };
+
+        let Some(engine) = target else {
+            return;
+        };
+        if resident.as_deref() == Some(engine.as_str()) {
+            return; // already the resident engine
+        }
+
+        // Install-on-select for apfel: the swap gate requires the engine to be
+        // marked installed, but apfel installs lazily (PATH-detect / `brew`).
+        if engine == "apfel" && !state.setup.is_installed("apfel").await {
+            if let Err(e) = apfel::installer::ensure_installed().await {
+                tracing::warn!(error = %e, "could not install apfel for Apple Intelligence pick");
+                return;
+            }
+            state.setup.mark_installed("apfel").await;
+        }
+
+        match state.manager.set_active_local_engine(&engine).await {
+            Ok(_) => {
+                if let Err(e) = state.gateway.refresh().await {
+                    tracing::warn!(error = %e, "gateway refresh after ryu engine swap failed");
+                }
+                tracing::info!(engine = %engine, "swapped resident local engine for ryu model pick");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, engine = %engine, "could not swap local engine for ryu pick");
+            }
+        }
+    });
+}
+
+/// The engine to restore when switching the ryu agent away from Apple
+/// Intelligence: the model store's persisted engine if still valid, else the
+/// first node-supported GGUF engine (the default local chat stack).
+async fn restore_local_engine(state: &crate::server::ServerState) -> String {
+    use crate::model_catalog::installed;
+    if let Ok(Some(raw)) = state.preferences.get(installed::ACTIVE_MODEL_PREF).await {
+        if let Some(active) = installed::parse_active_pref(&raw) {
+            if active.engine != "apfel"
+                && crate::sidecar::active_engine::is_local_engine(&active.engine)
+            {
+                return active.engine;
+            }
+        }
+    }
+    crate::model_format::pick_engine(
+        crate::model_format::ModelFormat::Gguf,
+        None,
+        crate::catalog::registry::supported_on_node,
+    )
+    .unwrap_or("llamacpp")
+    .to_string()
+}
+
 /// Pre-rendered SSE frame for the UI message stream. The completion task
 /// produces these; the SSE generator forwards them verbatim to the client.
 type UiFrame = Vec<u8>;
@@ -4091,6 +4258,11 @@ async fn route_acp_stream(
             if let Err(e) = crate::pi_config::persist_turn_model(model) {
                 tracing::warn!(error = %e, model, "could not persist ryu model pick into Pi config");
             }
+            // Keep the resident local engine aligned with the pick: selecting
+            // Apple Intelligence (apple-foundationmodel) makes the on-device
+            // `apfel` engine resident so the gateway's `local` provider forwards
+            // there; switching away restores the default local engine.
+            sync_ryu_local_engine(model.to_string());
         }
     }
 
@@ -4983,7 +5155,7 @@ mod tests {
         // Nothing indexed yet.
         assert!(retrieval.indexed_memory_ids().await.unwrap().is_empty());
 
-        backfill_memory_facts(&memory, &retrieval, scope).await;
+        backfill_memory_facts(&memory, &retrieval).await;
 
         let indexed = retrieval.indexed_memory_ids().await.unwrap();
         assert!(
@@ -4993,7 +5165,7 @@ mod tests {
         assert_eq!(indexed.len(), 1);
 
         // Second backfill: already indexed → no change.
-        backfill_memory_facts(&memory, &retrieval, scope).await;
+        backfill_memory_facts(&memory, &retrieval).await;
         assert_eq!(
             retrieval.indexed_memory_ids().await.unwrap().len(),
             1,
@@ -5051,12 +5223,14 @@ mod tests {
             retrieval: retrieval.clone(),
             top_k: 5,
             fts_enabled: false,
+            read_levels: Vec::new(),
+            space_ids: Vec::new(),
         };
         let block_off = run_auto_recall(
             &cfg_off,
             &conversations,
             &memory,
-            "default",
+            None,
             &recency,
             "kubernetes migration",
             Some("c-current"),
@@ -5072,12 +5246,14 @@ mod tests {
             retrieval,
             top_k: 5,
             fts_enabled: true,
+            read_levels: Vec::new(),
+            space_ids: Vec::new(),
         };
         let block_on = run_auto_recall(
             &cfg_on,
             &conversations,
             &memory,
-            "default",
+            None,
             &recency,
             "kubernetes migration",
             Some("c-current"),
