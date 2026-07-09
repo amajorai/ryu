@@ -30,6 +30,7 @@ pub mod identity_api;
 pub mod learning;
 pub mod media;
 pub mod meetings_api;
+pub mod research;
 pub mod memory;
 pub mod message_fts;
 pub mod message_index;
@@ -1200,6 +1201,16 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
                 .layer(axum::extract::DefaultBodyLimit::max(media::MAX_MEDIA_BYTES)),
         )
         .route("/api/media/:file", get(media::serve_media))
+        // ── Autoresearch data path — proxies to the research sidecar (:8087) ──
+        .route("/api/research/status", get(research::research_status))
+        .route(
+            "/api/research/workspace",
+            post(research::research_init_workspace),
+        )
+        .route(
+            "/api/research/workspace/:id/ledger",
+            get(research::research_ledger),
+        )
         // ── Git workspace status (read-only, Unit U009) ─────────────────────
         .route("/api/git/status", get(git::git_status))
         // ── Git branch list + switch (composer branch selector) ─────────────
@@ -1246,6 +1257,14 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
                 .put(canvas::save_canvas_handler)
                 .delete(canvas::delete_canvas),
         )
+        // ── Workflow template catalog (curated, installable blueprints) ─────
+        // Static `catalog` segments registered before the `:id` workflow routes.
+        .route("/api/workflows/catalog", get(list_workflow_templates))
+        .route(
+            "/api/workflows/catalog/install",
+            post(install_workflow_template),
+        )
+        .route("/api/workflows/catalog/:id", get(get_workflow_template))
         // ── Workflows (DAG engine) ──────────────────────────────────────────
         .route("/workflows", get(list_workflows).post(create_workflow))
         .route("/workflows/:id", get(get_workflow).delete(delete_workflow))
@@ -14105,6 +14124,92 @@ fn urlencoding_simple(s: &str) -> String {
 async fn list_workflows() -> Json<serde_json::Value> {
     let workflows = crate::workflow::store::list_workflows();
     Json(json!({ "workflows": workflows }))
+}
+
+/// `GET /api/workflows/catalog` — list the curated workflow templates
+/// (metadata only). The desktop "Workflow Templates" store section renders these.
+#[utoipa::path(
+    get,
+    path = "/api/workflows/catalog",
+    tag = "Workflows",
+    summary = "List workflow templates",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn list_workflow_templates() -> Json<serde_json::Value> {
+    Json(json!({ "templates": crate::workflow::templates::catalog_meta() }))
+}
+
+/// `GET /api/workflows/catalog/:id` — one template's detail, including a preview
+/// graph (the nodes + edges of its primary workflow).
+#[utoipa::path(
+    get,
+    path = "/api/workflows/catalog/{id}",
+    tag = "Workflows",
+    summary = "Get a workflow template",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_workflow_template(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::workflow::templates::find(&id) {
+        Some(t) => (
+            StatusCode::OK,
+            Json(json!({
+                "template": {
+                    "id": t.meta.id,
+                    "name": t.meta.name,
+                    "description": t.meta.description,
+                    "category": t.meta.category,
+                    "pattern": t.meta.pattern,
+                    "icon": t.meta.icon,
+                    "node_count": t.meta.node_count,
+                    "tags": t.meta.tags,
+                    "source_url": t.meta.source_url,
+                    // Preview graph: the primary workflow's nodes + edges.
+                    "nodes": t.primary.nodes,
+                    "edges": t.primary.edges,
+                }
+            })),
+        ),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "success": false, "error": "template not found" })),
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct InstallTemplateBody {
+    template_id: String,
+}
+
+/// `POST /api/workflows/catalog/install` — install a template into the user's
+/// workflows. Mints fresh ids for the primary + any body workflows, patches the
+/// durable `while` body references, persists them all, and returns the primary
+/// workflow id (navigate to `/workflows/:id`).
+#[utoipa::path(
+    post,
+    path = "/api/workflows/catalog/install",
+    tag = "Workflows",
+    summary = "Install a workflow template",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn install_workflow_template(
+    Json(body): Json<InstallTemplateBody>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::workflow::templates::install(&body.template_id).await {
+        Ok(workflow_id) => (StatusCode::OK, Json(json!({ "workflow_id": workflow_id }))),
+        Err(e) => {
+            let status = if e.contains("unknown template") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, Json(json!({ "success": false, "error": e })))
+        }
+    }
 }
 
 #[utoipa::path(

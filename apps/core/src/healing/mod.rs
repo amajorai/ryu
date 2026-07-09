@@ -27,7 +27,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -168,13 +168,42 @@ impl HealConfig {
     }
 }
 
-/// Per-source heal bookkeeping (in-memory; resets on Core restart, acceptable v1).
-#[derive(Debug, Clone, Default, Serialize)]
+/// Per-source heal bookkeeping. Persisted to `~/.ryu/healing-attempts.json` so the
+/// caps survive a Core restart.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HealAttempt {
     pub count: u32,
     /// Unix millis of the last heal for this source.
     pub last_at: i64,
     pub given_up: bool,
+}
+
+/// What kind of run failed — selects the re-run action a heal proposes.
+#[derive(Debug, Clone)]
+pub enum HealSource {
+    /// A chat / agent / scheduled-agent run: re-run the agent with a corrected
+    /// prompt.
+    Agent { agent_id: Option<String> },
+    /// A workflow run: re-run the workflow from scratch (diagnosed retry).
+    Workflow,
+}
+
+fn attempts_path() -> std::path::PathBuf {
+    crate::paths::ryu_dir().join("healing-attempts.json")
+}
+
+fn load_attempts() -> HashMap<String, HealAttempt> {
+    std::fs::read_to_string(attempts_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Best-effort persist (called after a mutation, off the lock).
+fn save_attempts(map: &HashMap<String, HealAttempt>) {
+    if let Ok(json) = serde_json::to_string(map) {
+        let _ = std::fs::write(attempts_path(), json);
+    }
 }
 
 /// What to do with a failed-run event, given the source's history + config.
@@ -240,7 +269,8 @@ impl HealEngine {
     pub fn new(state: ServerState) -> Self {
         Self {
             state,
-            attempts: Arc::new(Mutex::new(HashMap::new())),
+            // Load persisted per-source caps so a restart doesn't reset them.
+            attempts: Arc::new(Mutex::new(load_attempts())),
         }
     }
 
@@ -274,71 +304,128 @@ impl HealEngine {
         self.attempts.lock().await.clone()
     }
 
+    /// Bus path: a chat/agent conversation run failed. Load its instruction +
+    /// error from the store, then feed the generic entry.
     async fn handle_failed(&self, run: ConversationSummary) {
-        let conv_id = run.id.clone();
+        if !resolve_enabled(&self.state).await {
+            return;
+        }
+        let (instruction, failure) = self.extract_context(&run.id).await;
+        if instruction.is_empty() {
+            tracing::debug!("healing: {} has no instruction to retry", run.id);
+            return;
+        }
+        self.report_failure(
+            &run.id,
+            HealSource::Agent {
+                agent_id: run.agent_id,
+            },
+            instruction,
+            failure,
+        )
+        .await;
+    }
+
+    /// Generic entry: a run identified by `source_id` failed. Any failure surface
+    /// (chat/agent bus, scheduler agent job, workflow run) funnels here with the
+    /// instruction + failure text already in hand. Applies the cap/cooldown/never-
+    /// heal-a-heal decision, then diagnoses and proposes/applies the right re-run.
+    pub async fn report_failure(
+        &self,
+        source_id: &str,
+        source: HealSource,
+        instruction: String,
+        failure: String,
+    ) {
         if !resolve_enabled(&self.state).await {
             return;
         }
         let cfg = HealConfig::resolve(&self.state).await;
         let now = chrono::Utc::now().timestamp_millis();
 
-        // Decide under the lock and record the attempt atomically, so two failed
-        // events for the same source can't both slip past the cap/cooldown.
-        let decision = {
+        // Decide + record the attempt atomically, so two failures for the same
+        // source can't both slip past the cap/cooldown. Persist the (cloned) map
+        // outside the lock so the caps survive a restart.
+        let (decision, snapshot) = {
             let mut map = self.attempts.lock().await;
-            let decision = decide_heal(&conv_id, map.get(&conv_id), &cfg, now);
-            match decision {
+            let decision = decide_heal(source_id, map.get(source_id), &cfg, now);
+            let mutated = match decision {
                 HealDecision::Heal => {
-                    let e = map.entry(conv_id.clone()).or_default();
+                    let e = map.entry(source_id.to_owned()).or_default();
                     e.count += 1;
                     e.last_at = now;
+                    true
                 }
                 HealDecision::GiveUp => {
-                    map.entry(conv_id.clone()).or_default().given_up = true;
+                    map.entry(source_id.to_owned()).or_default().given_up = true;
+                    true
                 }
-                HealDecision::Skip(_) => {}
-            }
-            decision
+                HealDecision::Skip(_) => false,
+            };
+            (decision, mutated.then(|| map.clone()))
         };
+        if let Some(map) = snapshot {
+            save_attempts(&map);
+        }
 
         match decision {
             HealDecision::Skip(reason) => {
-                tracing::debug!("healing: skip {conv_id}: {reason}");
+                tracing::debug!("healing: skip {source_id}: {reason}");
             }
-            HealDecision::GiveUp => self.escalate(&conv_id, &cfg).await,
-            HealDecision::Heal => self.propose_or_apply(&conv_id, run.agent_id).await,
+            HealDecision::GiveUp => self.escalate(source_id, &cfg).await,
+            HealDecision::Heal => self.propose_or_apply(source_id, source, &instruction, &failure).await,
         }
     }
 
-    async fn propose_or_apply(&self, conv_id: &str, agent_id: Option<String>) {
-        let (instruction, failure) = self.extract_context(conv_id).await;
-        if instruction.is_empty() {
-            tracing::debug!("healing: {conv_id} has no instruction to retry");
-            return;
-        }
-        let Some((diagnosis, corrected)) = self.diagnose(&instruction, &failure).await else {
-            tracing::info!("healing: no diagnosis for {conv_id} (model unreachable or empty)");
+    async fn propose_or_apply(
+        &self,
+        source_id: &str,
+        source: HealSource,
+        instruction: &str,
+        failure: &str,
+    ) {
+        let Some((diagnosis, corrected)) = self.diagnose(instruction, failure).await else {
+            tracing::info!("healing: no diagnosis for {source_id} (model unreachable or empty)");
             return;
         };
-        let corrected = if corrected.trim().is_empty() {
-            instruction
-        } else {
-            corrected
-        };
-
-        if resolve_auto_decide(&self.state).await {
-            let run_id = format!("{HEAL_PREFIX}{}", uuid::Uuid::new_v4().simple());
-            if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
-                if let Err(e) = runner.run(agent_id, run_id, corrected).await {
-                    tracing::warn!("healing: auto-apply re-run failed for {conv_id}: {e:#}");
+        let auto = resolve_auto_decide(&self.state).await;
+        match source {
+            HealSource::Agent { agent_id } => {
+                let corrected = if corrected.trim().is_empty() {
+                    instruction.to_owned()
+                } else {
+                    corrected
+                };
+                if auto {
+                    let run_id = format!("{HEAL_PREFIX}{}", uuid::Uuid::new_v4().simple());
+                    if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
+                        if let Err(e) = runner.run(agent_id, run_id, corrected).await {
+                            tracing::warn!("healing: auto re-run failed for {source_id}: {e:#}");
+                        }
+                    }
+                } else if let Some(engine) = crate::approvals::global_engine() {
+                    let req = crate::approvals::ApprovalRequest::for_heal_fix(
+                        source_id, agent_id, &diagnosis, corrected,
+                    );
+                    if let Err(e) = engine.request_deduped(req).await {
+                        tracing::warn!("healing: queue heal approval failed for {source_id}: {e:#}");
+                    }
                 }
             }
-        } else if let Some(engine) = crate::approvals::global_engine() {
-            let req = crate::approvals::ApprovalRequest::for_heal_fix(
-                conv_id, agent_id, &diagnosis, corrected,
-            );
-            if let Err(e) = engine.request_deduped(req).await {
-                tracing::warn!("healing: queueing heal approval failed for {conv_id}: {e:#}");
+            HealSource::Workflow => {
+                if auto {
+                    if let Err(e) = crate::workflow::rerun_run(source_id).await {
+                        tracing::warn!("healing: auto workflow re-run failed for {source_id}: {e}");
+                    }
+                } else if let Some(engine) = crate::approvals::global_engine() {
+                    let req =
+                        crate::approvals::ApprovalRequest::for_heal_workflow(source_id, &diagnosis);
+                    if let Err(e) = engine.request_deduped(req).await {
+                        tracing::warn!(
+                            "healing: queue workflow heal failed for {source_id}: {e:#}"
+                        );
+                    }
+                }
             }
         }
     }

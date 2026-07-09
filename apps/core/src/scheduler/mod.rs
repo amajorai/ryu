@@ -212,6 +212,29 @@ impl Scheduler {
                 },
                 Err(error) => {
                     tracing::warn!("scheduled job '{}' failed: {error}", job.id);
+                    // Feed an agent-job failure to the self-healing loop (best-effort,
+                    // fire-and-forget so it never delays recording the outcome). Only
+                    // agent jobs map to a corrected-prompt re-run.
+                    if let JobTarget::Agent { agent_id, prompt } = &job.target {
+                        let src = format!("job:{}", job.id);
+                        let agent_id = agent_id.clone();
+                        let prompt = prompt.clone();
+                        let err = error.clone();
+                        tokio::spawn(async move {
+                            if let Some(engine) = crate::healing::global_engine() {
+                                engine
+                                    .report_failure(
+                                        &src,
+                                        crate::healing::HealSource::Agent {
+                                            agent_id: Some(agent_id),
+                                        },
+                                        prompt,
+                                        err,
+                                    )
+                                    .await;
+                            }
+                        });
+                    }
                     ExecRecord {
                         started_at,
                         finished_at,

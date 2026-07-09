@@ -21,6 +21,7 @@ pub mod delegate;
 pub mod exa;
 pub mod notify_tool;
 pub mod orchestrator;
+pub mod research;
 pub mod rtk;
 pub mod sandbox;
 pub mod search_conversations;
@@ -425,6 +426,7 @@ impl McpRegistry {
             || name == skills_tool::SERVER_NAME
             || name == advisor::SERVER_NAME
             || name == ui_tool::SERVER_NAME
+            || name == research::SERVER_NAME
         {
             return true;
         }
@@ -461,6 +463,16 @@ impl McpRegistry {
                 ),
                 enabled: true,
                 available: Some(spider_bin.exists()),
+            },
+            ServerSummary {
+                name: research::SERVER_NAME.to_owned(),
+                command: "(built-in HTTP)".to_owned(),
+                args: vec![],
+                description: Some(
+                    "Built-in autoresearch experiment runner. Install the Research sidecar (or run `python -m ryu_research`) to enable. Degrades gracefully when not running.".to_owned(),
+                ),
+                enabled: true,
+                available: Some(crate::sidecar::tools::research::is_installed()),
             },
             ServerSummary {
                 name: rtk::SERVER_NAME.to_owned(),
@@ -708,6 +720,10 @@ impl McpRegistry {
 
         let mut all = shadow::tools();
         all.extend(spider::tools());
+        // Built-in autoresearch tools — drive the research sidecar's experiment
+        // loop. Always listed; dispatch reports unavailable when the sidecar is
+        // not running (opt-in / not installed).
+        all.extend(research::tools());
         all.extend(rtk::tools());
         all.extend(exa::tools());
         // Built-in authenticated web fetch (Identity Vault credential consumer).
@@ -1043,6 +1059,24 @@ impl McpRegistry {
                 }
             }
             return spider::dispatch(tool, arguments).await;
+        }
+
+        // Built-in Research provider: dispatched over HTTP to the sidecar.
+        // Degrades gracefully to `available: false` when the sidecar is down.
+        if server == research::SERVER_NAME {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool {
+                    id: tool_id.to_owned(),
+                    server: server.to_owned(),
+                    name: tool.to_owned(),
+                    description: None,
+                    input_schema: None,
+                };
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            return research::dispatch(&self.http, tool, arguments).await;
         }
 
         // Built-in RTK provider: dispatched by shelling out to the `rtk` binary

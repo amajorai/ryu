@@ -28,9 +28,10 @@ pub mod durable;
 pub mod executor;
 pub mod store;
 pub mod template;
+pub mod templates;
 pub mod triggers;
 
-pub use executor::{fail_run, resume_run};
+pub use executor::{fail_run, rerun_run, resume_run};
 
 use std::collections::HashMap;
 

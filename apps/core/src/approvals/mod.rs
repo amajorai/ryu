@@ -130,6 +130,10 @@ pub enum PendingAction {
         agent_id: Option<String>,
         prompt: String,
     },
+    /// Re-run a failed workflow from scratch on approve (self-healing). Carries the
+    /// failed run's id; the workflow + inputs are re-derived from it and dispatched
+    /// under a fresh `healrun_` run.
+    HealWorkflowRerun { run_id: String },
     /// Execute a gated agent tool call on approve. Captures the full re-dispatch
     /// context so the approved run is identical to the one that was gated; run
     /// through the registry's no-gate entry so it never re-raises an approval.
@@ -333,6 +337,25 @@ impl ApprovalRequest {
         req.conversation_id = Some(conversation_id.to_owned());
         req.agent_id = agent_id;
         req.risk_tags = vec!["heal".to_owned(), "auto".to_owned()];
+        req
+    }
+
+    /// Build a request for a self-healing workflow fix: re-run a failed workflow
+    /// from scratch. The `run_id` of the failed run rides in the action; the
+    /// diagnosis is the summary. Deduped on the failed run id.
+    pub fn for_heal_workflow(run_id: &str, diagnosis: &str) -> Self {
+        let mut req = Self::new(
+            ApprovalKind::HealFix,
+            "Auto-fix a failed workflow".to_owned(),
+            format!(
+                "A workflow run failed and Ryu proposed a fix. Diagnosis: {diagnosis}\n\nApprove to re-run the workflow."
+            ),
+            Some(PendingAction::HealWorkflowRerun {
+                run_id: run_id.to_owned(),
+            }),
+        );
+        req.source_ref = Some(run_id.to_owned());
+        req.risk_tags = vec!["heal".to_owned(), "workflow".to_owned(), "auto".to_owned()];
         req
     }
 
@@ -682,6 +705,12 @@ impl ApprovalEngine {
                 }
                 Ok(None)
             }
+            PendingAction::HealWorkflowRerun { run_id } => {
+                crate::workflow::rerun_run(run_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("re-running failed workflow {run_id}: {e}"))?;
+                Ok(None)
+            }
             PendingAction::ActivateSkill { slug, skill_md } => {
                 let skills = self.skills.as_ref().ok_or_else(|| {
                     anyhow::anyhow!("no skills registry attached; cannot activate approved skill")
@@ -886,6 +915,20 @@ mod tests {
             }
             _ => panic!("expected a HealRerun action carrying the corrected prompt"),
         }
+    }
+
+    #[test]
+    fn for_heal_workflow_carries_run_id_and_rerun_action() {
+        let req = ApprovalRequest::for_heal_workflow("wfrun_9", "a step timed out");
+        assert_eq!(req.kind, ApprovalKind::HealFix);
+        assert_eq!(req.source_ref.as_deref(), Some("wfrun_9"));
+        match req.action {
+            Some(PendingAction::HealWorkflowRerun { ref run_id }) => {
+                assert_eq!(run_id, "wfrun_9");
+            }
+            _ => panic!("expected a HealWorkflowRerun action"),
+        }
+        assert!(req.risk_tags.iter().any(|t| t == "workflow"));
     }
 
     #[test]

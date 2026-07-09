@@ -125,9 +125,7 @@ switch (platform) {
 				nativeBinding = require("@ryuhq/sdk-native-darwin-universal");
 			}
 			break;
-		} catch {
-			// Intentionally ignored.
-		}
+		} catch {}
 		switch (arch) {
 			case "x64":
 				localFileExisted = existsSync(

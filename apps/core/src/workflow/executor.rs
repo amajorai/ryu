@@ -154,7 +154,41 @@ pub async fn fail_run(run_id: &str, error: &str) -> Result<(), String> {
     run.error = Some(error.to_string());
     run.awaiting_node = None;
     run.updated_at = chrono::Utc::now().to_rfc3339();
-    store::save_run(&run).map_err(|e| format!("failed to persist run failure: {e}"))
+    let saved = store::save_run(&run).map_err(|e| format!("failed to persist run failure: {e}"));
+
+    // Feed the failure to the self-healing loop (diagnose → propose a diagnosed
+    // retry to the inbox, or auto-retry). Best-effort + fire-and-forget so it never
+    // blocks or fails the fail_run write. The `healrun_` guard in the heal engine
+    // stops a heal-retry that itself fails from looping.
+    if saved.is_ok() {
+        let run_id = run_id.to_string();
+        let error = error.to_string();
+        tokio::spawn(async move {
+            if let Some(engine) = crate::healing::global_engine() {
+                engine
+                    .report_failure(
+                        &run_id,
+                        crate::healing::HealSource::Workflow,
+                        format!("Workflow run {run_id} failed."),
+                        error,
+                    )
+                    .await;
+            }
+        });
+    }
+    saved
+}
+
+/// Re-run a failed workflow from scratch: load the failed run, load its workflow,
+/// and start a FRESH run with the same inputs under a new `healrun_`-prefixed id
+/// (the never-heal-a-heal marker, so a retry that itself fails won't be re-healed).
+/// Used by the self-healing loop's approved workflow fix.
+pub async fn rerun_run(run_id: &str) -> Result<WorkflowRun, String> {
+    let run = store::load_run(run_id).map_err(|_| "run not found".to_string())?;
+    let workflow = store::load_workflow(&run.workflow_id)
+        .map_err(|_| format!("workflow '{}' not found", run.workflow_id))?;
+    let new_id = format!("healrun_{}", uuid::Uuid::new_v4().simple());
+    run_workflow(&workflow, run.input.clone(), new_id).await
 }
 
 fn run_workflow_inner(
@@ -214,6 +248,20 @@ fn run_workflow_inner(
 
         while let Some(idx) = queue.pop_front() {
             if pruned_nodes.contains(&idx) {
+                // A skipped node still resolves its outgoing edges so a
+                // downstream join (branches that reconverge on one node) keeps
+                // making progress instead of stalling forever. Its edges carry
+                // no value and are deactivated inside `resolve_successors`.
+                resolve_successors(
+                    idx,
+                    true,
+                    &graph,
+                    &mut active_edges,
+                    &mut indegree,
+                    &mut pruned_nodes,
+                    &mut queue,
+                    &mut run,
+                )?;
                 continue;
             }
             let node = &graph.graph[idx];
@@ -372,38 +420,19 @@ fn run_workflow_inner(
 
             store::save_run(&run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
 
-            // Decrement indegree of successors along active edges.
-            for edge in graph.graph.edges_directed(idx, Direction::Outgoing) {
-                let target = edge.target();
-                let entry = indegree.entry(target).or_insert(0);
-                if *entry > 0 {
-                    *entry -= 1;
-                }
-                if !active_edges.contains(&edge.id()) {
-                    // Pruned edge: if the target now has no remaining active
-                    // incoming edge, mark it skipped.
-                    let has_active_incoming = graph
-                        .graph
-                        .edges_directed(target, Direction::Incoming)
-                        .any(|e| active_edges.contains(&e.id()) && e.source() != idx);
-                    let still_pending = !run.is_completed(&graph.graph[target].id);
-                    if !has_active_incoming && still_pending {
-                        pruned_nodes.insert(target);
-                        mark(
-                            &mut run,
-                            &graph.graph[target].id,
-                            NodeStatus::Skipped,
-                            None,
-                            None,
-                        );
-                        store::save_run(&run)
-                            .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
-                    }
-                }
-                if *entry == 0 && !pruned_nodes.contains(&target) {
-                    queue.push_back(target);
-                }
-            }
+            // Resolve successors: decrement each successor's indegree and, once
+            // it reaches zero, either enqueue it (a live incoming edge remains)
+            // or skip it (every incoming path was pruned).
+            resolve_successors(
+                idx,
+                false,
+                &graph,
+                &mut active_edges,
+                &mut indegree,
+                &mut pruned_nodes,
+                &mut queue,
+                &mut run,
+            )?;
         }
 
         // Collect Output node values into the run output map.
@@ -425,6 +454,63 @@ fn run_workflow_inner(
         store::save_run(&run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
         Ok(run)
     })
+}
+
+/// Resolve a finalized node's outgoing edges during Kahn traversal.
+///
+/// Called once per node after it Completes (`was_skipped == false`) and once per
+/// Skipped node (`was_skipped == true`). A skipped node produces no value, so its
+/// outgoing edges are deactivated. For every successor whose indegree reaches
+/// zero we decide run-vs-skip: a successor with at least one still-active
+/// incoming edge runs (and reads only its active inputs); a successor whose
+/// incoming edges were all pruned is itself skipped and enqueued so the skip
+/// propagates through any further joins. This is what lets a `Condition` whose
+/// branches reconverge on a single downstream node work — the pruned branch's
+/// skip flows through to the join instead of stalling its indegree forever.
+#[allow(clippy::too_many_arguments)]
+fn resolve_successors(
+    idx: NodeIndex,
+    was_skipped: bool,
+    graph: &WorkflowGraph,
+    active_edges: &mut HashSet<petgraph::graph::EdgeIndex>,
+    indegree: &mut HashMap<NodeIndex, usize>,
+    pruned_nodes: &mut HashSet<NodeIndex>,
+    queue: &mut VecDeque<NodeIndex>,
+    run: &mut WorkflowRun,
+) -> Result<(), String> {
+    let out_edges: Vec<(petgraph::graph::EdgeIndex, NodeIndex)> = graph
+        .graph
+        .edges_directed(idx, Direction::Outgoing)
+        .map(|e| (e.id(), e.target()))
+        .collect();
+    for (eid, target) in out_edges {
+        if was_skipped {
+            // A skipped source carries no value into the join.
+            active_edges.remove(&eid);
+        }
+        let entry = indegree.entry(target).or_insert(0);
+        if *entry > 0 {
+            *entry -= 1;
+        }
+        if *entry != 0 || pruned_nodes.contains(&target) {
+            continue;
+        }
+        let has_active_incoming = graph
+            .graph
+            .edges_directed(target, Direction::Incoming)
+            .any(|e| active_edges.contains(&e.id()));
+        // A still-pending node reachable by no active path is skipped (and the
+        // skip propagates from its own edges). A completed node — a prior run's
+        // checkpoint on resume — is never re-marked; it is enqueued so the
+        // loop replays its stored output down the graph.
+        if !has_active_incoming && !run.is_completed(&graph.graph[target].id) {
+            pruned_nodes.insert(target);
+            mark(run, &graph.graph[target].id, NodeStatus::Skipped, None, None);
+            store::save_run(run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+        }
+        queue.push_back(target);
+    }
+    Ok(())
 }
 
 fn input_for_root(node: &super::WorkflowNode, run: &WorkflowRun) -> String {
@@ -3267,6 +3353,102 @@ mod tests {
         assert_eq!(run.output.get("n"), None);
         assert_eq!(
             run.nodes.get("no").map(|s| s.status),
+            Some(NodeStatus::Skipped)
+        );
+    }
+
+    #[tokio::test]
+    async fn condition_branches_reconverge_on_one_output() {
+        // A diamond: both Condition branches feed the SAME Output node. The
+        // pruned branch must propagate its skip through the join so the Output
+        // still fires with the taken branch's value (regression for the join
+        // dead-end that stalled routing / classify-and-act / adversarial
+        // templates).
+        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
+
+        let node = |id: &str, kind: NodeKind| WorkflowNode {
+            id: id.into(),
+            retry: None,
+            timeout_ms: None,
+            kind,
+        };
+        let edge = |from: &str, to: &str, branch: Option<&str>| WorkflowEdge {
+            from: from.into(),
+            to: to.into(),
+            branch: branch.map(str::to_string),
+        };
+
+        let build = || Workflow {
+            id: format!("test-diamond-{}", uuid::Uuid::new_v4().simple()),
+            name: "diamond".into(),
+            description: None,
+            nodes: vec![
+                node(
+                    "in",
+                    NodeKind::Input {
+                        key: Some("v".into()),
+                    },
+                ),
+                node(
+                    "c",
+                    NodeKind::Condition {
+                        expr: "input == \"yes\"".into(),
+                    },
+                ),
+                node(
+                    "yes",
+                    NodeKind::Transform {
+                        op: "template".into(),
+                        template: Some("YESPATH".into()),
+                    },
+                ),
+                node(
+                    "no",
+                    NodeKind::Transform {
+                        op: "template".into(),
+                        template: Some("NOPATH".into()),
+                    },
+                ),
+                node(
+                    "out",
+                    NodeKind::Output {
+                        key: Some("r".into()),
+                    },
+                ),
+            ],
+            edges: vec![
+                edge("in", "c", None),
+                edge("c", "yes", Some("true")),
+                edge("c", "no", Some("false")),
+                edge("yes", "out", None),
+                edge("no", "out", None),
+            ],
+            triggers: Vec::new(),
+            created_at: None,
+            updated_at: None,
+        };
+
+        // Taken branch = true.
+        let mut input = HashMap::new();
+        input.insert("v".to_string(), "yes".to_string());
+        let run_id = format!("run-{}", uuid::Uuid::new_v4().simple());
+        let run = run_workflow(&build(), input, run_id).await.expect("run ok");
+        assert_eq!(run.status, RunStatus::Completed);
+        assert_eq!(run.output.get("r").map(String::as_str), Some("YESPATH"));
+        assert_eq!(
+            run.nodes.get("no").map(|s| s.status),
+            Some(NodeStatus::Skipped)
+        );
+
+        // Taken branch = false: the join must still fire with the other value.
+        let mut input = HashMap::new();
+        input.insert("v".to_string(), "no".to_string());
+        let run_id = format!("run-{}", uuid::Uuid::new_v4().simple());
+        let run = run_workflow(&build(), input, run_id).await.expect("run ok");
+        assert_eq!(run.status, RunStatus::Completed);
+        assert_eq!(run.output.get("r").map(String::as_str), Some("NOPATH"));
+        assert_eq!(
+            run.nodes.get("yes").map(|s| s.status),
             Some(NodeStatus::Skipped)
         );
     }

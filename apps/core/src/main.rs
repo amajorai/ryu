@@ -88,7 +88,10 @@ use sidecar::{
         whispercpp::WhisperCppManager, DockerModelRunnerManager,
     },
     tailscale::TailscaleManager,
-    tools::{ghost::GhostManager, llmfit::LlmFit, shadow::ShadowManager, spider::SpiderManager},
+    tools::{
+        ghost::GhostManager, llmfit::LlmFit, research::ResearchManager, shadow::ShadowManager,
+        spider::SpiderManager,
+    },
     SidecarManager,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -268,6 +271,11 @@ async fn main() {
         Arc::new(UnslothManager::new().with_downloads(download_center.clone())),
         // Tools
         Arc::new(SpiderManager::new()),
+        // Autoresearch experiment runner (Python stdlib HTTP service). Opt-in;
+        // NOT in startup_order — it only starts once a user installs it or runs
+        // `python -m ryu_research` (adopt-mode) and the /api/research path or the
+        // research__* tools reach it lazily.
+        Arc::new(ResearchManager::new().with_downloads(download_center.clone())),
         Arc::new(LlmFit::new()),
         Arc::new(ShadowManager::new().with_downloads(download_center.clone())),
         Arc::new(GhostManager::new().with_downloads(download_center.clone())),

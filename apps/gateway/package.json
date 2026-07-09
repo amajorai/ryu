@@ -3,8 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "cargo run",
-    "dev:watch": "cargo watch -x run",
+    "dev": "cargo run -- --bind=127.0.0.1:7981",
+    "dev:watch": "cargo watch -x 'run -- --bind=127.0.0.1:7981'",
     "build": "cargo build --release",
     "check": "cargo check"
   }

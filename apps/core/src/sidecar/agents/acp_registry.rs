@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -150,19 +151,64 @@ async fn fetch_remote() -> Result<RegistryFile> {
 }
 
 /// Load the registry: fresh CDN fetch when cache is stale, else disk cache.
+///
+/// This is a *sync* function reached from both plain-sync callers (before the
+/// runtime exists) and from inside async code (`AcpAgentRegistry::new` at
+/// startup). Spinning a nested `Runtime` inside a running Tokio runtime panics
+/// ("Cannot start a runtime from within a runtime"), so when a runtime is
+/// already driving this thread we must NOT block on the network here: serve the
+/// disk cache immediately and kick the refresh onto a background task so the
+/// next boot is fresh. Only the pure-sync path blocks on a fresh fetch.
 pub fn load_registry_agents() -> Vec<RegistryAgent> {
     let stale = cache_age_secs().is_none_or(|age| age > CACHE_MAX_AGE_SECS);
     if stale {
-        if let Ok(rt) = tokio::runtime::Runtime::new() {
-            match rt.block_on(fetch_remote()) {
-                Ok(file) => {
-                    let agents = file.agents.clone();
-                    if write_cache(&file).is_ok() {
-                        tracing::info!(count = agents.len(), "refreshed ACP registry from CDN");
-                    }
-                    return agents;
+        match tokio::runtime::Handle::try_current() {
+            // Inside a Tokio runtime: never block on the network here. Refresh
+            // in the background and fall through to the disk cache.
+            Ok(handle) => {
+                // Guard against a thundering herd: many sync callers hit this on
+                // a cold boot, and each would otherwise spawn an identical CDN
+                // GET. Let exactly one refresh run at a time.
+                static REFRESHING: AtomicBool = AtomicBool::new(false);
+                if REFRESHING
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    handle.spawn(async {
+                        match fetch_remote().await {
+                            Ok(file) => {
+                                let count = file.agents.len();
+                                if write_cache(&file).is_ok() {
+                                    tracing::info!(
+                                        count,
+                                        "refreshed ACP registry from CDN (background)"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "ACP registry background refresh failed")
+                            }
+                        }
+                        REFRESHING.store(false, Ordering::Release);
+                    });
                 }
-                Err(e) => tracing::warn!(error = %e, "ACP registry fetch failed; using cache"),
+            }
+            // No runtime yet (pure sync context): safe to block on a fresh fetch.
+            Err(_) => {
+                if let Ok(rt) = tokio::runtime::Runtime::new() {
+                    match rt.block_on(fetch_remote()) {
+                        Ok(file) => {
+                            let agents = file.agents.clone();
+                            if write_cache(&file).is_ok() {
+                                tracing::info!(count = agents.len(), "refreshed ACP registry from CDN");
+                            }
+                            return agents;
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "ACP registry fetch failed; using cache")
+                        }
+                    }
+                }
             }
         }
     }
