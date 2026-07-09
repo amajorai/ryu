@@ -201,9 +201,8 @@ pub async fn search_skills(
 /// the detail panel can still load it).
 fn installed_cards() -> Vec<SkillCard> {
     let provenance = load_provenance();
-    let dir = crate::skills::SkillRegistry::skills_dir();
     let mut cards: Vec<SkillCard> = Vec::new();
-    for found in crate::skills::scan_skill_dir(&dir) {
+    for found in crate::skills::scan_all_skill_dirs() {
         let slug = found.id;
         let contents = std::fs::read_to_string(&found.skill_md).unwrap_or_default();
         let (fm, _) = split_front_matter(&contents);
@@ -1011,11 +1010,11 @@ fn record_provenance(slug: &str, id: &str) {
 
 // ── Installed detection ─────────────────────────────────────────────────────
 
-/// Slugs of Skills currently present in the universal skills directory (either
-/// the standard `<slug>/SKILL.md` layout or a legacy flat `<slug>.md`).
+/// Slugs of Skills currently present in any standard skills root — `~/.claude/skills`
+/// or the vendor-neutral `~/.agents/skills` (standard `<slug>/SKILL.md` layout, or
+/// a legacy flat `<slug>.md` in the primary root).
 fn installed_slugs() -> std::collections::HashSet<String> {
-    let dir = crate::skills::SkillRegistry::skills_dir();
-    crate::skills::scan_skill_dir(&dir)
+    crate::skills::scan_all_skill_dirs()
         .into_iter()
         .map(|s| s.id)
         .collect()

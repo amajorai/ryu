@@ -105,6 +105,8 @@ use utoipa::OpenApi;
         super::put_pi_config,
         super::get_pi_config_catalog,
         super::configure_pi_provider,
+        super::check_pi_provider,
+        super::set_pi_model_enabled,
         super::delete_pi_provider,
         super::discover_pi_models,
         super::acp_authenticate,

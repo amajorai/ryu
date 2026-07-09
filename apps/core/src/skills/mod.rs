@@ -3,10 +3,18 @@
 //! This module owns the Core side of the Skills standard:
 //! - SKILL.md parsing (YAML front-matter + Markdown body).
 //! - [`SkillRecord`] — the real, executable Skill Runnable (replaces `SkillStub`).
-//! - [`SkillRegistry`] — loads skills from the universal Agent Skills directory
-//!   `~/.claude/skills/<id>/SKILL.md` (overridable via `RYU_SKILLS_DIR`), the same
-//!   location Claude Code and the skills CLI read, plus the legacy flat
-//!   `<id>.md` layout for back-compat.
+//! - [`SkillRegistry`] — loads skills from the universal Agent Skills directories
+//!   (overridable via `RYU_SKILLS_DIR`), plus the legacy flat `<id>.md` layout for
+//!   back-compat. Two standard roots are scanned so a skill installed by *any*
+//!   agent is detected:
+//!     1. `~/.claude/skills/<id>/SKILL.md` — the Claude Code / skills-CLI location
+//!        (also Ryu's own write/install target).
+//!     2. `~/.agents/skills/<id>/SKILL.md` — the **vendor-neutral** Agent Skills
+//!        directory the `agentskills.io` / `vercel-labs/skills` ecosystem installs
+//!        into, and the exact path the managed Pi binary auto-loads. Detecting it
+//!        means skills any tool dropped there work in Ryu with zero setup. Per the
+//!        spec, root-level `.md` files under this dir are ignored (dirs only).
+//!   On an id collision the first root (`~/.claude/skills`) wins.
 //!
 //! Core-vs-Gateway rule: Core decides *what skills run* (selection, loading,
 //! instruction injection into the outgoing request body). The Gateway decides
@@ -260,11 +268,26 @@ fn split_front_matter(content: &str) -> Result<(String, String), String> {
 /// The universal Agent Skills directory: `~/.claude/skills`. This is the
 /// convention Claude Code and the skills CLI use (one directory per skill, each
 /// containing a `SKILL.md` plus any bundled resources), so standardizing on it
-/// means a skill installed anywhere is usable everywhere.
+/// means a skill installed anywhere is usable everywhere. Ryu's own installer /
+/// authoring writes here (the singular [`SkillRegistry::skills_dir`]).
 fn default_skills_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".claude")
+        .join("skills")
+}
+
+/// The **vendor-neutral** Agent Skills directory: `~/.agents/skills`. This is the
+/// cross-agent, cross-platform location the `agentskills.io` / `vercel-labs/skills`
+/// ecosystem installs into (`~` resolves the OS home on macOS, Linux and Windows
+/// alike), and the exact hard-coded path the managed Pi binary auto-loads. Ryu
+/// disables Pi's own discovery of it (see `pi_config`) precisely so Core stays the
+/// single governed injector — which means Core must scan it here for those skills
+/// to be detected at all. Read-only: Ryu never writes into it.
+fn agents_skills_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".agents")
         .join("skills")
 }
 
@@ -287,8 +310,61 @@ pub struct InstalledSkillPath {
 ///
 /// On an id collision the standard directory form wins (it can carry resources).
 /// This is the single source of truth for "what skills are on disk" — the
-/// registry loader and the catalog's installed-view both call it.
+/// registry loader and the catalog's installed-view both call it (via
+/// [`scan_all_skill_dirs`]).
 pub fn scan_skill_dir(dir: &Path) -> Vec<InstalledSkillPath> {
+    scan_skill_dir_opts(dir, true)
+}
+
+/// The ordered set of roots scanned for installed skills, each paired with whether
+/// legacy flat `<id>.md` files count as skills there.
+///
+/// - `RYU_SKILLS_DIR` override → that single dir, flat layout honoured (the
+///   explicit knob the user owns; tests and the installer rely on flat support).
+/// - Otherwise → `~/.claude/skills` (flat honoured, for back-compat with the
+///   legacy migration) followed by the vendor-neutral `~/.agents/skills` (dirs
+///   only — the Agent Skills spec says root-level `.md` files there are not
+///   skills). The first root wins on an id collision.
+fn skills_scan_roots() -> Vec<(PathBuf, bool)> {
+    if let Some(p) = std::env::var_os("RYU_SKILLS_DIR") {
+        return vec![(PathBuf::from(p), true)];
+    }
+    let claude = default_skills_dir();
+    let agents = agents_skills_dir();
+    let mut roots = vec![(claude.clone(), true)];
+    if agents != claude {
+        roots.push((agents, false));
+    }
+    roots
+}
+
+/// Scan **every** standard skills root ([`skills_scan_roots`]) in one pass,
+/// deduped by id (first root wins). This is what the registry loader and the
+/// catalog's installed-view use so a skill dropped into any standard location —
+/// `~/.claude/skills` or the vendor-neutral `~/.agents/skills` — is detected.
+pub fn scan_all_skill_dirs() -> Vec<InstalledSkillPath> {
+    let mut found: Vec<InstalledSkillPath> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for (dir, include_flat) in skills_scan_roots() {
+        for s in scan_skill_dir_opts(&dir, include_flat) {
+            if seen.insert(s.id.clone()) {
+                found.push(s);
+            } else {
+                tracing::debug!(
+                    "skill id '{}' at {} shadowed by an earlier root; skipping",
+                    s.id,
+                    s.skill_md.display()
+                );
+            }
+        }
+    }
+    found
+}
+
+/// Scan a single `dir`. When `include_flat_md` is false, legacy flat `<id>.md`
+/// files are ignored and only `<id>/SKILL.md` directories are treated as skills
+/// (the rule for the vendor-neutral `~/.agents/skills` root).
+fn scan_skill_dir_opts(dir: &Path, include_flat_md: bool) -> Vec<InstalledSkillPath> {
     let mut found: Vec<InstalledSkillPath> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     let mut flat: Vec<InstalledSkillPath> = Vec::new();
@@ -330,7 +406,7 @@ pub fn scan_skill_dir(dir: &Path) -> Vec<InstalledSkillPath> {
                     path.display()
                 );
             }
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+        } else if include_flat_md && path.extension().and_then(|e| e.to_str()) == Some("md") {
             // Legacy flat layout: `<id>.md`. Defer so directory forms win.
             let id = path
                 .file_stem()
@@ -563,12 +639,14 @@ impl SkillRegistry {
         registry
     }
 
-    /// Resolve the skills directory: `RYU_SKILLS_DIR` if set, else the universal
-    /// Agent Skills directory `~/.claude/skills`.
+    /// Resolve the **write/install target** directory: `RYU_SKILLS_DIR` if set,
+    /// else `~/.claude/skills`. This is the single dir Ryu's installer and
+    /// `skills__author` write into (one canonical home for Ryu-authored skills).
     ///
-    /// This is the location Claude Code, the skills CLI, and other agents already
-    /// read, so a skill installed by Ryu is usable everywhere — and a skill
-    /// installed by any of those tools shows up as installed in Ryu.
+    /// Detection is *broader* than this: [`scan_all_skill_dirs`] also reads the
+    /// vendor-neutral `~/.agents/skills`, so a skill installed by Ryu is usable
+    /// everywhere — and a skill installed by any other agent into either standard
+    /// root shows up as installed in Ryu.
     pub fn skills_dir() -> PathBuf {
         if let Some(p) = std::env::var_os("RYU_SKILLS_DIR") {
             return PathBuf::from(p);
@@ -577,12 +655,15 @@ impl SkillRegistry {
     }
 
     /// (Re)load skills from disk, replacing the current registry contents.
+    ///
+    /// Scans **all** standard roots ([`scan_all_skill_dirs`]) — `~/.claude/skills`
+    /// and the vendor-neutral `~/.agents/skills` — not just the singular write
+    /// target, so a skill any agent installed into either is detected.
     pub fn reload(&self) {
-        let dir = Self::skills_dir();
         let mut skills: Vec<SkillRecord> = Vec::new();
 
         let active = load_active_set();
-        for found in scan_skill_dir(&dir) {
+        for found in scan_all_skill_dirs() {
             match std::fs::read_to_string(&found.skill_md) {
                 Ok(content) => match parse_skill_md(&found.id, &content) {
                     Ok(mut record) => {
@@ -1260,6 +1341,65 @@ Do something minimal.
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("nope");
         assert!(scan_skill_dir(&missing).is_empty());
+    }
+
+    #[test]
+    fn agents_root_ignores_flat_md_but_keeps_dirs() {
+        // The vendor-neutral `~/.agents/skills` root scans dirs only: a root-level
+        // `<id>.md` is NOT a skill there (Agent Skills spec), while `<id>/SKILL.md`
+        // still is.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let dir = root.join("gamma");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), "---\nname: Gamma\n---\nbody").unwrap();
+        // A stray flat markdown file that must be ignored under this root.
+        std::fs::write(root.join("delta.md"), "---\nname: Delta\n---\nbody").unwrap();
+
+        let ids: Vec<String> = scan_skill_dir_opts(root, false)
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        assert_eq!(ids, vec!["gamma".to_owned()], "flat .md ignored under agents root");
+
+        // The same tree WITH flat support enabled picks up both.
+        let mut both: Vec<String> = scan_skill_dir_opts(root, true)
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        both.sort();
+        assert_eq!(both, vec!["delta".to_owned(), "gamma".to_owned()]);
+    }
+
+    #[test]
+    fn scan_roots_honour_override_then_fall_back_to_two_standard_dirs() {
+        let _env = SKILLS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prev = std::env::var_os("RYU_SKILLS_DIR");
+
+        // Override → exactly one root, flat layout honoured.
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("RYU_SKILLS_DIR", tmp.path());
+        let roots = skills_scan_roots();
+        assert_eq!(roots.len(), 1, "override collapses to a single root");
+        assert_eq!(roots[0].0, tmp.path());
+        assert!(roots[0].1, "override root honours flat .md");
+
+        // No override → the two standard roots, agents dir second and dirs-only.
+        std::env::remove_var("RYU_SKILLS_DIR");
+        let roots = skills_scan_roots();
+        assert_eq!(roots.len(), 2, "claude + agents roots");
+        assert_eq!(roots[0].0, default_skills_dir());
+        assert!(roots[0].1, "claude root honours flat .md");
+        assert_eq!(roots[1].0, agents_skills_dir());
+        assert!(!roots[1].1, "agents root is dirs-only");
+
+        match prev {
+            Some(v) => std::env::set_var("RYU_SKILLS_DIR", v),
+            None => std::env::remove_var("RYU_SKILLS_DIR"),
+        }
     }
 
     // One test owns the process-global skills env vars to avoid races with any

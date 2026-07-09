@@ -1,0 +1,53 @@
+{
+  "id": "io.ryu.security-guidance",
+  "name": "Security Guidance",
+  "version": "1.0.0",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
+  "runnables": [],
+  "permission_grants": ["hook:side-model"],
+  "activation_events": ["*"],
+  "contributes": {
+    "composer_controls": [
+      {
+        "id": "security-guidance.toggle",
+        "type": "toggle",
+        "flag": "io.ryu.security-guidance",
+        "label": "Security review",
+        "description": "Scan each answer for security vulnerabilities and review the code with a second model."
+      }
+    ],
+    "settings_tabs": [
+      {
+        "id": "security-guidance.settings",
+        "title": "Security review",
+        "fields": [
+          {
+            "type": "model_picker",
+            "pref_key": "security-review-model",
+            "label": "Reviewer model"
+          }
+        ]
+      }
+    ],
+    "slash_commands": [
+      {
+        "id": "security-guidance.run",
+        "command": "/security",
+        "description": "Run a one-off security review of the last answer."
+      }
+    ],
+    "turn_hooks": [
+      {
+        "id": "security-guidance.review",
+        "on": "post_assistant_turn",
+        "match": {
+          "flag": "io.ryu.security-guidance",
+          "commands": ["/security"]
+        },
+        "code": "const FLAG = 'io.ryu.security-guidance';\nconst toggled = !!(ctx.flags && ctx.flags[FLAG]);\nconst rev = ctx.transcript.slice().reverse();\nconst lastUser = rev.find((m) => m.role === 'user');\nconst forced = !!(lastUser && lastUser.content.trim().startsWith('/security'));\nif (!toggled && !forced) {\n  return { kind: 'none' };\n}\nconst lastAssistant = rev.find((m) => m.role === 'assistant');\nif (!lastAssistant || !lastAssistant.content || !lastAssistant.content.trim()) {\n  return { kind: 'none' };\n}\nconst code = lastAssistant.content;\n\n// Layer 1 — regex pattern warnings. Ported from the security-guidance\n// patterns.py rule set. File-path gating is dropped (a turn hook sees the\n// assistant text, not file paths), so the high-signal, API-specific rules are\n// kept and the bare eval(/exec( rules that rely on path context are omitted.\nconst RULES = [\n  { re: /child_process\\.exec|execSync\\s*\\(/, m: 'child_process.exec/execSync runs through a shell — command injection. Prefer execFile/spawn with an argument array.' },\n  { re: /new Function\\s*\\(/, m: 'new Function() with interpolated input is code injection. Use safe property access or an expression parser.' },\n  { re: /dangerouslySetInnerHTML/, m: 'dangerouslySetInnerHTML can cause XSS. Sanitize with DOMPurify or avoid raw HTML.' },\n  { re: /document\\.write/, m: 'document.write() enables XSS. Use createElement/appendChild.' },\n  { re: /\\.(inner|outer)HTML\\s*=/, m: 'Assigning innerHTML/outerHTML with untrusted content is an XSS sink. Use textContent or a sanitizer.' },\n  { re: /\\.insertAdjacentHTML\\s*\\(/, m: 'insertAdjacentHTML with untrusted content is an XSS sink. Sanitize first.' },\n  { re: /(?<![a-zA-Z0-9_])pickle\\.(loads?|Unpickler)\\b/, m: 'pickle.load on untrusted data allows arbitrary code execution. Prefer JSON or a schema-validated deserializer.' },\n  { re: /\\b(cPickle|cloudpickle|dill)\\.(load|loads)\\s*\\(/, m: 'cPickle/cloudpickle/dill load on untrusted data = arbitrary code execution.' },\n  { re: /\\bjoblib\\.load\\s*\\(|\\b(?:pd|pandas)\\.read_pickle\\s*\\(/, m: 'joblib.load / pandas.read_pickle unpickle arbitrary objects. Untrusted input = RCE.' },\n  { re: /\\b(?:np|numpy)\\.load\\s*\\([^)\\n]{0,200}allow_pickle\\s*=\\s*True/, m: 'numpy.load(allow_pickle=True) executes arbitrary code on untrusted files.' },\n  { re: /\\bmarshal\\.loads?\\s*\\(/, m: 'marshal.load on untrusted data is unsafe.' },\n  { re: /\\bshelve\\.open\\s*\\(/, m: 'shelve is pickle-backed — unsafe on untrusted files.' },\n  { re: /\\bos\\.system\\s*\\(|from os import system/, m: 'os.system() runs a shell — command injection. Use subprocess with an argument list, no shell.' },\n  { re: /subprocess\\.(?:run|call|Popen|check_output|check_call)\\([^\\n]*shell\\s*=\\s*True/, m: 'subprocess(..., shell=True) is a command-injection risk. Pass an argument list and drop shell=True.' },\n  { re: /exec\\.Command\\(\\s*\"(?:sh|bash|\\/bin\\/sh|\\/bin\\/bash)\"/, m: 'exec.Command(\"sh\"/\"bash\", ...) invokes a shell — command injection in Go.' },\n  { re: /\\byaml\\.load\\s*\\((?![^)\\n]{0,80}\\bSafe)/, m: 'yaml.load() executes arbitrary Python. Use yaml.safe_load().' },\n  { re: /\\byaml\\.unsafe_load\\s*\\(/, m: 'yaml.unsafe_load() executes arbitrary Python. Use yaml.safe_load().' },\n  { re: /(?:\\btorch\\.load)\\s*\\((?![^)\\n]{0,200}weights_only\\s*=\\s*True)/, m: 'torch.load defaults to weights_only=False (arbitrary code execution). Pass weights_only=True.' },\n  { re: /\\b(xml\\.etree\\.ElementTree|ElementTree|ET)\\.(parse|fromstring|XML)\\s*\\(|\\bminidom\\.(parse|parseString)\\s*\\(/, m: 'Default XML parsers are vulnerable to XXE/billion-laughs. Use defusedxml.' },\n  { re: /\\bcrypto\\.(createCipher|createDecipher)\\b/, m: 'crypto.createCipher has no IV and is deprecated. Use createCipheriv with a random IV.' },\n  { re: /\\bAES\\.MODE_ECB\\b|\\bmodes\\.ECB\\s*\\(|['\"]aes-\\d+-ecb['\"]/, m: 'AES-ECB leaks plaintext structure. Use an authenticated mode (GCM).' },\n  { re: /\\bverify\\s*=\\s*False\\b|rejectUnauthorized\\s*:\\s*false|InsecureSkipVerify\\s*:\\s*true|NODE_TLS_REJECT_UNAUTHORIZED\\s*=\\s*['\"]?0|ssl\\._create_unverified_context|check_hostname\\s*=\\s*False/, m: 'TLS verification disabled — enables MITM. Do not disable certificate verification.' },\n];\n\nconst hits = [];\nfor (const r of RULES) {\n  if (r.re.test(code)) {\n    hits.push('• ' + r.m);\n  }\n}\n\n// Layer 2 — LLM diff review over the code the assistant just produced. Routes\n// through the Gateway via host.sideModel; the model is resolved swappably from\n// the `security-review-model` preference (never hardcoded).\nlet review = '';\ntry {\n  const out = await host.sideModel({\n    system: 'You are a security code reviewer. Review only the code in the message for high-confidence security vulnerabilities: injection (SQL/command/code), XSS, SSRF, hardcoded secrets/credentials, IDOR/auth bypass, unsafe deserialization, path traversal, and weak crypto. Report only concrete, exploitable issues with a one-line fix each. If a line has an inline comment justifying why it is safe, treat it as excluded. If you find nothing exploitable, reply with exactly: Looks secure.',\n    prompt: 'Review this code the assistant just produced:\\n\\n' + code,\n    model_pref_key: 'security-review-model',\n  });\n  if (out && out.trim() && !/^looks (secure|good|fine|ok)/i.test(out.trim())) {\n    review = out.trim();\n  }\n} catch (e) {\n  host.log('security-guidance review failed: ' + e);\n}\n\nconst parts = [];\nif (hits.length) {\n  parts.push('⚠️ Pattern warnings:\\n' + hits.join('\\n'));\n}\nif (review) {\n  parts.push('LLM security review:\\n' + review);\n}\nif (!parts.length) {\n  return { kind: 'none' };\n}\nreturn { kind: 'note', text: 'Security guidance:\\n\\n' + parts.join('\\n\\n') };\n"
+      }
+    ]
+  }
+}

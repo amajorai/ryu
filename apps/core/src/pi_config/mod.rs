@@ -1314,12 +1314,38 @@ pub fn current() -> PiConfigView {
     }
 }
 
+/// Extract a provider's per-model `enabled` overrides from an already-read
+/// models.json value, as a `{ modelId: bool }` map. Only ids the user has
+/// explicitly toggled appear; an absent id means the model is enabled (default).
+/// `models` reads the value returned by [`read_models`].
+fn model_overrides(models: &Value, id: &str) -> Value {
+    let mut out = Map::new();
+    if let Some(list) = models["providers"]
+        .get(id)
+        .and_then(|p| p.get("models"))
+        .and_then(Value::as_array)
+    {
+        for entry in list {
+            let Some(model_id) = entry.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            if let Some(enabled) = entry.get("enabled").and_then(Value::as_bool) {
+                out.insert(model_id.to_owned(), Value::Bool(enabled));
+            }
+        }
+    }
+    Value::Object(out)
+}
+
 /// The catalog of supported providers + thinking levels, with per-provider
 /// `configured` and `suggestedModels` so the desktop can render a picker.
 pub fn catalog() -> Value {
     let custom_ids = custom_provider_ids();
     let active = active_provider_id_from(&read_settings());
     let is_active = |id: &str| active.as_deref() == Some(id);
+    // Read models.json once so each provider can surface its per-model `enabled`
+    // overrides without a file read per iteration.
+    let models_value = read_models();
     let mut providers: Vec<Value> = PROVIDERS
         .iter()
         .map(|p| {
@@ -1338,6 +1364,9 @@ pub fn catalog() -> Value {
                 "custom": false,
                 "suggestedModels": p.suggested_models,
                 "supportsDiscovery": !p.models_url.is_empty(),
+                // Per-model enabled overrides (absent id ⇒ enabled). Lets the
+                // desktop render each model's on/off toggle.
+                "modelOverrides": model_overrides(&models_value, p.id),
             })
         })
         .collect();
@@ -1363,6 +1392,7 @@ pub fn catalog() -> Value {
             "suggestedModels": [],
             // Custom providers discover against their own baseUrl + /models.
             "supportsDiscovery": true,
+            "modelOverrides": model_overrides(&models_value, &id),
         }));
     }
 
@@ -1643,6 +1673,60 @@ pub fn remove_provider(id: &str) -> Result<Value> {
     Ok(catalog())
 }
 
+// ── Per-model enable/disable (LobeChat-style) ──────────────────────────────────
+
+/// Toggle a single model on/off within a provider.
+#[derive(Debug, Deserialize)]
+pub struct ModelEnabledInput {
+    /// Provider id (built-in or custom).
+    pub provider: String,
+    /// Model id to toggle.
+    pub model: String,
+    /// Desired state; `false` disables the model (absent ⇒ enabled).
+    pub enabled: bool,
+}
+
+/// Persist a per-model `enabled` flag on the provider's models.json entry.
+/// Absent = enabled, so a model is only recorded once explicitly toggled and
+/// existing configs are unaffected. Returns the refreshed catalog so the desktop
+/// re-renders the model's toggle state.
+pub fn set_model_enabled(input: ModelEnabledInput) -> Result<Value> {
+    let provider = input.provider.trim().to_owned();
+    let model = input.model.trim().to_owned();
+    if provider.is_empty() || model.is_empty() {
+        anyhow::bail!("provider and model are required");
+    }
+
+    let mut models = read_models();
+    let providers = models["providers"]
+        .as_object_mut()
+        .expect("providers object ensured by read_models");
+    let entry = providers
+        .entry(provider)
+        .or_insert_with(|| json!({ "models": [] }));
+    let obj = entry
+        .as_object_mut()
+        .context("provider entry is not an object")?;
+    let list = obj.entry("models".to_owned()).or_insert_with(|| json!([]));
+    let arr = list
+        .as_array_mut()
+        .context("provider models is not an array")?;
+
+    if let Some(existing) = arr
+        .iter_mut()
+        .find(|m| m.get("id").and_then(Value::as_str) == Some(model.as_str()))
+    {
+        if let Some(map) = existing.as_object_mut() {
+            map.insert("enabled".to_owned(), Value::Bool(input.enabled));
+        }
+    } else {
+        arr.push(json!({ "id": model, "enabled": input.enabled }));
+    }
+
+    write_models(&models)?;
+    Ok(catalog())
+}
+
 // ── Model discovery (OpenAI-compatible `GET /models`, static fallback) ──────────
 
 /// Request to discover a provider's live model list.
@@ -1730,6 +1814,80 @@ pub async fn discover_models(input: DiscoverInput) -> Value {
         .map(|id| json!({ "id": id }))
         .collect();
     json!({ "models": seed, "source": "fallback" })
+}
+
+/// A live connectivity probe against a provider's models endpoint.
+#[derive(Debug, Deserialize)]
+pub struct CheckInput {
+    /// A known/custom provider id to resolve the URL + key from stored config.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// An explicit base URL (e.g. a not-yet-saved custom provider being tested).
+    #[serde(rename = "baseUrl", default)]
+    pub base_url: Option<String>,
+    /// An explicit key to try (never persisted; used only for the probe).
+    #[serde(rename = "apiKey", default)]
+    pub api_key: Option<String>,
+}
+
+/// The result of a [`check_provider`] connectivity probe.
+#[derive(Debug, Serialize)]
+pub struct CheckResult {
+    pub ok: bool,
+    #[serde(rename = "latencyMs")]
+    pub latency_ms: u64,
+    #[serde(rename = "modelCount")]
+    pub model_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Live-check a provider's connectivity by doing one authenticated GET against
+/// its models endpoint (the same URL/auth resolution [`discover_models`] uses).
+/// Persists nothing — it only reports reachability, latency, and model count so
+/// the desktop can show an inline "OK · 120ms · 42 models" / error status.
+pub async fn check_provider(input: CheckInput) -> CheckResult {
+    let provider_id = non_empty(&input.provider);
+    let explicit_base = non_empty(&input.base_url);
+    let explicit_key = non_empty(&input.api_key);
+
+    // Resolve (url, auth) exactly like Tier 1 of discovery.
+    let resolved: Option<(String, DiscoveryAuth)> = if let Some(base) = &explicit_base {
+        let auth = explicit_key
+            .clone()
+            .map(DiscoveryAuth::Bearer)
+            .unwrap_or(DiscoveryAuth::None);
+        Some((models_url_from_base(base), auth))
+    } else if let Some(id) = &provider_id {
+        resolve_provider_discovery(id, explicit_key.clone())
+    } else {
+        None
+    };
+
+    let Some((url, auth)) = resolved else {
+        return CheckResult {
+            ok: false,
+            latency_ms: 0,
+            model_count: 0,
+            error: Some("no reachable models endpoint for this provider".to_owned()),
+        };
+    };
+
+    let started = std::time::Instant::now();
+    match fetch_models(&url, auth).await {
+        Ok(models) => CheckResult {
+            ok: true,
+            latency_ms: started.elapsed().as_millis() as u64,
+            model_count: models.len(),
+            error: None,
+        },
+        Err(e) => CheckResult {
+            ok: false,
+            latency_ms: started.elapsed().as_millis() as u64,
+            model_count: 0,
+            error: Some(e.to_string()),
+        },
+    }
 }
 
 /// Resolve the discovery URL + auth for a known/custom provider id from stored

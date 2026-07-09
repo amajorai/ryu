@@ -803,6 +803,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/plugins", get(list_apps))
         .route("/api/plugins/contributions", get(plugin_contributions))
         .route("/api/plugins/catalog", get(list_apps_catalog))
+        .route("/api/plugins/catalog/browse", get(plugin_catalog_browse))
+        .route("/api/plugins/catalog/detail", get(plugin_catalog_detail))
         .route("/api/plugins/install", post(install_app_from_url))
         .route("/api/plugins/reload", post(reload_app_manifests))
         .route(
@@ -885,6 +887,11 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/pi-config", get(get_pi_config).put(put_pi_config))
         .route("/api/pi-config/catalog", get(get_pi_config_catalog))
         .route("/api/pi-config/providers", post(configure_pi_provider))
+        .route("/api/pi-config/providers/check", post(check_pi_provider))
+        .route(
+            "/api/pi-config/providers/model-enabled",
+            post(set_pi_model_enabled),
+        )
         .route("/api/pi-config/providers/:id", delete(delete_pi_provider))
         .route("/api/pi-config/discover-models", post(discover_pi_models))
         // ── Agent teams (collections of agents + a coordination strategy) ──
@@ -1237,6 +1244,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             get(gateway_get_config).put(gateway_put_config),
         )
         .route("/api/gateway/status", get(gateway_status))
+        // ── Manual gateway restart (preflight/health page recovery action) ───
+        .route("/api/gateway/restart", post(gateway_restart))
         // ── Local-engine admission-queue depth (batching/queue observability) ──
         .route("/api/engine/concurrency", get(engine_concurrency))
         // ── BYOK provider-key vault (Unit U026) ──────────────────────────────
@@ -3021,6 +3030,43 @@ async fn agent_update(
     }
 }
 
+/// Optional query for `GET /api/agents/:id/capabilities` — when the composer has
+/// picked a model that differs from the agent's bound slot, pass it here so the
+/// GGUF probe targets the selection (Jan-style per-model capabilities).
+#[derive(serde::Deserialize)]
+struct AgentCapabilitiesQuery {
+    #[serde(default)]
+    model: Option<String>,
+}
+
+/// Resolve the model ref to probe for capability detection: an explicit query
+/// override wins, then the agent's chat slot, then the node's active local model.
+async fn resolve_capability_model_ref(
+    state: &ServerState,
+    agent_id: &str,
+    query_model: Option<String>,
+) -> Option<String> {
+    if let Some(m) = query_model.filter(|s| !s.trim().is_empty()) {
+        return Some(m);
+    }
+    let bound = match state.agent_store.get(agent_id).await {
+        Ok(Some(r)) => r.chat_model.and_then(|s| s.model_id).or(r.model),
+        _ => None,
+    };
+    match bound {
+        Some(m) => Some(m),
+        None => state
+            .preferences
+            .get(crate::model_catalog::installed::ACTIVE_MODEL_PREF)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|raw| {
+                crate::model_catalog::installed::parse_active_pref(&raw).map(|a| a.r#ref)
+            }),
+    }
+}
+
 /// `GET /api/agents/:id/capabilities` — the agent's effective tool / reasoning /
 /// vision capabilities, Jan-style.
 ///
@@ -3034,13 +3080,18 @@ async fn agent_update(
 async fn agent_capabilities(
     State(state): State<ServerState>,
     Path(agent_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<AgentCapabilitiesQuery>,
 ) -> axum::response::Response {
     use crate::model_catalog::capabilities::{self as caps, CapabilityReport, DetectedCaps};
 
     let overrides = caps::load_override(&agent_id);
+    let model_ref =
+        resolve_capability_model_ref(&state, &agent_id, query.model).await;
+    let local_detected = model_ref.as_deref().and_then(caps::detect_local);
 
     // ACP plane: tools flow through the MCP bridge (always supported); reasoning
-    // is whatever the agent advertises at session/new.
+    // is whatever the agent advertises at session/new. Vision/diffusion come from
+    // the bound local GGUF when one resolves (Ryu/Pi + Gemma, …).
     if let Some(spawn_cmd) = crate::sidecar::adapters::resolve_acp_spawn_cmd(
         &agent_id,
         &state.agents,
@@ -3051,51 +3102,44 @@ async fn agent_capabilities(
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let (detected, source) =
             match crate::sidecar::adapters::acp::probe_acp_config(spawn_cmd, cwd).await {
-                Ok(v) => (
-                    DetectedCaps {
+                Ok(v) => {
+                    let acp = DetectedCaps {
                         tools: true,
                         reasoning: caps::acp_probe_reasoning(&v),
                         vision: false,
                         diffusion: false,
-                    },
-                    "acp_probe",
-                ),
+                    };
+                    let merged = caps::merge_acp_with_local(acp, local_detected);
+                    let source = if local_detected.is_some() {
+                        "acp_probe+gguf"
+                    } else {
+                        "acp_probe"
+                    };
+                    (merged, source)
+                }
                 // Probe failed (agent binary missing, etc.) — assume a tool loop
                 // is available so we don't hide controls on a transient error.
-                Err(_) => (
-                    DetectedCaps {
+                Err(_) => {
+                    let fallback = DetectedCaps {
                         tools: true,
                         reasoning: false,
                         vision: false,
                         diffusion: false,
-                    },
-                    "default",
-                ),
+                    };
+                    let merged = caps::merge_acp_with_local(fallback, local_detected);
+                    let source = if local_detected.is_some() {
+                        "default+gguf"
+                    } else {
+                        "default"
+                    };
+                    (merged, source)
+                }
             };
         return Json(CapabilityReport::build(detected, overrides, source)).into_response();
     }
 
-    // Local / openai-compat plane: read the bound model's GGUF chat template. The
-    // bound model is the agent's chat slot (or legacy flat `model`); fall back to
-    // the node's active local chat model when the agent pins none.
-    let bound = match state.agent_store.get(&agent_id).await {
-        Ok(Some(r)) => r.chat_model.and_then(|s| s.model_id).or(r.model),
-        _ => None,
-    };
-    let model_ref = match bound {
-        Some(m) => Some(m),
-        None => state
-            .preferences
-            .get(crate::model_catalog::installed::ACTIVE_MODEL_PREF)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|raw| {
-                crate::model_catalog::installed::parse_active_pref(&raw).map(|a| a.r#ref)
-            }),
-    };
-
-    let (detected, source) = match model_ref.as_deref().and_then(caps::detect_local) {
+    // Local / openai-compat plane: read the bound model's GGUF chat template.
+    let (detected, source) = match local_detected {
         Some(d) => (d, "gguf"),
         // No installed GGUF resolves (remote provider / non-GGUF / not
         // downloaded). Default to tool support (most remote providers do);
@@ -3147,8 +3191,14 @@ async fn set_agent_capabilities(
         )
             .into_response();
     }
-    // Re-resolve so the response reflects the new effective flags.
-    agent_capabilities(State(state), Path(agent_id)).await
+    // Re-resolve so the response reflects the new effective flags. No explicit
+    // model override here: report the agent's own effective capabilities.
+    agent_capabilities(
+        State(state),
+        Path(agent_id),
+        axum::extract::Query(AgentCapabilitiesQuery { model: None }),
+    )
+    .await
 }
 
 /// Body for `POST /api/chat/permission`.
@@ -3874,35 +3924,34 @@ async fn list_apps(State(state): State<ServerState>) -> Json<serde_json::Value> 
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn list_apps_catalog(State(state): State<ServerState>) -> Json<serde_json::Value> {
-    // The Plugins catalog merges three sources into one `entries` list, deduped by
-    // id (first writer wins, in precedence order below). Previously this returned
-    // ONLY the remote GitHub registry, which is empty/unreachable in the common
-    // case — so the desktop Store's Plugins tab was blank while Skills/MCP/Models
-    // (which consult their federated CatalogSource) were not. This brings the
-    // Plugin kind to parity: built-in manifests are always shown (offline-safe),
-    // the active marketplace source is merged in, and the legacy registry still
-    // contributes anything new.
-    // 1. Loaded built-in / installed plugin manifests (spider, exa, ghost, shadow,
-    //    sample, …). Always present and offline-safe, so the catalog is never blank
-    //    — the parity counterpart of the other kinds' built-in registries. The read
-    //    guard is scoped to this block so it is dropped before the awaits below.
+    let entries = merged_plugin_catalog_entries(&state).await;
+    Json(json!({ "entries": entries }))
+}
+
+/// The active Plugin catalog source (Ryu Marketplace by default, or integrations.sh
+/// / a custom mirror). See [`crate::catalog_source`].
+async fn active_plugin_source(state: &ServerState) -> Option<crate::catalog_source::Source> {
+    state
+        .catalog_sources
+        .get_active(crate::catalog_source::CatalogKind::Plugin, &state.preferences)
+        .await
+}
+
+/// Merged Ryu Marketplace plugin catalog: built-in manifests + marketplace items +
+/// legacy registry, deduped by id. Used by `list_apps_catalog` and the marketplace
+/// browse path.
+async fn merged_plugin_catalog_entries(state: &ServerState) -> Vec<serde_json::Value> {
+    // 1. Loaded built-in / installed plugin manifests — always offline-safe.
     let manifest_entries: Vec<serde_json::Value> = {
         let manifests = state.app_manifests.read().await;
         manifests.iter().map(plugin_manifest_to_entry).collect()
     };
 
-    // 2. The active Plugin marketplace source (default = the Ryu marketplace).
-    //    Best-effort: a slow/empty/unreachable marketplace degrades silently so it
-    //    never blanks the built-ins. The source returns a `{ items: [...] }`
-    //    envelope (see `RyuMarketplaceSource::card_to_value`).
+    // 2. Ryu Marketplace federated source (best-effort; never blanks built-ins).
     let mut marketplace_entries: Vec<serde_json::Value> = Vec::new();
     if let Some(source) = state
         .catalog_sources
-        .get_active(
-            crate::catalog_source::CatalogKind::Plugin,
-            &state.preferences,
-        )
-        .await
+        .source_by_id(crate::catalog_source::CatalogKind::Plugin, "ryu-marketplace")
     {
         let q = crate::catalog_source::CatalogQuery {
             limit: 40,
@@ -3918,20 +3967,162 @@ async fn list_apps_catalog(State(state): State<ServerState>) -> Json<serde_json:
         }
     }
 
-    // 3. The legacy remote registry.
+    // 3. Legacy remote registry.
     let catalog = state.catalog_client.fetch_catalog().await;
     let registry_entries: Vec<serde_json::Value> = serde_json::to_value(&catalog)
         .ok()
         .and_then(|v| v.get("entries").and_then(|e| e.as_array()).cloned())
         .unwrap_or_default();
 
-    // Merge, deduped by id (first writer wins): built-ins → marketplace → registry.
-    let entries = merge_plugin_catalog_entries(vec![
+    merge_plugin_catalog_entries(vec![
         manifest_entries,
         marketplace_entries,
         registry_entries,
-    ]);
-    Json(json!({ "entries": entries }))
+    ])
+}
+
+fn plugin_entry_matches_query(entry: &serde_json::Value, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let name = entry
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let description = entry
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let id = entry
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    name.contains(needle) || description.contains(needle) || id.contains(needle)
+}
+
+/// `GET /api/plugins/catalog/browse?query=&limit=&cursor=` — browse the active
+/// Plugin catalog source. When the active source is `ryu-marketplace`, returns
+/// the merged built-in + marketplace + legacy list (client-side filter on
+/// `query`). For federated sources (e.g. integrations.sh), searches the source
+/// with server-side pagination.
+#[utoipa::path(
+    get,
+    path = "/api/plugins/catalog/browse",
+    tag = "Plugins",
+    summary = "Browse the active plugin catalog source",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn plugin_catalog_browse(
+    State(state): State<ServerState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let query = params.get("query").map(String::as_str).unwrap_or("");
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(40);
+    let cursor = params
+        .get("cursor")
+        .map(String::as_str)
+        .filter(|s| !s.is_empty());
+
+    let active_id = state
+        .catalog_sources
+        .active_id(crate::catalog_source::CatalogKind::Plugin, &state.preferences)
+        .await
+        .unwrap_or_else(|| "ryu-marketplace".to_string());
+
+    // Default marketplace view: merged offline-safe catalog.
+    if active_id == "ryu-marketplace" {
+        let needle = query.trim().to_ascii_lowercase();
+        let entries: Vec<serde_json::Value> = merged_plugin_catalog_entries(&state)
+            .await
+            .into_iter()
+            .filter(|e| plugin_entry_matches_query(e, &needle))
+            .collect();
+        return (
+            StatusCode::OK,
+            Json(json!({ "entries": entries, "next_cursor": serde_json::Value::Null })),
+        );
+    }
+
+    let mut q = crate::catalog_source::CatalogQuery {
+        query: query.to_string(),
+        limit,
+        cursor: cursor.map(str::to_string),
+        ..Default::default()
+    };
+    q.extra.clear();
+
+    match active_plugin_source(&state).await {
+        Some(source) => match source.search(&state.client, &q).await {
+            Ok(val) => {
+                let entries: Vec<serde_json::Value> = val
+                    .get("items")
+                    .and_then(|v| v.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|it| plugin_marketplace_item_to_entry(it, source.id()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (
+                    StatusCode::OK,
+                    Json(json!({
+                        "entries": entries,
+                        "next_cursor": val.get("next_cursor").cloned().unwrap_or(serde_json::Value::Null),
+                        "note": val.get("note").cloned().unwrap_or(serde_json::Value::Null),
+                    })),
+                )
+            }
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": e.to_string(), "entries": [] })),
+            ),
+        },
+        None => (
+            StatusCode::OK,
+            Json(json!({ "entries": [], "next_cursor": serde_json::Value::Null })),
+        ),
+    }
+}
+
+/// `GET /api/plugins/catalog/detail?id=<entry-id>` — detail for the selected
+/// entry from the active Plugin catalog source (integrations.sh descriptors, etc.).
+#[utoipa::path(
+    get,
+    path = "/api/plugins/catalog/detail",
+    tag = "Plugins",
+    summary = "Plugin catalog entry detail",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn plugin_catalog_detail(
+    State(state): State<ServerState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(id) = params.get("id").filter(|s| !s.is_empty()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "missing required `id` query parameter" })),
+        );
+    };
+    match active_plugin_source(&state).await {
+        Some(source) => match source.detail(&state.client, id).await {
+            Ok(value) => (StatusCode::OK, Json(value)),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": e.to_string() })),
+            ),
+        },
+        None => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": "no active plugin catalog source" })),
+        ),
+    }
 }
 
 /// Map a loaded [`crate::plugin_manifest::PluginManifest`] to a Plugins-catalog
@@ -3973,16 +4164,53 @@ fn plugin_marketplace_item_to_entry(
     source_id: &str,
 ) -> Option<serde_json::Value> {
     let id = it.get("id").and_then(|v| v.as_str())?;
+    let integration_kind = it
+        .get("integration_kind")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let category = it
+        .get("category")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let domain = it
+        .get("domain")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let integration_url = it
+        .get("url")
+        .or_else(|| it.get("install_source"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let icon_url = it
+        .get("icon_url")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let mut kinds: Vec<String> = Vec::new();
+    if let Some(k) = &integration_kind {
+        kinds.push(k.clone());
+    }
+    let mut tags: Vec<String> = Vec::new();
+    if let Some(c) = &category {
+        tags.push(c.clone());
+    }
+    if let Some(d) = &domain {
+        tags.push(d.clone());
+    }
+    let descriptor_only = source_id == "integrations-sh";
     Some(json!({
         "id": id,
         "name": it.get("name").and_then(|v| v.as_str()).unwrap_or(id),
         "description": it.get("description").and_then(|v| v.as_str()).unwrap_or(""),
         "version": it.get("version").and_then(|v| v.as_str()).unwrap_or(""),
         "source": source_id,
-        "kinds": [],
-        "tags": [],
+        "kinds": kinds,
+        "tags": tags,
         "permission_grants": [],
         "built_in": false,
+        "descriptor_only": descriptor_only,
+        "integration_kind": integration_kind,
+        "integration_url": integration_url,
+        "icon_url": icon_url,
     }))
 }
 
@@ -6520,6 +6748,44 @@ async fn discover_pi_models(
     Json(input): Json<crate::pi_config::DiscoverInput>,
 ) -> Json<serde_json::Value> {
     Json(crate::pi_config::discover_models(input).await)
+}
+
+/// Live-check a provider's connectivity with one authenticated GET to its models
+/// endpoint. Persists nothing; reports `{ ok, latencyMs, modelCount, error }`.
+#[utoipa::path(
+    post,
+    path = "/api/pi-config/providers/check",
+    tag = "Agents",
+    summary = "Live-check a Pi provider's connectivity",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn check_pi_provider(
+    Json(input): Json<crate::pi_config::CheckInput>,
+) -> Json<crate::pi_config::CheckResult> {
+    Json(crate::pi_config::check_provider(input).await)
+}
+
+/// Enable/disable a single model within a provider (persisted as an `enabled`
+/// flag on the provider's models.json entry). Returns the refreshed catalog.
+#[utoipa::path(
+    post,
+    path = "/api/pi-config/providers/model-enabled",
+    tag = "Agents",
+    summary = "Toggle a Pi provider's model on/off",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn set_pi_model_enabled(
+    Json(input): Json<crate::pi_config::ModelEnabledInput>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::pi_config::set_model_enabled(input) {
+        Ok(catalog) => (StatusCode::OK, Json(catalog)),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
 }
 
 // ── Agent teams CRUD ──────────────────────────────────────────────────────────
@@ -13509,6 +13775,23 @@ async fn gateway_config_write(
             )
                 .into_response()
         }
+    }
+}
+
+/// `POST /api/gateway/restart` — a recovery action for the preflight/health
+/// page. Respawns the managed gateway child (stop → start, then health-wait) via
+/// `GatewayManager::refresh`. A no-op that reports `externally_managed: true`
+/// when the gateway is not Core-managed (remote/external), since Core does not
+/// own that process. Always 200 with `{ success, ... }`.
+async fn gateway_restart(State(state): State<ServerState>) -> Json<serde_json::Value> {
+    match state.gateway.refresh().await {
+        Ok(true) => Json(json!({ "success": true })),
+        Ok(false) => Json(json!({
+            "success": false,
+            "externally_managed": true,
+            "notice": "gateway is externally managed; Core does not control its process",
+        })),
+        Err(e) => Json(json!({ "success": false, "error": e.to_string() })),
     }
 }
 

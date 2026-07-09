@@ -182,6 +182,25 @@ pub fn detect_local_is_diffusion(stem: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Merge ACP-probed capabilities with a local GGUF model's detection.
+///
+/// ACP agents (Ryu/Pi, Claude Code, …) always support tools via the MCP bridge,
+/// and may advertise reasoning via `session/new` config options. Vision and
+/// diffusion are properties of the *bound local model* (mmproj on disk), which
+/// the ACP probe never reports — so for flagship/local-hybrid agents we OR in
+/// the GGUF flags without clobbering the ACP tool guarantee.
+pub fn merge_acp_with_local(acp: DetectedCaps, local: Option<DetectedCaps>) -> DetectedCaps {
+    let Some(local) = local else {
+        return acp;
+    };
+    DetectedCaps {
+        tools: acp.tools,
+        reasoning: acp.reasoning || local.reasoning,
+        vision: local.vision,
+        diffusion: local.diffusion,
+    }
+}
+
 /// Detect whether an ACP agent advertises a reasoning / thought-level control in
 /// its probed `session/new` response (the `{ modes, models, configOptions }`
 /// shape from `probe_acp_config`). A config option whose category/id/name reads
@@ -328,6 +347,26 @@ mod tests {
             diffusion: false,
         };
         assert_eq!(ov.apply(detected), detected);
+    }
+
+    #[test]
+    fn merge_acp_with_local_adds_vision_from_gguf() {
+        let acp = DetectedCaps {
+            tools: true,
+            reasoning: true,
+            vision: false,
+            diffusion: false,
+        };
+        let local = DetectedCaps {
+            tools: false,
+            reasoning: false,
+            vision: true,
+            diffusion: false,
+        };
+        let merged = merge_acp_with_local(acp, Some(local));
+        assert!(merged.tools, "ACP tool loop preserved");
+        assert!(merged.reasoning, "ACP reasoning preserved");
+        assert!(merged.vision, "local mmproj adds vision");
     }
 
     #[test]

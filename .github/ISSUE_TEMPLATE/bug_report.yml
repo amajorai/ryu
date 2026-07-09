@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in the open-source core (Core, Gateway, CLI, SDK, docs) is broken.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. This tracker is for the **open-source units** (Core, Gateway, CLI,
+        SDK, docs). Desktop / web / mobile app bugs go to support at ryuhq.com — they're built
+        from a separate, proprietary tree.
+  - type: input
+    id: unit
+    attributes:
+      label: Which unit?
+      placeholder: apps/core · apps/gateway · apps/cli · packages/sdk · docs
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The smaller the repro, the faster the fix.
+      placeholder: |
+        1. cargo build --release in apps/gateway
+        2. point client at :7981/v1/chat/completions
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS + arch, and the release tag or commit SHA.
+      placeholder: "macOS 14 arm64 · v0.x.y (or commit abc1234)"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste the shortest decisive lines. This is automatically formatted as code.
+      render: shell

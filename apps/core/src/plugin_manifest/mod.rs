@@ -462,6 +462,13 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // plugin: store presence + availability (detect-on-PATH) + the Phase-2
     // auto-wrap settings. Community-tier, opt-in; the `rtk` binary is BYO.
     include_str!("fixtures/rtk.plugin.json"),
+    // `security-guidance` ports Anthropic's security-guidance Claude Code plugin
+    // onto Ryu's turn-hook substrate: a flag-gated `post_assistant_turn` hook that
+    // (1) runs a ~22-rule regex pattern scan over the last answer and (2) does a
+    // second-model diff review via `host.sideModel` (grant `hook:side-model`),
+    // surfacing findings as an out-of-band note. Toggle + `/security` command +
+    // reviewer-model picker mirror `double-check`. Community-tier, opt-in.
+    include_str!("fixtures/security-guidance.plugin.json"),
 ];
 
 /// Loader that merges built-in manifests with user-installed ones from
@@ -907,6 +914,32 @@ mod tests {
             manifests.iter().any(|m| m.id == "io.ryu.proof"),
             "built-in Proof of Work manifest should be loaded"
         );
+        assert!(
+            manifests.iter().any(|m| m.id == "io.ryu.security-guidance"),
+            "built-in Security Guidance manifest should be loaded"
+        );
+    }
+
+    #[test]
+    fn security_guidance_fixture_has_gated_turn_hook() {
+        // The ported security-guidance plugin must contribute a flag-gated
+        // `post_assistant_turn` hook with the side-model grant, so it is free on
+        // the hot path (skipped unless the toggle/command is set) and can review.
+        let manifests = PluginManifestLoader::load();
+        let m = manifests
+            .iter()
+            .find(|m| m.id == "io.ryu.security-guidance")
+            .expect("security-guidance must load");
+        assert!(
+            m.permission_grants.iter().any(|g| g == "hook:side-model"),
+            "must declare the side-model grant"
+        );
+        let hooks = &m.contributes.as_ref().expect("contributes").turn_hooks;
+        assert_eq!(hooks.len(), 1, "one turn hook");
+        assert_eq!(hooks[0].on, "post_assistant_turn");
+        let gate = hooks[0].run_when.as_ref().expect("a match gate");
+        assert_eq!(gate.flag.as_deref(), Some("io.ryu.security-guidance"));
+        assert!(gate.commands.iter().any(|c| c == "/security"));
     }
 
     // ── Per-kind validation via loader ────────────────────────────────────────

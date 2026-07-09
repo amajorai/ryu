@@ -29,6 +29,34 @@ Local-first, encrypted by default, no telemetry. Locked to no provider or ecosys
 - 📦 **Two static binaries.** `ryu-core` and `ryu-gateway` are the whole self-hostable stack. No database, no cloud.
 - 🧩 **Standards-native.** MCP, ACP, and Agent Skills are first-class. Point any OpenAI-compatible client at the Gateway.
 
+<!--
+  DEMO GIF SLOT — drop a ~10s screen capture of the aha moment (install → pick agent → first
+  local reply, no key) at .github/demo.gif and uncomment. This is the single highest-impact
+  visual on the page; keep it under ~4 MB so it autoplays on GitHub.
+
+  <p align="center"><img src=".github/demo.gif" alt="Ryu in 10 seconds" width="100%" /></p>
+-->
+
+## How it compares
+
+Model routers (LiteLLM, OpenRouter) route *one chat completion*. Ryu governs *whole agents* — the
+tools they reach, what they cost, and what's safe to send — and runs the engine you already use.
+
+| | **Ryu** | LiteLLM | OpenRouter | Agent CLI alone |
+|---|:---:|:---:|:---:|:---:|
+| Self-hostable | ✅ | ✅ | ❌ hosted | ✅ |
+| Local model on install, no API key | ✅ | ⚠️ BYO Ollama | ❌ | ⚠️ varies |
+| Multi-provider routing + fallback | ✅ | ✅ | ✅ | ❌ |
+| Firewall + PII/DLP on egress | ✅ | ⚠️ plugins | ❌ | ❌ |
+| Budgets + audit trail | ✅ | ✅ | ⚠️ credits | ❌ |
+| Governs **agents**, not just completions | ✅ | ❌ | ❌ | — |
+| Wraps an existing agent (Claude Code, Codex, …) | ✅ | ❌ | ❌ | — |
+| Install-and-go desktop app | ✅ | ❌ | ❌ | ❌ |
+| No provider lock-in | ✅ | ✅ | ⚠️ | ❌ |
+
+<sub>✅ built · ⚠️ partial / BYO · ❌ not offered. Honest as of the current release — corrections
+via PR welcome. The desktop app is proprietary but is a thin GUI over this open core.</sub>
+
 > **This repository is the open-source core of Ryu**: the orchestration engine, the LLM gateway, the CLI, and the developer SDK.
 >
 > It's everything you need to self-host Ryu or build on it. The desktop, web, and mobile apps are proprietary and developed separately, so they aren't here.
@@ -165,7 +193,13 @@ They're open-sourced for auditability and, inside Ryu, run only behind explicit 
 
 ## Contributing & security
 
-Contributions are welcome. See each unit's `CONTRIBUTING.md` for standalone build steps, and `SECURITY.md` for private vulnerability reporting (or email `security@ryuhq.com`).
+Contributions are welcome — start with [`CONTRIBUTING.md`](./.github/CONTRIBUTING.md) (it explains
+the one-way mirror this repo runs on) and the [Code of Conduct](./.github/CODE_OF_CONDUCT.md).
+Questions and ideas go to [Discord](https://ryuhq.com/discord) or
+[Discussions](https://github.com/amajorai/ryu/discussions).
+
+Report vulnerabilities privately per [`SECURITY.md`](./.github/SECURITY.md) — email
+`security@ryuhq.com`, never a public issue.
 
 ## License
 

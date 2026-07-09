@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a capability for the open-source core.
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything non-trivial, a quick [Discussion](https://github.com/amajorai/ryu/discussions)
+        first is often faster than a full issue — we can agree on the shape before you or we build it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Start with the pain, not the solution. Who hits it, and when?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Which layer? (best guess)
+      description: "Core = *what runs*. Gateway = *what's allowed / measured / paid for*."
+      options:
+        - Core (orchestration — agents, sessions, workflows, tools)
+        - Gateway (governance — routing, firewall, budgets, audit)
+        - SDK / CLI / docs
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

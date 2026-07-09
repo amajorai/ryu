@@ -1,0 +1,7 @@
+# GitHub "Sponsor" button config. https://docs.github.com/sponsors/funding-links
+# Uncomment/fill each channel you actually have set up — an unset handle shows a dead button.
+
+# github: [amajorai]          # enable once GitHub Sponsors is approved for the org
+custom:
+  - https://ryuhq.com
+  - https://ryuhq.com/download

@@ -685,7 +685,6 @@ impl RetrievalStore {
              );
              CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source);
              CREATE INDEX IF NOT EXISTS idx_chunks_space  ON chunks(space_id);
-             CREATE INDEX IF NOT EXISTS idx_chunks_mem_scope ON chunks(mem_scope, mem_scope_id);
 
              -- Filterable metadata sidecar for OKF (Open Knowledge Format) chunks.
              -- One row per indexed chunk; `chunk_id` joins back to `chunks.id`.
@@ -728,6 +727,15 @@ impl RetrievalStore {
             "ALTER TABLE chunks ADD COLUMN mem_importance INTEGER NOT NULL DEFAULT 3",
             [],
         );
+
+        // Built after the ALTERs above so it works on DBs created before the
+        // mem_scope columns existed — on those, `CREATE TABLE IF NOT EXISTS`
+        // no-ops and the columns only appear via the migrations, so indexing
+        // them inside the initial batch would fail with "no such column".
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_chunks_mem_scope ON chunks(mem_scope, mem_scope_id);",
+        )
+        .context("indexing chunks.mem_scope")?;
         Ok(())
     }
 

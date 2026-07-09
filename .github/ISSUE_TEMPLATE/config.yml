@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Discord community
+    url: https://ryuhq.com/discord
+    about: Questions, help, and general chat — the fastest way to get unblocked.
+  - name: 🗣️ GitHub Discussions
+    url: https://github.com/amajorai/ryu/discussions
+    about: Ideas, RFCs, and open-ended design conversations.
+  - name: 📚 Documentation
+    url: https://ryuhq.com/help
+    about: Guides, self-hosting, and the interactive API reference.
+  - name: 🔒 Report a security issue
+    url: https://github.com/amajorai/ryu/security/policy
+    about: Please report vulnerabilities privately, not as a public issue.
+  - name: 🖥️ Desktop / web / mobile app support
+    url: https://ryuhq.com/help
+    about: The apps are built from a separate tree — this tracker is the OSS core only.

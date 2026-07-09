@@ -272,6 +272,11 @@ impl CatalogSourceRegistry {
         self.find(kind, &id)
     }
 
+    /// Resolve a specific catalog source by kind + id (built-in or custom).
+    pub fn source_by_id(&self, kind: CatalogKind, id: &str) -> Option<Source> {
+        self.find(kind, id)
+    }
+
     /// Add (or replace) a custom source and persist it to the JSON file.
     pub fn add_custom(&self, spec: CustomSourceSpec) -> Result<()> {
         // Custom model sources resolve to an HfSource (HF-compatible base) or a

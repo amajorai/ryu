@@ -775,6 +775,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn live_security_guidance_flags_pattern_and_review() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // Toggle on + the last answer contains an unsafe pattern (yaml.load) →
+        // the hook must return a note combining the pattern warning and the
+        // side-model review text.
+        let ctx = HookContext {
+            conversation_id: Some("c1".into()),
+            agent_id: Some("ryu".into()),
+            transcript: vec![
+                HookMessage {
+                    role: "user".into(),
+                    content: "load the config".into(),
+                },
+                HookMessage {
+                    role: "assistant".into(),
+                    content: "cfg = yaml.load(open('c.yml'))".into(),
+                },
+            ],
+            flags: std::iter::once(("io.ryu.security-guidance".to_string(), true)).collect(),
+        };
+        let directive = run_fixture(
+            "io.ryu.security-guidance",
+            ctx,
+            serde_json::json!("Use yaml.safe_load; yaml.load allows arbitrary code execution."),
+        )
+        .await;
+        match directive {
+            HookDirective::Note { text } => {
+                assert!(text.contains("Pattern warnings"), "note: {text}");
+                assert!(text.contains("yaml.safe_load"), "note: {text}");
+            }
+            other => panic!("expected a security note, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn live_security_guidance_off_is_none() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // No toggle and no `/security` command → the hook short-circuits to None.
+        let ctx = HookContext {
+            conversation_id: Some("c1".into()),
+            transcript: vec![HookMessage {
+                role: "assistant".into(),
+                content: "cfg = yaml.load(f)".into(),
+            }],
+            ..Default::default()
+        };
+        let directive =
+            run_fixture("io.ryu.security-guidance", ctx, serde_json::json!("unused")).await;
+        assert_eq!(directive, HookDirective::None);
+    }
+
+    #[tokio::test]
     async fn live_advisor_off_is_none() {
         if !tool_exec::is_available() {
             return;
