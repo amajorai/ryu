@@ -52,6 +52,12 @@ pub enum GatewayError {
     #[allow(dead_code)]
     BudgetExceeded,
 
+    /// A managed-inference org's credit balance is exhausted (pre-flight gate).
+    /// Distinct from [`GatewayError::BudgetExceeded`] (token-budget period cap):
+    /// this is the org wallet hitting zero. Stable code: `insufficient_credits`.
+    #[error("Insufficient credits")]
+    InsufficientCredits,
+
     /// All providers in the fallback chain are unavailable (circuits open or
     /// provider calls failed). Stable code: `all_providers_unavailable`.
     #[error("All providers unavailable: {0}")]
@@ -105,6 +111,11 @@ impl IntoResponse for GatewayError {
                 StatusCode::PAYMENT_REQUIRED,
                 "budget_exceeded",
                 "Token budget exceeded for this period.",
+            ),
+            GatewayError::InsufficientCredits => (
+                StatusCode::PAYMENT_REQUIRED,
+                "insufficient_credits",
+                "organization credit balance exhausted",
             ),
             GatewayError::AllProvidersUnavailable(msg) => (
                 StatusCode::SERVICE_UNAVAILABLE,

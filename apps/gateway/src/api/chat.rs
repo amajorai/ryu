@@ -157,7 +157,8 @@ pub async fn chat_completions(
             tool_profile,
             raw_tools,
         },
-    )?;
+    )
+    .await?;
     debug!(request_id = %ctx.request_id, "chat_completions: authenticated");
 
     let is_stream = body["stream"].as_bool().unwrap_or(false);

@@ -151,6 +151,15 @@ pub struct CreditsConfig {
     /// Per-request timeout in milliseconds for the debit POST. Default: 3000.
     #[serde(default = "default_credits_timeout_ms")]
     pub timeout_ms: u64,
+    /// Fail CLOSED on debit errors for managed tenants (env
+    /// `GATEWAY_CREDITS_FAIL_CLOSED`). Default: false (preserves today's
+    /// fail-open behavior). When true and the request is a managed-inference
+    /// tenant, a debit transport error or non-2xx response flips that org's
+    /// wallet-empty flag so the NEXT request is refused, instead of the failure
+    /// being silently swallowed. The current in-flight response is never blocked
+    /// on the (async) debit — the failure is just made sticky.
+    #[serde(default)]
+    pub fail_closed: bool,
 
     // ─── Sandbox per-resource rates (Daytona), nano-USD per unit-second ───────
     // Rates are stored in NANO-USD (not micro) because the Daytona storage rate
@@ -263,6 +272,7 @@ impl Default for CreditsConfig {
             wallet_empty_action: WalletEmptyAction::default(),
             wallet_empty_downgrade_to: None,
             timeout_ms: default_credits_timeout_ms(),
+            fail_closed: false,
             cost_per_sandbox_vcpu_second_nano_usd: 14_000,
             cost_per_sandbox_mem_gib_second_nano_usd: 4_500,
             cost_per_sandbox_storage_gib_second_nano_usd: 30,
@@ -2196,6 +2206,11 @@ impl GatewayConfig {
         if let Ok(model) = std::env::var("GATEWAY_CREDITS_WALLET_EMPTY_DOWNGRADE_TO") {
             if !model.trim().is_empty() {
                 config.credits.wallet_empty_downgrade_to = Some(model);
+            }
+        }
+        if let Ok(raw) = std::env::var("GATEWAY_CREDITS_FAIL_CLOSED") {
+            if let Some(fail_closed) = parse_bool_env(&raw) {
+                config.credits.fail_closed = fail_closed;
             }
         }
 

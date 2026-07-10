@@ -21,7 +21,9 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+mod cache;
 mod drift;
+pub use cache::{ResolveCache, ResolveErr};
 pub use drift::{detect_drift, DriftWarning};
 
 /// Env var with the control-plane base URL (no trailing `/api`).
@@ -58,11 +60,66 @@ impl EffectivePolicy {
     }
 }
 
+/// One org resolved from an arbitrary `rgw_` gateway token (the multi-tenant
+/// data-plane path). Carries the fields the pipeline needs to attribute and gate
+/// a request: the org id, whether it is a managed-inference tenant (so the
+/// pre-flight credit gate applies), the org's remaining credit budget (authoritative
+/// from the control plane), and its effective policy.
+#[derive(Debug, Clone)]
+pub struct ResolvedOrg {
+    /// The organization id this token belongs to.
+    pub org_id: String,
+    /// Whether the org bills through managed inference (credit wallet). Only
+    /// managed tenants get the pre-flight budget gate; BYOK/self-hosted do not.
+    pub managed_inference: bool,
+    /// Remaining credit budget in micro-USD, or `None` when the org has no
+    /// managed budget cap. `Some(b)` with `b <= 0` means the wallet is exhausted.
+    pub remaining_budget_micro_usd: Option<i64>,
+    /// The org's resolved effective policy (allowlist / locked guardrails / regions).
+    pub policy: EffectivePolicy,
+}
+
 /// Shape of the control plane's `/gateway/resolve` response (subset).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ResolveResponse {
     #[serde(default)]
+    organization: ResolveOrganization,
+    #[serde(default)]
     policy: ResolvePolicy,
+    /// Whether this org bills through managed inference (credit wallet).
+    #[serde(default)]
+    managed_inference: bool,
+    /// Remaining credit budget in micro-USD (`null` when uncapped).
+    #[serde(default)]
+    remaining_budget_micro_usd: Option<i64>,
+    /// Monthly credit pool in micro-USD (carried for parity; not gated on here).
+    #[serde(default)]
+    #[allow(dead_code)]
+    monthly_credit_pool_micro_usd: i64,
+}
+
+/// The `organization` field of the resolve response. We only need the id.
+#[derive(Debug, Default, Deserialize)]
+struct ResolveOrganization {
+    #[serde(default)]
+    id: String,
+}
+
+impl ResolveResponse {
+    /// Map the parsed response into a [`ResolvedOrg`], moving the policy rules out.
+    fn into_resolved(self) -> ResolvedOrg {
+        ResolvedOrg {
+            org_id: self.organization.id,
+            managed_inference: self.managed_inference,
+            remaining_budget_micro_usd: self.remaining_budget_micro_usd,
+            policy: EffectivePolicy {
+                locked_guardrails: self.policy.rules.locked_guardrails,
+                approved_models: self.policy.rules.approved_models,
+                allowed_regions: self.policy.rules.allowed_regions,
+            },
+        }
+    }
 }
 
 /// The `policy` field of the resolve response: `{ rules, lockedFields }`.
@@ -108,28 +165,43 @@ impl PolicySource {
 
     /// Fetch and parse the effective policy from the control plane. Errors are
     /// surfaced to the caller, which decides whether to fail open (default,
-    /// keep serving with no extra policy) or closed.
+    /// keep serving with no extra policy) or closed. Uses the shared
+    /// [`resolve_token`] mapping so the single-org startup path and the dynamic
+    /// per-token path stay in sync.
     pub async fn fetch(&self, http: &reqwest::Client) -> anyhow::Result<EffectivePolicy> {
-        let endpoint = format!(
-            "{}/api/control-plane/gateway/resolve",
-            self.control_plane_url
-        );
-        let resp = http
-            .get(&endpoint)
-            .header("x-gateway-key", &self.gateway_key)
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await?;
-        if !resp.status().is_success() {
-            anyhow::bail!("control plane returned HTTP {}", resp.status());
-        }
-        let parsed: ResolveResponse = resp.json().await?;
-        Ok(EffectivePolicy {
-            locked_guardrails: parsed.policy.rules.locked_guardrails,
-            approved_models: parsed.policy.rules.approved_models,
-            allowed_regions: parsed.policy.rules.allowed_regions,
-        })
+        let resolved = resolve_token(&self.control_plane_url, http, &self.gateway_key).await?;
+        Ok(resolved.policy)
     }
+}
+
+/// Resolve an arbitrary `rgw_` gateway token to its org + budget + policy via the
+/// control plane's `/gateway/resolve` endpoint (the multi-tenant data-plane path).
+///
+/// The endpoint accepts ANY valid, non-revoked token as `x-gateway-key` and
+/// returns that token's org; it 401s on a missing/invalid/revoked token, which
+/// surfaces here as an error the caller maps to a hard 401 (never fail-open into
+/// anonymous). `control_plane_url` is the base URL WITHOUT the `/api` suffix
+/// (the same value `PolicySource` reads from `CONTROL_PLANE_URL`).
+pub async fn resolve_token(
+    control_plane_url: &str,
+    http: &reqwest::Client,
+    token: &str,
+) -> anyhow::Result<ResolvedOrg> {
+    let endpoint = format!(
+        "{}/api/control-plane/gateway/resolve",
+        control_plane_url.trim_end_matches('/')
+    );
+    let resp = http
+        .get(&endpoint)
+        .header("x-gateway-key", token)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("control plane returned HTTP {}", resp.status());
+    }
+    let parsed: ResolveResponse = resp.json().await?;
+    Ok(parsed.into_resolved())
 }
 
 #[cfg(test)]
@@ -169,6 +241,7 @@ mod tests {
     fn parses_resolve_response_shape() {
         let body = serde_json::json!({
             "organization": { "id": "o1", "name": "Acme", "slug": "acme" },
+            "credential": { "id": "cred_1", "keyPrefix": "rgw_abc" },
             "policy": {
                 "rules": {
                     "lockedGuardrails": ["pii", "secrets"],
@@ -176,12 +249,39 @@ mod tests {
                     "allowedRegions": ["eu"]
                 },
                 "lockedFields": ["approvedModels"]
-            }
+            },
+            "managedInference": true,
+            "monthlyCreditPoolMicroUsd": 5_000_000,
+            "remainingBudgetMicroUsd": 1_250_000
         });
         let parsed: ResolveResponse = serde_json::from_value(body).unwrap();
         assert_eq!(parsed.policy.rules.approved_models, vec!["gpt-4o"]);
         assert_eq!(parsed.policy.rules.locked_guardrails.len(), 2);
         assert_eq!(parsed.policy.rules.allowed_regions, vec!["eu"]);
+
+        // The previously-dropped fields are now read into the ResolvedOrg.
+        let resolved = parsed.into_resolved();
+        assert_eq!(resolved.org_id, "o1");
+        assert!(resolved.managed_inference);
+        assert_eq!(resolved.remaining_budget_micro_usd, Some(1_250_000));
+        assert_eq!(resolved.policy.approved_models, vec!["gpt-4o"]);
+    }
+
+    #[test]
+    fn parses_resolve_response_with_null_budget_and_defaults() {
+        // A BYOK/self-hosted org: no managed inference, uncapped budget (null).
+        let body = serde_json::json!({
+            "organization": { "id": "o2" },
+            "policy": { "rules": {} },
+            "remainingBudgetMicroUsd": null
+        });
+        let resolved: ResolvedOrg = serde_json::from_value::<ResolveResponse>(body)
+            .unwrap()
+            .into_resolved();
+        assert_eq!(resolved.org_id, "o2");
+        assert!(!resolved.managed_inference);
+        assert_eq!(resolved.remaining_budget_micro_usd, None);
+        assert!(resolved.policy.approved_models.is_empty());
     }
 
     #[test]

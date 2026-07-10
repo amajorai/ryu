@@ -12,7 +12,7 @@ use crate::{
     firewall::FirewallScanner,
     jobs::MediaJobStore,
     metrics::Metrics,
-    policy::EffectivePolicy,
+    policy::{EffectivePolicy, ResolveCache},
     providers::ProviderRegistry,
     quota::ProviderQuotas,
     rate_limit::RateLimiter,
@@ -78,6 +78,11 @@ pub struct AppState {
     /// In-memory async media-job store (video generation). Job-based because
     /// cloud video runs for minutes; the client polls the gateway.
     pub jobs: MediaJobStore,
+    /// Token → org resolve cache for the multi-tenant data plane. `Some` when a
+    /// control-plane URL is configured (`CONTROL_PLANE_URL`); resolves any minted
+    /// `rgw_` bearer to its org + budget + policy and caches the result. `None`
+    /// ⇒ the dynamic per-token auth path is inert and single-org behavior holds.
+    pub resolve_cache: Option<ResolveCache>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -155,6 +160,7 @@ impl AppState {
             tools,
             semantic_cache,
             auth: RwLock::new(auth),
+            resolve_cache: ResolveCache::from_env(http.clone()),
             http,
             policy: RwLock::new(EffectivePolicy::default()),
             jobs: MediaJobStore::new(),
@@ -279,6 +285,7 @@ impl AppState {
             tools: None,
             semantic_cache: None,
             auth: RwLock::new(auth),
+            resolve_cache: None,
             http,
             policy: RwLock::new(EffectivePolicy::default()),
             jobs: MediaJobStore::new(),

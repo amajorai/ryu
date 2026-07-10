@@ -97,6 +97,20 @@ pub struct RequestContext {
     /// swallowing the calls. Governance still applies where tools actually
     /// execute (Core `/api/mcp/tools/call` enforces the agent allowlist).
     pub raw_tools: bool,
+    /// True when this request's org was resolved from an `rgw_` gateway token
+    /// (multi-tenant data plane) and the org bills through managed inference.
+    /// Only managed tenants get the pre-flight credit gate + fail-closed debit;
+    /// BYOK / static-key / master-key traffic is `false` and unaffected.
+    pub managed_inference: bool,
+    /// The resolved org's remaining credit budget in micro-USD, from the
+    /// control-plane token resolution. `Some(b)` with `b <= 0` ⇒ wallet exhausted
+    /// ⇒ pre-flight 402. `None` ⇒ no managed cap (uncapped / non-managed).
+    pub remaining_budget_micro_usd: Option<i64>,
+    /// The org's resolved effective policy when auth came from a dynamic `rgw_`
+    /// token. `Some` ⇒ the pipeline enforces THIS tenant's policy (allowlist /
+    /// locked guardrails) instead of the global startup policy; `None` ⇒ the
+    /// global `state.policy` applies (single-org / static-key / master paths).
+    pub resolved_policy: Option<crate::policy::EffectivePolicy>,
 }
 
 /// Describes the degraded mode the pipeline entered, if any, for this request.
@@ -208,7 +222,7 @@ impl<'a> AuthInputs<'a> {
 /// via `x-ryu-*` headers; they drive per-user/per-agent budgets (U21), skill
 /// attribution (M3), per-attribute slot routing (M3 / #164), session
 /// correlation (M4), and the unified tool-loop allowlist (#475 C7).
-pub fn authenticate(
+pub async fn authenticate(
     state: &AppState,
     inputs: AuthInputs<'_>,
 ) -> Result<RequestContext, GatewayError> {
@@ -229,70 +243,106 @@ pub fn authenticate(
         tool_profile,
         raw_tools,
     } = inputs;
+
+    // Shared builder so the anonymous / master / static / dynamic paths differ
+    // only in their identity fields and never drift on the forwarded request
+    // fields (adding a `RequestContext` field touches one place).
+    let build_ctx = |is_master_key: bool,
+                     api_key: String,
+                     org_id: Option<String>,
+                     team_id: Option<String>,
+                     project_id: Option<String>,
+                     user_name: Option<String>,
+                     eff_user_id: Option<String>,
+                     eff_agent_id: Option<String>,
+                     key_config: Option<ApiKeyConfig>,
+                     managed_inference: bool,
+                     remaining_budget_micro_usd: Option<i64>,
+                     resolved_policy: Option<crate::policy::EffectivePolicy>|
+     -> RequestContext {
+        RequestContext {
+            request_id: Uuid::new_v4().to_string(),
+            api_key,
+            is_master_key,
+            org_id,
+            team_id,
+            project_id,
+            user_name,
+            user_id: eff_user_id,
+            agent_id: eff_agent_id,
+            key_config,
+            skill_ids: skill_ids.clone(),
+            tool_actions: tool_actions.clone(),
+            tools_header_present,
+            slot_provider: slot_provider.clone(),
+            slot_model: slot_model.clone(),
+            session_id: session_id.clone(),
+            feature: feature.clone(),
+            companion_source,
+            tool_search_requested,
+            priority,
+            tool_profile: tool_profile.clone(),
+            raw_tools,
+            managed_inference,
+            remaining_budget_micro_usd,
+            resolved_policy,
+        }
+    };
+
+    // Outcome of the synchronous match under the auth lock. The dynamic `rgw_`
+    // resolve is async and MUST NOT hold the `auth` read guard across an await, so
+    // it is deferred to after the lock is released.
+    enum StaticOutcome {
+        Matched(RequestContext),
+        Reject(GatewayError),
+        /// No static match, but the bearer is an `rgw_` token and the resolve
+        /// cache is enabled: try the control-plane resolution outside the lock.
+        TryDynamic(String),
+    }
+
     // Use the live auth config (via RwLock) so keys added via PUT /v1/config
     // take effect immediately without a gateway restart.
-    state.with_auth(|auth| {
+    let outcome = state.with_auth(|auth| {
         if !auth.require_auth {
-            return Ok(RequestContext {
-                request_id: Uuid::new_v4().to_string(),
-                api_key: raw_api_key.unwrap_or("anonymous").to_string(),
-                is_master_key: false,
-                org_id: None,
-                team_id: None,
-                project_id: None,
-                user_name: None,
-                user_id: user_id.clone(),
-                agent_id: agent_id.clone(),
-                key_config: None,
-                skill_ids: skill_ids.clone(),
-                tool_actions: tool_actions.clone(),
-                tools_header_present,
-                slot_provider: slot_provider.clone(),
-                slot_model: slot_model.clone(),
-                session_id: session_id.clone(),
-                feature: feature.clone(),
-                companion_source,
-                tool_search_requested,
-                priority,
-                tool_profile: tool_profile.clone(),
-                raw_tools,
-            });
+            return StaticOutcome::Matched(build_ctx(
+                false,
+                raw_api_key.unwrap_or("anonymous").to_string(),
+                None,
+                None,
+                None,
+                None,
+                user_id.clone(),
+                agent_id.clone(),
+                None,
+                false,
+                None,
+                None,
+            ));
         }
 
-        let key = raw_api_key.ok_or_else(|| {
-            GatewayError::Unauthorized(
+        let Some(key) = raw_api_key else {
+            return StaticOutcome::Reject(GatewayError::Unauthorized(
                 "No API key provided. Pass it via the Authorization header.".to_string(),
-            )
-        })?;
-
+            ));
+        };
         let key = key.strip_prefix("Bearer ").unwrap_or(key);
 
         if let Some(master) = &auth.master_key {
             if key == master.as_str() {
-                return Ok(RequestContext {
-                    request_id: Uuid::new_v4().to_string(),
-                    api_key: key.to_string(),
-                    is_master_key: true,
-                    org_id: None,
-                    team_id: None,
-                    project_id: None,
-                    user_name: Some("master".to_string()),
-                    user_id: user_id.clone(),
-                    agent_id: agent_id.clone(),
-                    key_config: None,
-                    skill_ids: skill_ids.clone(),
-                    tool_actions: tool_actions.clone(),
-                    tools_header_present,
-                    slot_provider: slot_provider.clone(),
-                    slot_model: slot_model.clone(),
-                    session_id: session_id.clone(),
-                    feature: feature.clone(),
-                    companion_source,
-                    tool_search_requested,
-                    priority,
-                    tool_profile: tool_profile.clone(),
-                    raw_tools,
-                });
+                return StaticOutcome::Matched(build_ctx(
+                    true,
+                    key.to_string(),
+                    None,
+                    None,
+                    None,
+                    Some("master".to_string()),
+                    user_id.clone(),
+                    agent_id.clone(),
+                    None,
+                    false,
+                    None,
+                    None,
+                ));
             }
         }
 
@@ -309,35 +359,72 @@ pub fn authenticate(
                 } else {
                     (Some(cfg_key.name.clone()), None)
                 };
-                return Ok(RequestContext {
-                    request_id: Uuid::new_v4().to_string(),
-                    api_key: key.to_string(),
-                    is_master_key: false,
-                    org_id: cfg_key.org_id.clone(),
-                    team_id: cfg_key.team_id.clone(),
-                    project_id: cfg_key.project_id.clone(),
-                    user_name: Some(cfg_key.name.clone()),
-                    user_id: eff_user_id,
-                    agent_id: eff_agent_id,
-                    key_config: Some(cfg_key.clone()),
-                    skill_ids: skill_ids.clone(),
-                    tool_actions: tool_actions.clone(),
-                    tools_header_present,
-                    slot_provider: slot_provider.clone(),
-                    slot_model: slot_model.clone(),
-                    session_id: session_id.clone(),
-                    feature: feature.clone(),
-                    companion_source,
-                    tool_search_requested,
-                    priority,
-                    tool_profile: tool_profile.clone(),
-                    raw_tools,
-                });
+                return StaticOutcome::Matched(build_ctx(
+                    false,
+                    key.to_string(),
+                    cfg_key.org_id.clone(),
+                    cfg_key.team_id.clone(),
+                    cfg_key.project_id.clone(),
+                    Some(cfg_key.name.clone()),
+                    eff_user_id,
+                    eff_agent_id,
+                    Some(cfg_key.clone()),
+                    false,
+                    None,
+                    None,
+                ));
             }
         }
 
-        Err(GatewayError::Unauthorized("Invalid API key.".to_string()))
-    })
+        // No static match. An `rgw_`-shaped bearer is a candidate for dynamic
+        // per-token org resolution (multi-tenant data plane) when the resolve
+        // cache is enabled. Everything else is a hard 401.
+        if key.starts_with("rgw_") && state.resolve_cache.is_some() {
+            StaticOutcome::TryDynamic(key.to_string())
+        } else {
+            StaticOutcome::Reject(GatewayError::Unauthorized("Invalid API key.".to_string()))
+        }
+    });
+
+    match outcome {
+        StaticOutcome::Matched(ctx) => Ok(ctx),
+        StaticOutcome::Reject(err) => Err(err),
+        StaticOutcome::TryDynamic(token) => {
+            // Safe: `TryDynamic` is only produced when `resolve_cache` is `Some`.
+            let cache = state
+                .resolve_cache
+                .as_ref()
+                .expect("TryDynamic implies resolve_cache is Some");
+            match cache.resolve_cached(&token).await {
+                Ok(resolved) => {
+                    // A resolved `rgw_` token: bill/attribute to its org. Do NOT
+                    // store the raw bearer in `api_key` (it is written verbatim
+                    // into every audit row) — use a redacted org-scoped label.
+                    let api_key_label = format!("rgw_org:{}", resolved.org_id);
+                    Ok(build_ctx(
+                        false,
+                        api_key_label,
+                        Some(resolved.org_id.clone()),
+                        None,
+                        None,
+                        Some(format!("org:{}", resolved.org_id)),
+                        user_id.clone(),
+                        agent_id.clone(),
+                        None,
+                        resolved.managed_inference,
+                        resolved.remaining_budget_micro_usd,
+                        Some(resolved.policy.clone()),
+                    ))
+                }
+                // An `rgw_`-shaped token that does not resolve (invalid / revoked /
+                // control plane unreachable) is a HARD 401 — never fall open into
+                // anonymous.
+                Err(crate::policy::ResolveErr::Unresolved) => Err(GatewayError::Unauthorized(
+                    "Invalid or revoked gateway token.".to_string(),
+                )),
+            }
+        }
+    }
 }
 
 // ─── Smart (classifier-driven) routing ────────────────────────────────────────
@@ -464,7 +551,12 @@ fn pre_process(
     // elsewhere in the pipeline.
     let requested_model = body["model"].as_str().unwrap_or("gpt-4o").to_string();
     if !ctx.is_master_key {
-        let policy = state.policy_snapshot();
+        // A dynamically-resolved `rgw_` tenant enforces its OWN control-plane
+        // policy; single-org / static-key paths use the global startup policy.
+        let policy = ctx
+            .resolved_policy
+            .clone()
+            .unwrap_or_else(|| state.policy_snapshot());
 
         // Model allowlist.
         if !policy.allows_model(&requested_model) {
@@ -720,6 +812,7 @@ pub async fn run(
         if let Some(saved) =
             crate::compression::maybe_compress(&state.config.compression, &mut body).await
         {
+            state.metrics.add_compression_saved(saved);
             debug!(tokens_saved = saved, "compression: request compressed");
         }
     }
@@ -1045,12 +1138,15 @@ pub async fn run(
                         );
                         let state2 = Arc::clone(&state);
                         let request_id = ctx.request_id.clone();
+                        let fail_closed_sticky =
+                            state.config.credits.fail_closed && ctx.managed_inference;
                         tokio::spawn(debit_wallet_for_request(
                             state2,
                             org_id,
                             request_id,
                             "gateway_usage",
                             cost,
+                            fail_closed_sticky,
                         ));
                     }
                 }
@@ -1062,6 +1158,7 @@ pub async fn run(
                     ctx.org_id.as_deref(),
                     &ctx.request_id,
                     billable_tool_calls,
+                    ctx.managed_inference,
                 );
 
                 return Ok(PipelineOutput {
@@ -1351,6 +1448,7 @@ pub async fn run_stream(
                         ctx.org_id.as_deref(),
                         &ctx.request_id,
                         billable_tool_calls,
+                        ctx.managed_inference,
                     );
                     Ok(crate::tools::value_to_sse_stream(&buffered))
                 }
@@ -1698,12 +1796,15 @@ pub async fn run_multimodal(
                     let has_output = modality != Modality::Image
                         || response["data"].as_array().is_some_and(|a| !a.is_empty());
                     if cost > 0 && has_output {
+                        let fail_closed_sticky =
+                            state.config.credits.fail_closed && ctx.managed_inference;
                         tokio::spawn(debit_wallet_for_request(
                             state.clone(),
                             org_id,
                             format!("{}:{}", ctx.request_id, modality.as_str()),
                             "media",
                             cost,
+                            fail_closed_sticky,
                         ));
                     }
                 }
@@ -1883,12 +1984,15 @@ pub async fn submit_video_job(
         if let Some(org_id) = job_org.filter(|s| !s.is_empty()) {
             let cost = state.config.credits.media_cost_micro_usd(&Modality::Video);
             if cost > 0 {
+                let fail_closed_sticky =
+                    state.config.credits.fail_closed && ctx.managed_inference;
                 tokio::spawn(debit_wallet_for_request(
                     state.clone(),
                     org_id,
                     format!("{job_id}:video"),
                     "media",
                     cost,
+                    fail_closed_sticky,
                 ));
             }
         }
@@ -1953,12 +2057,15 @@ pub async fn poll_video_job(
         if let Some(org_id) = job.org_id.clone().filter(|s| !s.is_empty()) {
             let cost = state.config.credits.media_cost_micro_usd(&Modality::Video);
             if cost > 0 {
+                let fail_closed_sticky =
+                    state.config.credits.fail_closed && ctx.managed_inference;
                 tokio::spawn(debit_wallet_for_request(
                     state.clone(),
                     org_id,
                     format!("{job_id}:video"),
                     "media",
                     cost,
+                    fail_closed_sticky,
                 ));
             }
         }
@@ -2142,6 +2249,22 @@ fn enforce_budget(
     if ctx.is_master_key {
         return Ok(None);
     }
+    // Pre-flight credit gate (multi-tenant data plane): a managed-inference tenant
+    // whose control-plane-resolved wallet is already exhausted is rejected BEFORE
+    // dispatch with a hard 402. This closes the "fresh replica serves one request
+    // against an already-empty wallet" hole — it reads the authoritative resolved
+    // balance (refreshed on the 60s cache TTL), so a top-up auto-recovers without a
+    // sticky flag. Independent of `credits.is_active()` (the balance is
+    // control-plane authoritative). Non-managed / BYOK / master traffic is exempt.
+    if let Some(err) = preflight_credit_gate(ctx) {
+        state.metrics.inc_budget_exceeded();
+        warn!(
+            org_id = ?ctx.org_id,
+            remaining_budget_micro_usd = ?ctx.remaining_budget_micro_usd,
+            "credits: managed tenant wallet exhausted, rejecting pre-flight (402)"
+        );
+        return Err(err);
+    }
     // Token-budget decision (U21) and the credit-wallet-empty decision (#486)
     // are both expressed as a `BudgetDecision`; pick the more severe so a single
     // `match` applies one action. The wallet decision reuses the existing budget
@@ -2227,6 +2350,23 @@ fn enforce_budget(
 /// response); this gate fires PRE-call on the NEXT request for that org. Returns
 /// the configured wallet-empty action (Stop by default, or Downgrade) so the
 /// shared `enforce_budget` machinery applies it — no new denial path (spec §4).
+/// Pre-flight credit gate for the multi-tenant data plane (§4). A managed-inference
+/// tenant (resolved from an `rgw_` token) whose control-plane-resolved remaining
+/// wallet balance is non-positive is rejected before dispatch with a hard
+/// `InsufficientCredits` (402). Reads only the resolved balance carried on the
+/// ctx — it is refreshed on the resolve cache's 60s TTL, so a top-up auto-recovers
+/// (no sticky flag to strand a re-funded org). Returns `None` for non-managed,
+/// uncapped (`None` budget), or positive-balance requests.
+fn preflight_credit_gate(ctx: &RequestContext) -> Option<GatewayError> {
+    if !ctx.managed_inference {
+        return None;
+    }
+    match ctx.remaining_budget_micro_usd {
+        Some(balance) if balance <= 0 => Some(GatewayError::InsufficientCredits),
+        _ => None,
+    }
+}
+
 fn wallet_empty_decision(state: &AppState, ctx: &RequestContext) -> Option<BudgetDecision> {
     let credits = &state.config.credits;
     if !credits.is_active() {
@@ -2363,10 +2503,13 @@ fn sse_parse_cost(raw: &str) -> Option<f64> {
 /// `/credits/debit` for the request's org, then updates the cached empty flag
 /// from the authoritative balance so the NEXT request is gated.
 ///
-/// Fails OPEN: a transport error, a non-2xx, or a missing org never blocks the
-/// (already-served) request — it is logged (audit-grade observability via
-/// `warn!`) and the flag is left untouched. A zero debit (cache hits, 0-token
-/// modalities) is skipped (the endpoint rejects `amountMicroUsd <= 0`).
+/// Never blocks the (already-served) request: a transport error, a non-2xx, or a
+/// missing org is logged (audit-grade observability via `warn!`). By default it
+/// fails OPEN (the empty flag is left untouched). When `fail_closed_sticky` is
+/// true (managed tenant + `credits.fail_closed`, §5), a transport error or non-2xx
+/// instead flips the org's wallet-empty flag so the NEXT request is refused — the
+/// current response still completes. A zero debit (cache hits, 0-token modalities)
+/// is skipped (the endpoint rejects `amountMicroUsd <= 0`).
 ///
 /// `ref_id` makes the debit idempotent: a retried hook is a no-op. Token usage
 /// passes `ref_id = request_id`; the per-request tool-call (Composio) debit passes
@@ -2378,6 +2521,7 @@ async fn debit_wallet_for_request(
     ref_id: String,
     reason: &'static str,
     cost_micro_usd: u64,
+    fail_closed_sticky: bool,
 ) {
     let credits = &state.config.credits;
     if !credits.is_active() {
@@ -2437,14 +2581,18 @@ async fn debit_wallet_for_request(
             }
         }
         Ok(r) => {
-            // Fail open: a control-plane error never blocks the served request,
-            // but the failed debit is recorded in the durable audit log (#486 AC)
-            // so unbilled usage is observable and reconcilable later.
+            // A control-plane error never blocks the (already-served) request. The
+            // failed debit is recorded in the durable audit log (#486 AC) so
+            // unbilled usage is observable and reconcilable later. When fail-closed
+            // is on for a managed tenant (§5), also flip the org's wallet-empty flag
+            // so the NEXT request is refused — the failure is made sticky, not
+            // silently swallowed.
             let status = r.status();
             warn!(
                 org_id = %org_id,
                 status = %status,
-                "credits: debit returned non-success (failing open)"
+                fail_closed = fail_closed_sticky,
+                "credits: debit returned non-success"
             );
             audit_debit_failure(
                 &state,
@@ -2452,15 +2600,26 @@ async fn debit_wallet_for_request(
                 &ref_id,
                 &format!("credits debit failed: control plane returned {status}"),
             );
+            if fail_closed_sticky {
+                state.wallet.set_org_empty(&org_id, true);
+            }
         }
         Err(e) => {
-            warn!(org_id = %org_id, error = %e, "credits: debit transport error (failing open)");
+            warn!(
+                org_id = %org_id,
+                error = %e,
+                fail_closed = fail_closed_sticky,
+                "credits: debit transport error"
+            );
             audit_debit_failure(
                 &state,
                 &org_id,
                 &ref_id,
                 &format!("credits debit failed (transport): {e}"),
             );
+            if fail_closed_sticky {
+                state.wallet.set_org_empty(&org_id, true);
+            }
         }
     }
 }
@@ -2479,6 +2638,7 @@ fn spawn_tool_call_debit(
     org_id: Option<&str>,
     request_id: &str,
     billable_tool_calls: u64,
+    managed_inference: bool,
 ) {
     if billable_tool_calls == 0 {
         return;
@@ -2495,12 +2655,14 @@ fn spawn_tool_call_debit(
         return;
     }
     let ref_id = format!("{request_id}:composio");
+    let fail_closed_sticky = credits.fail_closed && managed_inference;
     tokio::spawn(debit_wallet_for_request(
         Arc::clone(state),
         org_id.to_string(),
         ref_id,
         "composio",
         cost,
+        fail_closed_sticky,
     ));
 }
 
@@ -2755,12 +2917,15 @@ fn attach_stream_observer(
                                 input_tokens,
                                 output_tokens,
                             );
+                            let fail_closed_sticky = s.state.config.credits.fail_closed
+                                && s.ctx.managed_inference;
                             debit_wallet_for_request(
                                 Arc::clone(&s.state),
                                 org_id,
                                 s.ctx.request_id.clone(),
                                 "gateway_usage",
                                 cost,
+                                fail_closed_sticky,
                             )
                             .await;
                         }
@@ -3071,7 +3236,45 @@ mod tests {
             priority: crate::concurrency::Priority::Interactive,
             tool_profile: None,
             raw_tools: false,
+            managed_inference: false,
+            remaining_budget_micro_usd: None,
+            resolved_policy: None,
         }
+    }
+
+    #[test]
+    fn preflight_credit_gate_managed_empty_rejects_others_allow() {
+        let mut ctx = signal_ctx(None, false, false);
+        ctx.org_id = Some("o1".to_string());
+
+        // Non-managed traffic is never gated, even at a zero balance (BYOK /
+        // static-key / master paths are exempt).
+        ctx.managed_inference = false;
+        ctx.remaining_budget_micro_usd = Some(0);
+        assert!(preflight_credit_gate(&ctx).is_none());
+
+        // Managed + positive balance ⇒ allowed.
+        ctx.managed_inference = true;
+        ctx.remaining_budget_micro_usd = Some(500);
+        assert!(preflight_credit_gate(&ctx).is_none());
+
+        // Managed + uncapped (None budget) ⇒ allowed.
+        ctx.remaining_budget_micro_usd = None;
+        assert!(preflight_credit_gate(&ctx).is_none());
+
+        // Managed + exhausted (zero) ⇒ hard 402.
+        ctx.remaining_budget_micro_usd = Some(0);
+        assert!(matches!(
+            preflight_credit_gate(&ctx),
+            Some(GatewayError::InsufficientCredits)
+        ));
+
+        // Managed + overdrawn (negative) ⇒ hard 402.
+        ctx.remaining_budget_micro_usd = Some(-5);
+        assert!(matches!(
+            preflight_credit_gate(&ctx),
+            Some(GatewayError::InsufficientCredits)
+        ));
     }
 
     #[test]
@@ -3957,6 +4160,9 @@ mod tests {
             priority: crate::concurrency::Priority::Interactive,
             tool_profile: None,
             raw_tools: false,
+            managed_inference: false,
+            remaining_budget_micro_usd: None,
+            resolved_policy: None,
         };
 
         let body = Body::from(fixture);

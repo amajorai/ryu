@@ -54,6 +54,10 @@ pub fn router(state: SharedState) -> Router {
         // Metrics
         .route("/metrics", get(metrics::get_metrics))
         .route("/v1/metrics", get(metrics::get_metrics))
+        // Community savings — public, ungated anonymous aggregate (opt-in beacon
+        // source). Mirrors /metrics registration; NO admin gate.
+        .route("/v1/savings", get(metrics::community_savings))
+        .route("/savings", get(metrics::community_savings))
         // Local-engine admission-queue depth (Layer 2 observability)
         .route("/v1/concurrency", get(metrics::get_concurrency))
         // Evals — rolling scores + dataset runner

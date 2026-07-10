@@ -148,7 +148,9 @@ pub async fn run_evals(
             agent_id: req.agent_id.clone(),
             ..Default::default()
         },
-    ) {
+    )
+    .await
+    {
         Ok(ctx) => ctx,
         Err(e) => {
             return (

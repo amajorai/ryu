@@ -49,7 +49,8 @@ pub async fn image_generations(
             slot_model,
             ..Default::default()
         },
-    )?;
+    )
+    .await?;
     debug!(request_id = %ctx.request_id, "image_generations: authenticated");
 
     let output = pipeline::run_multimodal(state, ctx, body, Modality::Image).await?;
@@ -92,7 +93,8 @@ pub async fn audio_speech(
             slot_model,
             ..Default::default()
         },
-    )?;
+    )
+    .await?;
     debug!(request_id = %ctx.request_id, "audio_speech: authenticated");
 
     let output = pipeline::run_multimodal(state, ctx, body, Modality::Tts).await?;
@@ -135,7 +137,8 @@ pub async fn audio_transcriptions(
             slot_model,
             ..Default::default()
         },
-    )?;
+    )
+    .await?;
     debug!(request_id = %ctx.request_id, "audio_transcriptions: authenticated");
 
     let output = pipeline::run_multimodal(state, ctx, body, Modality::Stt).await?;
@@ -180,7 +183,8 @@ pub async fn video_generations(
             slot_model,
             ..Default::default()
         },
-    )?;
+    )
+    .await?;
     debug!(request_id = %ctx.request_id, "video_generations: authenticated");
 
     let output = pipeline::submit_video_job(state, ctx, body).await?;
@@ -201,7 +205,8 @@ pub async fn video_job_status(
             raw_api_key: raw_key,
             ..Default::default()
         },
-    )?;
+    )
+    .await?;
     let output = pipeline::poll_video_job(state, ctx, id).await?;
     Ok(Json(output).into_response())
 }

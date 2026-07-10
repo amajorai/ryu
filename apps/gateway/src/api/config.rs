@@ -231,7 +231,7 @@ pub async fn get_config(
     headers: HeaderMap,
 ) -> Result<Json<Value>, GatewayError> {
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
-    let ctx = authenticate(&state, AuthInputs::with_key(raw_key))?;
+    let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
     require_local_admin(&state, &peer, ctx.is_master_key, "Config access")?;
 
     // Read live config from the RwLock fields so GET reflects any PUT changes
@@ -337,7 +337,7 @@ pub async fn put_config(
     Json(patch): Json<ConfigPatch>,
 ) -> Result<Json<Value>, GatewayError> {
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
-    let ctx = authenticate(&state, AuthInputs::with_key(raw_key))?;
+    let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
     // Same local-trust rule as GET: writable from loopback in no-auth mode,
     // master-key-gated otherwise (remote peers always need the master key).
     require_local_admin(&state, &peer, ctx.is_master_key, "Config updates")?;

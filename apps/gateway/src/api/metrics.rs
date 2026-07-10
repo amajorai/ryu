@@ -1,5 +1,7 @@
+use std::sync::atomic::Ordering;
+
 use axum::{extract::State, Json};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::state::SharedState;
 
@@ -19,6 +21,30 @@ pub async fn get_metrics(State(state): State<SharedState>) -> Json<Value> {
         obj.insert("provider_quota".to_string(), state.quota.snapshot());
     }
     Json(snapshot)
+}
+
+/// Public, ungated community-savings aggregate (mirrors `/metrics` registration
+/// but exposes ONLY safe totals — no per-provider maps, no quota, no keys).
+/// Core's community-stats beacon reads this to fan out anonymous savings to the
+/// control plane. Opt-in on the Core side; the gateway endpoint itself is public.
+pub async fn community_savings(State(state): State<SharedState>) -> Json<Value> {
+    let m = &state.metrics;
+    let hits = m.cache_hits.load(Ordering::Relaxed);
+    let misses = m.cache_misses.load(Ordering::Relaxed);
+    let total_cache = hits + misses;
+    let cache_hit_rate = if total_cache == 0 {
+        0.0_f64
+    } else {
+        hits as f64 / total_cache as f64
+    };
+
+    Json(json!({
+        "requests":      m.total_requests.load(Ordering::Relaxed),
+        "input_tokens":  m.total_input_tokens.load(Ordering::Relaxed),
+        "output_tokens": m.total_output_tokens.load(Ordering::Relaxed),
+        "tokens_saved":  m.compression_tokens_saved.load(Ordering::Relaxed),
+        "cache_hit_rate": cache_hit_rate,
+    }))
 }
 
 /// Live admission-queue depth for the gated local engine — in-flight vs queued

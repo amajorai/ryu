@@ -111,7 +111,7 @@ pub async fn exec_tool(
     Json(body): Json<ExecToolBody>,
 ) -> Result<Json<ExecToolResponse>, GatewayError> {
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
-    let ctx = authenticate(&state, AuthInputs::with_key(raw_key))?;
+    let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
 
     // Gate: trusted-forwarder or master key, neutralized when mesh is on (B-9).
     let is_trusted =
@@ -346,7 +346,7 @@ pub async fn exec_scan(
     Json(body): Json<ExecScanBody>,
 ) -> Result<Json<ScanVerdict>, GatewayError> {
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
-    let ctx = authenticate(&state, AuthInputs::with_key(raw_key))?;
+    let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
     let is_trusted =
         ctx.is_master_key || ctx.key_config.as_ref().is_some_and(|k| k.trusted_forwarder);
     if !is_trusted {

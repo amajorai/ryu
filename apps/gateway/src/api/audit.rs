@@ -53,7 +53,7 @@ pub async fn query_audit(
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
     // The audit query endpoint is master-key only and not budget-scoped, so no
     // per-user / per-agent identity is threaded here.
-    let ctx = authenticate(&state, AuthInputs::with_key(raw_key))?;
+    let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
 
     // Audit data is tenant-wide, so the master key is always sufficient. Without
     // it, access is allowed ONLY from a loopback peer in no-auth mode — never
@@ -296,7 +296,7 @@ pub async fn ingest_exec_audit(
     Json(body): Json<ExecAuditBody>,
 ) -> Result<Json<Value>, GatewayError> {
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
-    let ctx = authenticate(&state, AuthInputs::with_key(raw_key))?;
+    let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
 
     // Only trusted-forwarder keys (Core's internal key) or the master key may
     // ingest exec events. This prevents anyone who can make HTTP requests from
@@ -369,7 +369,7 @@ pub async fn check_exec_budget(
     Json(body): Json<ExecBudgetCheckBody>,
 ) -> Result<Json<ExecBudgetCheckResponse>, GatewayError> {
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
-    let ctx = authenticate(&state, AuthInputs::with_key(raw_key))?;
+    let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
 
     let is_trusted =
         ctx.is_master_key || ctx.key_config.as_ref().is_some_and(|k| k.trusted_forwarder);

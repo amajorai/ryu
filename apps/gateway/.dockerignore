@@ -1,0 +1,22 @@
+# Keep the Docker build context small + reproducible. The Rust build only needs
+# Cargo.toml, Cargo.lock, and src/. Everything below is either build output,
+# local state, or editor cruft that would bust the layer cache on every change.
+target/
+**/*.rs.bk
+*.pdb
+
+# Local gateway state / audit store — never bake into the image.
+*.sqlite
+*.sqlite-*
+*.db
+gateway.toml
+data/
+/data/
+
+# Docs, tests fixtures, and misc that don't affect the binary.
+README.md
+*.md
+.git/
+.gitignore
+.env
+.env.*

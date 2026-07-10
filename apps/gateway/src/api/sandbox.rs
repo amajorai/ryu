@@ -110,7 +110,7 @@ pub async fn sandbox_tick(
     Json(body): Json<SandboxTickBody>,
 ) -> Result<Json<SandboxTickResponse>, GatewayError> {
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
-    let ctx = authenticate(&state, AuthInputs::with_key(raw_key))?;
+    let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
 
     let is_trusted =
         ctx.is_master_key || ctx.key_config.as_ref().is_some_and(|k| k.trusted_forwarder);

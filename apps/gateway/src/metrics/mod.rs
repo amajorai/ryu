@@ -15,6 +15,8 @@ pub struct Metrics {
     pub firewall_blocked: AtomicU64,
     pub total_input_tokens: AtomicU64,
     pub total_output_tokens: AtomicU64,
+    /// Aggregated tokens saved by context compression (egress transform).
+    pub compression_tokens_saved: AtomicU64,
     pub budget_exceeded: AtomicU64,
     pub budget_notified: AtomicU64,
     pub budget_downgraded: AtomicU64,
@@ -80,6 +82,11 @@ impl Metrics {
         self.total_input_tokens.fetch_add(input, Ordering::Relaxed);
         self.total_output_tokens
             .fetch_add(output, Ordering::Relaxed);
+    }
+    /// Add to the aggregated context-compression tokens-saved counter.
+    pub fn add_compression_saved(&self, n: u64) {
+        self.compression_tokens_saved
+            .fetch_add(n, Ordering::Relaxed);
     }
     pub fn inc_provider_request(&self, provider: &str) {
         *self

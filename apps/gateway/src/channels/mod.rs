@@ -132,6 +132,10 @@ fn channel_context(channel_name: &str) -> RequestContext {
         tool_profile: None,
         // Bots use the managed tool loops, not SDK raw passthrough.
         raw_tools: false,
+        // Channel/bot traffic is not a dynamically-resolved managed tenant.
+        managed_inference: false,
+        remaining_budget_micro_usd: None,
+        resolved_policy: None,
     }
 }
 
