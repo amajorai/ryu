@@ -652,6 +652,13 @@ async fn main() {
     // installs any. Skills are injected into outgoing chat requests by the adapter.
     let skill_registry = crate::skills::SkillRegistry::load();
 
+    // Per-run worktree diff cache, shared by the chat path and the off-chat agent
+    // runner. Built once here so both `ServerState`, the runner, and the in-process
+    // `ryu.worktree` app (via the MCP registry below) hold the same handle (a
+    // per-run diff captured during a workflow agent turn is visible to chat too).
+    let worktree_diffs: crate::server::WorktreeDiffStore =
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+
     // Wire self-build context into the MCP registry (U57). The registry holds
     // Arc references to the manifest store and app store so scaffold_runnable /
     // install_app / write_ryu_json can hot-install without a process restart.
@@ -661,6 +668,9 @@ async fn main() {
             // Wire the agent store so the `agent_builder` tools can edit agent
             // records in chat (the desktop agent-edit page's builder pane).
             .with_agent_store(agent_store.clone())
+            // Wire the team store so `agent_builder__create_agent_team` can mint a
+            // roster of agents and persist them as a reusable team.
+            .with_team_store(teams.clone())
             // Wire the conversation store so the `search_conversations` built-in
             // tool can run semantic search over past chat messages.
             .with_conversations(conversations.clone())
@@ -669,7 +679,10 @@ async fn main() {
             .with_skills(skill_registry.clone())
             // Wire the preferences store so the built-in `advisor` tool resolves
             // the configured `advisor-model` (the stronger reviewer model).
-            .with_preferences(preferences.clone()),
+            .with_preferences(preferences.clone())
+            // Wire the per-run worktree diff store so the in-process `ryu.worktree`
+            // app can resolve a run's diff and apply/discard it (widget callTool).
+            .with_worktree_diffs(Arc::clone(&worktree_diffs)),
     );
 
     // Website-monitoring engine (#456 monitoring feature). Opens its own SQLite
@@ -843,13 +856,6 @@ async fn main() {
         Ok(store) => crate::composio_triggers::set_global(store),
         Err(e) => tracing::warn!("composio triggers store unavailable: {e:#}"),
     }
-
-    // Per-run worktree diff cache, shared by the chat path and the off-chat agent
-    // runner. Built once here so both `ServerState` and the runner hold the same
-    // handle (a per-run diff captured during a workflow agent turn is visible to
-    // the chat surfaces too).
-    let worktree_diffs: crate::server::WorktreeDiffStore =
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
     // Publish the global agent runner so off-chat callers (workflow `Prompt`
     // nodes, the scheduler's `JobTarget::Agent`, Composio triggers) can invoke

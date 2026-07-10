@@ -180,6 +180,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(search_schema()),
+            ..Default::default()
         },
         RegistryTool {
             id: LOAD_TOOL_ID.to_owned(),
@@ -193,6 +194,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(load_schema()),
+            ..Default::default()
         },
     ];
     if author_enabled() {
@@ -211,6 +213,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(author_schema()),
+            ..Default::default()
         });
     }
     tools

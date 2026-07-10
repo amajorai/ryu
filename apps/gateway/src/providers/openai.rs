@@ -231,18 +231,69 @@ impl Provider for OpenAiProvider {
         body: &'a Value,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, GatewayError>> + Send + 'a>> {
         Box::pin(async move {
-            let mut payload = body.clone();
-            payload["model"] = Value::String(model.to_string());
-            debug!(provider = "openai", model, "sending STT request");
+            use base64::Engine as _;
+
+            // Core carries the audio to the Gateway as base64 inside a JSON body
+            // (it holds no multipart), but real Groq/OpenAI `/audio/transcriptions`
+            // (Whisper STT) require `multipart/form-data`. Re-multipart here.
+            let audio_b64 = body
+                .get("file")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    GatewayError::ProviderError(
+                        "STT request missing base64 `file` field".to_string(),
+                    )
+                })?;
+            let audio_bytes = base64::engine::general_purpose::STANDARD
+                .decode(audio_b64.trim())
+                .map_err(|e| {
+                    GatewayError::ProviderError(format!("STT `file` is not valid base64: {e}"))
+                })?;
+
+            let filename = body
+                .get("filename")
+                .and_then(Value::as_str)
+                .unwrap_or("audio.wav")
+                .to_string();
+            let content_type = audio_content_type(&filename).to_string();
+
+            // Text parts to forward alongside the file. `model` is the routed model
+            // (never the caller's), and we preserve whatever the caller set for the
+            // optional Whisper params — including `response_format: verbose_json`,
+            // which is how the caller opts into timestamped segments.
+            let mut text_parts: Vec<(String, String)> =
+                vec![("model".to_string(), model.to_string())];
+            for key in ["language", "response_format", "temperature", "prompt"] {
+                if let Some(val) = body.get(key) {
+                    if let Some(s) = value_to_form_string(val) {
+                        text_parts.push((key.to_string(), s));
+                    }
+                }
+            }
+
+            debug!(provider = "openai", model, "sending STT multipart request");
 
             let url = audio_transcriptions_url(&self.base_url);
             let resp = send_with_retry(
                 || {
+                    let mut form = reqwest::multipart::Form::new().part(
+                        "file",
+                        reqwest::multipart::Part::bytes(audio_bytes.clone())
+                            .file_name(filename.clone())
+                            .mime_str(&content_type)
+                            .unwrap_or_else(|_| {
+                                reqwest::multipart::Part::bytes(audio_bytes.clone())
+                                    .file_name(filename.clone())
+                            }),
+                    );
+                    for (key, val) in &text_parts {
+                        form = form.text(key.clone(), val.clone());
+                    }
                     let req = self
                         .client
                         .post(&url)
                         .bearer_auth(self.primary_key())
-                        .json(&payload);
+                        .multipart(form);
                     Box::pin(async move { req.send().await })
                 },
                 "openai",
@@ -252,5 +303,32 @@ impl Provider for OpenAiProvider {
 
             check_response_status(resp, "openai", None).await
         })
+    }
+}
+
+/// Guess an audio MIME type from a filename extension so the STT provider parses
+/// the uploaded `file` part correctly. Defaults to `application/octet-stream`.
+fn audio_content_type(filename: &str) -> &'static str {
+    match filename.rsplit('.').next().map(str::to_ascii_lowercase).as_deref() {
+        Some("wav") => "audio/wav",
+        Some("mp3") => "audio/mpeg",
+        Some("m4a" | "mp4") => "audio/mp4",
+        Some("ogg" | "oga") => "audio/ogg",
+        Some("webm") => "audio/webm",
+        Some("flac") => "audio/flac",
+        Some("aac") => "audio/aac",
+        Some("mpga") => "audio/mpeg",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Render a JSON value as a `multipart/form-data` text field. Strings pass
+/// through as-is; numbers/bools are stringified; other shapes are skipped.
+fn value_to_form_string(val: &Value) -> Option<String> {
+    match val {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        _ => None,
     }
 }

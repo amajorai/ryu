@@ -54,8 +54,9 @@ use rmcp::{
 use serde_json::{json, Map, Value};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-use crate::sidecar::adapters::acp::AcpEvent;
+use crate::sidecar::adapters::acp::{AcpEvent, ToolWidgetEvent};
 use crate::sidecar::mcp::catalog::ToolKind;
+use crate::sidecar::mcp::client::McpToolResult;
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::untrusted;
 use crate::tool_exec;
@@ -511,6 +512,9 @@ impl rmcp::ServerHandler for RyuMcpHandler {
             .clone()
             .map(Value::Object)
             .unwrap_or(Value::Null);
+        // Retained for the widget-emit path (the `_` arm moves `args` into
+        // `call_tool_with_identity`).
+        let tool_input = args.clone();
 
         // Capability gate (defense in depth): these tools are filtered out of the
         // advertised set for an agent that lacks the capability, but a model can
@@ -525,7 +529,9 @@ impl rmcp::ServerHandler for RyuMcpHandler {
                 None,
             ));
         }
-        if tool_id == crate::sidecar::mcp::CREATE_AGENT_TOOL_ID && !self.caps.can_create_agents {
+        let creates_agents = tool_id == crate::sidecar::mcp::CREATE_AGENT_TOOL_ID
+            || tool_id == crate::sidecar::mcp::CREATE_AGENT_TEAM_TOOL_ID;
+        if creates_agents && !self.caps.can_create_agents {
             return Err(McpError::new(
                 rmcp::model::ErrorCode::INVALID_REQUEST,
                 format!("tool '{tool_id}' requires the agent-creation capability, which is disabled for this agent"),
@@ -603,6 +609,31 @@ impl rmcp::ServerHandler for RyuMcpHandler {
                 })?,
         };
 
+        // Widget emit (D1): the MCP bridge is the single choke point for both
+        // planes, so a tool that resolves to a `WidgetBinding` emits the widget
+        // side-channel here, keyed to the tool call, in addition to the normal
+        // text result. Only on the interactive/streaming path (a `permission_tx`
+        // is present); headless callers get the text result and no widget.
+        if let Some(tx) = &self.permission_tx {
+            // ACP plane: the bridge does not know the ACP-side tool-call id, so it
+            // passes `None` and `build_widget_event` derives the synthetic
+            // `wgtcall_{instance_id}` (behaviour unchanged). The Core OpenAI-compat
+            // chat loop passes the REAL `tool_calls[].id` instead (R1 / A0).
+            if let Some(event) = build_widget_event(
+                &self.mcp,
+                tool_id,
+                &tool_input,
+                &result,
+                None,
+                self.permission_scope_id.clone(),
+                self.agent_id.clone(),
+            )
+            .await
+            {
+                let _ = tx.send(AcpEvent::ToolWidget(Box::new(event)));
+            }
+        }
+
         let text = match result {
             Value::String(s) => s,
             other => other.to_string(),
@@ -612,6 +643,116 @@ impl rmcp::ServerHandler for RyuMcpHandler {
         // the transcript). See `neutralize_external_result`.
         let text = neutralize_external_result(tool_id, text);
         Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+}
+
+/// Build the widget-availability event for a tool that resolves to a
+/// [`crate::sidecar::mcp::WidgetBinding`], or `None` when the tool renders no
+/// widget / errored / the per-session instance cap is hit. Mints the
+/// `WidgetInstance` (the round-trip identity) and resolves the widget HTML.
+///
+/// A free fn (not a method) so BOTH emit planes share it (R1 / A0):
+/// - the ACP MCP bridge passes `tool_call_id = None` and gets the synthetic
+///   `wgtcall_{instance_id}` id (behaviour unchanged);
+/// - the Core OpenAI-compat chat tool loop passes `Some(real_id)`, the actual
+///   `tool_calls[].id`, so the widget part carries the real correlation id (D1).
+///
+/// It reads `structuredContent`/`_meta` out of `result` and never re-dispatches
+/// the tool, so it is safe to call after the tool has already executed on either
+/// plane.
+pub(crate) async fn build_widget_event(
+    mcp: &McpRegistry,
+    tool_id: &str,
+    tool_input: &Value,
+    result: &Value,
+    tool_call_id: Option<String>,
+    conversation_id: Option<String>,
+    agent_id: String,
+) -> Option<ToolWidgetEvent> {
+    let binding = mcp.widget_binding(tool_id).await?;
+    let typed = McpToolResult::from_result_value(result.clone());
+    // `isError` results NEVER emit a widget (spec §1.1).
+    if typed.is_error {
+        return None;
+    }
+    let (server, _tool) = McpRegistry::split_tool_id(tool_id)?;
+    let resource = mcp.widget_resource(server, &binding.template_uri).await?;
+    // Prewarm sibling widget resources for reload (best-effort).
+    let _ = mcp.prewarm_widgets(server).await;
+    let tool_ids = mcp.widget_accessible_tool_ids(server).await;
+
+    // Mint the instance (round-trip identity). The conversation/session key is
+    // the permission scope; over the per-session cap → no widget.
+    let instance = crate::server::widgets::mint_widget_instance(
+        conversation_id.unwrap_or_default(),
+        agent_id,
+        server.to_owned(),
+        tool_ids,
+    )?;
+
+    // `_meta` minus `ryu/widget` (Core strips) → `toolResponseMetadata`.
+    let mut meta = typed.meta.unwrap_or_else(|| Value::Object(Default::default()));
+    if let Some(obj) = meta.as_object_mut() {
+        obj.remove("ryu/widget");
+    }
+    let tool_output = typed.structured_content.unwrap_or(Value::Null);
+
+    // Injection defense (B3): first-party in-process apps are trusted; results
+    // from any other server are neutralized (structured string leaves) before
+    // they reach the widget / model-context fold.
+    let (tool_output, meta) = if crate::sidecar::mcp::apps::owns(server) {
+        (tool_output, meta)
+    } else {
+        (neutralize_structured(tool_output), neutralize_structured(meta))
+    };
+
+    let approved_grants = if binding.widget_accessible {
+        vec!["tool:call".to_owned(), "ui:send_message".to_owned()]
+    } else {
+        Vec::new()
+    };
+
+    // Real tool-call id when the caller has one (the chat loop); otherwise the
+    // synthetic instance-derived id (the ACP bridge, which cannot see it).
+    let tool_call_id =
+        tool_call_id.unwrap_or_else(|| format!("wgtcall_{}", instance.instance_id));
+
+    Some(ToolWidgetEvent {
+        tool_call_id,
+        tool_name: tool_id.to_owned(),
+        instance_id: instance.instance_id,
+        server_id: server.to_owned(),
+        template_uri: binding.template_uri,
+        widget_html: resource.html,
+        widget_mime: resource.mime_type,
+        tool_input: tool_input.clone(),
+        tool_output,
+        tool_response_metadata: meta,
+        widget_accessible: binding.widget_accessible,
+        approved_grants,
+        invoking: binding.invoking_label,
+        invoked: binding.invoked_label,
+        initial_widget_state: instance.widget_state,
+        display_mode: "inline".to_owned(),
+    })
+}
+
+/// Recursively neutralize string leaves of a structured value (injection defense
+/// for widget data originating from a non-first-party MCP server). No-op when
+/// the untrusted-wrapping control is disabled.
+fn neutralize_structured(v: Value) -> Value {
+    if !untrusted::is_enabled() {
+        return v;
+    }
+    match v {
+        Value::String(s) => Value::String(untrusted::neutralize(&s)),
+        Value::Array(a) => Value::Array(a.into_iter().map(neutralize_structured).collect()),
+        Value::Object(o) => Value::Object(
+            o.into_iter()
+                .map(|(k, val)| (k, neutralize_structured(val)))
+                .collect(),
+        ),
+        other => other,
     }
 }
 

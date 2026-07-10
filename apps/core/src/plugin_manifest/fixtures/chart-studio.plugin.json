@@ -1,0 +1,30 @@
+{
+  "id": "io.ryu.chart-studio",
+  "name": "Chart Studio",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "tool-chart-render",
+      "name": "Render Chart",
+      "kind": "tool",
+      "config": { "slug": "chart__render" }
+    },
+    {
+      "id": "tool-chart-query",
+      "name": "Query Range",
+      "kind": "tool",
+      "config": { "slug": "chart__query_range" }
+    }
+  ],
+  "contributes": {
+    "widgets": [
+      {
+        "tool_id": "chart__render",
+        "uri": "ui://widget/chart-studio.html",
+        "mime": "text/html+skybridge",
+        "default_display_mode": "inline"
+      }
+    ]
+  },
+  "permission_grants": ["chat.sendFollowUp"]
+}

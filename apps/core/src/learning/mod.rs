@@ -76,8 +76,28 @@ pub const LEARNING_LAST_CYCLE_PREF: &str = "learning.last-cycle-at";
 /// Minimum hours between scheduled cycles.
 pub const LEARNING_MIN_GAP_HOURS_PREF: &str = "learning.min-cycle-gap-hours";
 
+/// Whether a thumbs 👍/👎 on a chat message writes a long-term RAG memory fact
+/// (good answers become recallable examples; bad answers become "avoid" notes).
+/// Default ON — the memory store is local and private, and auto-recall already
+/// surfaces its facts, so this improves answers on install with no egress.
+pub const FEEDBACK_MEMORY_ENABLED_PREF: &str = "feedback.memory-enabled";
+/// Whether a 👎 also records a *negative* ("avoid answering like this") memory
+/// note, in addition to being filtered out of the training set. Default ON.
+pub const FEEDBACK_DOWN_NEGATIVE_PREF: &str = "feedback.down-negative-memory";
+
 const DEFAULT_MIN_REWARD: f64 = 0.7;
 const DEFAULT_MIN_GAP_HOURS: i64 = 20;
+/// Reward written into the experience buffer for a 👍 / 👎. 👍 is a maximal
+/// positive so it always clears `learning.min-reward`; 👎 is `0.0` so it is
+/// dropped from the reward-filtered SFT set.
+const FEEDBACK_REWARD_UP: f64 = 1.0;
+const FEEDBACK_REWARD_DOWN: f64 = 0.0;
+/// Importance (1..=5) for a feedback-derived memory fact. Above the default (3)
+/// so a human-labelled example is recalled ahead of ambient facts.
+const FEEDBACK_MEMORY_IMPORTANCE: i32 = 4;
+/// Cap the assistant snippet stored in a memory fact so a long reply doesn't
+/// dominate the recall budget.
+const FEEDBACK_SNIPPET_CHARS: usize = 600;
 
 /// Published `ServerState` handle for the scheduler's `LearningCycle` job, which
 /// has no `State` extractor. Set once at startup ([`set_global_state`]), mirroring
@@ -168,6 +188,22 @@ pub async fn resolve_skills_enabled(state: &ServerState) -> bool {
 /// live. Default ON. A `force` synth bypasses this at the call site.
 pub async fn resolve_require_approval(state: &ServerState) -> bool {
     match pref(state, LEARNING_REQUIRE_APPROVAL_PREF).await {
+        Some(v) => truthy(&v),
+        None => true,
+    }
+}
+
+/// Whether a thumbs vote writes a RAG memory fact. Default ON (local + private).
+pub async fn resolve_feedback_memory_enabled(state: &ServerState) -> bool {
+    match pref(state, FEEDBACK_MEMORY_ENABLED_PREF).await {
+        Some(v) => truthy(&v),
+        None => true,
+    }
+}
+
+/// Whether a 👎 records a negative "avoid" memory note. Default ON.
+pub async fn resolve_feedback_down_negative(state: &ServerState) -> bool {
+    match pref(state, FEEDBACK_DOWN_NEGATIVE_PREF).await {
         Some(v) => truthy(&v),
         None => true,
     }
@@ -459,6 +495,189 @@ pub async fn sweep_into_buffer(state: &ServerState) -> Result<usize> {
         }
     }
     Ok(added)
+}
+
+// ---------------------------------------------------------------------------
+// Thumbs feedback: seed the reward + RAG-memory sinks from a 👍 / 👎
+// ---------------------------------------------------------------------------
+
+/// What a thumbs vote actually seeded downstream. Returned to the client so the
+/// UI can hint (e.g. "saved to memory") and for tests. All-false is normal when
+/// the vote was cleared or the relevant opt-ins are off.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FeedbackOutcome {
+    /// A reward was written into the experience buffer (training path on).
+    pub reward_captured: bool,
+    /// A RAG memory fact was recorded (memory sink on).
+    pub memory_captured: bool,
+}
+
+/// Seed the continual-learning reward and the RAG-memory sinks from a thumbs vote
+/// on an assistant message. The message's own `feedback` column is set by the
+/// caller (durable UI state); this only fans the vote out to the two learners.
+///
+/// - **Reward sink** (gated on [`resolve_enabled`], default OFF): upsert the turn
+///   into the experience buffer, then `set_reward` to `1.0` (👍) or `0.0` (👎).
+///   A human label is authoritative — `set_reward` overwrites any prior PRM score,
+///   and a 👎 at `0.0` is dropped from the reward-filtered training set.
+/// - **Memory sink** (gated on [`resolve_feedback_memory_enabled`], default ON):
+///   a 👍 records the exchange as a recallable good example; a 👎 optionally
+///   records an "avoid" note (gated on [`resolve_feedback_down_negative`]).
+///
+/// `rating` is `Some("up")` / `Some("down")` to seed, or `None` (a cleared vote)
+/// which is a no-op here. Fail-soft: a sink error is logged, not propagated, so a
+/// downstream hiccup never fails the user's click.
+pub async fn apply_message_feedback(
+    state: &ServerState,
+    conversation_id: &str,
+    message_id: &str,
+    rating: Option<&str>,
+) -> FeedbackOutcome {
+    let mut outcome = FeedbackOutcome::default();
+    // Tag stamped on every feedback-derived memory fact for this message, so a
+    // changed or cleared vote can find and remove its prior artifacts.
+    let msg_tag = format!("msg:{message_id}");
+
+    // Roll back any prior feedback artifacts for this message FIRST (idempotent),
+    // so re-voting, changing up↔down, or clearing never leaves a stale reward or a
+    // contradictory memory fact. Clearing the reward reverts the row to unscored
+    // (PRM-rescorable) rather than keeping a dead human label.
+    if resolve_enabled(state).await {
+        if let Err(e) = state.experience.clear_reward(message_id).await {
+            tracing::warn!("feedback: clearing reward {message_id} failed: {e:#}");
+        }
+    }
+    match state.memory.ids_with_tag(&msg_tag).await {
+        Ok(ids) => {
+            for id in ids {
+                let _ = state.memory.delete(&id).await;
+                let _ = state.retrieval.remove_chunk(&id).await;
+            }
+        }
+        Err(e) => tracing::warn!("feedback: listing prior memory facts failed: {e:#}"),
+    }
+
+    let is_up = match rating {
+        Some("up") => true,
+        Some("down") => false,
+        // Cleared (or unknown) rating: the rollback above is the whole job.
+        _ => return outcome,
+    };
+
+    // Per-conversation learning opt-out is honored here exactly as the sweep /
+    // score / cycle paths honor it: an excluded conversation's plaintext must
+    // never be staged into the buffer or a memory fact.
+    if resolve_excluded(state, conversation_id).await {
+        return outcome;
+    }
+
+    // Fetch the (user prompt, assistant reply) pair this vote refers to. Both
+    // sinks need it; if we can't resolve the turn there is nothing to seed.
+    let turn = match state
+        .conversations
+        .get_turn_for_assistant_message(conversation_id, message_id)
+        .await
+    {
+        Ok(Some(t)) => t,
+        Ok(None) => return outcome,
+        Err(e) => {
+            tracing::warn!("feedback: resolving turn {message_id} failed: {e:#}");
+            return outcome;
+        }
+    };
+    let (user_text, assistant_text, agent_id) = turn;
+    if user_text.trim().is_empty() || assistant_text.trim().is_empty() {
+        return outcome;
+    }
+
+    // --- Reward sink (training path; explicit opt-in) ------------------------
+    if resolve_enabled(state).await {
+        let generation = resolve_skill_generation(state).await;
+        let exp = Experience {
+            id: message_id.to_string(),
+            conversation_id: conversation_id.to_string(),
+            agent_id: agent_id.clone(),
+            user_text: user_text.clone(),
+            assistant_text: assistant_text.clone(),
+            outcome: "completed".to_string(),
+            reward: None,
+            base_model: None,
+            skill_generation: generation,
+            excluded: false,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        // Insert-if-absent then overwrite the reward: a human label wins over any
+        // PRM score already on the row.
+        if let Err(e) = state.experience.record_if_absent(&exp).await {
+            tracing::warn!("feedback: buffering turn {message_id} failed: {e:#}");
+        }
+        let reward = if is_up {
+            FEEDBACK_REWARD_UP
+        } else {
+            FEEDBACK_REWARD_DOWN
+        };
+        match state.experience.set_reward(message_id, reward).await {
+            Ok(updated) => outcome.reward_captured = updated,
+            Err(e) => tracing::warn!("feedback: set_reward({message_id}) failed: {e:#}"),
+        }
+    }
+
+    // --- Memory sink (RAG; local + private, default on) ---------------------
+    if resolve_feedback_memory_enabled(state).await {
+        let record_negative = !is_up && resolve_feedback_down_negative(state).await;
+        if is_up || record_negative {
+            let snippet = truncate_snippet(&assistant_text, FEEDBACK_SNIPPET_CHARS);
+            let question = user_text.trim();
+            let (content, tag) = if is_up {
+                (
+                    format!("Approach the user liked. When asked \"{question}\", a good answer is: {snippet}"),
+                    "good-answer",
+                )
+            } else {
+                (
+                    format!("Approach the user disliked. When asked \"{question}\", avoid answering like: {snippet}"),
+                    "avoid",
+                )
+            };
+            let agent = agent_id.as_deref().unwrap_or("default");
+            let mut mem = crate::server::memory::NewMemory::user_fact(content);
+            mem.importance = FEEDBACK_MEMORY_IMPORTANCE;
+            mem.when_to_use = Some(question.to_string());
+            // `msg_tag` lets a later change/clear find and remove this exact fact.
+            mem.tags = vec!["feedback".to_string(), tag.to_string(), msg_tag.clone()];
+            mem.author_agent_id = Some(agent.to_string());
+            match state
+                .memory
+                .record_full(crate::server::memory::LOCAL_USER, agent, mem)
+                .await
+            {
+                Ok(Some(id)) => {
+                    outcome.memory_captured = true;
+                    // Index now so semantic recall/search sees it immediately
+                    // (auto-recall would otherwise lazy-bridge it later).
+                    if let Ok(Some(entry)) = state.memory.get(&id).await {
+                        crate::server::index_memory_entry(state, &entry).await;
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => tracing::warn!("feedback: recording memory failed: {e:#}"),
+            }
+        }
+    }
+
+    outcome
+}
+
+/// Truncate `text` to at most `max` chars on a char boundary, appending an
+/// ellipsis when it was cut. Char-based (not byte) so multibyte replies are safe.
+fn truncate_snippet(text: &str, max: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= max {
+        return trimmed.to_string();
+    }
+    let mut out: String = trimmed.chars().take(max).collect();
+    out.push('…');
+    out
 }
 
 // ---------------------------------------------------------------------------

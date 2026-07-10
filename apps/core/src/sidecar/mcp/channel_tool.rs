@@ -47,6 +47,7 @@ pub fn tools() -> Vec<RegistryTool> {
                 .to_owned(),
         ),
         input_schema: Some(send_schema()),
+        ..Default::default()
     }]
 }
 

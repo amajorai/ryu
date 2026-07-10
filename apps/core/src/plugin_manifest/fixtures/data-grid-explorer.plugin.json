@@ -1,0 +1,30 @@
+{
+  "id": "io.ryu.data-grid-explorer",
+  "name": "Data Grid Explorer",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "tool-table-render",
+      "name": "Render Data Grid",
+      "kind": "tool",
+      "config": { "slug": "table__render" }
+    },
+    {
+      "id": "tool-table-act",
+      "name": "Act On Rows",
+      "kind": "tool",
+      "config": { "slug": "table__act_on_rows" }
+    }
+  ],
+  "contributes": {
+    "widgets": [
+      {
+        "tool_id": "table__render",
+        "uri": "ui://widget/data-grid-explorer.html",
+        "mime": "text/html+skybridge",
+        "default_display_mode": "inline"
+      }
+    ]
+  },
+  "permission_grants": ["chat.sendFollowUp"]
+}

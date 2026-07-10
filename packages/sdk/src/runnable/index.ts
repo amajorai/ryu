@@ -15,6 +15,8 @@
 export type { AgentOptions } from "./agent.ts";
 // biome-ignore lint/performance/noBarrelFile: intentional package entry point for @ryuhq/sdk/runnable
 export { defineAgent } from "./agent.ts";
+export type { AppToolSpec, DefineAppOptions } from "./app.ts";
+export { appToolId, defineApp } from "./app.ts";
 export type {
 	GatewayClient,
 	Runnable,

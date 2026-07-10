@@ -5,6 +5,7 @@ pub mod restate;
 pub mod screenpipe;
 pub mod shadow;
 pub mod spider;
+pub mod ytdlp;
 
 pub use ghost::GhostManager;
 pub use research::ResearchManager;

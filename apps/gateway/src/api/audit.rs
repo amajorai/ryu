@@ -1,10 +1,13 @@
 use std::net::SocketAddr;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use axum::{
     extract::{ConnectInfo, Query, State},
     http::HeaderMap,
     Json,
 };
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -12,9 +15,11 @@ use uuid::Uuid;
 use crate::{
     audit::{AuditLogger, AuditQuery},
     budget::ExecBudgetResult,
+    config::WidgetConfig,
     error::GatewayError,
     pipeline::{authenticate, AuthInputs},
     state::SharedState,
+    tools::exec::WidgetEnvelope,
 };
 
 /// Query-string parameters accepted by `GET /v1/audit`.
@@ -33,6 +38,8 @@ pub struct AuditQueryParams {
     pub request_id: Option<String>,
     /// Filter by Core session/conversation id (M4 / #176).
     pub session_id: Option<String>,
+    /// Filter by widget instance id (Ryu Apps, §4.4).
+    pub widget_instance_id: Option<String>,
 }
 
 /// Local audit-log query endpoint. Restricted to the master key: audit data is
@@ -84,6 +91,7 @@ pub async fn query_audit(
         limit: params.limit,
         request_id: params.request_id,
         session_id: params.session_id,
+        widget_instance_id: params.widget_instance_id,
     };
 
     let entries = state
@@ -138,6 +146,78 @@ fn estimate_cost_micro_usd(input_tokens: u64, output_tokens: u64, per_1k_micro_u
         / 1000
 }
 
+// ── Per-widget-instance rate limiter (Ryu Apps, §4.3) ────────────────────────
+//
+// A process-global rolling-minute token bucket per widget instance. It is a
+// static rather than a field on `AppState` because it is self-contained
+// governance that BOTH `check_exec_budget` (the pre-run gate) and the
+// `exec_tool` widget chain (D5) consult, without threading new state through the
+// whole app. Keyed by `"<kind>:<instance_id>"` so a widget's `callTool` and
+// `sendFollowUpMessage` buckets are independent, and one rendered widget can
+// never drain another's budget.
+
+struct WidgetBucket {
+    window_start: Instant,
+    count: u32,
+}
+
+#[derive(Default)]
+struct WidgetRateLimiter {
+    buckets: DashMap<String, WidgetBucket>,
+}
+
+impl WidgetRateLimiter {
+    /// Try to consume one token for `key` under `max_per_min`. Returns `true`
+    /// when allowed (and records the use); `false` when this minute's budget is
+    /// spent. `max_per_min == 0` ⇒ unlimited.
+    fn try_consume(&self, key: String, max_per_min: u32) -> bool {
+        if max_per_min == 0 {
+            return true;
+        }
+        let mut bucket = self.buckets.entry(key).or_insert_with(|| WidgetBucket {
+            window_start: Instant::now(),
+            count: 0,
+        });
+        if bucket.window_start.elapsed() >= Duration::from_secs(60) {
+            bucket.window_start = Instant::now();
+            bucket.count = 0;
+        }
+        if bucket.count >= max_per_min {
+            return false;
+        }
+        bucket.count += 1;
+        true
+    }
+}
+
+fn widget_limiter() -> &'static WidgetRateLimiter {
+    static LIMITER: OnceLock<WidgetRateLimiter> = OnceLock::new();
+    LIMITER.get_or_init(WidgetRateLimiter::default)
+}
+
+/// Consume one widget `callTool` token for `instance_id`. Returns `false` when
+/// the per-instance per-minute call budget is spent. A disabled widget section
+/// (`enabled = false`) or `max_calls_per_min == 0` is always allowed.
+pub fn widget_call_allowed(cfg: &WidgetConfig, instance_id: &str) -> bool {
+    if !cfg.enabled {
+        return true;
+    }
+    widget_limiter().try_consume(format!("call:{instance_id}"), cfg.max_calls_per_min)
+}
+
+/// Consume one widget `sendFollowUpMessage` token for `instance_id` (stricter
+/// than `callTool`). Returns `false` when the per-instance per-minute follow-up
+/// budget is spent. Consumed by the follow-up authorization path (§4.2, gate 4);
+/// exposed here as the single owner of the widget token buckets. `dead_code`
+/// until the follow-up ingest handler wires it, so the bucket lives in one place.
+#[allow(dead_code)]
+pub fn widget_followup_allowed(cfg: &WidgetConfig, instance_id: &str) -> bool {
+    if !cfg.enabled {
+        return true;
+    }
+    widget_limiter().try_consume(format!("followup:{instance_id}"), cfg.max_followups_per_min)
+}
+
 // ── Exec audit ingest (M6 / #192) ────────────────────────────────────────────
 
 /// Body accepted by `POST /v1/exec/audit`.
@@ -175,9 +255,22 @@ pub struct ExecAuditBody {
 #[derive(Debug, Deserialize)]
 pub struct ExecBudgetCheckBody {
     /// Sandbox backend that will run the command (informational; not enforced here).
+    #[allow(dead_code)]
     pub backend: String,
     /// Command or tool that will be executed (informational).
+    #[allow(dead_code)]
     pub command: String,
+    /// Product-surface tag (`x-ryu-feature`); `"widget"` for widget round-trips.
+    /// Accepted for transport tolerance / audit correlation; the widget branch
+    /// keys off the `widget` envelope, not this tag.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub feature: Option<String>,
+    /// Widget envelope (§4.3). When present, the per-instance widget call token
+    /// bucket is consulted in addition to the sandbox exec budget, so a pre-run
+    /// gate for a widget `callTool` is rate-limited per rendered instance.
+    #[serde(default)]
+    pub widget: Option<WidgetEnvelope>,
 }
 
 /// Response from `POST /v1/exec/budget/check`.
@@ -273,7 +366,7 @@ pub async fn ingest_exec_audit(
 pub async fn check_exec_budget(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Json(_body): Json<ExecBudgetCheckBody>,
+    Json(body): Json<ExecBudgetCheckBody>,
 ) -> Result<Json<ExecBudgetCheckResponse>, GatewayError> {
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
     let ctx = authenticate(&state, AuthInputs::with_key(raw_key))?;
@@ -291,12 +384,30 @@ pub async fn check_exec_budget(
     let max_count = state.config.exec_budget.max_count;
 
     match result {
-        ExecBudgetResult::Allow => Ok(Json(ExecBudgetCheckResponse {
-            allowed: true,
-            reason: None,
-            current_count,
-            max_count,
-        })),
+        ExecBudgetResult::Allow => {
+            // Widget calls also drain a per-instance per-minute token bucket
+            // (§4.3), consulted only when the request carries the widget
+            // envelope. Keyed by instance_id so widgets stay isolated.
+            if let Some(widget) = body.widget.as_ref() {
+                if !widget_call_allowed(&state.config.widget, &widget.instance_id) {
+                    return Ok(Json(ExecBudgetCheckResponse {
+                        allowed: false,
+                        reason: Some(format!(
+                            "Widget call rate limit exhausted: {} calls/min for instance {}.",
+                            state.config.widget.max_calls_per_min, widget.instance_id
+                        )),
+                        current_count,
+                        max_count,
+                    }));
+                }
+            }
+            Ok(Json(ExecBudgetCheckResponse {
+                allowed: true,
+                reason: None,
+                current_count,
+                max_count,
+            }))
+        }
         ExecBudgetResult::Deny {
             exec_count,
             wall_clock_secs,

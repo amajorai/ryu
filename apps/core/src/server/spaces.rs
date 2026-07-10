@@ -153,6 +153,34 @@ pub struct DocumentContent {
     pub parent_id: Option<String>,
 }
 
+/// Metadata for one saved version of a document (no `source`, so version lists
+/// stay light). The full snapshot is fetched per-version via `get_document_version`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentVersionMeta {
+    pub id: String,
+    pub document_id: String,
+    pub title: String,
+    /// Optional user-supplied label for a manual snapshot (`None` for auto ones).
+    pub label: Option<String>,
+    /// `"page"` or `"database"` — the doc kind captured at snapshot time.
+    pub kind: String,
+    /// Unix milliseconds.
+    pub created_at: i64,
+}
+
+/// A full saved version of a document, including the captured `source`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentVersion {
+    pub id: String,
+    pub document_id: String,
+    pub title: String,
+    pub source: String,
+    pub label: Option<String>,
+    pub kind: String,
+    /// Unix milliseconds.
+    pub created_at: i64,
+}
+
 /// An inter-document link (wiki `[[Title]]` or mention `[[@Title]]`). Used for the
 /// outgoing-links list and, with `src_title`/`snippet` populated, for backlinks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -785,6 +813,28 @@ impl SpaceStore {
         )
         .context("initializing document_links schema")?;
 
+        // Page version history (Notion/Prompt-Studio-style snapshots). Each row is
+        // an immutable full copy of a document's `title` + `source` at snapshot
+        // time. Versions are created manually ("Save version") or captured
+        // automatically just before a restore so a restore is itself undoable.
+        // Rows are FK-less plain-text ids (like `document_links`); `delete_document`
+        // removes them explicitly. Oldest rows past a per-document cap are pruned.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS document_versions (
+                 id          TEXT PRIMARY KEY,
+                 document_id TEXT NOT NULL,
+                 space_id    TEXT NOT NULL,
+                 title       TEXT NOT NULL,
+                 source      TEXT NOT NULL,
+                 label       TEXT,
+                 kind        TEXT NOT NULL DEFAULT 'page',
+                 created_at  INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_document_versions_doc
+                 ON document_versions(document_id, created_at DESC);",
+        )
+        .context("initializing document_versions schema")?;
+
         // Multi-user tenancy (collaboration epic, Phase 0): the verified human
         // owner of the document, the org it belongs to, its sharing visibility,
         // and an optional owning team. Guarded by a PRAGMA table_info existence
@@ -1000,6 +1050,15 @@ impl SpaceStore {
             .await
     }
 
+    /// Create an empty whiteboard (Excalidraw scene) document in a Space. Same
+    /// lifecycle as a page/database — the editor saves the Excalidraw scene JSON
+    /// via `update_document`, which chunks + embeds the flattened element text so
+    /// the board stays searchable.
+    pub async fn create_whiteboard(&self, space_id: &str, title: &str) -> Result<String> {
+        self.create_document_of_kind(space_id, title, "whiteboard", None)
+            .await
+    }
+
     /// Shared constructor for an empty document of a given `kind`
     /// (`"page"` | `"database"`), optionally parented to another document.
     async fn create_document_of_kind(
@@ -1116,10 +1175,10 @@ impl SpaceStore {
             .optional()
             .context("reading document kind")?
         };
-        let chunk_source = if kind.as_deref() == Some("database") {
-            flatten_database_source(source)
-        } else {
-            source.to_string()
+        let chunk_source = match kind.as_deref() {
+            Some("database") => flatten_database_source(source),
+            Some("whiteboard") => flatten_whiteboard_source(source),
+            _ => source.to_string(),
         };
         let chunks = chunk_text(&chunk_source);
         // Embed outside the lock — the embedder may do network I/O.
@@ -1201,6 +1260,114 @@ impl SpaceStore {
         Ok(())
     }
 
+    /// Maximum retained versions per document. Oldest beyond this are pruned on
+    /// each new snapshot so history stays bounded (mirrors Prompt Studio's cap).
+    const MAX_DOC_VERSIONS: usize = 50;
+
+    /// Capture the document's current `title`/`source`/`kind` as an immutable
+    /// version row and return its metadata. Prunes the oldest rows past
+    /// [`Self::MAX_DOC_VERSIONS`]. Errors if the document does not exist.
+    pub async fn snapshot_document(
+        &self,
+        doc_id: &str,
+        label: Option<&str>,
+    ) -> Result<DocumentVersionMeta> {
+        let now = now_millis();
+        let version_id = format!("dv_{}", uuid::Uuid::new_v4());
+        let conn = self.conn.lock().await;
+
+        let (space_id, title, source, kind): (String, String, String, String) = conn
+            .query_row(
+                "SELECT space_id, title, source, kind FROM documents WHERE id = ?1",
+                params![doc_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()
+            .context("reading document for snapshot")?
+            .ok_or_else(|| anyhow::anyhow!("document '{doc_id}' not found"))?;
+
+        conn.execute(
+            "INSERT INTO document_versions
+                 (id, document_id, space_id, title, source, label, kind, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![version_id, doc_id, space_id, title, source, label, kind, now],
+        )
+        .context("inserting document version")?;
+
+        // Prune oldest rows beyond the cap for this document.
+        conn.execute(
+            "DELETE FROM document_versions
+             WHERE document_id = ?1 AND id NOT IN (
+                 SELECT id FROM document_versions
+                 WHERE document_id = ?1
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT ?2
+             )",
+            params![doc_id, Self::MAX_DOC_VERSIONS as i64],
+        )
+        .context("pruning old document versions")?;
+
+        Ok(DocumentVersionMeta {
+            id: version_id,
+            document_id: doc_id.to_string(),
+            title,
+            label: label.map(str::to_string),
+            kind,
+            created_at: now,
+        })
+    }
+
+    /// List a document's saved versions, newest first (metadata only).
+    pub async fn list_document_versions(&self, doc_id: &str) -> Result<Vec<DocumentVersionMeta>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, document_id, title, label, kind, created_at
+                 FROM document_versions
+                 WHERE document_id = ?1
+                 ORDER BY created_at DESC, id DESC",
+            )
+            .context("preparing version list")?;
+        let rows = stmt
+            .query_map(params![doc_id], |row| {
+                Ok(DocumentVersionMeta {
+                    id: row.get(0)?,
+                    document_id: row.get(1)?,
+                    title: row.get(2)?,
+                    label: row.get(3)?,
+                    kind: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })
+            .context("querying document versions")?;
+        Ok(rows.filter_map(std::result::Result::ok).collect())
+    }
+
+    /// Fetch one saved version in full (including its captured `source`).
+    pub async fn get_document_version(&self, version_id: &str) -> Result<Option<DocumentVersion>> {
+        let conn = self.conn.lock().await;
+        let ver = conn
+            .query_row(
+                "SELECT id, document_id, title, source, label, kind, created_at
+                 FROM document_versions WHERE id = ?1",
+                params![version_id],
+                |row| {
+                    Ok(DocumentVersion {
+                        id: row.get(0)?,
+                        document_id: row.get(1)?,
+                        title: row.get(2)?,
+                        source: row.get(3)?,
+                        label: row.get(4)?,
+                        kind: row.get(5)?,
+                        created_at: row.get(6)?,
+                    })
+                },
+            )
+            .optional()
+            .context("reading document version")?;
+        Ok(ver)
+    }
+
     /// Delete a document and all its chunks/vectors/graph rows. If the document
     /// has child documents (e.g. a database's row pages, linked by `parent_id`),
     /// they are removed too — including their vec0 vectors, which no FK cascade
@@ -1252,6 +1419,12 @@ impl SpaceStore {
                 params![id],
             )
             .context("unresolving inbound links")?;
+            // Version history has no FK cascade (plain-text ids) — drop it too.
+            tx.execute(
+                "DELETE FROM document_versions WHERE document_id = ?1",
+                params![id],
+            )
+            .context("deleting document versions")?;
         }
 
         tx.commit().context("committing delete transaction")?;
@@ -2069,6 +2242,29 @@ fn flatten_database_source(source: &str) -> String {
     } else {
         out
     }
+}
+
+/// Flatten an Excalidraw scene's text elements into a plain-text rendering so a
+/// whiteboard document stays searchable like a page. The stored `source` remains
+/// the raw scene JSON; this is only the embedding text. Returns an empty string
+/// if `source` is not valid Excalidraw scene JSON.
+fn flatten_whiteboard_source(source: &str) -> String {
+    let Ok(scene) = serde_json::from_str::<serde_json::Value>(source) else {
+        return String::new();
+    };
+    let Some(elements) = scene.get("elements").and_then(|e| e.as_array()) else {
+        return String::new();
+    };
+    let mut parts: Vec<String> = Vec::new();
+    for el in elements {
+        if let Some(text) = el.get("text").and_then(|t| t.as_str()) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_string());
+            }
+        }
+    }
+    parts.join("\n")
 }
 
 /// Flatten one grid cell value to searchable text across all cell variants

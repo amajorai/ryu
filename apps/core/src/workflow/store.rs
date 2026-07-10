@@ -205,11 +205,179 @@ pub fn list_workflows() -> Vec<Workflow> {
 pub fn delete_workflow(id: &str) -> std::io::Result<bool> {
     validate_id(id)?;
     let path = workflows_dir().join(format!("{id}.json"));
-    match std::fs::remove_file(path) {
+    let removed = match std::fs::remove_file(path) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(e),
+    };
+    // The definition is gone — its version history is dead weight; drop it too.
+    let _ = delete_workflow_versions(id);
+    Ok(removed)
+}
+
+// ── Version history (Prompt-Studio-style snapshots) ─────────────────────────
+//
+// Each workflow keeps a bounded, immutable history of past definitions under
+// `~/.ryu/workflow-versions/<workflow_id>/<version_id>.json`. A version wraps a
+// full [`Workflow`] snapshot plus metadata. Versions are created manually
+// ("Save version") or automatically just before a restore, so a restore is
+// itself undoable.
+
+/// Maximum retained versions per workflow. Oldest beyond this are pruned on each
+/// new snapshot so history stays bounded (mirrors the pages `MAX_DOC_VERSIONS`).
+const MAX_WORKFLOW_VERSIONS: usize = 50;
+
+fn versions_root() -> PathBuf {
+    ryu_dir().join("workflow-versions")
+}
+
+fn workflow_versions_dir(workflow_id: &str) -> std::io::Result<PathBuf> {
+    validate_id(workflow_id)?;
+    Ok(versions_root().join(workflow_id))
+}
+
+/// Metadata for one saved workflow version (no embedded graph, so lists stay
+/// light).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowVersionMeta {
+    pub id: String,
+    pub workflow_id: String,
+    /// The workflow name captured at snapshot time.
+    pub name: String,
+    /// Optional user label for a manual snapshot (`None` for auto ones).
+    pub label: Option<String>,
+    /// Unix milliseconds.
+    pub created_at: i64,
+}
+
+/// A full saved workflow version, including the captured definition.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowVersion {
+    pub id: String,
+    pub workflow_id: String,
+    pub name: String,
+    pub label: Option<String>,
+    /// Unix milliseconds.
+    pub created_at: i64,
+    /// The full definition captured at snapshot time.
+    pub workflow: Workflow,
+}
+
+fn now_millis() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+/// Snapshot a workflow definition as a new version and return its metadata.
+/// Prunes the oldest versions past [`MAX_WORKFLOW_VERSIONS`].
+pub fn save_workflow_version(
+    workflow: &Workflow,
+    label: Option<&str>,
+) -> std::io::Result<WorkflowVersionMeta> {
+    let dir = workflow_versions_dir(&workflow.id)?;
+    std::fs::create_dir_all(&dir)?;
+    let version_id = format!("wv_{}", uuid::Uuid::new_v4().simple());
+    let created_at = now_millis();
+    let version = WorkflowVersion {
+        id: version_id.clone(),
+        workflow_id: workflow.id.clone(),
+        name: workflow.name.clone(),
+        label: label.map(str::to_string),
+        created_at,
+        workflow: workflow.clone(),
+    };
+    let json = serde_json::to_string_pretty(&version)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(dir.join(format!("{version_id}.json")), json)?;
+
+    prune_workflow_versions(&workflow.id)?;
+
+    Ok(WorkflowVersionMeta {
+        id: version_id,
+        workflow_id: workflow.id.clone(),
+        name: workflow.name.clone(),
+        label: label.map(str::to_string),
+        created_at,
+    })
+}
+
+/// Read every version file for a workflow (full, unsorted). Corrupt files are
+/// skipped rather than failing the whole read.
+fn read_workflow_versions(workflow_id: &str) -> std::io::Result<Vec<WorkflowVersion>> {
+    let dir = workflow_versions_dir(workflow_id)?;
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(bytes) = std::fs::read(&path) {
+            if let Ok(v) = serde_json::from_slice::<WorkflowVersion>(&bytes) {
+                out.push(v);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// List a workflow's saved versions, newest first (metadata only).
+pub fn list_workflow_versions(workflow_id: &str) -> std::io::Result<Vec<WorkflowVersionMeta>> {
+    let mut versions = read_workflow_versions(workflow_id)?;
+    versions.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
+    Ok(versions
+        .into_iter()
+        .map(|v| WorkflowVersionMeta {
+            id: v.id,
+            workflow_id: v.workflow_id,
+            name: v.name,
+            label: v.label,
+            created_at: v.created_at,
+        })
+        .collect())
+}
+
+/// Load one saved version in full (including its captured definition).
+pub fn load_workflow_version(
+    workflow_id: &str,
+    version_id: &str,
+) -> std::io::Result<Option<WorkflowVersion>> {
+    validate_id(version_id)?;
+    let path = workflow_versions_dir(workflow_id)?.join(format!("{version_id}.json"));
+    match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Delete a workflow's entire version history directory. Returns `true` when a
+/// directory was removed.
+pub fn delete_workflow_versions(workflow_id: &str) -> std::io::Result<bool> {
+    let dir = workflow_versions_dir(workflow_id)?;
+    match std::fs::remove_dir_all(dir) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(e),
     }
+}
+
+/// Remove the oldest version files beyond [`MAX_WORKFLOW_VERSIONS`].
+fn prune_workflow_versions(workflow_id: &str) -> std::io::Result<()> {
+    let mut versions = read_workflow_versions(workflow_id)?;
+    if versions.len() <= MAX_WORKFLOW_VERSIONS {
+        return Ok(());
+    }
+    // Newest first, then delete the tail past the cap.
+    versions.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
+    let dir = workflow_versions_dir(workflow_id)?;
+    for v in versions.into_iter().skip(MAX_WORKFLOW_VERSIONS) {
+        let _ = std::fs::remove_file(dir.join(format!("{}.json", v.id)));
+    }
+    Ok(())
 }
 
 // ── Run persistence ─────────────────────────────────────────────────────────
@@ -260,4 +428,71 @@ pub fn load_run(run_id: &str) -> std::io::Result<WorkflowRun> {
     let bytes = std::fs::read(path)?;
     serde_json::from_slice(&bytes)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+#[cfg(test)]
+mod version_store_tests {
+    use super::*;
+
+    /// Build a minimal valid workflow (only `id`/`name`/`nodes` are required).
+    fn make_wf(id: &str, name: &str) -> Workflow {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "name": name,
+            "nodes": [],
+        }))
+        .expect("valid workflow json")
+    }
+
+    #[test]
+    fn snapshot_list_load_prune_delete() {
+        // A unique id keeps this test isolated from real data (and other tests)
+        // regardless of where `ryu_dir()` resolves; the version dir is removed at
+        // the end.
+        let wf_id = format!("wftest{}", uuid::Uuid::new_v4().simple());
+
+        // Snapshot returns metadata that echoes the label + workflow id.
+        let meta = save_workflow_version(&make_wf(&wf_id, "v1"), Some("first"))
+            .expect("save v1");
+        assert_eq!(meta.workflow_id, wf_id);
+        assert_eq!(meta.label.as_deref(), Some("first"));
+        assert_eq!(meta.name, "v1");
+
+        // The list has exactly the one version.
+        let list = list_workflow_versions(&wf_id).expect("list");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, meta.id);
+
+        // Loading the full version round-trips the captured definition.
+        let full = load_workflow_version(&wf_id, &meta.id)
+            .expect("load")
+            .expect("version exists");
+        assert_eq!(full.workflow.id, wf_id);
+        assert_eq!(full.workflow.name, "v1");
+
+        // Missing versions load as None rather than erroring.
+        assert!(
+            load_workflow_version(&wf_id, "wv_does_not_exist")
+                .expect("load missing")
+                .is_none()
+        );
+
+        // Exceeding the cap bounds retained history to exactly MAX.
+        for i in 0..MAX_WORKFLOW_VERSIONS + 5 {
+            save_workflow_version(&make_wf(&wf_id, &format!("n{i}")), None)
+                .expect("save n");
+        }
+        let bounded = list_workflow_versions(&wf_id).expect("list bounded");
+        assert_eq!(bounded.len(), MAX_WORKFLOW_VERSIONS);
+
+        // Delete clears the whole history.
+        assert!(delete_workflow_versions(&wf_id).expect("delete"));
+        assert!(
+            list_workflow_versions(&wf_id)
+                .expect("list after delete")
+                .is_empty()
+        );
+        // Deleting an absent history is a no-op, not an error.
+        assert!(!delete_workflow_versions(&wf_id).expect("delete again"));
+    }
 }

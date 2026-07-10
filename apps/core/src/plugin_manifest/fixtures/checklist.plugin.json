@@ -1,0 +1,30 @@
+{
+  "id": "io.ryu.checklist",
+  "name": "Checklist",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "tool-checklist-render",
+      "name": "Render Checklist",
+      "kind": "tool",
+      "config": { "slug": "checklist__render" }
+    },
+    {
+      "id": "tool-checklist-update",
+      "name": "Update Checklist",
+      "kind": "tool",
+      "config": { "slug": "checklist__update" }
+    }
+  ],
+  "contributes": {
+    "widgets": [
+      {
+        "tool_id": "checklist__render",
+        "uri": "ui://widget/checklist.html",
+        "mime": "text/html+skybridge",
+        "default_display_mode": "inline"
+      }
+    ]
+  },
+  "permission_grants": ["chat.sendFollowUp"]
+}

@@ -629,6 +629,24 @@ impl MemoryStore {
         Ok(removed > 0)
     }
 
+    /// The ids of every entry carrying `tag` (an exact element of the plaintext
+    /// `tags` JSON array). The array is stored as `["a","b"]`, so a quoted-substring
+    /// match is exact per element. Used to find (and then delete + un-index) the
+    /// prior feedback-derived facts for a message before re-recording, so a changed
+    /// or cleared thumbs vote never leaves contradictory facts. `tags` is a
+    /// non-encrypted column, so this needs no decryption.
+    pub async fn ids_with_tag(&self, tag: &str) -> Result<Vec<String>> {
+        let needle = format!("%{}%", serde_json::Value::String(tag.to_string()));
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare("SELECT id FROM memory_entries WHERE tags LIKE ?1")?;
+        let rows = stmt.query_map(params![needle], |row| row.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Total number of stored long-term memory entries across every scope.
     /// Backs the danger-zone count preview.
     pub async fn count(&self) -> Result<u64> {

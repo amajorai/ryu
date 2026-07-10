@@ -64,6 +64,9 @@ pub struct GatewayConfig {
     pub tools: ToolsConfig,
 
     #[serde(default)]
+    pub widget: WidgetConfig,
+
+    #[serde(default)]
     pub credits: CreditsConfig,
 
     /// Fleet mode (managed-cloud WS2). When true, this gateway is a publicly
@@ -148,6 +151,78 @@ pub struct CreditsConfig {
     /// Per-request timeout in milliseconds for the debit POST. Default: 3000.
     #[serde(default = "default_credits_timeout_ms")]
     pub timeout_ms: u64,
+
+    // ─── Sandbox per-resource rates (Daytona), nano-USD per unit-second ───────
+    // Rates are stored in NANO-USD (not micro) because the Daytona storage rate
+    // (0.03 micro-USD/GiB/s) truncates to 0 in a u64 micro-USD field, silently
+    // disabling storage billing. Everything downstream (accrual, debit, wallet,
+    // balance, budgets) stays micro-USD — the single nano→micro conversion
+    // happens inside `sandbox_tick_cost_raw_micro`.
+    /// vCPU rate, nano-USD per vCPU-second. Default: 14000 (0.014 micro/s).
+    #[serde(default)]
+    pub cost_per_sandbox_vcpu_second_nano_usd: u64,
+    /// Memory rate, nano-USD per GiB-second. Default: 4500.
+    #[serde(default)]
+    pub cost_per_sandbox_mem_gib_second_nano_usd: u64,
+    /// Storage rate, nano-USD per GiB-second (over the free tier). Default: 30.
+    #[serde(default)]
+    pub cost_per_sandbox_storage_gib_second_nano_usd: u64,
+    /// GPU H200 rate, nano-USD per GPU-second. Default: 1261000.
+    #[serde(default)]
+    pub cost_per_sandbox_gpu_h200_second_nano_usd: u64,
+    /// GPU H100 rate, nano-USD per GPU-second. Default: 1097000.
+    #[serde(default)]
+    pub cost_per_sandbox_gpu_h100_second_nano_usd: u64,
+    /// GPU RTX PRO 6000 rate, nano-USD per GPU-second. Default: 842000.
+    #[serde(default)]
+    pub cost_per_sandbox_gpu_rtx_pro_6000_second_nano_usd: u64,
+    /// GPU RTX 5090 rate, nano-USD per GPU-second. Default: 358000.
+    #[serde(default)]
+    pub cost_per_sandbox_gpu_rtx_5090_second_nano_usd: u64,
+    /// GPU RTX 4090 rate, nano-USD per GPU-second. Default: 275000.
+    #[serde(default)]
+    pub cost_per_sandbox_gpu_rtx_4090_second_nano_usd: u64,
+    /// Windows surcharge, nano-USD per vCPU-second (added on top of the base
+    /// vCPU rate for Windows workspaces). Default: 23800.
+    #[serde(default)]
+    pub cost_per_sandbox_windows_vcpu_second_nano_usd: u64,
+    /// Storage GiB that are free before the storage rate applies. Default: 5.
+    #[serde(default = "default_sandbox_free_storage_gib")]
+    pub sandbox_free_storage_gib: u64,
+    /// Platform markup on metered sandbox usage in basis points. SEPARATE from
+    /// the global `markup_bps` (which is pinned 0 for at-cost tokens/Composio);
+    /// sandbox carries its own margin. Default: 3000 (× 1.30).
+    #[serde(default = "default_sandbox_markup_bps")]
+    pub sandbox_markup_bps: u64,
+}
+
+/// GPU tier for a sandbox workspace. Canonical definition (Core mirrors it).
+/// Explicit per-variant serde renames (do NOT rely on `rename_all`, which
+/// mishandles the digits in `rtx_5090`/`rtx_4090`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum GpuKind {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "h200")]
+    H200,
+    #[serde(rename = "h100")]
+    H100,
+    #[serde(rename = "rtx_pro_6000")]
+    RtxPro6000,
+    #[serde(rename = "rtx_5090")]
+    Rtx5090,
+    #[serde(rename = "rtx_4090")]
+    Rtx4090,
+}
+
+/// Operating system for a sandbox workspace. Canonical definition (Core mirrors
+/// it). Windows carries a per-vCPU-second surcharge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum OsKind {
+    #[serde(rename = "linux")]
+    Linux,
+    #[serde(rename = "windows")]
+    Windows,
 }
 
 /// The budget action taken when an org's credit wallet is empty.
@@ -165,6 +240,14 @@ fn default_credits_timeout_ms() -> u64 {
     3000
 }
 
+fn default_sandbox_markup_bps() -> u64 {
+    3000
+}
+
+fn default_sandbox_free_storage_gib() -> u64 {
+    5
+}
+
 impl Default for CreditsConfig {
     fn default() -> Self {
         Self {
@@ -180,6 +263,17 @@ impl Default for CreditsConfig {
             wallet_empty_action: WalletEmptyAction::default(),
             wallet_empty_downgrade_to: None,
             timeout_ms: default_credits_timeout_ms(),
+            cost_per_sandbox_vcpu_second_nano_usd: 14_000,
+            cost_per_sandbox_mem_gib_second_nano_usd: 4_500,
+            cost_per_sandbox_storage_gib_second_nano_usd: 30,
+            cost_per_sandbox_gpu_h200_second_nano_usd: 1_261_000,
+            cost_per_sandbox_gpu_h100_second_nano_usd: 1_097_000,
+            cost_per_sandbox_gpu_rtx_pro_6000_second_nano_usd: 842_000,
+            cost_per_sandbox_gpu_rtx_5090_second_nano_usd: 358_000,
+            cost_per_sandbox_gpu_rtx_4090_second_nano_usd: 275_000,
+            cost_per_sandbox_windows_vcpu_second_nano_usd: 23_800,
+            sandbox_free_storage_gib: default_sandbox_free_storage_gib(),
+            sandbox_markup_bps: default_sandbox_markup_bps(),
         }
     }
 }
@@ -222,6 +316,73 @@ impl CreditsConfig {
     /// so treat it as disabled rather than emitting doomed calls.
     pub fn is_active(&self) -> bool {
         self.enabled && self.internal_secret.is_some() && !self.base_url.trim().is_empty()
+    }
+
+    /// Per-GPU-second rate in nano-USD for a GPU tier. `None` costs nothing.
+    pub fn gpu_rate_nano(&self, gpu: GpuKind) -> u64 {
+        match gpu {
+            GpuKind::None => 0,
+            GpuKind::H200 => self.cost_per_sandbox_gpu_h200_second_nano_usd,
+            GpuKind::H100 => self.cost_per_sandbox_gpu_h100_second_nano_usd,
+            GpuKind::RtxPro6000 => self.cost_per_sandbox_gpu_rtx_pro_6000_second_nano_usd,
+            GpuKind::Rtx5090 => self.cost_per_sandbox_gpu_rtx_5090_second_nano_usd,
+            GpuKind::Rtx4090 => self.cost_per_sandbox_gpu_rtx_4090_second_nano_usd,
+        }
+    }
+
+    /// Raw (pre-markup) cost of one sandbox tick in MICRO-USD. Takes primitive
+    /// args so this module does not depend on the metering route's `SandboxSpec`.
+    /// Rates are summed in nano-USD per second, multiplied by `seconds`, then
+    /// converted once to micro-USD (round-half-up). Storage is billed only above
+    /// the free tier; a GPU count of 0 with a non-`None` tier bills as 1.
+    pub fn sandbox_tick_cost_raw_micro(
+        &self,
+        vcpu: u32,
+        mem_gib: u32,
+        storage_gib: u32,
+        gpu: GpuKind,
+        gpu_count: u32,
+        os: OsKind,
+        seconds: u64,
+    ) -> u64 {
+        let vcpu = u64::from(vcpu);
+        let billable_storage =
+            u64::from(storage_gib).saturating_sub(self.sandbox_free_storage_gib);
+        let eff_gpu = match gpu {
+            GpuKind::None => 0,
+            _ => u64::from(gpu_count.max(1)),
+        };
+        let per_sec_nano = vcpu
+            .saturating_mul(self.cost_per_sandbox_vcpu_second_nano_usd)
+            .saturating_add(
+                u64::from(mem_gib).saturating_mul(self.cost_per_sandbox_mem_gib_second_nano_usd),
+            )
+            .saturating_add(
+                billable_storage
+                    .saturating_mul(self.cost_per_sandbox_storage_gib_second_nano_usd),
+            )
+            .saturating_add(eff_gpu.saturating_mul(self.gpu_rate_nano(gpu)))
+            .saturating_add(match os {
+                OsKind::Windows => {
+                    vcpu.saturating_mul(self.cost_per_sandbox_windows_vcpu_second_nano_usd)
+                }
+                OsKind::Linux => 0,
+            });
+        let total_nano = per_sec_nano.saturating_mul(seconds);
+        // nano -> micro, round half up.
+        total_nano.saturating_add(500) / 1_000
+    }
+
+    /// The amount to debit (micro-USD) for a sandbox tick costing
+    /// `cost_micro_usd`, after applying the sandbox markup. SEPARATE from
+    /// [`Self::debit_amount`]: this uses `sandbox_markup_bps` (default 3000 ⇒
+    /// × 1.30), not the global at-cost `markup_bps`. Round-half-up, saturating.
+    pub fn sandbox_debit_amount(&self, cost_micro_usd: u64) -> u64 {
+        const BPS_DENOM: u64 = 10_000;
+        cost_micro_usd
+            .saturating_mul(BPS_DENOM.saturating_add(self.sandbox_markup_bps))
+            .saturating_add(BPS_DENOM / 2)
+            / BPS_DENOM
     }
 }
 
@@ -1370,6 +1531,80 @@ impl Default for ExecBudgetConfig {
     }
 }
 
+/// Widget (Ryu Apps) governance config (§4.3). Governs the interactive widget
+/// tool calls and follow-up messages that a rendered app iframe makes back
+/// through the host — the traffic that arrives at the gateway carrying the
+/// `widget: { instance_id, origin_server }` exec envelope.
+///
+/// The gateway owns rate/scan governance for these round-trips (D5: `exec_tool`
+/// runs scan → budget → forward → audit for a widget `callTool`). The token
+/// buckets are per-`instance_id` so one rendered widget cannot exhaust another's
+/// budget. `max_concurrent_widget_instances_per_session` is declared here as the
+/// single swappable knob (nothing hardcoded) but is enforced in Core at mint
+/// time (D4, `WidgetInstanceStore::mint`), not on this request path.
+///
+/// Everything is a swappable default; the whole section can be disabled with
+/// `enabled = false`, which makes the widget branch a bare governed forward.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WidgetConfig {
+    /// Master switch for widget-specific governance. Default: true. When false,
+    /// widget calls still forward (governed by the base exec gate) but skip the
+    /// per-instance rate/scan layer.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Max widget `callTool`s per rolling minute, per widget instance. 0 =
+    /// unlimited. Default: 60.
+    #[serde(default = "default_widget_max_calls_per_min")]
+    pub max_calls_per_min: u32,
+    /// Max `sendFollowUpMessage`s per rolling minute, per widget instance
+    /// (stricter than `callTool`). 0 = unlimited. Default: 6.
+    #[serde(default = "default_widget_max_followups_per_min")]
+    pub max_followups_per_min: u32,
+    /// Max concurrently live widget instances per session. Declared here as the
+    /// governance knob; enforced by Core at mint time (D4), not on this path.
+    /// Default: 8.
+    #[serde(default = "default_widget_max_concurrent_instances_per_session")]
+    pub max_concurrent_widget_instances_per_session: u32,
+    /// Scan widget `callTool` arguments through the firewall (PII/secret/
+    /// injection) before forwarding. Default: true.
+    #[serde(default = "default_true")]
+    pub scan_arguments: bool,
+    /// Scan `sendFollowUpMessage` prompts before they enter model context.
+    /// Default: true.
+    #[serde(default = "default_true")]
+    pub scan_followups: bool,
+    /// Require the widget manifest to carry the `chat.sendFollowUp` grant before
+    /// a follow-up is accepted. Default: true. Surfaced here so the follow-up
+    /// gate is a swappable policy, enforced with Core's provenance record.
+    #[serde(default = "default_true")]
+    pub require_followup_grant: bool,
+}
+
+fn default_widget_max_calls_per_min() -> u32 {
+    60
+}
+fn default_widget_max_followups_per_min() -> u32 {
+    6
+}
+fn default_widget_max_concurrent_instances_per_session() -> u32 {
+    8
+}
+
+impl Default for WidgetConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_calls_per_min: default_widget_max_calls_per_min(),
+            max_followups_per_min: default_widget_max_followups_per_min(),
+            max_concurrent_widget_instances_per_session:
+                default_widget_max_concurrent_instances_per_session(),
+            scan_arguments: true,
+            scan_followups: true,
+            require_followup_grant: true,
+        }
+    }
+}
+
 impl GatewayConfig {
     /// Resolve the gateway.toml path using the same logic as `load()`:
     /// `GATEWAY_CONFIG` env var first, then `$config_dir/ryu/gateway.toml`.
@@ -1890,6 +2125,64 @@ impl GatewayConfig {
             if let Ok(raw) = std::env::var(var) {
                 if let Ok(cost) = raw.trim().parse::<u64>() {
                     *slot = cost;
+                }
+            }
+        }
+        // Sandbox per-resource Daytona rates (nano-USD/unit-second) + the two
+        // scalar knobs. Rates default to the Daytona base rates (manual `Default`
+        // impl); these envs let a deployment override any rate without a
+        // gateway.toml edit. Core injects all of them at gateway spawn.
+        if let Ok(raw) = std::env::var("GATEWAY_CREDITS_SANDBOX_MARKUP_BPS") {
+            if let Ok(bps) = raw.trim().parse::<u64>() {
+                config.credits.sandbox_markup_bps = bps;
+            }
+        }
+        if let Ok(raw) = std::env::var("GATEWAY_CREDITS_SANDBOX_FREE_STORAGE_GIB") {
+            if let Ok(gib) = raw.trim().parse::<u64>() {
+                config.credits.sandbox_free_storage_gib = gib;
+            }
+        }
+        for (var, slot) in [
+            (
+                "GATEWAY_CREDITS_COST_PER_SANDBOX_VCPU_SECOND_NANO_USD",
+                &mut config.credits.cost_per_sandbox_vcpu_second_nano_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_SANDBOX_MEM_GIB_SECOND_NANO_USD",
+                &mut config.credits.cost_per_sandbox_mem_gib_second_nano_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_SANDBOX_STORAGE_GIB_SECOND_NANO_USD",
+                &mut config.credits.cost_per_sandbox_storage_gib_second_nano_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD",
+                &mut config.credits.cost_per_sandbox_gpu_h200_second_nano_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H100_SECOND_NANO_USD",
+                &mut config.credits.cost_per_sandbox_gpu_h100_second_nano_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_PRO_6000_SECOND_NANO_USD",
+                &mut config.credits.cost_per_sandbox_gpu_rtx_pro_6000_second_nano_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_5090_SECOND_NANO_USD",
+                &mut config.credits.cost_per_sandbox_gpu_rtx_5090_second_nano_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_4090_SECOND_NANO_USD",
+                &mut config.credits.cost_per_sandbox_gpu_rtx_4090_second_nano_usd,
+            ),
+            (
+                "GATEWAY_CREDITS_COST_PER_SANDBOX_WINDOWS_VCPU_SECOND_NANO_USD",
+                &mut config.credits.cost_per_sandbox_windows_vcpu_second_nano_usd,
+            ),
+        ] {
+            if let Ok(raw) = std::env::var(var) {
+                if let Ok(rate) = raw.trim().parse::<u64>() {
+                    *slot = rate;
                 }
             }
         }
@@ -2432,6 +2725,7 @@ impl Default for GatewayConfig {
             exec_budget: ExecBudgetConfig::default(),
             compression: CompressionConfig::default(),
             tools: ToolsConfig::default(),
+            widget: WidgetConfig::default(),
             credits: CreditsConfig::default(),
             fleet: false,
         }

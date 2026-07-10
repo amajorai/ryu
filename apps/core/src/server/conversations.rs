@@ -56,8 +56,35 @@ pub struct StoredMessage {
     /// turns (which are plain text). Sealed at rest like `content`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parts: Option<serde_json::Value>,
+    /// The message this one was produced in reply to (its position in the
+    /// version tree). `None` for root turns and for every message in a
+    /// conversation that has never been edited/regenerated (flat history). Set
+    /// lazily the first time a conversation is branched (see `linearize`), then
+    /// maintained by `append_message` once `active_leaf` is engaged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_message_id: Option<String>,
+    /// 0-based index of this message among its siblings (messages sharing the
+    /// same `parent_message_id`), ordered by `created_at`. `0` for messages with
+    /// no siblings. Computed at read time by `get_active_messages`, not stored.
+    #[serde(default)]
+    pub sibling_index: usize,
+    /// Total number of sibling versions at this point in the tree (including
+    /// this one). `1` when the message was never branched. Computed at read
+    /// time; drives the `< n / m >` version pager in the client.
+    #[serde(default = "default_sibling_count")]
+    pub sibling_count: usize,
+    /// The ids of every version at this branch point, in pager order (v1..vN),
+    /// so the client can map a pager step to the target id for `select_version`.
+    /// Empty when the message was never branched (`sibling_count == 1`), keeping
+    /// flat-history payloads unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sibling_ids: Vec<String>,
     /// Unix milliseconds.
     pub created_at: i64,
+}
+
+fn default_sibling_count() -> usize {
+    1
 }
 
 /// A semantic-search hit over past conversation messages. The snippet is
@@ -577,6 +604,40 @@ impl ConversationStore {
                 .context("adding parts column to messages")?;
         }
 
+        // Additive migration: per-message thumbs feedback ('up' | 'down' | NULL).
+        // A deliberate 👍/👎 on an assistant reply. Durable so the button stays lit
+        // across reloads; it also seeds the continual-learning reward and the RAG
+        // memory sinks (see `crate::learning::apply_message_feedback`). Nullable —
+        // existing rows and un-rated messages carry NULL. Not encrypted (a coarse
+        // ordinal, no message text).
+        if !existing_msg_columns.contains("feedback") {
+            conn.execute_batch("ALTER TABLE messages ADD COLUMN feedback TEXT")
+                .context("adding feedback column to messages")?;
+        }
+
+        // Additive migration: message version tree (ChatGPT/Claude-style edit +
+        // regenerate branching). `parent_message_id` links a message to the turn
+        // it replied to; siblings sharing a parent are alternate versions. NULL
+        // for every message in a conversation that has never been branched (flat
+        // history stays byte-identical). Populated lazily on first edit/regenerate
+        // by `linearize`, then maintained by `append_message`.
+        if !existing_msg_columns.contains("parent_message_id") {
+            conn.execute_batch("ALTER TABLE messages ADD COLUMN parent_message_id TEXT")
+                .context("adding parent_message_id column to messages")?;
+        }
+
+        // Additive migration: the conversation's currently-selected leaf in the
+        // version tree. NULL means the conversation is flat (never branched) and
+        // reads fall back to chronological order. Once set, the active thread is
+        // the parent chain walked up from this leaf, and new turns attach beneath
+        // it.
+        if !existing_conv_columns.contains("active_leaf_message_id") {
+            conn.execute_batch(
+                "ALTER TABLE conversations ADD COLUMN active_leaf_message_id TEXT",
+            )
+            .context("adding active_leaf_message_id column to conversations")?;
+        }
+
         Ok(())
     }
 
@@ -884,13 +945,39 @@ impl ConversationStore {
             params![conversation_id, title, agent_id, now],
         )
         .context("upserting conversation on append")?;
+        // Version-tree linkage: if this conversation has been branched (its
+        // `active_leaf_message_id` is set), attach the new turn beneath the
+        // current leaf and advance the leaf to this message. Conversations that
+        // have never been edited/regenerated carry a NULL leaf, so `parent` stays
+        // NULL and the append is byte-identical to the pre-tree behavior. This is
+        // what makes flat chat (including council/team/group multi-reply) untouched
+        // until the user actually edits.
+        let parent_message_id: Option<String> = conn
+            .query_row(
+                "SELECT active_leaf_message_id FROM conversations WHERE id = ?1",
+                params![conversation_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .context("reading active leaf on append")?
+            .flatten();
         let sealed = self.cipher.seal(content)?;
         conn.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, agent_id, author_user_id, author_name, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![message_id, conversation_id, role, sealed, agent_id, author_user_id, author_name, now],
+            "INSERT INTO messages (id, conversation_id, role, content, agent_id, author_user_id, author_name, parent_message_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![message_id, conversation_id, role, sealed, agent_id, author_user_id, author_name, parent_message_id, now],
         )
         .context("inserting message")?;
+        // Advance the leaf so the next turn chains beneath this one. Only matters
+        // once branching is engaged (NULL leaf stays NULL: the UPDATE below sets it
+        // to this id only when it was already non-NULL).
+        if parent_message_id.is_some() {
+            conn.execute(
+                "UPDATE conversations SET active_leaf_message_id = ?1 WHERE id = ?2",
+                params![message_id, conversation_id],
+            )
+            .context("advancing active leaf on append")?;
+        }
 
         // Auto-rename trigger: when this is the conversation's *first* user
         // message and the title hasn't been user-locked, hand the id to the
@@ -1110,7 +1197,7 @@ impl ConversationStore {
     pub async fn get_messages(&self, conversation_id: &str) -> Result<Vec<StoredMessage>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT id, role, content, agent_id, created_at, author_user_id, author_name, parts
+            "SELECT id, role, content, agent_id, created_at, author_user_id, author_name, parts, parent_message_id
              FROM messages
              WHERE conversation_id = ?1
              ORDER BY created_at ASC, rowid ASC",
@@ -1129,6 +1216,10 @@ impl ConversationStore {
                     author_user_id: row.get(5)?,
                     author_name: row.get(6)?,
                     parts: None,
+                    parent_message_id: row.get(8)?,
+                    sibling_index: 0,
+                    sibling_count: 1,
+                    sibling_ids: Vec::new(),
                     created_at: row.get(4)?,
                 },
                 sealed_parts,
@@ -1142,6 +1233,108 @@ impl ConversationStore {
             out.push(msg);
         }
         Ok(out)
+    }
+
+    /// Set (or clear) the thumbs feedback on a message. `rating` is `"up"` /
+    /// `"down"` to set, or `None` to clear. Scoped by `conversation_id` so a stray
+    /// id can't rate another conversation's message. Returns `true` when a row was
+    /// updated (i.e. the message exists in this conversation).
+    pub async fn set_message_feedback(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        rating: Option<&str>,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let n = conn
+            .execute(
+                "UPDATE messages SET feedback = ?3
+                 WHERE id = ?1 AND conversation_id = ?2",
+                params![message_id, conversation_id, rating],
+            )
+            .context("setting message feedback")?;
+        Ok(n > 0)
+    }
+
+    /// The rated messages of a conversation as `(message_id, rating)` pairs
+    /// (`rating` is `"up"` / `"down"`). Un-rated messages are omitted, so the map
+    /// is small even for long threads. Drives the persisted thumbs state on reload.
+    pub async fn list_feedback(&self, conversation_id: &str) -> Result<Vec<(String, String)>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, feedback FROM messages
+             WHERE conversation_id = ?1 AND feedback IS NOT NULL",
+        )?;
+        let rows = stmt.query_map(params![conversation_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// The decrypted `(user_prompt, assistant_reply, agent_id)` for the turn that
+    /// the given assistant message closes: the assistant text plus the *nearest
+    /// preceding user message* in chronological order. `None` when the id is not an
+    /// assistant message or has no user message before it. Used to seed the
+    /// learning reward + RAG memory sinks from a thumbs vote.
+    ///
+    /// Note the pairing walks back to the nearest user message regardless of any
+    /// intervening assistant rows, so it resolves correctly for a regenerated /
+    /// edited sibling (`[user, asstV1, asstV2]` — voting `asstV2` still maps to
+    /// `user`) and for council/team turns with several consecutive assistant
+    /// replies (each maps to the same preceding user turn).
+    pub async fn get_turn_for_assistant_message(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+    ) -> Result<Option<(String, String, Option<String>)>> {
+        let messages = self.get_messages(conversation_id).await?;
+        let Some(idx) = messages
+            .iter()
+            .position(|m| m.id == message_id && m.role == "assistant")
+        else {
+            return Ok(None);
+        };
+        // Nearest preceding user message (skip intervening assistant siblings).
+        for user in messages[..idx].iter().rev() {
+            if user.role == "user" {
+                let asst = &messages[idx];
+                return Ok(Some((
+                    user.content.clone(),
+                    asst.content.clone(),
+                    asst.agent_id.clone(),
+                )));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The id of a conversation's most recent assistant message, if any. A
+    /// freshly-streamed reply is rendered under a client-generated id that never
+    /// reached the DB (Core assigns its own uuid at persist time), so a thumbs vote
+    /// on the just-produced reply can't match by id until the thread is reloaded.
+    /// The feedback handler falls back to this newest assistant row when the client
+    /// flags the vote as the latest turn — resolving that common live case.
+    pub async fn latest_assistant_message_id(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM messages
+                 WHERE conversation_id = ?1 AND role = 'assistant'
+                 ORDER BY created_at DESC, rowid DESC
+                 LIMIT 1",
+                params![conversation_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("reading latest assistant message")?;
+        Ok(id)
     }
 
     /// The decrypted text of a conversation's earliest user message, if any.
@@ -1426,6 +1619,10 @@ impl ConversationStore {
                 // model plain text, so the structured parts are intentionally not
                 // read here — only `get_messages` (the reload path) decodes them.
                 parts: None,
+                parent_message_id: None,
+                sibling_index: 0,
+                sibling_count: 1,
+                sibling_ids: Vec::new(),
                 created_at: row.get(4)?,
                 author_user_id: row.get(5)?,
                 author_name: row.get(6)?,
@@ -1524,7 +1721,11 @@ impl ConversationStore {
         &self,
         conversation_id: &str,
     ) -> Result<Option<ConversationDetail>> {
-        let messages = self.get_messages(conversation_id).await?;
+        // Serve the *active* thread (the currently-selected branch) so a reloaded
+        // conversation renders the version the user last chose, with sibling
+        // counts for the pager. Flat (never-branched) conversations fall back to
+        // full chronological order inside `get_active_messages`.
+        let messages = self.get_active_messages(conversation_id).await?;
         let conn = self.conn.lock().await;
         let row: Option<(Option<String>, Option<String>, i64, i64, Option<String>)> = conn
             .query_row(
@@ -1669,6 +1870,265 @@ impl ConversationStore {
             pinned: false,
             archived: false,
         }))
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Message version tree (ChatGPT/Claude-style edit + regenerate branching)
+    //
+    // A conversation starts flat: every message has a NULL `parent_message_id`
+    // and the conversation's `active_leaf_message_id` is NULL, so reads return
+    // chronological order and appends do not link parents. The first edit or
+    // regenerate calls `linearize`, which converts that flat history into a spine
+    // (each message's parent = its predecessor) and sets the leaf to the last
+    // message. From then on the *active thread* is the parent chain walked up
+    // from the leaf, alternate versions are siblings (messages sharing a parent),
+    // and `append_message` chains new turns beneath the leaf.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Convert a never-branched conversation's flat history into a linked spine
+    /// so it can host version branches. Idempotent: a no-op once the leaf is set
+    /// (i.e. the conversation already has a tree). Returns the id of the message
+    /// the caller named, resolved within the now-linearized history, or `None`
+    /// if that message does not belong to the conversation.
+    ///
+    /// Must be called while holding no other reference to the connection.
+    fn linearize_locked(conn: &Connection, conversation_id: &str) -> Result<()> {
+        let already: Option<String> = conn
+            .query_row(
+                "SELECT active_leaf_message_id FROM conversations WHERE id = ?1",
+                params![conversation_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .context("checking leaf for linearize")?
+            .flatten();
+        if already.is_some() {
+            return Ok(());
+        }
+        // Chronological ids (the flat order the UI has always shown).
+        let ids: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM messages WHERE conversation_id = ?1
+                 ORDER BY created_at ASC, rowid ASC",
+            )?;
+            let rows = stmt.query_map(params![conversation_id], |row| row.get::<_, String>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        if ids.is_empty() {
+            return Ok(());
+        }
+        // Link each message to its predecessor; first stays a root (NULL parent).
+        for pair in ids.windows(2) {
+            conn.execute(
+                "UPDATE messages SET parent_message_id = ?1 WHERE id = ?2",
+                params![pair[0], pair[1]],
+            )
+            .context("linearizing message parent")?;
+        }
+        let leaf = ids.last().expect("non-empty");
+        conn.execute(
+            "UPDATE conversations SET active_leaf_message_id = ?1 WHERE id = ?2",
+            params![leaf, conversation_id],
+        )
+        .context("setting leaf on linearize")?;
+        Ok(())
+    }
+
+    /// The active thread of a conversation: the parent chain walked up from the
+    /// selected leaf, in chronological (root-first) order, each message annotated
+    /// with its `sibling_index`/`sibling_count` for the version pager. Falls back
+    /// to flat chronological order for conversations that have never been branched
+    /// (NULL leaf) — byte-identical to `get_messages` there.
+    pub async fn get_active_messages(&self, conversation_id: &str) -> Result<Vec<StoredMessage>> {
+        let conn = self.conn.lock().await;
+        let leaf: Option<String> = conn
+            .query_row(
+                "SELECT active_leaf_message_id FROM conversations WHERE id = ?1",
+                params![conversation_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .context("reading active leaf")?
+            .flatten();
+        drop(conn);
+        let Some(leaf) = leaf else {
+            // Never branched: flat history.
+            return self.get_messages(conversation_id).await;
+        };
+
+        // Load the full row set once (sealed), then walk the parent chain in
+        // memory so we never hold the DB lock across decryption.
+        let all = self.get_messages(conversation_id).await?;
+        let by_id: std::collections::HashMap<&str, &StoredMessage> =
+            all.iter().map(|m| (m.id.as_str(), m)).collect();
+
+        // Walk up from the leaf collecting the active path (leaf → root), then
+        // reverse to chronological order.
+        let mut path: Vec<StoredMessage> = Vec::new();
+        let mut cursor = Some(leaf);
+        while let Some(id) = cursor {
+            let Some(msg) = by_id.get(id.as_str()) else {
+                break;
+            };
+            path.push((*msg).clone());
+            cursor = msg.parent_message_id.clone();
+        }
+        path.reverse();
+
+        // Annotate each with its sibling index/count. Siblings share a
+        // `parent_message_id` (treating None as a shared "root" bucket). `all` is
+        // already in insertion order (`created_at ASC, rowid ASC` from
+        // `get_messages`), so filtering preserves creation order — the pager shows
+        // v1, v2, v3 as authored even when two versions land in the same
+        // millisecond (rowid, not the random uuid, breaks the tie).
+        for msg in &mut path {
+            let siblings: Vec<&StoredMessage> = all
+                .iter()
+                .filter(|m| m.parent_message_id == msg.parent_message_id)
+                .collect();
+            msg.sibling_count = siblings.len();
+            msg.sibling_index = siblings
+                .iter()
+                .position(|m| m.id == msg.id)
+                .unwrap_or(0);
+            // Only carry the id list when there is an actual choice to page
+            // through — a single-version turn stays a lean payload.
+            msg.sibling_ids = if siblings.len() > 1 {
+                siblings.iter().map(|m| m.id.clone()).collect()
+            } else {
+                Vec::new()
+            };
+        }
+        Ok(path)
+    }
+
+    /// Edit a user message: create a new sibling version carrying `new_content`
+    /// (same parent as the edited message) and point the active leaf at it, so a
+    /// subsequent generation turn attaches its reply beneath the edit. Returns the
+    /// new sibling's id, or `None` if the message is absent / not a user turn.
+    pub async fn edit_user_message(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        new_content: &str,
+    ) -> Result<Option<String>> {
+        let now = now_millis();
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let sealed = self.cipher.seal(new_content)?;
+        let conn = self.conn.lock().await;
+        Self::linearize_locked(&conn, conversation_id)?;
+        // Resolve the edited message's role, parent, and agent.
+        let row: Option<(String, Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT role, parent_message_id, agent_id FROM messages
+                 WHERE id = ?1 AND conversation_id = ?2",
+                params![message_id, conversation_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .context("loading message to edit")?;
+        let Some((role, parent, agent_id)) = row else {
+            return Ok(None);
+        };
+        if role != "user" {
+            return Ok(None);
+        }
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, agent_id, parent_message_id, created_at)
+             VALUES (?1, ?2, 'user', ?3, ?4, ?5, ?6)",
+            params![new_id, conversation_id, sealed, agent_id, parent, now],
+        )
+        .context("inserting edited user sibling")?;
+        conn.execute(
+            "UPDATE conversations SET active_leaf_message_id = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_id, now, conversation_id],
+        )
+        .context("pointing leaf at edit")?;
+        Ok(Some(new_id))
+    }
+
+    /// Prepare to regenerate an assistant message: point the active leaf at the
+    /// user turn *above* it (its parent) so the next generation appends a fresh
+    /// assistant sibling. Returns the parent id, or `None` if the message is
+    /// absent or has no parent (a regenerate needs a preceding user turn).
+    pub async fn prepare_regenerate(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+    ) -> Result<Option<String>> {
+        let now = now_millis();
+        let conn = self.conn.lock().await;
+        Self::linearize_locked(&conn, conversation_id)?;
+        let parent: Option<Option<String>> = conn
+            .query_row(
+                "SELECT parent_message_id FROM messages
+                 WHERE id = ?1 AND conversation_id = ?2",
+                params![message_id, conversation_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .context("loading message to regenerate")?;
+        let Some(Some(parent_id)) = parent else {
+            return Ok(None);
+        };
+        conn.execute(
+            "UPDATE conversations SET active_leaf_message_id = ?1, updated_at = ?2 WHERE id = ?3",
+            params![parent_id, now, conversation_id],
+        )
+        .context("pointing leaf at regenerate parent")?;
+        Ok(Some(parent_id))
+    }
+
+    /// Switch the active version at a branch point: make `version_id` the chosen
+    /// sibling, then descend to a leaf (following the newest child at each step)
+    /// and set that as the conversation's active leaf. Returns the resolved leaf
+    /// id, or `None` if `version_id` is absent. The client then re-reads the
+    /// active path to re-render the thread along the newly-selected branch.
+    pub async fn select_version(
+        &self,
+        conversation_id: &str,
+        version_id: &str,
+    ) -> Result<Option<String>> {
+        let now = now_millis();
+        let conn = self.conn.lock().await;
+        Self::linearize_locked(&conn, conversation_id)?;
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM messages WHERE id = ?1 AND conversation_id = ?2",
+                params![version_id, conversation_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .context("checking version exists")?
+            .is_some();
+        if !exists {
+            return Ok(None);
+        }
+        // Descend from the chosen version to a leaf, always following the
+        // most-recently-created child (the latest continuation of that branch).
+        let mut leaf = version_id.to_owned();
+        loop {
+            let child: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM messages
+                     WHERE conversation_id = ?1 AND parent_message_id = ?2
+                     ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                    params![conversation_id, leaf],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+                .context("descending to leaf")?;
+            match child {
+                Some(c) => leaf = c,
+                None => break,
+            }
+        }
+        conn.execute(
+            "UPDATE conversations SET active_leaf_message_id = ?1, updated_at = ?2 WHERE id = ?3",
+            params![leaf, now, conversation_id],
+        )
+        .context("setting selected leaf")?;
+        Ok(Some(leaf))
     }
 
     /// Add an agent as a participant in a conversation. Idempotent — adding an
@@ -2518,6 +2978,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn message_feedback_set_list_and_turn_resolution() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .append_message("conv-f", "user", "how do I reverse a string", None, None, None)
+            .await
+            .unwrap();
+        let asst = store
+            .append_message("conv-f", "assistant", "use chars().rev()", None, None, None)
+            .await
+            .unwrap();
+
+        // No feedback yet.
+        assert!(store.list_feedback("conv-f").await.unwrap().is_empty());
+
+        // Set a thumbs up.
+        assert!(store
+            .set_message_feedback("conv-f", &asst, Some("up"))
+            .await
+            .unwrap());
+        let fb = store.list_feedback("conv-f").await.unwrap();
+        assert_eq!(fb, vec![(asst.clone(), "up".to_string())]);
+
+        // The turn resolves to (user prompt, assistant reply).
+        let turn = store
+            .get_turn_for_assistant_message("conv-f", &asst)
+            .await
+            .unwrap()
+            .expect("turn resolves");
+        assert_eq!(turn.0, "how do I reverse a string");
+        assert_eq!(turn.1, "use chars().rev()");
+
+        // Clearing removes it from the map.
+        assert!(store
+            .set_message_feedback("conv-f", &asst, None)
+            .await
+            .unwrap());
+        assert!(store.list_feedback("conv-f").await.unwrap().is_empty());
+
+        // A wrong-conversation scope is a no-op (row not found).
+        assert!(!store
+            .set_message_feedback("conv-other", &asst, Some("down"))
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn turn_resolution_pairs_second_assistant_reply_to_the_user() {
+        // Regenerate / council case: a second consecutive assistant reply must
+        // still pair to the preceding user turn (not return None).
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .append_message("conv-r", "user", "what is 2+2", None, None, None)
+            .await
+            .unwrap();
+        store
+            .append_message("conv-r", "assistant", "first attempt: 4", None, None, None)
+            .await
+            .unwrap();
+        let second = store
+            .append_message(
+                "conv-r",
+                "assistant",
+                "regenerated: it is 4",
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let turn = store
+            .get_turn_for_assistant_message("conv-r", &second)
+            .await
+            .unwrap()
+            .expect("second assistant reply resolves to the preceding user turn");
+        assert_eq!(turn.0, "what is 2+2");
+        assert_eq!(turn.1, "regenerated: it is 4");
+    }
+
+    #[tokio::test]
     async fn list_orders_by_recency_and_counts() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
@@ -2939,5 +3479,127 @@ mod tests {
         assert!(detail.participants.contains(&"agent-x".to_owned()));
         assert!(detail.participants.contains(&"agent-y".to_owned()));
         assert_eq!(detail.messages.len(), 1);
+    }
+
+    // ── Version tree (edit + regenerate + select) ──────────────────────────
+
+    /// Seed a 2-turn flat conversation: user "q1" → assistant "a1". Returns the
+    /// two message ids.
+    async fn seed_flat(store: &ConversationStore, conv: &str) -> (String, String) {
+        let u = store
+            .append_message(conv, "user", "q1", Some("agent-x"), None, None)
+            .await
+            .unwrap();
+        let a = store
+            .append_message(conv, "assistant", "a1", Some("agent-x"), None, None)
+            .await
+            .unwrap();
+        (u, a)
+    }
+
+    #[tokio::test]
+    async fn flat_conversation_stays_flat_until_edited() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        seed_flat(&store, "conv-flat").await;
+        // No branching yet: active messages == flat messages, no siblings, no
+        // parent links (byte-identical to pre-tree behavior).
+        let active = store.get_active_messages("conv-flat").await.unwrap();
+        assert_eq!(active.len(), 2);
+        assert!(active.iter().all(|m| m.parent_message_id.is_none()));
+        assert!(active.iter().all(|m| m.sibling_count == 1));
+    }
+
+    #[tokio::test]
+    async fn edit_user_message_creates_sibling_and_switches_active_path() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        let (u, _a) = seed_flat(&store, "conv-edit").await;
+
+        // Edit the user turn → new sibling, leaf now points at it. The old
+        // assistant reply drops off the active path (its parent is the ORIGINAL
+        // user turn, not the edit).
+        let u2 = store
+            .edit_user_message("conv-edit", &u, "q1-edited")
+            .await
+            .unwrap()
+            .expect("edit returns new id");
+        assert_ne!(u2, u);
+
+        let active = store.get_active_messages("conv-edit").await.unwrap();
+        assert_eq!(active.len(), 1, "only the edited user turn is active");
+        assert_eq!(active[0].id, u2);
+        assert_eq!(active[0].content, "q1-edited");
+        // Two versions at this branch point: original + edit.
+        assert_eq!(active[0].sibling_count, 2);
+        assert_eq!(active[0].sibling_index, 1, "edit is the newer version");
+
+        // A generated reply now attaches beneath the edit.
+        store
+            .append_message("conv-edit", "assistant", "a2", Some("agent-x"), None, None)
+            .await
+            .unwrap();
+        let active = store.get_active_messages("conv-edit").await.unwrap();
+        assert_eq!(active.len(), 2);
+        assert_eq!(active[1].content, "a2");
+        assert_eq!(active[1].parent_message_id.as_deref(), Some(u2.as_str()));
+    }
+
+    #[tokio::test]
+    async fn select_version_restores_the_other_branch() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        let (u, _a) = seed_flat(&store, "conv-sel").await;
+        let u2 = store
+            .edit_user_message("conv-sel", &u, "q1-edited")
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .append_message("conv-sel", "assistant", "a2", Some("agent-x"), None, None)
+            .await
+            .unwrap();
+
+        // Switch back to the ORIGINAL user version → its subtree (assistant "a1")
+        // returns as the active path.
+        let leaf = store
+            .select_version("conv-sel", &u)
+            .await
+            .unwrap()
+            .expect("select returns a leaf");
+        let active = store.get_active_messages("conv-sel").await.unwrap();
+        assert_eq!(active.len(), 2);
+        assert_eq!(active[0].id, u);
+        assert_eq!(active[0].content, "q1");
+        assert_eq!(active[1].content, "a1");
+        assert_eq!(active[1].id, leaf);
+
+        // Flip forward to the edit again.
+        store.select_version("conv-sel", &u2).await.unwrap();
+        let active = store.get_active_messages("conv-sel").await.unwrap();
+        assert_eq!(active[0].content, "q1-edited");
+        assert_eq!(active[1].content, "a2");
+    }
+
+    #[tokio::test]
+    async fn regenerate_creates_assistant_sibling_under_same_user_turn() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        let (u, a) = seed_flat(&store, "conv-regen").await;
+
+        // Regenerate the assistant reply → leaf moves to the user turn above it.
+        let parent = store
+            .prepare_regenerate("conv-regen", &a)
+            .await
+            .unwrap()
+            .expect("regenerate returns parent");
+        assert_eq!(parent, u);
+
+        // The fresh generation appends as a sibling of the old assistant reply.
+        store
+            .append_message("conv-regen", "assistant", "a1-v2", Some("agent-x"), None, None)
+            .await
+            .unwrap();
+        let active = store.get_active_messages("conv-regen").await.unwrap();
+        assert_eq!(active.len(), 2);
+        assert_eq!(active[1].content, "a1-v2");
+        assert_eq!(active[1].sibling_count, 2, "two assistant versions");
+        assert_eq!(active[1].parent_message_id.as_deref(), Some(u.as_str()));
     }
 }

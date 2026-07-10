@@ -87,6 +87,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(get_workflow_schema()),
+            ..Default::default()
         },
         RegistryTool {
             id: "workflow_builder__create_workflow".to_owned(),
@@ -99,6 +100,7 @@ pub fn tools() -> Vec<RegistryTool> {
                  together. Required: name.\n\n{NODE_KIND_REFERENCE}"
             )),
             input_schema: Some(create_workflow_schema()),
+            ..Default::default()
         },
         RegistryTool {
             id: "workflow_builder__configure_workflow".to_owned(),
@@ -114,6 +116,7 @@ pub fn tools() -> Vec<RegistryTool> {
                  result is rejected with a message so you can fix it. Required: workflow_id.\n\n{NODE_KIND_REFERENCE}"
             )),
             input_schema: Some(configure_workflow_schema()),
+            ..Default::default()
         },
     ]
 }

@@ -64,6 +64,7 @@ pub fn tools() -> Vec<RegistryTool> {
                 .to_owned(),
         ),
         input_schema: Some(discover_agents_schema()),
+        ..Default::default()
     }]
 }
 

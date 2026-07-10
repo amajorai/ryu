@@ -1,0 +1,30 @@
+{
+  "id": "io.ryu.decision-wizard",
+  "name": "Decision Wizard",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "tool-decision-flow",
+      "name": "Decision Flow",
+      "kind": "tool",
+      "config": { "slug": "app.decision__flow" }
+    },
+    {
+      "id": "tool-decision-submit",
+      "name": "Submit Decision",
+      "kind": "tool",
+      "config": { "slug": "app.decision__submit" }
+    }
+  ],
+  "contributes": {
+    "widgets": [
+      {
+        "tool_id": "app.decision__flow",
+        "uri": "ui://widget/decision-wizard.html",
+        "mime": "text/html+skybridge",
+        "default_display_mode": "inline"
+      }
+    ]
+  },
+  "permission_grants": ["chat.sendFollowUp"]
+}

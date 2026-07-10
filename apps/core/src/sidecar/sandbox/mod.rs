@@ -5,6 +5,7 @@
 //! - [`docker`] — Docker/OCI containers via the `docker` CLI (detect-only)
 //! - [`microsandbox`] — microVMs via the `msb` CLI (detect-only)
 //! - [`opensandbox`] — gVisor/Kata/Firecracker via the `osb` CLI (detect-only)
+//! - [`daytona`] — remote sandboxes via the Daytona REST API (token-gated)
 //!
 //! Sandboxing is "what runs" (an execution context), so this lives in Core per
 //! the Core-vs-Gateway rule (CLAUDE.md §1). Policy over *what is allowed* inside
@@ -24,9 +25,12 @@
 //! [`select_backend`]. The only hard rule: `select_backend` never returns an
 //! unknown backend silently — it errors out so callers can surface the problem.
 
+pub mod daytona;
 pub mod docker;
+pub mod heartbeat;
 pub mod microsandbox;
 pub mod opensandbox;
+pub mod spec;
 pub mod wasmtime;
 
 use std::collections::HashSet;
@@ -387,7 +391,8 @@ pub fn configured_backend() -> SandboxBackend {
 
 /// The sandbox backends Ryu knows how to select, in display order. `wasmtime` is
 /// the built-in default; the rest are detect-only external CLIs.
-pub const KNOWN_BACKENDS: &[&str] = &["wasmtime", "docker", "microsandbox", "opensandbox"];
+pub const KNOWN_BACKENDS: &[&str] =
+    &["wasmtime", "docker", "microsandbox", "opensandbox", "daytona"];
 
 /// Human-facing label for a known backend (`name` for anything unknown).
 pub fn backend_display_name(name: &str) -> &str {
@@ -396,6 +401,7 @@ pub fn backend_display_name(name: &str) -> &str {
         "docker" => "Docker",
         "microsandbox" => "microsandbox",
         "opensandbox" => "OpenSandbox",
+        "daytona" => "Daytona (remote)",
         other => other,
     }
 }
@@ -418,6 +424,7 @@ pub async fn detect_backend(name: &str) -> bool {
             opensandbox::detect().await,
             opensandbox::DetectResult::Available
         ),
+        "daytona" => matches!(daytona::detect().await, daytona::DetectResult::Available),
         _ => false,
     }
 }
@@ -469,11 +476,11 @@ impl SandboxBackendStore {
 /// Returns `Err` for [`SandboxBackend::Wasmtime`] (use the wasmtime path with a
 /// WASM module instead), for [`SandboxBackend::Subprocess`] (no host-process
 /// backend is built yet), and for unknown `Custom` names. Recognised command
-/// backends: `docker`, `microsandbox`, `opensandbox`.
+/// backends: `docker`, `microsandbox`, `opensandbox`, `daytona`.
 ///
-/// All three are detect-only CLI wrappers — construction does no I/O and never
-/// installs anything; reachability is a runtime probe via each backend's
-/// `detect()`.
+/// The CLI wrappers (`docker`/`microsandbox`/`opensandbox`) and the remote HTTP
+/// backend (`daytona`) all construct without I/O and never install/provision
+/// anything; reachability is a runtime probe via each backend's `detect()`.
 pub fn build_command_backend(backend: &SandboxBackend) -> Result<Box<dyn Sandbox>> {
     match backend {
         SandboxBackend::Docker => Ok(Box::new(docker::DockerSandbox::new())),
@@ -482,6 +489,9 @@ pub fn build_command_backend(backend: &SandboxBackend) -> Result<Box<dyn Sandbox
         }
         SandboxBackend::Custom(name) if name == "opensandbox" => {
             Ok(Box::new(opensandbox::OpenSandboxSandbox::new()))
+        }
+        SandboxBackend::Custom(name) if name == "daytona" => {
+            Ok(Box::new(daytona::DaytonaSandbox::new()))
         }
         SandboxBackend::Wasmtime => Err(anyhow!(
             "wasmtime is not a command backend — pass a WASM module via `wasm_b64`"

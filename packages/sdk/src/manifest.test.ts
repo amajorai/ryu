@@ -23,8 +23,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { agent, PluginBuilder, skill, tool, workflow } from "./builder.ts";
+import { agent, app, PluginBuilder, skill, tool, workflow } from "./builder.ts";
 import { PluginManifestSchema } from "./manifest.ts";
+import { defineApp } from "./runnable/app.ts";
 
 // ── builder unit tests ────────────────────────────────────────────────────────
 
@@ -263,5 +264,178 @@ describe("round-trip: SDK build → JSON → Core schema parse", () => {
 		const bad = { name: "No ID", version: "1.0.0", runnables: [] };
 		const result = PluginManifestSchema.safeParse(bad);
 		expect(result.success).toBe(false);
+	});
+});
+
+// ── Ryu App (defineApp / AppBuilder) ──────────────────────────────────────────
+
+describe("defineApp", () => {
+	// A fixture app with one render tool + one companion (accessible) tool. This
+	// exercises the render-vs-companion derivation that mirrors Core's
+	// `apps::tools()`.
+	function fixtureApp() {
+		return defineApp({
+			id: "com.example.checklist",
+			title: "Checklist",
+			version: "1.0.0",
+			slug: "checklist",
+			uiEntry: "src/checklist.tsx",
+			grants: ["mcp:file_read"],
+			tools: [
+				{
+					name: "render",
+					description: "Render a checklist",
+					inputSchema: {
+						type: "object",
+						properties: { title: { type: "string" } },
+					},
+					invoking: "Building…",
+					invoked: "Ready",
+				},
+				{ name: "toggle", description: "Toggle an item", accessible: true },
+			],
+		});
+	}
+
+	it("emits one WidgetContribution for the render tool and none for the companion", () => {
+		const manifest = fixtureApp();
+		const widgets = manifest.contributes?.widgets ?? [];
+
+		expect(widgets).toHaveLength(1);
+		expect(widgets[0]?.tool_id).toBe("checklist__render");
+		expect(widgets[0]?.uri).toBe("ui://widget/checklist.html");
+		expect(widgets[0]?.ui_entry).toBe("src/checklist.tsx");
+		expect(widgets[0]?.mime).toBe("text/html+skybridge");
+		expect(widgets[0]?.default_display_mode).toBe("inline");
+	});
+
+	it("builds one kind:'tool' runnable per tool with the widget config flags", () => {
+		const manifest = fixtureApp();
+		expect(manifest.runnables).toHaveLength(2);
+		expect(manifest.runnables.every((r) => r.kind === "tool")).toBe(true);
+
+		const render = manifest.runnables.find((r) => r.id === "checklist__render");
+		expect(render?.config).toMatchObject({
+			slug: "checklist__render",
+			// The manifest is the only channel for a packed app: description +
+			// input_schema must survive so Core can rebuild a driveable tool.
+			description: "Render a checklist",
+			input_schema: {
+				type: "object",
+				properties: { title: { type: "string" } },
+			},
+			widget: true,
+			// The render tool's widget may call tools because the app declares a
+			// companion (widget_accessible tool).
+			widget_accessible: true,
+			invoking: "Building…",
+			invoked: "Ready",
+		});
+
+		const toggle = manifest.runnables.find((r) => r.id === "checklist__toggle");
+		expect(toggle?.config).toMatchObject({
+			slug: "checklist__toggle",
+			widget: false,
+			widget_accessible: true,
+		});
+	});
+
+	it("marks a render tool's widget non-accessible when the app has no companion", () => {
+		const manifest = defineApp({
+			id: "com.example.chart",
+			title: "Chart",
+			version: "1.0.0",
+			slug: "chart-studio",
+			server: "chart",
+			uiEntry: "src/chart.tsx",
+			tools: [{ name: "render", description: "Render a chart" }],
+		});
+		const render = manifest.runnables.find((r) => r.id === "chart__render");
+		expect(render?.config).toMatchObject({
+			widget: true,
+			widget_accessible: false,
+		});
+		// `server` override qualifies the tool id and the widget binding.
+		expect(manifest.contributes?.widgets[0]?.tool_id).toBe("chart__render");
+		// The widget uri still derives from the slug, not the server.
+		expect(manifest.contributes?.widgets[0]?.uri).toBe(
+			"ui://widget/chart-studio.html"
+		);
+	});
+
+	it("round-trips through PluginManifestSchema without stripping widgets", () => {
+		// The load-bearing check: `contributes.widgets` is only preserved because it
+		// was added to `ContributesSchema`. A JSON round-trip proves the field
+		// survives Core-strict zod parse (the same parse the CLI applies).
+		const manifest = fixtureApp();
+		const json = JSON.stringify(manifest);
+		const parsed = PluginManifestSchema.safeParse(JSON.parse(json));
+
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			return;
+		}
+		expect(parsed.data.contributes?.widgets).toHaveLength(1);
+		expect(parsed.data.contributes?.widgets[0]?.tool_id).toBe(
+			"checklist__render"
+		);
+		// description + input_schema survive the strict parse (the only channel for
+		// a packed app — no `generated.rs` on the Core side).
+		const render = parsed.data.runnables.find(
+			(r) => r.id === "checklist__render"
+		);
+		expect(render?.config?.description).toBe("Render a checklist");
+		expect(render?.config?.input_schema).toBeDefined();
+	});
+
+	it("rejects an invalid semver version", () => {
+		expect(() =>
+			defineApp({
+				id: "com.example.bad",
+				title: "Bad",
+				version: "not-semver",
+				slug: "bad",
+				uiEntry: "src/bad.tsx",
+				tools: [{ name: "render", description: "Render" }],
+			})
+		).toThrow(/semver/);
+	});
+});
+
+describe("AppBuilder", () => {
+	it("builds an equivalent manifest to defineApp", () => {
+		const manifest = app()
+			.id("com.example.checklist")
+			.title("Checklist")
+			.version("1.0.0")
+			.slug("checklist")
+			.uiEntry("src/checklist.tsx")
+			.grant("mcp:file_read")
+			.tool({
+				name: "render",
+				description: "Render a checklist",
+				invoking: "Building…",
+				invoked: "Ready",
+			})
+			.tool({ name: "toggle", description: "Toggle an item", accessible: true })
+			.build();
+
+		expect(manifest.id).toBe("com.example.checklist");
+		expect(manifest.runnables).toHaveLength(2);
+		expect(manifest.contributes?.widgets).toHaveLength(1);
+		expect(manifest.contributes?.widgets[0]?.tool_id).toBe("checklist__render");
+		expect(manifest.permission_grants).toEqual(["mcp:file_read"]);
+	});
+
+	it("throws on missing id", () => {
+		expect(() =>
+			app()
+				.title("No ID")
+				.version("1.0.0")
+				.slug("x")
+				.uiEntry("src/x.tsx")
+				.tool({ name: "render", description: "Render" })
+				.build()
+		).toThrow(/id/);
 	});
 });

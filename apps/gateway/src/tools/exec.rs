@@ -50,6 +50,27 @@ pub struct ExecToolBody {
     pub user_id: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
+    /// Product-surface tag (`x-ryu-feature`); `"widget"` for widget round-trips.
+    /// Accepted for transport tolerance; the widget branch keys off the presence
+    /// of the `widget` envelope and hardcodes `feature="widget"` on the audit row.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub feature: Option<String>,
+    /// Widget envelope (§4.3). Present ⇒ `exec_tool` runs the governed widget
+    /// chain (scan → budget → forward → audit) instead of the bare forward the
+    /// non-widget `kind=tool` path uses (D5: `exec_tool` owns the chain).
+    #[serde(default)]
+    pub widget: Option<WidgetEnvelope>,
+}
+
+/// The `widget: { instance_id, origin_server }` envelope Core attaches to a
+/// widget-initiated `callTool` (§4.3). `instance_id` is the opaque per-render id
+/// (the rate-limit + audit key); `origin_server` is the app that owns the
+/// widget's output template (recorded as the audit `backend`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct WidgetEnvelope {
+    pub instance_id: String,
+    pub origin_server: String,
 }
 
 fn default_exec_kind() -> String {
@@ -107,6 +128,15 @@ pub async fn exec_tool(
         )));
     };
 
+    // Widget round-trips (§4.3 / D5): when the request carries the widget
+    // envelope, the gateway owns the FULL governance chain — scan → budget →
+    // forward → audit — keyed to the widget instance. This is the concrete gap
+    // the envelope closes over the bare `kind=tool` forward below; Core does not
+    // separately scan/budget/audit (D5).
+    if body.widget.is_some() {
+        return exec_widget_tool(&state, catalog, &ctx.api_key, body).await;
+    }
+
     match body.kind.as_str() {
         "tool" => exec_kind_tool(catalog, body).await,
         "execute" => exec_kind_forward(catalog, "/api/tools/exec", &body).await,
@@ -114,6 +144,123 @@ pub async fn exec_tool(
         other => Ok(Json(ExecToolResponse::err(format!(
             "unknown exec kind '{other}' (expected tool|execute|resume)"
         )))),
+    }
+}
+
+/// The governed widget `callTool` chain (§4.3 / D5): scan → budget → forward →
+/// audit, keyed to the widget instance. Every outcome (allow or any denial) is
+/// audited as a `feature="widget"` `ExecCall` carrying the `widget_instance_id`.
+///
+/// - **scan**: when `widget.scan_arguments` is on, the serialized arguments are
+///   run through the inbound firewall (PII / secret / prompt-injection). A hit
+///   denies the call, fail-closed.
+/// - **budget**: the sandbox exec budget (this call is an `ExecCall` that drains
+///   it) plus the per-instance per-minute widget call token bucket (§4.3).
+/// - **forward**: to Core `POST /api/mcp/tools/call` via the catalog client.
+/// - **audit**: one widget-call row, then `exec_budget.record(duration)`.
+async fn exec_widget_tool(
+    state: &SharedState,
+    catalog: &dyn super::CoreCatalog,
+    api_key: &str,
+    body: ExecToolBody,
+) -> Result<Json<ExecToolResponse>, GatewayError> {
+    let widget = body
+        .widget
+        .as_ref()
+        .expect("exec_widget_tool called with a widget envelope");
+    let cfg = &state.config.widget;
+    let instance_id = widget.instance_id.clone();
+    let origin_server = widget.origin_server.clone();
+
+    // A widget callTool must name a tool id (it is always a `kind=tool` call).
+    let Some(tool_id) = body
+        .tool_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+    else {
+        return Ok(Json(ExecToolResponse::err(
+            "tool_id is required for a widget callTool",
+        )));
+    };
+
+    // Audit one widget-call row (allow ⇒ error=None; any denial ⇒ error=reason).
+    let audit_call = |duration_ms: u64, error: Option<String>| {
+        if state.audit.is_enabled() {
+            state
+                .audit
+                .log(crate::audit::AuditLogger::make_widget_call_record(
+                    uuid::Uuid::new_v4().to_string(),
+                    api_key.to_owned(),
+                    origin_server.clone(),
+                    tool_id.clone(),
+                    body.agent_id.clone(),
+                    body.session_id.clone(),
+                    instance_id.clone(),
+                    duration_ms,
+                    error,
+                ));
+        }
+    };
+
+    // ── scan ─────────────────────────────────────────────────────────────────
+    if cfg.enabled && cfg.scan_arguments {
+        let args_text = body.arguments.to_string();
+        if let Some(m) = state.with_firewall(|fw| fw.scan_inbound(&args_text)) {
+            let reason = format!("firewall {:?}: {}", m.kind, m.pattern_name);
+            audit_call(0, Some(reason.clone()));
+            return Ok(Json(ExecToolResponse::err(format!(
+                "widget call denied ({reason})"
+            ))));
+        }
+    }
+
+    // ── budget ─────────────────────────────────────────────────────────────────
+    // Sandbox exec budget (this call drains it like any tool run).
+    if let crate::budget::ExecBudgetResult::Deny { .. } = state.exec_budget.check() {
+        let reason = "exec budget exhausted".to_owned();
+        audit_call(0, Some(reason.clone()));
+        return Ok(Json(ExecToolResponse::err(format!(
+            "widget call denied ({reason})"
+        ))));
+    }
+    // Per-instance per-minute widget call rate limit (§4.3).
+    if !crate::api::audit::widget_call_allowed(cfg, &instance_id) {
+        let reason = format!(
+            "widget call rate limit exhausted ({} calls/min)",
+            cfg.max_calls_per_min
+        );
+        audit_call(0, Some(reason.clone()));
+        return Ok(Json(ExecToolResponse::err(format!(
+            "widget call denied ({reason})"
+        ))));
+    }
+
+    // ── forward ─────────────────────────────────────────────────────────────────
+    let start = std::time::Instant::now();
+    let outcome = catalog
+        .call_tool(
+            &tool_id,
+            body.arguments.clone(),
+            body.agent_id.as_deref(),
+            body.user_id.as_deref(),
+        )
+        .await;
+    let duration_ms = start.elapsed().as_millis() as u64;
+    // Record the exec against the sandbox exec-budget window (allow or error —
+    // it reached Core and consumed compute either way).
+    state.exec_budget.record(duration_ms);
+
+    // ── audit ─────────────────────────────────────────────────────────────────
+    match outcome {
+        Ok(result) => {
+            audit_call(duration_ms, None);
+            Ok(Json(ExecToolResponse::ok(result)))
+        }
+        Err(e) => {
+            audit_call(duration_ms, Some(e.clone()));
+            Ok(Json(ExecToolResponse::err(e)))
+        }
     }
 }
 

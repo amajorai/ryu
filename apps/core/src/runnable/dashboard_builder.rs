@@ -74,6 +74,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(get_schema()),
+            ..Default::default()
         },
         RegistryTool {
             id: "dashboard_builder__create_dashboard".to_owned(),
@@ -85,6 +86,7 @@ pub fn tools() -> Vec<RegistryTool> {
                  initial `widgets` array. Required: name.\n\n{WIDGET_REFERENCE}"
             )),
             input_schema: Some(create_schema()),
+            ..Default::default()
         },
         RegistryTool {
             id: "dashboard_builder__configure_dashboard".to_owned(),
@@ -97,6 +99,7 @@ pub fn tools() -> Vec<RegistryTool> {
                  delete). Required: dashboard_id.\n\n{WIDGET_REFERENCE}"
             )),
             input_schema: Some(configure_schema()),
+            ..Default::default()
         },
     ]
 }

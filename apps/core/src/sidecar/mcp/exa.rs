@@ -120,6 +120,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(search_schema()),
+            ..Default::default()
         },
         RegistryTool {
             id: format!("{SERVER_NAME}__find_similar"),
@@ -130,6 +131,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(find_similar_schema()),
+            ..Default::default()
         },
     ]
 }

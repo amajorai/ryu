@@ -16,6 +16,8 @@ import type {
 	RunnableMeta,
 } from "./manifest.ts";
 import { PluginManifestSchema, RunnableMetaSchema } from "./manifest.ts";
+import type { AppToolSpec, DefineAppOptions } from "./runnable/app.ts";
+import { defineApp } from "./runnable/app.ts";
 
 // ── RunnableMeta builders ─────────────────────────────────────────────────────
 
@@ -209,3 +211,133 @@ export class PluginBuilder {
 		return result.data;
 	}
 }
+
+// ── AppBuilder (Ryu Apps) ─────────────────────────────────────────────────────
+
+/**
+ * Fluent builder for a Ryu App — a `plugin.json` whose tools render interactive
+ * widgets inline in chat. Delegates to {@link defineApp} on `.build()`, so it
+ * derives the render-vs-companion split and validates through
+ * `PluginManifestSchema` (throwing a descriptive `Error` on bad input) exactly
+ * like the factory.
+ *
+ * @example
+ * ```ts
+ * import { app } from "@ryuhq/sdk/builder"
+ *
+ * const manifest = app()
+ *   .id("com.example.checklist")
+ *   .title("Checklist")
+ *   .version("1.0.0")
+ *   .slug("checklist")
+ *   .uiEntry("src/checklist.tsx")
+ *   .tool({ name: "render", description: "Render a checklist", invoking: "Building…" })
+ *   .tool({ name: "toggle", description: "Toggle an item", accessible: true })
+ *   .build()
+ * ```
+ */
+export class AppBuilder {
+	private _id = "";
+	private _title = "";
+	private _version = "";
+	private _slug = "";
+	private _server: string | undefined = undefined;
+	private _displayMode: string | undefined = undefined;
+	private _mime: string | undefined = undefined;
+	private _uiEntry = "";
+	private readonly _grants: string[] = [];
+	private readonly _activationEvents: string[] = [];
+	private readonly _tools: AppToolSpec[] = [];
+
+	/** Set the reverse-domain app id (e.g. `"com.example.checklist"`). */
+	id(value: string): this {
+		this._id = value;
+		return this;
+	}
+
+	/** Set the human-readable display name. */
+	title(value: string): this {
+		this._title = value;
+		return this;
+	}
+
+	/** Set the semver version string (e.g. `"1.0.0"`). */
+	version(value: string): this {
+		this._version = value;
+		return this;
+	}
+
+	/** Set the app slug (drives `ui://widget/<slug>.html` and the server default). */
+	slug(value: string): this {
+		this._slug = value;
+		return this;
+	}
+
+	/** Override the MCP server namespace for tool ids (defaults to the slug). */
+	server(value: string): this {
+		this._server = value;
+		return this;
+	}
+
+	/** Set the default widget display mode (`inline` | `fullscreen` | `pip`). */
+	displayMode(value: string): this {
+		this._displayMode = value;
+		return this;
+	}
+
+	/** Override the widget MIME dialect (defaults to `text/html+skybridge`). */
+	mime(value: string): this {
+		this._mime = value;
+		return this;
+	}
+
+	/** Set the widget UI source entry `ryu pack` bundles into `ui_code`. */
+	uiEntry(value: string): this {
+		this._uiEntry = value;
+		return this;
+	}
+
+	/** Declare a permission grant (e.g. `"mcp:web_search"`). */
+	grant(permission: string): this {
+		this._grants.push(permission);
+		return this;
+	}
+
+	/** Add a VS-Code-style activation event (empty = eager `["*"]`). */
+	activationEvent(event: string): this {
+		this._activationEvents.push(event);
+		return this;
+	}
+
+	/** Append a tool spec (render tool unless `accessible:true`). */
+	tool(spec: AppToolSpec): this {
+		this._tools.push(spec);
+		return this;
+	}
+
+	/**
+	 * Validate and return the assembled `PluginManifest`. Throws an `Error` naming
+	 * the failing field when validation fails.
+	 */
+	build(): PluginManifest {
+		const options: DefineAppOptions = {
+			id: this._id,
+			title: this._title,
+			version: this._version,
+			slug: this._slug,
+			uiEntry: this._uiEntry,
+			tools: this._tools,
+			grants: this._grants,
+			...(this._server ? { server: this._server } : {}),
+			...(this._displayMode ? { displayMode: this._displayMode } : {}),
+			...(this._mime ? { mime: this._mime } : {}),
+			...(this._activationEvents.length > 0
+				? { activationEvents: this._activationEvents }
+				: {}),
+		};
+		return defineApp(options);
+	}
+}
+
+/** Create an AppBuilder. */
+export const app = () => new AppBuilder();

@@ -25,6 +25,7 @@ use serde_json::{json, Value};
 
 use crate::agents::{AgentStore, CreateAgent, PersonaSlot, UpdateAgent};
 use crate::sidecar::mcp::RegistryTool;
+use crate::teams::{Coordination, CreateTeam, TeamStore};
 
 /// Reserved server name for the agent-builder tool provider. Must not contain
 /// `__` (the tool-id separator).
@@ -48,6 +49,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(get_agent_schema()),
+            ..Default::default()
         },
         RegistryTool {
             id: "agent_builder__configure_agent".to_owned(),
@@ -63,6 +65,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(configure_agent_schema()),
+            ..Default::default()
         },
         RegistryTool {
             id: "agent_builder__create_agent".to_owned(),
@@ -75,6 +78,27 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(create_agent_schema()),
+            ..Default::default()
+        },
+        RegistryTool {
+            id: "agent_builder__create_agent_team".to_owned(),
+            server: SERVER_NAME.to_owned(),
+            name: "create_agent_team".to_owned(),
+            description: Some(
+                "Create a whole team of new permanent agents in one call, then save them as a \
+                 reusable team the user can address as one unit. Use when the user asks to \
+                 'build a team' to pursue a goal (e.g. a CMO assembling a marketing team): each \
+                 member is a distinct persistent agent with its own name, instructions, and \
+                 tools. The team is a roster plus a coordination strategy; it does not run a \
+                 coordinator loop itself (chatting the team fans out to members, or drive them \
+                 with a workflow). Required: team_name, members (at least one, each needs a \
+                 name). Optional per member: description, system_prompt, engine, tools, skills, \
+                 lead. Optional team: description, coordination \
+                 (broadcast | round-robin | debate-synthesis | router)."
+                    .to_owned(),
+            ),
+            input_schema: Some(create_agent_team_schema()),
+            ..Default::default()
         },
     ]
 }
@@ -132,16 +156,63 @@ fn create_agent_schema() -> Value {
     })
 }
 
+fn create_agent_team_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "team_name": { "type": "string", "description": "Display name for the team." },
+            "description": { "type": "string", "description": "Short one-line description of the team's purpose or goal." },
+            "coordination": {
+                "type": "string",
+                "enum": ["broadcast", "round-robin", "debate-synthesis", "router"],
+                "description": "How members respond when the team is called. 'broadcast' (default): every member answers independently. 'round-robin': members answer in order, each seeing prior replies. 'debate-synthesis': members answer, then the lead merges. 'router': the lead routes to one member."
+            },
+            "members": {
+                "type": "array",
+                "description": "The agents to create and add to the team, in order. Each is a new permanent agent. At least one is required.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "description": "Display name for this member agent." },
+                        "description": { "type": "string", "description": "Short one-line description." },
+                        "system_prompt": { "type": "string", "description": "This member's instructions." },
+                        "engine": { "type": "string", "description": "Engine/runtime id, e.g. 'acp:pi'." },
+                        "tools": { "type": "array", "items": { "type": "string" }, "description": "Initial tool allowlist." },
+                        "skills": { "type": "array", "items": { "type": "string" }, "description": "Initial skill allowlist." },
+                        "lead": { "type": "boolean", "description": "Mark this member as the team lead (synthesizer for debate-synthesis, classifier for router). The first member marked lead wins." }
+                    },
+                    "required": ["name"]
+                }
+            }
+        },
+        "required": ["team_name", "members"]
+    })
+}
+
 // ── Dispatch ────────────────────────────────────────────────────────────────────
 
 /// Dispatch a tool call from the MCP registry to the correct agent-builder
 /// handler. `store` is an owned clone of the shared [`AgentStore`] (it is
 /// `Clone`, holding an `Arc` inside).
-pub async fn dispatch(tool: &str, arguments: Value, store: AgentStore) -> Result<Value> {
+pub async fn dispatch(
+    tool: &str,
+    arguments: Value,
+    store: AgentStore,
+    team_store: Option<TeamStore>,
+) -> Result<Value> {
     match tool {
         "get_agent" => get_agent(arguments, store).await,
         "configure_agent" => configure_agent(arguments, store).await,
         "create_agent" => create_agent(arguments, store).await,
+        "create_agent_team" => {
+            let teams = team_store.ok_or_else(|| {
+                anyhow!(
+                    "create_agent_team called but the team store is not wired; \
+                     call McpRegistry::with_team_store at startup"
+                )
+            })?;
+            create_agent_team(arguments, store, teams).await
+        }
         other => Err(anyhow!("unknown agent_builder tool: '{other}'")),
     }
 }
@@ -290,6 +361,80 @@ async fn create_agent(args: Value, store: AgentStore) -> Result<Value> {
     }))
 }
 
+/// Mint one permanent agent per member spec, then persist a team grouping them.
+///
+/// This is the composite the `create_agent_team` tool exposes: an agent (e.g. a
+/// "CMO") calls it once to stand up a whole roster. It creates real
+/// [`AgentRecord`]s (not ephemeral delegates) and a real [`TeamRecord`], so the
+/// team survives a restart and is selectable in the desktop. It is a roster
+/// only — the coordination *strategy* is stored, but running the members toward
+/// a goal stays with the existing team-chat fan-out or a workflow.
+async fn create_agent_team(
+    args: Value,
+    store: AgentStore,
+    team_store: TeamStore,
+) -> Result<Value> {
+    let team_name = require_str(&args, "team_name")?.to_owned();
+    let members = args["members"]
+        .as_array()
+        .filter(|arr| !arr.is_empty())
+        .ok_or_else(|| anyhow!("'members' must be a non-empty array"))?;
+
+    // Parse the coordination strategy from its stored string form, defaulting to
+    // Broadcast when absent or unknown (Coordination derives kebab-case serde).
+    let coordination: Coordination =
+        serde_json::from_value(args["coordination"].clone()).unwrap_or_default();
+
+    let mut member_ids: Vec<String> = Vec::with_capacity(members.len());
+    let mut created_summaries: Vec<Value> = Vec::with_capacity(members.len());
+    let mut lead_agent_id: Option<String> = None;
+
+    for (idx, member) in members.iter().enumerate() {
+        let name = member["name"]
+            .as_str()
+            .ok_or_else(|| anyhow!("member #{idx} is missing 'name'"))?;
+        let input = CreateAgent {
+            name: name.to_owned(),
+            description: member["description"].as_str().map(str::to_owned),
+            system_prompt: member["system_prompt"].as_str().map(str::to_owned),
+            engine: member["engine"].as_str().map(str::to_owned),
+            tools: str_array(member, "tools"),
+            skills: str_array(member, "skills"),
+            ..Default::default()
+        };
+        let created = store.create(input).await?;
+        // First member flagged `lead` becomes the synthesizer/router lead.
+        if lead_agent_id.is_none() && member["lead"].as_bool().unwrap_or(false) {
+            lead_agent_id = Some(created.id.clone());
+        }
+        created_summaries.push(json!({ "agent_id": created.id, "name": created.name }));
+        member_ids.push(created.id);
+    }
+
+    let team = team_store
+        .create(CreateTeam {
+            name: team_name,
+            description: args["description"].as_str().map(str::to_owned),
+            members: member_ids,
+            coordination,
+            lead_agent_id,
+        })
+        .await?;
+
+    Ok(json!({
+        "success": true,
+        "team_id": team.id,
+        "team": serde_json::to_value(&team).unwrap_or_default(),
+        "members": created_summaries,
+        "message": format!(
+            "Created team '{}' ({}) with {} new agent(s).",
+            team.name,
+            team.id,
+            created_summaries.len()
+        ),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,7 +448,7 @@ mod tests {
     #[test]
     fn tools_have_stable_ids_and_server() {
         let tools = tools();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
         for t in &tools {
             assert_eq!(t.server, SERVER_NAME);
             assert!(t.id.starts_with("agent_builder__"));
@@ -313,6 +458,7 @@ mod tests {
         assert!(ids.contains(&"agent_builder__get_agent"));
         assert!(ids.contains(&"agent_builder__configure_agent"));
         assert!(ids.contains(&"agent_builder__create_agent"));
+        assert!(ids.contains(&"agent_builder__create_agent_team"));
     }
 
     #[test]
@@ -410,5 +556,60 @@ mod tests {
         let rec = store.get(id).await.unwrap().unwrap();
         assert_eq!(rec.name, "Fresh");
         assert_eq!(rec.tools, vec!["x".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn create_agent_team_mints_members_and_team() {
+        use crate::teams::Coordination;
+
+        let store = store();
+        let teams = crate::teams::TeamStore::open_in_memory().unwrap();
+        let res = create_agent_team(
+            json!({
+                "team_name": "Marketing",
+                "description": "Grow the brand.",
+                "coordination": "debate-synthesis",
+                "members": [
+                    { "name": "Strategist", "system_prompt": "Plan.", "lead": true },
+                    { "name": "Copywriter", "tools": ["web_fetch"] },
+                    { "name": "Analyst" }
+                ]
+            }),
+            store.clone(),
+            teams.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res["success"], json!(true));
+
+        // Three real agent records were created.
+        let team_id = res["team_id"].as_str().unwrap();
+        let team = teams.get(team_id).await.unwrap().unwrap();
+        assert_eq!(team.name, "Marketing");
+        assert_eq!(team.members.len(), 3);
+        assert_eq!(team.coordination, Coordination::DebateSynthesis);
+        // The lead is the first member flagged `lead`.
+        assert_eq!(team.lead_agent_id.as_deref(), Some(team.members[0].as_str()));
+
+        for member_id in &team.members {
+            assert!(store.get(member_id).await.unwrap().is_some());
+        }
+        let copywriter = store.get(&team.members[1]).await.unwrap().unwrap();
+        assert_eq!(copywriter.name, "Copywriter");
+        assert_eq!(copywriter.tools, vec!["web_fetch".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn create_agent_team_rejects_empty_members() {
+        let store = store();
+        let teams = crate::teams::TeamStore::open_in_memory().unwrap();
+        let err = create_agent_team(
+            json!({ "team_name": "Empty", "members": [] }),
+            store,
+            teams,
+        )
+        .await
+        .expect_err("empty members must fail");
+        assert!(err.to_string().contains("non-empty"));
     }
 }

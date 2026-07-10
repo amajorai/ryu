@@ -8,6 +8,7 @@ pub mod health;
 pub mod metrics;
 pub mod models;
 pub mod multimodal;
+pub mod sandbox;
 pub mod tools;
 
 use axum::{
@@ -70,6 +71,11 @@ pub fn router(state: SharedState) -> Router {
         // Exec audit ingest + pre-run budget gate (M6 / #192)
         .route("/v1/exec/audit", post(audit::ingest_exec_audit))
         .route("/v1/exec/budget/check", post(audit::check_exec_budget))
+        // Sandbox metering + billing rail (M6 sandboxes). Core posts one tick
+        // per run per heartbeat; the gateway accrues the marked-up cost, debits
+        // the org wallet, and returns a continue/warn/kill verdict. Auth =
+        // trusted-forwarder / master key, like exec-audit.
+        .route("/sandbox/tick", post(sandbox::sandbox_tick))
         // Unified tool gateway: governance front for direct tool/code execution (#475)
         .route("/v1/exec/tool", post(crate::tools::exec::exec_tool))
         // Pre-exec command governance (COMMAND-SCAN): hardline blocklist + risk

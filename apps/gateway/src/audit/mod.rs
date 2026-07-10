@@ -19,6 +19,10 @@ pub enum EventType {
     /// A sealed identity-vault credential read (#523). Distinct from `ExecCall`
     /// so identity reads are filterable and never drain the sandbox exec budget.
     CredentialRead,
+    /// A widget-initiated `sendFollowUpMessage` injected as a user turn (Ryu
+    /// Apps, §4.4). Distinct from `ExecCall` so widget follow-ups are filterable
+    /// on their own and never look like a sandbox/tool execution.
+    WidgetFollowUp,
 }
 
 impl EventType {
@@ -27,6 +31,7 @@ impl EventType {
             Self::ModelCall => "model_call",
             Self::ExecCall => "exec_call",
             Self::CredentialRead => "credential_read",
+            Self::WidgetFollowUp => "widget_follow_up",
         }
     }
 }
@@ -84,6 +89,12 @@ pub struct AuditRecord {
     /// (`chat` | `island` | `predict` | `agent`). `None` when untagged. Powers
     /// the per-feature usage breakdown in the daily rollup.
     pub feature: Option<String>,
+    // ── Widget (Ryu Apps) attribution (§4.4) ─────────────────────────────────
+    /// Opaque per-render widget instance id (`widget: { instance_id }` on the
+    /// exec envelope). Set on widget `callTool` (`ExecCall`) and follow-up
+    /// (`WidgetFollowUp`) rows so a governance viewer can trace every
+    /// round-trip a single rendered widget made; `None` for all other traffic.
+    pub widget_instance_id: Option<String>,
 }
 
 /// Filters for querying the local audit store. All fields are optional; a
@@ -104,6 +115,9 @@ pub struct AuditQuery {
     /// Filter by Core session/conversation id (M4 / #176).
     /// When set, returns only the audit rows that belong to the given session.
     pub session_id: Option<String>,
+    /// Filter by widget instance id (Ryu Apps, §4.4). When set, returns only the
+    /// `callTool` / follow-up rows that belong to the given rendered widget.
+    pub widget_instance_id: Option<String>,
 }
 
 /// Rolled-up totals across the whole local audit store. Used by the control-
@@ -152,6 +166,8 @@ pub struct AuditEntry {
     pub agent_id: Option<String>,
     /// Product surface (`x-ryu-feature`): `chat` | `island` | `predict` | `agent`.
     pub feature: Option<String>,
+    /// Widget instance id (Ryu Apps, §4.4); `None` for non-widget rows.
+    pub widget_instance_id: Option<String>,
 }
 
 /// Default number of rows returned by a query when no limit is given.
@@ -248,6 +264,12 @@ impl AuditLogger {
              CREATE INDEX IF NOT EXISTS idx_audit_agent_id ON audit_log(agent_id);",
         );
         let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN feature TEXT;");
+        // Add the widget instance id column (Ryu Apps, §4.4) for existing tables.
+        // Indexed so per-widget governance queries are efficient.
+        let _ = conn.execute_batch(
+            "ALTER TABLE audit_log ADD COLUMN widget_instance_id TEXT; \
+             CREATE INDEX IF NOT EXISTS idx_audit_widget_instance_id ON audit_log(widget_instance_id);",
+        );
 
         // Load existing per-key token totals so budget enforcement survives restarts.
         let token_totals: DashMap<String, u64> = DashMap::new();
@@ -281,9 +303,9 @@ impl AuditLogger {
                          provider, model, input_tokens, output_tokens,
                          cache_hit, latency_ms, eval_score, error, skill_ids, session_id,
                          event_type, backend, command, duration_ms, exit_code,
-                         user_id, agent_id, feature
+                         user_id, agent_id, feature, widget_instance_id
                      ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
-                               ?17,?18,?19,?20,?21,?22,?23,?24)",
+                               ?17,?18,?19,?20,?21,?22,?23,?24,?25)",
                     params![
                         record.request_id,
                         record.api_key,
@@ -309,6 +331,7 @@ impl AuditLogger {
                         record.user_id,
                         record.agent_id,
                         record.feature,
+                        record.widget_instance_id,
                     ],
                 ) {
                     error!("audit log write failed: {e}");
@@ -386,6 +409,102 @@ impl AuditLogger {
             user_id: None,
             agent_id: None,
             feature: None,
+            widget_instance_id: None,
+        }
+    }
+
+    /// Convenience constructor for a widget `callTool` exec event (Ryu Apps,
+    /// §4.4). It is an [`EventType::ExecCall`] (drains the sandbox exec budget
+    /// like any tool run) tagged `feature = "widget"`, with `backend` = the
+    /// widget's `origin_server`, `command` = the executed `tool_id`, and the
+    /// per-render `widget_instance_id` so a governance viewer can trace every
+    /// call one rendered widget made. `error` is `Some(reason)` on any denial.
+    #[allow(clippy::too_many_arguments)]
+    pub fn make_widget_call_record(
+        request_id: String,
+        api_key: String,
+        origin_server: String,
+        tool_id: String,
+        agent_id: Option<String>,
+        session_id: Option<String>,
+        widget_instance_id: String,
+        duration_ms: u64,
+        error: Option<String>,
+    ) -> AuditRecord {
+        AuditRecord {
+            request_id,
+            api_key,
+            user_name: None,
+            org_id: None,
+            team_id: None,
+            project_id: None,
+            provider: "widget".to_string(),
+            model: origin_server.clone(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_hit: false,
+            latency_ms: duration_ms,
+            eval_score: None,
+            error,
+            skill_ids: None,
+            session_id,
+            event_type: EventType::ExecCall,
+            backend: Some(origin_server),
+            command: Some(tool_id),
+            duration_ms: Some(duration_ms),
+            exit_code: None,
+            user_id: None,
+            agent_id,
+            feature: Some("widget".to_string()),
+            widget_instance_id: Some(widget_instance_id),
+        }
+    }
+
+    /// Convenience constructor for a widget `sendFollowUpMessage` event (Ryu
+    /// Apps, §4.4). Its own [`EventType::WidgetFollowUp`] discriminator (not an
+    /// exec) tagged `feature = "widget"`, `backend` = `origin_server`,
+    /// `command = "follow_up"`, `session_id` = the target conversation id, and
+    /// the `widget_instance_id`. Only the prompt length/hash is ever carried by
+    /// the caller — never the prompt text. `error` is `Some(reason)` on denial.
+    ///
+    /// `dead_code`-allowed: the follow-up ingest that logs these rows lives on
+    /// the Core → gateway path (§4.2) outside this unit; the constructor is the
+    /// single owner of the `WidgetFollowUp` row shape and is covered by a test.
+    #[allow(dead_code)]
+    pub fn make_widget_followup_record(
+        request_id: String,
+        api_key: String,
+        origin_server: String,
+        conversation_id: Option<String>,
+        widget_instance_id: String,
+        error: Option<String>,
+    ) -> AuditRecord {
+        AuditRecord {
+            request_id,
+            api_key,
+            user_name: None,
+            org_id: None,
+            team_id: None,
+            project_id: None,
+            provider: "widget".to_string(),
+            model: origin_server.clone(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_hit: false,
+            latency_ms: 0,
+            eval_score: None,
+            error,
+            skill_ids: None,
+            session_id: conversation_id,
+            event_type: EventType::WidgetFollowUp,
+            backend: Some(origin_server),
+            command: Some("follow_up".to_string()),
+            duration_ms: None,
+            exit_code: None,
+            user_id: None,
+            agent_id: None,
+            feature: Some("widget".to_string()),
+            widget_instance_id: Some(widget_instance_id),
         }
     }
 
@@ -430,6 +549,7 @@ impl AuditLogger {
             user_id: None,
             agent_id: None,
             feature: None,
+            widget_instance_id: None,
         }
     }
 
@@ -472,6 +592,7 @@ impl AuditLogger {
         push("model = ?", &query.model);
         push("request_id = ?", &query.request_id);
         push("session_id = ?", &query.session_id);
+        push("widget_instance_id = ?", &query.widget_instance_id);
         if query.errors_only {
             clauses.push("error IS NOT NULL");
         }
@@ -492,7 +613,7 @@ impl AuditLogger {
              project_id, provider, model, input_tokens, output_tokens, cache_hit, \
              latency_ms, eval_score, error, skill_ids, session_id, \
              event_type, backend, command, duration_ms, exit_code, \
-             user_id, agent_id, feature \
+             user_id, agent_id, feature, widget_instance_id \
              FROM audit_log {where_sql} ORDER BY id DESC LIMIT {limit}"
         );
 
@@ -535,6 +656,7 @@ impl AuditLogger {
                 user_id: row.get(23).unwrap_or(None),
                 agent_id: row.get(24).unwrap_or(None),
                 feature: row.get(25).unwrap_or(None),
+                widget_instance_id: row.get(26).unwrap_or(None),
             })
         })?;
 
@@ -620,6 +742,7 @@ mod tests {
             user_id: None,
             agent_id: None,
             feature: None,
+            widget_instance_id: None,
         }
     }
 
@@ -798,6 +921,100 @@ mod tests {
         // Inert exec-only fields don't masquerade as an execution.
         assert!(rec.duration_ms.is_none());
         assert!(rec.exit_code.is_none());
+    }
+
+    /// §4.4: the widget `callTool` constructor produces an attributable
+    /// `ExecCall` tagged `feature="widget"` (backend=origin_server,
+    /// command=tool_id) carrying the per-render instance id — so it drains the
+    /// exec budget like any tool run but is filterable per widget.
+    #[test]
+    fn widget_call_record_shape() {
+        let rec = AuditLogger::make_widget_call_record(
+            "req-id".to_string(),
+            "sk-core".to_string(),
+            "io.ryu.checklist".to_string(),
+            "checklist__toggle".to_string(),
+            Some("agent-1".to_string()),
+            Some("conv-9".to_string()),
+            "wi-abc".to_string(),
+            12,
+            None,
+        );
+        assert_eq!(rec.event_type, EventType::ExecCall);
+        assert_eq!(rec.feature.as_deref(), Some("widget"));
+        assert_eq!(rec.backend.as_deref(), Some("io.ryu.checklist"));
+        assert_eq!(rec.command.as_deref(), Some("checklist__toggle"));
+        assert_eq!(rec.agent_id.as_deref(), Some("agent-1"));
+        assert_eq!(rec.session_id.as_deref(), Some("conv-9"));
+        assert_eq!(rec.widget_instance_id.as_deref(), Some("wi-abc"));
+    }
+
+    /// §4.4: the widget follow-up constructor is its own `WidgetFollowUp`
+    /// discriminator (never an exec) so follow-ups are filterable on their own.
+    #[test]
+    fn widget_followup_record_shape() {
+        let rec = AuditLogger::make_widget_followup_record(
+            "req-id".to_string(),
+            "sk-core".to_string(),
+            "io.ryu.checklist".to_string(),
+            Some("conv-9".to_string()),
+            "wi-abc".to_string(),
+            Some("firewall: prompt_injection".to_string()),
+        );
+        assert_eq!(rec.event_type, EventType::WidgetFollowUp);
+        assert_eq!(rec.event_type.as_str(), "widget_follow_up");
+        assert_eq!(rec.feature.as_deref(), Some("widget"));
+        assert_eq!(rec.command.as_deref(), Some("follow_up"));
+        assert_eq!(rec.session_id.as_deref(), Some("conv-9"));
+        assert_eq!(rec.widget_instance_id.as_deref(), Some("wi-abc"));
+        assert!(rec.duration_ms.is_none());
+    }
+
+    /// §4.4: logging widget rows and querying by `widget_instance_id` returns
+    /// only the rows for that rendered widget.
+    #[test]
+    fn widget_instance_id_filter_returns_only_matching_widget() {
+        let dir = std::env::temp_dir().join(format!("ryu-audit-widget-{}", unique_suffix()));
+        let db_path = dir.join("audit.db");
+        let config = AuditConfig {
+            enabled: true,
+            db_path: db_path.to_str().unwrap().to_string(),
+        };
+
+        let logger = AuditLogger::new(&config).expect("logger");
+        logger.log(AuditLogger::make_widget_call_record(
+            "req-w1".to_string(),
+            "sk-core".to_string(),
+            "io.ryu.checklist".to_string(),
+            "checklist__toggle".to_string(),
+            None,
+            Some("conv-9".to_string()),
+            "wi-A".to_string(),
+            5,
+            None,
+        ));
+        logger.log(AuditLogger::make_widget_followup_record(
+            "req-w2".to_string(),
+            "sk-core".to_string(),
+            "io.ryu.checklist".to_string(),
+            Some("conv-9".to_string()),
+            "wi-B".to_string(),
+            None,
+        ));
+        wait_for_rows(&logger, &AuditQuery::default(), 2);
+
+        let wi_a = logger
+            .query(&AuditQuery {
+                widget_instance_id: Some("wi-A".to_string()),
+                ..Default::default()
+            })
+            .expect("query by widget_instance_id");
+        assert_eq!(wi_a.len(), 1);
+        assert_eq!(wi_a[0].request_id, "req-w1");
+        assert_eq!(wi_a[0].widget_instance_id.as_deref(), Some("wi-A"));
+        assert_eq!(wi_a[0].feature.as_deref(), Some("widget"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Cheap unique-ish suffix for temp dirs without pulling extra deps into tests.

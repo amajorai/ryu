@@ -37,6 +37,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::runnable::{Runnable, RunnableKind};
 
+pub mod store;
+
 /// Process-wide lock for tests that mutate the global `RYU_SKILLS_DIR` /
 /// `RYU_SKILLS_ACTIVE_FILE` env vars. Several test modules (`skills`,
 /// `skills_catalog::from_source`, `sidecar::mcp::skills_tool`) point these at their
@@ -230,7 +232,7 @@ pub fn parse_skill_md(id: &str, content: &str) -> Result<SkillRecord, String> {
 /// Accepts both `---\n...content...\n---\nbody` and bare-body (no front-matter)
 /// files. When there is no front-matter the whole content is treated as the
 /// instruction body and an empty front-matter string is returned.
-fn split_front_matter(content: &str) -> Result<(String, String), String> {
+pub(crate) fn split_front_matter(content: &str) -> Result<(String, String), String> {
     let trimmed = content.trim_start();
 
     if !trimmed.starts_with("---") {

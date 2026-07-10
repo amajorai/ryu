@@ -89,17 +89,26 @@ function loadManifest(dir: string): LoadedManifest {
 
 // ── pack command ──────────────────────────────────────────────────────────────
 
-// Find the first `companion` runnable that declares a `config.ui_entry`. That is
-// the plugin's sandboxed-UI entry module; `ryu pack` bundles it into `ui_code`.
-// Returns null for a manifest-only plugin (no companion / no ui_entry) — packing
-// stays backward-compatible in that case.
-function companionUiEntry(manifest: LoadedManifest): string | null {
+// Resolve the plugin's sandboxed-UI entry module — the source `ryu pack` bundles
+// into `ui_code`. Two authoring shapes carry one:
+//   1. A `companion` runnable's `config.ui_entry` (companion surface plugins).
+//   2. A Ryu App's `contributes.widgets[].ui_entry` (widget apps via `defineApp`).
+// Companion runnables take precedence; the first non-empty entry wins. Returns
+// null for a manifest-only plugin (no bundled UI) so packing stays
+// backward-compatible in that case.
+function resolveUiEntry(manifest: LoadedManifest): string | null {
 	for (const runnable of manifest.runnables) {
 		if (runnable.kind !== "companion") {
 			continue;
 		}
 		const entry = (runnable.config as Record<string, unknown> | undefined)
 			?.ui_entry;
+		if (typeof entry === "string" && entry.trim().length > 0) {
+			return entry;
+		}
+	}
+	for (const widget of manifest.contributes?.widgets ?? []) {
+		const entry = widget.ui_entry;
 		if (typeof entry === "string" && entry.trim().length > 0) {
 			return entry;
 		}
@@ -140,7 +149,7 @@ async function commandPack(rawDir: string): Promise<void> {
 
 	// Bundle the companion UI entry, if any. Manifest-only plugins skip this and
 	// emit exactly the previous shape (no `ui_code`).
-	const uiEntry = companionUiEntry(manifest);
+	const uiEntry = resolveUiEntry(manifest);
 	const uiCode = uiEntry ? await bundleUiEntry(dir, uiEntry) : null;
 
 	// Bind the bundled code to the manifest by its sha256. The hash goes INTO the
@@ -208,7 +217,7 @@ async function commandPublish(rawDir: string): Promise<void> {
 	// hash is injected into the manifest object BEFORE it is sent for signing, so
 	// the Gateway signs a manifest that already binds the code; the `ui_code` blob
 	// is sent as a sibling (unsigned payload, integrity via the signed hash).
-	const uiEntry = companionUiEntry(manifest);
+	const uiEntry = resolveUiEntry(manifest);
 	const uiCode = uiEntry ? await bundleUiEntry(dir, uiEntry) : null;
 	const manifestWithHash = uiCode
 		? { ...manifest, ui_code_sha256: uiCodeSha256(uiCode) }
@@ -225,6 +234,10 @@ async function commandPublish(rawDir: string): Promise<void> {
 		// it on install. Grants are read from the manifest server-side too.
 		descriptor: manifestWithHash,
 		grants: manifest.permission_grants ?? [],
+		// Per-item affiliate terms (optional): the commission a referrer earns when
+		// a referred user buys this paid item. The server re-validates the rule and
+		// stores it as the item's override (else the seller default applies).
+		...(manifest.affiliate?.enabled ? { affiliate: manifest.affiliate } : {}),
 		// The bundled UI code rides OUTSIDE the signed manifest as payload; the
 		// server stores it and serves it on detail. Omitted for manifest-only.
 		...(uiCode ? { ui_code: uiCode } : {}),

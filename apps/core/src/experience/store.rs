@@ -145,6 +145,20 @@ impl ExperienceStore {
         Ok(n > 0)
     }
 
+    /// Reset a row's reward to `NULL` (unscored). Used when a human clears a
+    /// thumbs vote, so the row reverts to PRM-scorable rather than keeping a stale
+    /// human label. No-op when the row is absent.
+    pub async fn clear_reward(&self, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let n = conn
+            .execute(
+                "UPDATE experience SET reward = NULL WHERE id = ?1",
+                params![id],
+            )
+            .context("clearing experience reward")?;
+        Ok(n > 0)
+    }
+
     /// Mark every captured turn of a conversation excluded (per-conversation
     /// opt-out applied retroactively).
     pub async fn exclude_conversation(
@@ -285,6 +299,19 @@ mod tests {
         let rows = store.list(10).await.unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].reward, Some(0.9));
+    }
+
+    #[tokio::test]
+    async fn clear_reward_reverts_to_unscored() {
+        let store = open_tmp("clear").await;
+        store.record_if_absent(&sample("a", None)).await.unwrap();
+        store.set_reward("a", 1.0).await.unwrap();
+        assert_eq!(store.list_for_training(0.7, 10).await.unwrap().len(), 1);
+        // Clearing a human vote reverts the row to unscored (NULL), so it drops
+        // out of the training set and re-enters the PRM work queue.
+        assert!(store.clear_reward("a").await.unwrap());
+        assert_eq!(store.list_for_training(0.7, 10).await.unwrap().len(), 0);
+        assert_eq!(store.list_unscored(10).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

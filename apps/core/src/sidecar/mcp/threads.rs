@@ -158,6 +158,7 @@ pub fn tools() -> Vec<RegistryTool> {
         name: name.to_owned(),
         description: Some(description.to_owned()),
         input_schema: Some(schema),
+        ..Default::default()
     };
     vec![
         def(

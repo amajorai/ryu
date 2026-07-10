@@ -18,9 +18,11 @@ pub mod approvals_api;
 pub mod auto_title;
 pub mod canvas;
 pub mod chat_suggestions;
+pub mod clips;
 pub mod conversations;
 pub mod dashboard_api;
 pub mod data_admin;
+pub mod gifs;
 pub mod finetune;
 pub mod git;
 pub mod hardware_api;
@@ -47,6 +49,7 @@ pub mod sync;
 pub mod trace;
 pub mod usage_api;
 pub mod voice;
+pub mod widgets;
 pub mod voice_ws;
 pub mod worktree;
 
@@ -833,7 +836,24 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/apps/:id/enable", post(enable_app_handler))
         .route("/api/apps/:id/disable", post(disable_app_handler))
         .route("/api/apps/:id/update", post(update_app_handler))
-        .route("/api/skills", get(list_skills))
+        .route("/api/skills", get(list_skills).post(create_skill_handler))
+        // ── Skill authoring + version history (desktop SKILL.md editor) ──
+        // Registered after the static `/api/skills/{catalog,activate,...}` routes
+        // so matchit resolves those literals before the `:id` param routes.
+        .route("/api/skills/:id/source", get(get_skill_source))
+        .route("/api/skills/:id", put(update_skill_handler))
+        .route(
+            "/api/skills/:id/versions",
+            get(list_skill_versions_handler).post(create_skill_version_handler),
+        )
+        .route(
+            "/api/skills/:id/versions/:version_id",
+            get(get_skill_version_handler),
+        )
+        .route(
+            "/api/skills/:id/versions/:version_id/restore",
+            post(restore_skill_version_handler),
+        )
         .route("/api/agents", get(list_agents).post(create_agent))
         .route("/api/agents/catalog", get(list_agent_catalog))
         .route("/api/agents/catalog/install", post(install_agent_handler))
@@ -911,6 +931,12 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         )
         .route("/api/mcp/tools", get(list_mcp_tools))
         .route("/api/mcp/tools/call", post(call_mcp_tool))
+        // ── Ryu Apps widgets (governed round-trips + resources) ──────────────
+        .route("/api/widgets/tools/call", post(widgets::widget_call_tool))
+        .route("/api/widgets/follow-up", post(widgets::widget_follow_up))
+        .route("/api/widgets/state", post(widgets::widget_state))
+        .route("/api/apps/ui/:slug", get(widgets::apps_ui_bundle))
+        .route("/api/mcp/resources/read", post(widgets::mcp_resources_read))
         // ── Unified tool catalog: search + describe (#474) ───────────────────
         .route("/api/tools/search", get(tools_search))
         .route("/api/tools/describe", get(tools_describe))
@@ -1012,6 +1038,28 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         )
         // Branch (fork) a conversation into a new chat, ChatGPT-style.
         .route("/api/conversations/:id/fork", post(fork_conversation))
+        .route(
+            "/api/conversations/:id/messages/:message_id/edit",
+            post(edit_message_handler),
+        )
+        .route(
+            "/api/conversations/:id/messages/:message_id/regenerate",
+            post(regenerate_message_handler),
+        )
+        .route(
+            "/api/conversations/:id/messages/:message_id/select",
+            post(select_version_handler),
+        )
+        // Thumbs 👍/👎 on an assistant reply: persisted on the message and fanned
+        // out to the continual-learning reward + RAG-memory sinks (consent-gated).
+        .route(
+            "/api/conversations/:id/messages/:message_id/feedback",
+            post(set_message_feedback_handler),
+        )
+        .route(
+            "/api/conversations/:id/feedback",
+            get(get_conversation_feedback_handler),
+        )
         // Pin / archive a conversation. Server-backed so coordinator-thread
         // pins/archives and desktop pins share one source of truth and sync
         // across clients (the same columns the `threads` tool writes).
@@ -1035,6 +1083,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── Side questions (`/btw`): answer over the conversation, persisted as
         //    a listable "side chat" keyed to its parent conversation ──────────
         .route("/api/btw", post(btw_handler))
+        .route(
+            "/api/whiteboard/generate",
+            post(whiteboard_generate_handler),
+        )
         .route("/api/btw/:id", axum::routing::delete(delete_btw_handler))
         .route("/api/conversations/:id/btw", get(list_btw_handler))
         // ── Predictive typing: system-wide inline autocomplete brain ──────────
@@ -1069,11 +1121,25 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         )
         .route("/api/spaces/:id/pages", post(create_page))
         .route("/api/spaces/:id/databases", post(create_database))
+        .route("/api/spaces/:id/whiteboards", post(create_whiteboard))
         .route(
             "/api/spaces/:id/documents/:doc_id",
             get(get_document)
                 .put(update_document)
                 .delete(delete_document),
+        )
+        // Page version history (Prompt-Studio-style, server-backed).
+        .route(
+            "/api/spaces/:id/documents/:doc_id/versions",
+            get(list_document_versions).post(create_document_version),
+        )
+        .route(
+            "/api/spaces/:id/documents/:doc_id/versions/:version_id",
+            get(get_document_version),
+        )
+        .route(
+            "/api/spaces/:id/documents/:doc_id/versions/:version_id/restore",
+            post(restore_document_version),
         )
         .route("/api/spaces/:id/search", post(search_space))
         // Wiki page-link graph: backlinks, outgoing links, and graph topology.
@@ -1198,6 +1264,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             post(healing_api::simulate_failure),
         )
         // ── Generative-media data path (image/video) — proxies to sd-server ──
+        .route("/api/gifs/search", get(gifs::search))
         .route("/api/images/generate", post(media::generate_image))
         .route("/api/video/generate", post(media::generate_video))
         // Poll a cloud video-generation job (job-based; see media::generate_video)
@@ -1274,9 +1341,35 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             post(install_workflow_template),
         )
         .route("/api/workflows/catalog/:id", get(get_workflow_template))
+        // ── Clips (agent-native Loom/Jam → Shadow proxy) ────────────────────
+        // Static collection route before the `:id` routes (convention).
+        .route("/api/clips", get(clips::list_clips))
+        .route("/api/clips/ingest", post(clips::ingest))
+        .route("/api/clips/sources", get(clips::get_sources))
+        .route("/api/clips/start", post(clips::start_clip))
+        .route("/api/clips/:id/stop", post(clips::stop_clip))
+        .route("/api/clips/:id/pause", post(clips::pause_clip))
+        .route("/api/clips/:id/resume", post(clips::resume_clip))
+        .route("/api/clips/:id/context", get(clips::get_context))
+        .route("/api/clips/:id/frame", get(clips::get_frame))
+        .route("/api/clips/:id/file", get(clips::get_file))
+        .route("/api/clips/:id/diagnostics", post(clips::post_diagnostics))
         // ── Workflows (DAG engine) ──────────────────────────────────────────
         .route("/workflows", get(list_workflows).post(create_workflow))
         .route("/workflows/:id", get(get_workflow).delete(delete_workflow))
+        // Workflow version history (Prompt-Studio-style, server-backed).
+        .route(
+            "/workflows/:id/versions",
+            get(list_workflow_versions).post(create_workflow_version),
+        )
+        .route(
+            "/workflows/:id/versions/:version_id",
+            get(get_workflow_version),
+        )
+        .route(
+            "/workflows/:id/versions/:version_id/restore",
+            post(restore_workflow_version),
+        )
         .route("/workflows/:id/run", post(run_workflow))
         .route("/workflows/runs/:run_id", get(get_workflow_run))
         .route("/workflows/runs/:run_id/resume", post(resume_workflow_run))
@@ -2481,7 +2574,7 @@ async fn build_hook_context(
     flags: &std::collections::HashMap<String, bool>,
 ) -> crate::plugin_host::HookContext {
     const MAX_TRANSCRIPT: usize = 20;
-    let transcript = match state.conversations.get_messages(conversation_id).await {
+    let transcript = match state.conversations.get_active_messages(conversation_id).await {
         Ok(msgs) => {
             let skip = msgs.len().saturating_sub(MAX_TRANSCRIPT);
             msgs.into_iter()
@@ -2516,7 +2609,10 @@ async fn continue_turn_request(
     text: String,
 ) -> crate::sidecar::adapters::ChatStreamRequest {
     use crate::sidecar::adapters::{UiContent, UiMessage};
-    let mut messages: Vec<UiMessage> = match state.conversations.get_messages(conversation_id).await
+    let mut messages: Vec<UiMessage> = match state
+        .conversations
+        .get_active_messages(conversation_id)
+        .await
     {
         Ok(msgs) => msgs
             .into_iter()
@@ -3669,7 +3765,7 @@ where
 
 /// Best-effort: mirror a memory entry into the retrieval index so it is
 /// immediately RAG-retrievable. Logs and continues on failure (fail-open).
-async fn index_memory_entry(state: &ServerState, entry: &memory::LongTermEntry) {
+pub(crate) async fn index_memory_entry(state: &ServerState, entry: &memory::LongTermEntry) {
     if let Err(e) = state
         .retrieval
         .index_memory_chunk(
@@ -5002,6 +5098,208 @@ async fn list_skills(State(state): State<ServerState>) -> Json<serde_json::Value
         .map(SkillSummary::from)
         .collect();
     Json(json!({ "skills": summaries }))
+}
+
+// ── Skill authoring + version history (desktop SKILL.md editor) ──────────────
+//
+// The catalog installs read-only skills from skills.sh; these let a user create
+// and edit their own SKILL.md in the desktop Plate editor, with server-backed,
+// undoable version history (the same reusable `VersionHistory` UI that pages and
+// workflows use). Skills live in the shared `~/.claude/skills/<id>/SKILL.md`;
+// version snapshots live in Ryu's own `~/.ryu/skill-versions/` (see
+// `skills::store`).
+
+/// `GET /api/skills/:id/source` — the full editable SKILL.md for the editor.
+///
+/// Returns both the decomposed form fields (name/description/allowed_tools/
+/// always_on/body) and the raw `source` string (the diff baseline for version
+/// history).
+async fn get_skill_source(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::skills::store::read_skill_source(&id) {
+        Ok(Some(source)) => {
+            let rec = crate::skills::parse_skill_md(&id, &source).ok();
+            let (name, description, allowed_tools, always_on, body) = match rec {
+                Some(r) => (
+                    r.name,
+                    r.description,
+                    r.allowed_tools,
+                    r.always_on,
+                    r.instructions,
+                ),
+                // Unparseable on-disk file: still let the editor open the raw body.
+                None => (id.clone(), None, Vec::new(), false, source.clone()),
+            };
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "id": id,
+                    "name": name,
+                    "description": description,
+                    "allowed_tools": allowed_tools,
+                    "always_on": always_on,
+                    "body": body,
+                    "source": source,
+                })),
+            )
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "skill not found" })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+/// Map a [`crate::skills::store::CreateError`] to an HTTP response.
+fn skill_write_error(e: crate::skills::store::CreateError) -> (StatusCode, Json<serde_json::Value>) {
+    use crate::skills::store::CreateError;
+    match e {
+        CreateError::Conflict(slug) => (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": format!("a skill named '{slug}' already exists") })),
+        ),
+        CreateError::Invalid(m) => (StatusCode::BAD_REQUEST, Json(json!({ "error": m }))),
+        CreateError::Io(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": err.to_string() })),
+        ),
+    }
+}
+
+/// `POST /api/skills` — create a new user-authored skill from the editor.
+async fn create_skill_handler(
+    State(state): State<ServerState>,
+    Json(draft): Json<crate::skills::store::SkillDraft>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::skills::store::create_skill(&draft) {
+        Ok(res) => {
+            // A skill the user authored is active by default (injects on the
+            // default route), matching the catalog-install paths.
+            crate::skills::set_active(&res.id, true);
+            state.skills.reload();
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "id": res.id,
+                    "path": res.path.to_string_lossy(),
+                    "source": res.source,
+                })),
+            )
+        }
+        Err(e) => skill_write_error(e),
+    }
+}
+
+/// `PUT /api/skills/:id` — update an existing skill's SKILL.md (autosaved from the
+/// editor). Front-matter keys the editor does not manage are preserved.
+async fn update_skill_handler(
+    State(state): State<ServerState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(draft): Json<crate::skills::store::SkillDraft>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::skills::store::update_skill(&id, &draft) {
+        Ok(res) => {
+            state.skills.reload();
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "id": res.id,
+                    "path": res.path.to_string_lossy(),
+                    "source": res.source,
+                })),
+            )
+        }
+        Err(e) => skill_write_error(e),
+    }
+}
+
+/// `GET /api/skills/:id/versions` — list a skill's saved versions (newest first).
+async fn list_skill_versions_handler(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::skills::store::list_skill_versions(&id) {
+        Ok(versions) => (StatusCode::OK, Json(json!({ "versions": versions }))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+struct CreateSkillVersionBody {
+    label: Option<String>,
+}
+
+/// `POST /api/skills/:id/versions` — snapshot the skill's current SKILL.md.
+async fn create_skill_version_handler(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    body: Option<Json<CreateSkillVersionBody>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let label = body
+        .and_then(|Json(b)| b.label)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    match crate::skills::store::snapshot_skill(&id, label.as_deref()) {
+        Ok(Some(meta)) => (StatusCode::OK, Json(json!({ "version": meta }))),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "skill not found" })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+/// `GET /api/skills/:id/versions/:version_id` — fetch one version in full
+/// (including its captured SKILL.md source, used for the diff view).
+async fn get_skill_version_handler(
+    axum::extract::Path((id, version_id)): axum::extract::Path<(String, String)>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::skills::store::load_skill_version(&id, &version_id) {
+        Ok(Some(version)) => (StatusCode::OK, Json(json!({ "version": version }))),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "version not found" })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+/// `POST /api/skills/:id/versions/:version_id/restore` — restore a version as the
+/// skill's current SKILL.md. The current definition is snapshotted first (as
+/// `"Before restore"`) so the restore is itself undoable.
+async fn restore_skill_version_handler(
+    State(state): State<ServerState>,
+    axum::extract::Path((id, version_id)): axum::extract::Path<(String, String)>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::skills::store::restore_skill_version(&id, &version_id) {
+        Ok(Some(source)) => {
+            state.skills.reload();
+            (
+                StatusCode::OK,
+                Json(json!({ "success": true, "source": source })),
+            )
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "version not found" })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
 }
 
 // ── App lifecycle handlers (M3 / U033) ───────────────────────────────────────
@@ -7372,6 +7670,224 @@ async fn fork_conversation(
 }
 
 #[derive(serde::Deserialize)]
+struct EditMessageBody {
+    /// The new text for the user message.
+    content: String,
+}
+
+/// `POST /api/conversations/:id/messages/:message_id/edit`
+///
+/// In-place version-tree edit (ChatGPT/Claude-style): create a new sibling of
+/// the named user message carrying `content` and switch the active thread to it.
+/// The caller then streams a normal chat turn (with `skip_user_append`) so the
+/// reply attaches beneath the edit. Returns the new sibling's id.
+#[utoipa::path(
+    post,
+    path = "/api/conversations/{id}/messages/{message_id}/edit",
+    tag = "Conversations",
+    summary = "Edit a user message into a new version",
+    params(("id" = String, Path), ("message_id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn edit_message_handler(
+    State(state): State<ServerState>,
+    axum::extract::Path((id, message_id)): axum::extract::Path<(String, String)>,
+    Json(body): Json<EditMessageBody>,
+) -> axum::response::Response {
+    match state
+        .conversations
+        .edit_user_message(&id, &message_id, &body.content)
+        .await
+    {
+        Ok(Some(new_id)) => Json(json!({ "ok": true, "message_id": new_id })).into_response(),
+        Ok(None) => json_error(
+            StatusCode::NOT_FOUND,
+            format!("user message '{message_id}' not found in conversation '{id}'"),
+        ),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `POST /api/conversations/:id/messages/:message_id/regenerate`
+///
+/// Point the active leaf at the user turn above the named assistant message so a
+/// subsequent stream (with `skip_user_append`) appends a fresh assistant sibling.
+/// Returns the parent (user) message id the reply will attach beneath.
+#[utoipa::path(
+    post,
+    path = "/api/conversations/{id}/messages/{message_id}/regenerate",
+    tag = "Conversations",
+    summary = "Prepare to regenerate an assistant message",
+    params(("id" = String, Path), ("message_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn regenerate_message_handler(
+    State(state): State<ServerState>,
+    axum::extract::Path((id, message_id)): axum::extract::Path<(String, String)>,
+) -> axum::response::Response {
+    match state
+        .conversations
+        .prepare_regenerate(&id, &message_id)
+        .await
+    {
+        Ok(Some(parent_id)) => {
+            Json(json!({ "ok": true, "parent_message_id": parent_id })).into_response()
+        }
+        Ok(None) => json_error(
+            StatusCode::NOT_FOUND,
+            format!("assistant message '{message_id}' with a parent not found in '{id}'"),
+        ),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `POST /api/conversations/:id/messages/:message_id/select`
+///
+/// Switch the active version at a branch point to the given sibling and descend
+/// to its leaf. The caller re-reads the active path to re-render the thread.
+#[utoipa::path(
+    post,
+    path = "/api/conversations/{id}/messages/{message_id}/select",
+    tag = "Conversations",
+    summary = "Select a message version",
+    params(("id" = String, Path), ("message_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn select_version_handler(
+    State(state): State<ServerState>,
+    axum::extract::Path((id, message_id)): axum::extract::Path<(String, String)>,
+) -> axum::response::Response {
+    match state.conversations.select_version(&id, &message_id).await {
+        Ok(Some(leaf)) => Json(json!({ "ok": true, "leaf_message_id": leaf })).into_response(),
+        Ok(None) => json_error(
+            StatusCode::NOT_FOUND,
+            format!("message '{message_id}' not found in conversation '{id}'"),
+        ),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `POST /api/conversations/:id/messages/:message_id/feedback` body.
+/// `rating` is `"up"` / `"down"` to set, or `null` (or omitted) to clear.
+#[derive(serde::Deserialize)]
+struct MessageFeedbackBody {
+    #[serde(default)]
+    rating: Option<String>,
+    /// When true, and the exact `message_id` isn't in the conversation (a live
+    /// reply still under its client-generated id, not yet reloaded), retarget the
+    /// vote at the conversation's newest assistant message. The client sets this
+    /// only for the latest turn, so the fallback can't mis-hit an older reply.
+    #[serde(default)]
+    allow_latest_fallback: bool,
+}
+
+/// `POST /api/conversations/:id/messages/:message_id/feedback` — record a thumbs
+/// 👍/👎 on an assistant reply. Persists the vote on the message (so the button
+/// stays lit across reloads) and fans it out to the continual-learning reward and
+/// RAG-memory sinks, each independently consent-gated (see
+/// [`crate::learning::apply_message_feedback`]).
+#[utoipa::path(
+    post,
+    path = "/api/conversations/{id}/messages/{message_id}/feedback",
+    tag = "Conversations",
+    summary = "Thumbs up/down an assistant message",
+    params(("id" = String, Path), ("message_id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn set_message_feedback_handler(
+    State(state): State<ServerState>,
+    axum::extract::Path((id, message_id)): axum::extract::Path<(String, String)>,
+    Json(body): Json<MessageFeedbackBody>,
+) -> axum::response::Response {
+    // Normalize the rating: only "up"/"down" set a vote; anything else clears it.
+    let rating = match body.rating.as_deref().map(str::trim) {
+        Some("up") => Some("up"),
+        Some("down") => Some("down"),
+        Some("") | None => None,
+        Some(other) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                format!("rating must be 'up', 'down', or null (got '{other}')"),
+            );
+        }
+    };
+    // Persist on the message first (source of truth for the UI state). If the id
+    // isn't in this conversation (a live reply still under its client-generated
+    // id) and the client flagged this as the latest turn, retarget the newest
+    // assistant message so voting on a fresh reply works before any reload.
+    let mut target = message_id.clone();
+    let mut set = match state
+        .conversations
+        .set_message_feedback(&id, &target, rating)
+        .await
+    {
+        Ok(set) => set,
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    if !set && body.allow_latest_fallback {
+        match state.conversations.latest_assistant_message_id(&id).await {
+            Ok(Some(latest)) => {
+                set = state
+                    .conversations
+                    .set_message_feedback(&id, &latest, rating)
+                    .await
+                    .unwrap_or(false);
+                if set {
+                    target = latest;
+                }
+            }
+            Ok(None) => {}
+            Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        }
+    }
+    if !set {
+        return json_error(
+            StatusCode::NOT_FOUND,
+            format!("message '{message_id}' not found in conversation '{id}'"),
+        );
+    }
+    // Fan out to the reward + memory sinks (fail-soft; never fails the click).
+    let outcome = crate::learning::apply_message_feedback(&state, &id, &target, rating).await;
+    Json(json!({
+        "ok": true,
+        "rating": rating,
+        "message_id": target,
+        "reward_captured": outcome.reward_captured,
+        "memory_captured": outcome.memory_captured,
+    }))
+    .into_response()
+}
+
+/// `GET /api/conversations/:id/feedback` — the rated messages of a conversation as
+/// a `{ message_id: "up" | "down" }` map (un-rated messages omitted). Lets a
+/// reloaded transcript restore its thumbs state without inflating the message read.
+#[utoipa::path(
+    get,
+    path = "/api/conversations/{id}/feedback",
+    tag = "Conversations",
+    summary = "Get thumbs feedback for a conversation",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_conversation_feedback_handler(
+    State(state): State<ServerState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    match state.conversations.list_feedback(&id).await {
+        Ok(pairs) => {
+            let map: serde_json::Map<String, serde_json::Value> = pairs
+                .into_iter()
+                .map(|(mid, rating)| (mid, serde_json::Value::String(rating)))
+                .collect();
+            Json(json!({ "feedback": map })).into_response()
+        }
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(serde::Deserialize)]
 struct SetFlagBody {
     value: bool,
 }
@@ -7925,6 +8441,152 @@ async fn btw_handler(
             format!("side-question model unavailable: {e}"),
         ),
     }
+}
+
+// ── Whiteboard AI generation (`/api/whiteboard/generate`) ─────────────────────
+//
+// One-shot, gateway-routed diagram generation for the Spaces whiteboard editor.
+// The model returns EITHER a Mermaid definition or an Excalidraw element
+// skeleton; the desktop converts whichever it gets into canvas elements
+// client-side (the Mermaid→Excalidraw and skeleton→element converters are
+// browser-only libraries). Core stays the governed model-call site (the moat) and
+// draws nothing itself. Stateless: persists nothing. Mirrors `/btw`'s
+// single-`call_side_model` shape.
+
+/// Resolve the model for whiteboard generation: pref `whiteboard-model` → env
+/// `RYU_WHITEBOARD_MODEL`/`RYU_DEFAULT_LLM_MODEL` → the built-in default. Nothing
+/// hardcoded — swappable like every other model slot.
+async fn resolve_whiteboard_model(state: &ServerState) -> String {
+    if let Ok(Some(pref)) = state.preferences.get("whiteboard-model").await {
+        let trimmed = pref.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    for var in ["RYU_WHITEBOARD_MODEL", "RYU_DEFAULT_LLM_MODEL"] {
+        if let Ok(val) = std::env::var(var) {
+            if !val.is_empty() {
+                return val;
+            }
+        }
+    }
+    crate::registry::DEFAULT_LLM_MODEL.to_string()
+}
+
+/// `POST /api/whiteboard/generate` request body. `existing_count` is a hint about
+/// how full the board already is (used only to word the prompt).
+#[derive(serde::Deserialize)]
+struct WhiteboardGenBody {
+    prompt: String,
+    #[serde(default)]
+    existing_count: Option<u32>,
+}
+
+/// Strip a Markdown code fence (```json … ```) wrapping the model's reply, so a
+/// model that fences its JSON still parses. Returns the inner text, else the input.
+fn strip_code_fence(text: &str) -> &str {
+    let t = text.trim();
+    let Some(rest) = t.strip_prefix("```") else {
+        return t;
+    };
+    // Drop the optional language tag on the fence's first line, then the closer.
+    let rest = rest.splitn(2, '\n').nth(1).unwrap_or("");
+    rest.trim().strip_suffix("```").unwrap_or(rest).trim()
+}
+
+/// The Mermaid diagram keywords a bare (unwrapped) reply may start with — used to
+/// salvage a definition the model returned without the JSON envelope.
+const MERMAID_KEYWORDS: [&str; 10] = [
+    "graph",
+    "flowchart",
+    "sequencediagram",
+    "classdiagram",
+    "erdiagram",
+    "mindmap",
+    "gantt",
+    "statediagram",
+    "journey",
+    "gitgraph",
+];
+
+/// `POST /api/whiteboard/generate` — produce a diagram for the whiteboard editor.
+/// Returns `{ format: "mermaid"|"skeleton", mermaid?, skeleton?, model }`. The
+/// client converts the payload into Excalidraw elements.
+async fn whiteboard_generate_handler(
+    State(state): State<ServerState>,
+    Json(body): Json<WhiteboardGenBody>,
+) -> axum::response::Response {
+    let prompt = body.prompt.trim();
+    if prompt.is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "a prompt is required".to_string());
+    }
+
+    let model = resolve_whiteboard_model(&state).await;
+    let effort = resolve_side_effort(&state, "whiteboard-effort", "RYU_WHITEBOARD_EFFORT").await;
+
+    let system = "You turn a user's request into a diagram for an Excalidraw whiteboard. \
+        Reply with ONLY a single JSON object and nothing else — no prose, no code fences. \
+        Choose ONE of two shapes: \
+        (1) For flowcharts, sequence/ER/class diagrams, mind maps, org charts, or any \
+        connected-node diagram, return {\"format\":\"mermaid\",\"mermaid\":\"<a valid Mermaid definition>\"}. \
+        (2) For freeform layouts (loose boxes, labels, arrows placed by position), return \
+        {\"format\":\"skeleton\",\"skeleton\":[ ... ]} where each item is an Excalidraw element \
+        skeleton, e.g. {\"type\":\"rectangle\",\"x\":100,\"y\":100,\"width\":180,\"height\":70,\"id\":\"a\",\"label\":{\"text\":\"Box\"}} \
+        and arrows {\"type\":\"arrow\",\"x\":0,\"y\":0,\"start\":{\"id\":\"a\"},\"end\":{\"id\":\"b\"}}. \
+        Prefer Mermaid for anything diagram-shaped. Keep it focused and readable.";
+    let user = format!(
+        "Request: {prompt}\n\nThe board currently has {} element(s). Generate the requested diagram.",
+        body.existing_count.unwrap_or(0)
+    );
+
+    let text = match call_side_model(&state, &model, &effort, system, user.as_str()).await {
+        Ok(t) => t,
+        Err(e) => {
+            return json_error(
+                StatusCode::BAD_GATEWAY,
+                format!("whiteboard model unavailable: {e}"),
+            );
+        }
+    };
+
+    let cleaned = strip_code_fence(&text);
+    let parsed: serde_json::Value = match serde_json::from_str(cleaned) {
+        Ok(v) => v,
+        Err(_) => {
+            // Salvage a bare Mermaid definition returned without the JSON envelope.
+            let lc = cleaned.trim_start().to_ascii_lowercase();
+            if MERMAID_KEYWORDS.iter().any(|k| lc.starts_with(k)) {
+                return Json(json!({ "format": "mermaid", "mermaid": cleaned, "model": model }))
+                    .into_response();
+            }
+            return json_error(
+                StatusCode::BAD_GATEWAY,
+                "the model did not return a usable diagram".to_string(),
+            );
+        }
+    };
+
+    let format = parsed.get("format").and_then(|f| f.as_str()).unwrap_or("");
+    let has_mermaid = parsed.get("mermaid").and_then(|m| m.as_str()).is_some();
+    let has_skeleton = parsed
+        .get("skeleton")
+        .map(serde_json::Value::is_array)
+        .unwrap_or(false);
+    let resolved_format = if format == "mermaid" || (format.is_empty() && has_mermaid) {
+        "mermaid"
+    } else if format == "skeleton" || (format.is_empty() && has_skeleton) {
+        "skeleton"
+    } else {
+        format
+    };
+
+    Json(json!({
+        "format": resolved_format,
+        "mermaid": parsed.get("mermaid"),
+        "skeleton": parsed.get("skeleton"),
+        "model": model,
+    }))
+    .into_response()
 }
 
 /// `GET /api/conversations/:id/btw` — list persisted `/btw` side chats for a
@@ -9854,6 +10516,41 @@ async fn create_database(
     }
 }
 
+/// `POST /api/spaces/:id/whiteboards` — create an empty whiteboard (Excalidraw) doc.
+/// Same lifecycle as a page; the editor saves its scene JSON via `update_document`.
+#[utoipa::path(
+    post,
+    path = "/api/spaces/{id}/whiteboards",
+    tag = "Spaces",
+    summary = "Create a whiteboard document",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn create_whiteboard(
+    State(state): State<ServerState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<CreatePageBody>,
+) -> axum::response::Response {
+    let title = if body.title.trim().is_empty() {
+        "Untitled"
+    } else {
+        body.title.trim()
+    };
+    match state.spaces.create_whiteboard(&id, title).await {
+        Ok(document_id) => Json(json!({ "id": document_id })).into_response(),
+        Err(e) => {
+            let msg = e.to_string();
+            let status = if msg.contains("not found") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            json_error(status, msg)
+        }
+    }
+}
+
 /// `GET /api/spaces/:id/documents/:doc_id` — fetch a document's markdown source.
 #[utoipa::path(
     get,
@@ -9934,6 +10631,147 @@ async fn delete_document(
     match state.spaces.delete_document(&doc_id).await {
         Ok(removed) => Json(json!({ "success": true, "removed": removed })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `GET /api/spaces/:id/documents/:doc_id/versions` — list saved versions
+/// (newest first, metadata only).
+#[utoipa::path(
+    get,
+    path = "/api/spaces/{id}/documents/{doc_id}/versions",
+    tag = "Spaces",
+    summary = "List document versions",
+    params(("id" = String, Path), ("doc_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn list_document_versions(
+    State(state): State<ServerState>,
+    axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
+) -> axum::response::Response {
+    match state.spaces.list_document_versions(&doc_id).await {
+        Ok(versions) => Json(versions).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CreateDocumentVersionBody {
+    #[serde(default)]
+    label: Option<String>,
+}
+
+/// `POST /api/spaces/:id/documents/:doc_id/versions` — snapshot the document's
+/// current content as a new version.
+#[utoipa::path(
+    post,
+    path = "/api/spaces/{id}/documents/{doc_id}/versions",
+    tag = "Spaces",
+    summary = "Snapshot a document version",
+    params(("id" = String, Path), ("doc_id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn create_document_version(
+    State(state): State<ServerState>,
+    axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
+    body: Option<Json<CreateDocumentVersionBody>>,
+) -> axum::response::Response {
+    let label = body
+        .and_then(|Json(b)| b.label)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    match state
+        .spaces
+        .snapshot_document(&doc_id, label.as_deref())
+        .await
+    {
+        Ok(meta) => Json(meta).into_response(),
+        Err(e) => {
+            let msg = e.to_string();
+            let status = if msg.contains("not found") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            json_error(status, msg)
+        }
+    }
+}
+
+/// `GET /api/spaces/:id/documents/:doc_id/versions/:version_id` — fetch one
+/// version in full (including its captured source).
+#[utoipa::path(
+    get,
+    path = "/api/spaces/{id}/documents/{doc_id}/versions/{version_id}",
+    tag = "Spaces",
+    summary = "Get a document version",
+    params(
+        ("id" = String, Path),
+        ("doc_id" = String, Path),
+        ("version_id" = String, Path)
+    ),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_document_version(
+    State(state): State<ServerState>,
+    axum::extract::Path((_id, _doc_id, version_id)): axum::extract::Path<(String, String, String)>,
+) -> axum::response::Response {
+    match state.spaces.get_document_version(&version_id).await {
+        Ok(Some(ver)) => Json(ver).into_response(),
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "version not found".to_owned()),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `POST /api/spaces/:id/documents/:doc_id/versions/:version_id/restore` —
+/// restore a version as the document's current content. The current content is
+/// snapshotted first (as `"Before restore"`) so a restore is itself undoable.
+#[utoipa::path(
+    post,
+    path = "/api/spaces/{id}/documents/{doc_id}/versions/{version_id}/restore",
+    tag = "Spaces",
+    summary = "Restore a document version",
+    params(
+        ("id" = String, Path),
+        ("doc_id" = String, Path),
+        ("version_id" = String, Path)
+    ),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn restore_document_version(
+    State(state): State<ServerState>,
+    axum::extract::Path((_id, doc_id, version_id)): axum::extract::Path<(String, String, String)>,
+) -> axum::response::Response {
+    // Load the target version first — fail fast if it is gone or belongs to
+    // another document.
+    let ver = match state.spaces.get_document_version(&version_id).await {
+        Ok(Some(v)) if v.document_id == doc_id => v,
+        Ok(_) => return json_error(StatusCode::NOT_FOUND, "version not found".to_owned()),
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    // Snapshot the current content so the restore can be undone.
+    if let Err(e) = state
+        .spaces
+        .snapshot_document(&doc_id, Some("Before restore"))
+        .await
+    {
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    }
+    match state
+        .spaces
+        .update_document(&doc_id, ver.title.trim(), &ver.source)
+        .await
+    {
+        Ok(()) => Json(json!({ "success": true })).into_response(),
+        Err(e) => {
+            let msg = e.to_string();
+            let status = if msg.contains("not found") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            json_error(status, msg)
+        }
     }
 }
 
@@ -14581,6 +15419,153 @@ async fn delete_workflow(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "success": false, "error": e.to_string() })),
         ),
+    }
+}
+
+/// `GET /workflows/:id/versions` — list a workflow's saved versions (newest
+/// first, metadata only).
+#[utoipa::path(
+    get,
+    path = "/workflows/{id}/versions",
+    tag = "Workflows",
+    summary = "List workflow versions",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn list_workflow_versions(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::workflow::store::list_workflow_versions(&id) {
+        Ok(versions) => (StatusCode::OK, Json(json!({ "versions": versions }))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "success": false, "error": e.to_string() })),
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CreateWorkflowVersionBody {
+    #[serde(default)]
+    label: Option<String>,
+}
+
+/// `POST /workflows/:id/versions` — snapshot the workflow's current definition
+/// as a new version.
+#[utoipa::path(
+    post,
+    path = "/workflows/{id}/versions",
+    tag = "Workflows",
+    summary = "Snapshot a workflow version",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn create_workflow_version(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    body: Option<Json<CreateWorkflowVersionBody>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let label = body
+        .and_then(|Json(b)| b.label)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let workflow = match crate::workflow::store::load_workflow(&id) {
+        Ok(wf) => wf,
+        Err(_) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "success": false, "error": "workflow not found" })),
+            );
+        }
+    };
+    match crate::workflow::store::save_workflow_version(&workflow, label.as_deref()) {
+        Ok(meta) => (StatusCode::OK, Json(json!({ "version": meta }))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "success": false, "error": e.to_string() })),
+        ),
+    }
+}
+
+/// `GET /workflows/:id/versions/:version_id` — fetch one version in full
+/// (including its captured definition).
+#[utoipa::path(
+    get,
+    path = "/workflows/{id}/versions/{version_id}",
+    tag = "Workflows",
+    summary = "Get a workflow version",
+    params(("id" = String, Path), ("version_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_workflow_version(
+    axum::extract::Path((id, version_id)): axum::extract::Path<(String, String)>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::workflow::store::load_workflow_version(&id, &version_id) {
+        Ok(Some(version)) => (StatusCode::OK, Json(json!({ "version": version }))),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "success": false, "error": "version not found" })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "success": false, "error": e.to_string() })),
+        ),
+    }
+}
+
+/// `POST /workflows/:id/versions/:version_id/restore` — restore a version as the
+/// workflow's current definition. The current definition is snapshotted first
+/// (as `"Before restore"`) so a restore is itself undoable.
+#[utoipa::path(
+    post,
+    path = "/workflows/{id}/versions/{version_id}/restore",
+    tag = "Workflows",
+    summary = "Restore a workflow version",
+    params(("id" = String, Path), ("version_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn restore_workflow_version(
+    axum::extract::Path((id, version_id)): axum::extract::Path<(String, String)>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    // Load the target version first — fail fast if it is gone.
+    let version = match crate::workflow::store::load_workflow_version(&id, &version_id) {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "success": false, "error": "version not found" })),
+            );
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": e.to_string() })),
+            );
+        }
+    };
+    // Snapshot the current definition so the restore can be undone (best-effort:
+    // a brand-new workflow with no on-disk file simply has nothing to snapshot).
+    if let Ok(current) = crate::workflow::store::load_workflow(&id) {
+        let _ = crate::workflow::store::save_workflow_version(&current, Some("Before restore"));
+    }
+    // Re-persist the captured definition through the shared write path so triggers
+    // reconcile and `updated_at` is re-stamped.
+    match crate::workflow::persist_workflow(version.workflow).await {
+        Ok(workflow) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "workflow": workflow })),
+        ),
+        Err(e) => {
+            let status = if e.contains("cycle")
+                || e.contains("unknown node")
+                || e.contains("duplicate node")
+            {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, Json(json!({ "success": false, "error": e })))
+        }
     }
 }
 

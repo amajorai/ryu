@@ -23,11 +23,60 @@ use crate::sidecar::providers::whispercpp::whisper_base_url;
 
 use super::ServerState;
 
+/// One timestamped transcript segment. Serialized camelCase
+/// (`startMs`/`endMs`/`text`) so it matches the cross-surface clip contract.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptSegment {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub text: String,
+}
+
+/// A transcription result: the full text plus optional timestamped segments.
+/// Segments are populated whenever the engine returns them (Whisper
+/// `verbose_json` via the Gateway or local whisper.cpp); parakeet returns text
+/// only, so its `segments` is empty.
+#[derive(Debug, Clone, Default)]
+pub struct Transcription {
+    pub text: String,
+    pub segments: Vec<TranscriptSegment>,
+}
+
+/// Parse OpenAI/whisper `verbose_json` `segments` (each with `start`/`end` in
+/// seconds and `text`) into millisecond [`TranscriptSegment`]s. An absent or
+/// malformed array yields an empty vec.
+fn parse_verbose_segments(body: &Value) -> Vec<TranscriptSegment> {
+    body.get("segments")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|s| {
+                    let start = s.get("start").and_then(Value::as_f64)?;
+                    let end = s.get("end").and_then(Value::as_f64)?;
+                    let text = s
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    Some(TranscriptSegment {
+                        start_ms: (start.max(0.0) * 1000.0) as u64,
+                        end_ms: (end.max(0.0) * 1000.0) as u64,
+                        text,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Optional `?engine=` selector for the transcription engine.
 #[derive(Debug, Deserialize)]
 pub struct TranscribeQuery {
-    /// `"parakeet"` (default) or `"whisper"`. When omitted, the cross-surface
-    /// default from [`default_stt_engine`] is used.
+    /// `"parakeet"` (default), `"whisper"` (local whisper.cpp), or `"gateway"`
+    /// (Gateway-routed Whisper — the swappable cloud STT slot, default Groq).
+    /// When omitted, the cross-surface default from [`default_stt_engine`] is used.
     #[serde(default)]
     pub engine: Option<String>,
 }
@@ -307,6 +356,20 @@ pub async fn transcribe_wav(
     filename: String,
     engine: Option<&str>,
 ) -> Result<String, String> {
+    transcribe_wav_detailed(client, bytes, filename, engine)
+        .await
+        .map(|t| t.text)
+}
+
+/// Like [`transcribe_wav`] but also returns timestamped segments when the engine
+/// provides them (Whisper `verbose_json` via the Gateway or local whisper.cpp).
+/// Parakeet (the in-process default) returns text only, so its segments are empty.
+pub async fn transcribe_wav_detailed(
+    client: &reqwest::Client,
+    bytes: Vec<u8>,
+    filename: String,
+    engine: Option<&str>,
+) -> Result<Transcription, String> {
     // Resolve the engine: an explicit non-empty selector wins; otherwise fall
     // back to the swappable cross-surface default (parakeet where compiled in).
     let engine = engine
@@ -315,18 +378,33 @@ pub async fn transcribe_wav(
         .map(str::to_string)
         .unwrap_or_else(default_stt_engine);
 
-    // Route to the in-process parakeet engine (default).
+    // Route to the in-process parakeet engine (default). Text only — no segments.
     if engine == "parakeet" {
         return crate::sidecar::providers::parakeet::transcribe(bytes, filename)
             .await
+            .map(|text| Transcription {
+                text,
+                segments: Vec::new(),
+            })
             .map_err(|e| format!("parakeet transcription failed: {e:#}"));
     }
 
-    // Default: forward to whisper.cpp's `/inference` multipart endpoint.
+    // Gateway-routed Whisper: the swappable cloud STT slot (default provider
+    // OpenAI, default model Groq's `whisper-large-v3`). Core emits only the
+    // per-attribute slot headers + a bearer to the Gateway — never a raw provider
+    // key (CLAUDE.md §1: routing/measuring the model call is a Gateway concern).
+    if engine == "gateway" {
+        return transcribe_via_gateway(client, bytes).await;
+    }
+
+    // Default: forward to whisper.cpp's `/inference` multipart endpoint. Request
+    // `verbose_json` so the response carries per-segment timings (whisper.cpp
+    // degrades to a plain `{ "text": ... }` when it can't, which parses to no
+    // segments — never an error).
     let part = reqwest::multipart::Part::bytes(bytes).file_name(filename);
     let form = reqwest::multipart::Form::new()
         .part("file", part)
-        .text("response_format", "json");
+        .text("response_format", "verbose_json");
 
     let url = format!("{}/inference", whisper_base_url());
     let resp = client
@@ -347,18 +425,92 @@ pub async fn transcribe_wav(
         return Err(format!("whisper returned {status}: {body}"));
     }
 
-    // whisper.cpp returns `{ "text": "..." }`; tolerate either a JSON object or a
-    // raw string body.
+    // whisper.cpp returns `{ "text": "...", "segments": [...] }` for verbose_json.
     let value: Value = resp
         .json()
         .await
         .map_err(|e| format!("could not parse whisper response: {e}"))?;
-    Ok(value
+    let text = value
         .get("text")
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim()
-        .to_string())
+        .to_string();
+    let segments = parse_verbose_segments(&value);
+    Ok(Transcription { text, segments })
+}
+
+/// Transcribe audio through the Gateway's `/v1/audio/transcriptions`, the
+/// swappable cloud STT slot. The audio is base64-encoded into a JSON body (Core
+/// carries no multipart to the Gateway) with the per-attribute slot headers that
+/// tell the Gateway which provider/model to route to. Bearer is the Gateway
+/// token slot — never a raw provider API key.
+///
+/// FLAG (whisper-gateway, pre-existing gap owned by `apps/gateway`, out of scope
+/// here): for true end-to-end the Gateway's OpenAI provider must re-multipart
+/// this base64 audio upstream — real Groq/OpenAI `/audio/transcriptions` need a
+/// multipart file, but `providers/openai.rs:166` currently forwards JSON verbatim.
+/// The Gateway owner must also point `modality_map[Stt]`/`base_url` at Groq. Until
+/// then, set `RYU_CLIP_STT_ENGINE=whisper` (local whisper.cpp) to ship without
+/// waiting — and captions-first means most YouTube ingests never hit Whisper.
+async fn transcribe_via_gateway(
+    client: &reqwest::Client,
+    bytes: Vec<u8>,
+) -> Result<Transcription, String> {
+    use base64::Engine as _;
+
+    let audio_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+    let provider = std::env::var("RYU_STT_GATEWAY_PROVIDER")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "openai".to_string());
+    let model = std::env::var("RYU_STT_GATEWAY_MODEL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "whisper-large-v3".to_string());
+
+    let base = crate::sidecar::gateway::gateway_url();
+    let base = base.trim_end_matches('/');
+    let url = format!("{base}/v1/audio/transcriptions");
+    let bearer = crate::sidecar::gateway::gateway_bearer().map_err(|e| e.to_string())?;
+
+    let payload = json!({
+        "model": model,
+        "file": audio_b64,
+        "response_format": "verbose_json",
+    });
+
+    let resp = client
+        .post(&url)
+        .bearer_auth(bearer)
+        .header("x-ryu-slot-stt-provider", &provider)
+        .header("x-ryu-slot-stt-model", &model)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("gateway STT unreachable at {url}: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let detail = resp.text().await.unwrap_or_default();
+        return Err(format!("gateway STT returned {status}: {detail}"));
+    }
+
+    let value: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("could not parse gateway STT response: {e}"))?;
+    let text = value
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let segments = parse_verbose_segments(&value);
+    Ok(Transcription { text, segments })
 }
 
 /// Transcribe an uploaded audio file. Routes to the in-process parakeet engine
@@ -395,8 +547,11 @@ pub async fn transcribe(
         );
     };
 
-    match transcribe_wav(&state.client, bytes, filename, query.engine.as_deref()).await {
-        Ok(text) => (StatusCode::OK, Json(json!({ "text": text }))),
+    match transcribe_wav_detailed(&state.client, bytes, filename, query.engine.as_deref()).await {
+        Ok(t) => (
+            StatusCode::OK,
+            Json(json!({ "text": t.text, "segments": t.segments })),
+        ),
         Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "error": e }))),
     }
 }

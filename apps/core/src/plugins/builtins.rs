@@ -96,6 +96,17 @@ pub const CORE_PLUGINS: &[&str] = &[
     "io.ryu.goal",
     "io.ryu.proof",
     "io.ryu.double-check",
+    // Ryu Apps (widget-rendering in-process apps). All ship default-on so their
+    // widgets render on install; widget-initiated writes are call-time
+    // Gateway-gated (governed round-trip), so default-on is safe.
+    "io.ryu.checklist",
+    "io.ryu.smart-intake-form",
+    "io.ryu.data-grid-explorer",
+    "io.ryu.chart-studio",
+    "io.ryu.decision-wizard",
+    "io.ryu.quest-board",
+    "io.ryu.worktree-diff-review",
+    "io.ryu.gateway-budget-dial",
 ];
 
 /// The subset of [`CORE_PLUGINS`] that should be **enabled by default** on a
@@ -117,6 +128,15 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     "io.ryu.goal",
     "io.ryu.proof",
     "io.ryu.double-check",
+    // Ryu Apps — default-on so widgets render on install (see CORE_PLUGINS).
+    "io.ryu.checklist",
+    "io.ryu.smart-intake-form",
+    "io.ryu.data-grid-explorer",
+    "io.ryu.chart-studio",
+    "io.ryu.decision-wizard",
+    "io.ryu.quest-board",
+    "io.ryu.worktree-diff-review",
+    "io.ryu.gateway-budget-dial",
 ];
 
 /// The [`crate::plugin_manifest::PluginTier`] of a plugin, derived from

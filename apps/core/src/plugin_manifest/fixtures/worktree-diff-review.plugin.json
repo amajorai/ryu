@@ -1,0 +1,42 @@
+{
+  "id": "io.ryu.worktree-diff-review",
+  "name": "Worktree Diff Review",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "tool-worktree-review",
+      "name": "Diff Review",
+      "kind": "tool",
+      "config": { "slug": "ryu.worktree__review" }
+    },
+    {
+      "id": "tool-worktree-apply",
+      "name": "Apply Hunks",
+      "kind": "tool",
+      "config": { "slug": "ryu.worktree__apply" }
+    },
+    {
+      "id": "tool-worktree-openpr",
+      "name": "Open PR",
+      "kind": "tool",
+      "config": { "slug": "ryu.worktree__open_pr" }
+    },
+    {
+      "id": "tool-worktree-discard",
+      "name": "Discard Hunks",
+      "kind": "tool",
+      "config": { "slug": "ryu.worktree__discard" }
+    }
+  ],
+  "contributes": {
+    "widgets": [
+      {
+        "tool_id": "ryu.worktree__review",
+        "uri": "ui://widget/worktree-diff-review.html",
+        "mime": "text/html+skybridge",
+        "default_display_mode": "inline"
+      }
+    ]
+  },
+  "permission_grants": ["chat.sendFollowUp"]
+}

@@ -21,7 +21,9 @@ export type {
 export { Agent, createAgent, query, ryuTool } from "./agent/index.ts";
 export {
 	AgentBuilder,
+	AppBuilder,
 	agent,
+	app,
 	PluginBuilder,
 	SkillBuilder,
 	skill,
@@ -36,7 +38,9 @@ export type {
 	PluginManifest,
 	RunnableKind,
 	RunnableMeta,
+	ToolAppConfig,
 	TurnHookContribution,
+	WidgetContribution,
 } from "./manifest.ts";
 export {
 	CompanionSurfaceSchema,
@@ -44,8 +48,10 @@ export {
 	PluginManifestSchema,
 	RunnableKindSchema,
 	RunnableMetaSchema,
+	ToolAppConfigSchema,
 	validateManifestStrict,
 	validatePluginId,
+	WidgetContributionSchema,
 } from "./manifest.ts";
 export type {
 	ChatDelta,
@@ -62,6 +68,8 @@ export {
 } from "./model/gateway.ts";
 export type { AgentOptions } from "./runnable/agent.ts";
 export { defineAgent } from "./runnable/agent.ts";
+export type { AppToolSpec, DefineAppOptions } from "./runnable/app.ts";
+export { appToolId, defineApp } from "./runnable/app.ts";
 export type {
 	GatewayClient,
 	Runnable,

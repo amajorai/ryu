@@ -28,6 +28,72 @@ pub struct McpTool {
     pub name: String,
     pub description: Option<String>,
     pub input_schema: Option<Value>,
+    /// `outputSchema`, verbatim (JSON Schema for `structuredContent`).
+    pub output_schema: Option<Value>,
+    /// `annotations`, verbatim (MCP tool annotations).
+    pub annotations: Option<Value>,
+    /// `_meta`, verbatim — carries the Ryu/OpenAI widget keys (`ryu/outputTemplate`,
+    /// `openai/outputTemplate`, `ryu/widgetAccessible`, `ryu/toolInvocation`, …).
+    pub meta: Option<Value>,
+}
+
+/// A resource advertised by an MCP server (`resources/list` entry).
+#[derive(Debug, Clone)]
+pub struct McpResource {
+    pub uri: String,
+    pub name: Option<String>,
+    pub mime_type: Option<String>,
+    pub description: Option<String>,
+    pub meta: Option<Value>,
+}
+
+/// The contents of one resource read via `resources/read`.
+#[derive(Debug, Clone)]
+pub struct McpResourceContents {
+    pub uri: String,
+    pub mime_type: Option<String>,
+    /// Text payload (`text` field) when the resource is textual.
+    pub text: Option<String>,
+    /// Base64 blob (`blob` field) when the resource is binary.
+    pub blob: Option<String>,
+    pub meta: Option<Value>,
+}
+
+/// A typed `tools/call` result that preserves the structured channels an MCP
+/// server returns alongside the human-readable `content` (needed for widgets:
+/// `structuredContent` feeds `toolOutput`, `_meta` feeds `toolResponseMetadata`).
+#[derive(Debug, Clone)]
+pub struct McpToolResult {
+    /// `structuredContent`, verbatim.
+    pub structured_content: Option<Value>,
+    /// `content` array, verbatim.
+    pub content: Option<Value>,
+    /// `_meta`, verbatim.
+    pub meta: Option<Value>,
+    /// `isError`, defaulting to `false`.
+    pub is_error: bool,
+    /// The whole raw result value, untouched (what `call_tool` returns today).
+    pub raw: Value,
+}
+
+impl McpToolResult {
+    /// Split a raw `tools/call` result value into its typed channels.
+    pub fn from_result_value(raw: Value) -> Self {
+        let structured_content = raw.get("structuredContent").cloned();
+        let content = raw.get("content").cloned();
+        let meta = raw.get("_meta").cloned();
+        let is_error = raw
+            .get("isError")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        Self {
+            structured_content,
+            content,
+            meta,
+            is_error,
+            raw,
+        }
+    }
 }
 
 /// A spawnable MCP stdio server: a command plus its arguments and environment.
@@ -201,6 +267,9 @@ pub async fn list_tools(cmd: &McpStdioCommand) -> Result<Vec<McpTool>> {
                             .and_then(Value::as_str)
                             .map(str::to_owned),
                         input_schema: t.get("inputSchema").cloned(),
+                        output_schema: t.get("outputSchema").cloned(),
+                        annotations: t.get("annotations").cloned(),
+                        meta: t.get("_meta").cloned(),
                     })
                 })
                 .collect()
@@ -211,6 +280,16 @@ pub async fn list_tools(cmd: &McpStdioCommand) -> Result<Vec<McpTool>> {
 
 /// Invoke a tool on an MCP server (`tools/call`) and return its result value.
 pub async fn call_tool(cmd: &McpStdioCommand, tool: &str, arguments: Value) -> Result<Value> {
+    Ok(call_tool_full(cmd, tool, arguments).await?.raw)
+}
+
+/// Invoke a tool and return the typed [`McpToolResult`] (structured channels
+/// preserved). [`call_tool`] delegates here and returns only `.raw`.
+pub async fn call_tool_full(
+    cmd: &McpStdioCommand,
+    tool: &str,
+    arguments: Value,
+) -> Result<McpToolResult> {
     let mut conn = McpConnection::connect(cmd).await?;
     let result = conn
         .request(
@@ -219,7 +298,72 @@ pub async fn call_tool(cmd: &McpStdioCommand, tool: &str, arguments: Value) -> R
         )
         .await;
     conn.shutdown().await;
-    result
+    Ok(McpToolResult::from_result_value(result?))
+}
+
+/// List the resources an MCP server advertises (`resources/list`). Mirrors
+/// [`list_tools`] (connect → request → shutdown). A server without resources
+/// support errors on the request; callers treat that as an empty list.
+pub async fn list_resources(cmd: &McpStdioCommand) -> Result<Vec<McpResource>> {
+    let mut conn = McpConnection::connect(cmd).await?;
+    let result = conn.request("resources/list", json!({})).await;
+    conn.shutdown().await;
+    let result = result?;
+
+    let resources = result
+        .get("resources")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|r| {
+                    let uri = r.get("uri")?.as_str()?.to_owned();
+                    Some(McpResource {
+                        uri,
+                        name: r.get("name").and_then(Value::as_str).map(str::to_owned),
+                        mime_type: r.get("mimeType").and_then(Value::as_str).map(str::to_owned),
+                        description: r
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                        meta: r.get("_meta").cloned(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(resources)
+}
+
+/// Read one resource by URI (`resources/read`). Returns every contents entry the
+/// server sends back.
+pub async fn read_resource(cmd: &McpStdioCommand, uri: &str) -> Result<Vec<McpResourceContents>> {
+    let mut conn = McpConnection::connect(cmd).await?;
+    let result = conn
+        .request("resources/read", json!({ "uri": uri }))
+        .await;
+    conn.shutdown().await;
+    let result = result?;
+
+    let contents = result
+        .get("contents")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .map(|c| McpResourceContents {
+                    uri: c
+                        .get("uri")
+                        .and_then(Value::as_str)
+                        .unwrap_or(uri)
+                        .to_owned(),
+                    mime_type: c.get("mimeType").and_then(Value::as_str).map(str::to_owned),
+                    text: c.get("text").and_then(Value::as_str).map(str::to_owned),
+                    blob: c.get("blob").and_then(Value::as_str).map(str::to_owned),
+                    meta: c.get("_meta").cloned(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(contents)
 }
 
 /// A persistent connection to an MCP stdio server.
@@ -247,12 +391,19 @@ impl McpSession {
 
     /// Invoke a tool on the live connection (`tools/call`) and return its result.
     pub async fn call_tool(&mut self, tool: &str, arguments: Value) -> Result<Value> {
-        self.conn
+        Ok(self.call_tool_full(tool, arguments).await?.raw)
+    }
+
+    /// Invoke a tool on the live connection and return the typed result.
+    pub async fn call_tool_full(&mut self, tool: &str, arguments: Value) -> Result<McpToolResult> {
+        let raw = self
+            .conn
             .request(
                 "tools/call",
                 json!({ "name": tool, "arguments": arguments }),
             )
-            .await
+            .await?;
+        Ok(McpToolResult::from_result_value(raw))
     }
 
     /// Gracefully close the connection and kill the child process.

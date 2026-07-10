@@ -68,7 +68,7 @@ pub fn classify_kind(id: &str, server: &str) -> ToolKind {
         return ToolKind::Composio;
     }
     let _ = id;
-    if server == "app" {
+    if server == "app" || super::apps::owns(server) {
         return ToolKind::App;
     }
     if server == super::SELF_BUILD_SERVER || BUILTIN_SERVERS.contains(&server) {
@@ -93,6 +93,15 @@ pub struct ToolDescriptor {
     pub arg_descriptions: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score: Option<f32>,
+    /// The tool's `_meta`, verbatim (widget keys), when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
+    /// Whether a widget originating from this tool may `callTool` (companion).
+    #[serde(default)]
+    pub widget_accessible: bool,
+    /// The `ui://widget/<slug>.html` template uri when this tool renders a widget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_template: Option<String>,
 }
 
 impl ToolDescriptor {
@@ -155,6 +164,9 @@ fn descriptor_from(tool: &RegistryTool) -> ToolDescriptor {
         arg_names,
         arg_descriptions,
         score: None,
+        meta: tool.meta.clone(),
+        widget_accessible: tool.widget_accessible,
+        output_template: tool.output_template.clone(),
     }
 }
 
@@ -499,6 +511,9 @@ async fn composio_candidates(http: &reqwest::Client, query: &str) -> Vec<ToolDes
                         arg_names: Vec::new(),
                         arg_descriptions: Vec::new(),
                         score: None,
+                        meta: None,
+                        widget_accessible: false,
+                        output_template: None,
                     })
                 })
                 .collect()
@@ -519,6 +534,9 @@ mod tests {
             arg_names: Vec::new(),
             arg_descriptions: Vec::new(),
             score: None,
+            meta: None,
+            widget_accessible: false,
+            output_template: None,
         }
     }
 
@@ -564,13 +582,7 @@ mod tests {
 
     #[test]
     fn description_option_maps_to_empty_string() {
-        let tool = RegistryTool {
-            id: "foo__bar".into(),
-            server: "foo".into(),
-            name: "bar".into(),
-            description: None,
-            input_schema: None,
-        };
+        let tool = RegistryTool::candidate("foo__bar", "foo", "bar");
         let d = descriptor_from(&tool);
         assert_eq!(d.description, "");
         assert_eq!(d.kind, ToolKind::Mcp);

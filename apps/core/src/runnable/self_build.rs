@@ -72,6 +72,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(scaffold_runnable_schema()),
+            ..Default::default()
         },
         RegistryTool {
             id: "ryu_self_build__install_app".to_owned(),
@@ -85,6 +86,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(install_app_schema()),
+            ..Default::default()
         },
         RegistryTool {
             id: "ryu_self_build__write_ryu_json".to_owned(),
@@ -99,6 +101,7 @@ pub fn tools() -> Vec<RegistryTool> {
                     .to_owned(),
             ),
             input_schema: Some(write_ryu_json_schema()),
+            ..Default::default()
         },
     ]
 }

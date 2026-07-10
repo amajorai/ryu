@@ -481,6 +481,7 @@ fn emit_audit(
         command: None,
         duration_ms: None,
         exit_code: None,
+        widget_instance_id: None,
     });
 }
 

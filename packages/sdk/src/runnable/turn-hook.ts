@@ -133,6 +133,9 @@ export function definePlugin(options: DefinePluginOptions): PluginManifest {
 		composer_controls: options.composerControls ?? [],
 		settings_tabs: options.settingsTabs ?? [],
 		slash_commands: options.slashCommands ?? [],
+		// A turn-hook plugin contributes no app widgets; the field is required on the
+		// resolved `Contributes` type (zod default applied), so set it explicitly.
+		widgets: [],
 	};
 	return {
 		id: options.id,

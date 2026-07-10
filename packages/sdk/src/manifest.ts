@@ -126,6 +126,69 @@ export const TurnHookContributionSchema = z.object({
 
 export type TurnHookContribution = z.infer<typeof TurnHookContributionSchema>;
 
+// ── WidgetContribution (Ryu Apps) ─────────────────────────────────────────────
+
+/** Default widget MIME dialect. Mirrors Core `default_widget_mime`. */
+const DEFAULT_WIDGET_MIME = "text/html+skybridge";
+/** Default widget display mode. Mirrors Core `default_widget_display_mode`. */
+const DEFAULT_WIDGET_DISPLAY_MODE = "inline";
+
+/**
+ * One app-widget contribution (Ryu Apps). Binds the render tool that produces the
+ * widget to its `ui://widget/<slug>.html` template. Shape-identical to Core's
+ * `WidgetContribution` (`apps/core/src/plugin_manifest/mod.rs`): built-in apps
+ * serve the HTML from the in-process provider and leave `ui_entry` unset, while a
+ * third-party app authored here sets `ui_entry` so `ryu pack` bundles the source
+ * into the manifest's `ui_code`.
+ */
+export const WidgetContributionSchema = z.object({
+	/** The fully-qualified tool id whose result renders this widget. */
+	tool_id: z.string().min(1),
+	/** `ui://widget/<slug>.html` — the widget resource uri. */
+	uri: z.string().min(1),
+	/** Source entry (e.g. `src/apps/checklist/index.tsx`) for `ryu pack`. */
+	ui_entry: z.string().optional(),
+	/** Widget MIME dialect (default `text/html+skybridge`). */
+	mime: z.string().default(DEFAULT_WIDGET_MIME),
+	/** Default display mode (`inline` | `fullscreen` | `pip`). */
+	default_display_mode: z.string().default(DEFAULT_WIDGET_DISPLAY_MODE),
+});
+
+export type WidgetContribution = z.infer<typeof WidgetContributionSchema>;
+
+// ── ToolAppConfig (Ryu Apps per-tool config) ─────────────────────────────────
+
+/**
+ * The `config` blob carried by a Ryu App's `kind:"tool"` runnable. Core's strict
+ * `ToolConfig` (`apps/core/src/plugin_manifest/schema.rs`) requires `slug` and
+ * ignores unknown fields on the current shape; the widget flags below are read by
+ * Core's `register_app_tool_with_widget` synthesis path (a separate Core unit) to
+ * rebuild the `_meta` binding, mirroring how the in-process `apps::tools()`
+ * derives `outputTemplate` / `toolInvocation` / `widgetAccessible`.
+ */
+export const ToolAppConfigSchema = z.object({
+	/** MCP tool slug this runnable wraps — the fully-qualified `<server>__<name>` id. */
+	slug: z.string().min(1),
+	/** The tool description the model reads when choosing it. Carried here because a
+	 *  packed app's manifest is the only channel (there is no `generated.rs`); Core's
+	 *  app-tool synthesis reads it back onto the `RegistryTool`. */
+	description: z.string(),
+	/** JSON Schema for the tool's arguments (used for validation + the LLM tool
+	 *  surface). Snake_case to match `widget_accessible`. Absent = no arguments. */
+	input_schema: z.record(z.string(), z.unknown()).optional(),
+	/** True when calling this tool renders the app's widget (carries the template). */
+	widget: z.boolean().default(false),
+	/** True when a mounted widget may `callTool` this tool (a companion), or when a
+	 *  render tool's widget may call any companion the app declares. */
+	widget_accessible: z.boolean().default(false),
+	/** Optional status label shown while the render tool runs. */
+	invoking: z.string().optional(),
+	/** Optional status label shown when the render tool finishes. */
+	invoked: z.string().optional(),
+});
+
+export type ToolAppConfig = z.infer<typeof ToolAppConfigSchema>;
+
 /**
  * The `contributes` block. Mirrors `Contributes` in
  * `apps/core/src/plugin_manifest/mod.rs`. The declarative UI surfaces
@@ -137,6 +200,11 @@ export const ContributesSchema = z.object({
 	composer_controls: z.array(z.record(z.string(), z.unknown())).default([]),
 	settings_tabs: z.array(z.record(z.string(), z.unknown())).default([]),
 	slash_commands: z.array(z.record(z.string(), z.unknown())).default([]),
+	/** App widgets (Ryu Apps). Each binds a render tool id to its
+	 *  `ui://widget/<slug>.html` template. Mirrors the Rust-side
+	 *  `Contributes.widgets` field, without which the CLI's zod parse would strip
+	 *  every widget an app authored here declares. */
+	widgets: z.array(WidgetContributionSchema).default([]),
 });
 
 export type Contributes = z.infer<typeof ContributesSchema>;
@@ -210,6 +278,29 @@ export const PluginManifestSchema = z.object({
 	 * Absent for a plugin that contributes nothing here.
 	 */
 	contributes: ContributesSchema.optional(),
+
+	/**
+	 * Optional per-item AFFILIATE terms: the commission paid to a referrer when a
+	 * referred user buys this (paid) item. `value` is basis points for `percent`
+	 * (2000 = 20%) or minor units (cents) for `flat`. Absent (or `enabled:false`)
+	 * falls back to the seller org owner's default affiliate terms. This is the
+	 * authoring surface for the marketplace publish body's `affiliate` field (the
+	 * server re-validates it); it only takes effect on a paid item.
+	 */
+	affiliate: z
+		.object({
+			enabled: z.boolean().default(false),
+			rule: z
+				.object({
+					type: z.enum(["percent", "flat"]),
+					value: z.number().nonnegative(),
+					recurring: z.boolean().default(false),
+					durationMonths: z.number().int().positive().nullish(),
+					fundedBy: z.enum(["platform", "seller"]).default("platform"),
+				})
+				.optional(),
+		})
+		.optional(),
 });
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;

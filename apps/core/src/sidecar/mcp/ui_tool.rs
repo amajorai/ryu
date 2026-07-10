@@ -58,6 +58,7 @@ pub fn tools() -> Vec<RegistryTool> {
         name: "render".to_owned(),
         description: Some(RENDER_CONTRACT.to_owned()),
         input_schema: Some(render_schema()),
+        ..Default::default()
     }]
 }
 

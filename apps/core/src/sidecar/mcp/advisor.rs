@@ -71,6 +71,7 @@ pub fn tools() -> Vec<RegistryTool> {
                 .to_owned(),
         ),
         input_schema: Some(consult_schema()),
+        ..Default::default()
     }]
 }
 

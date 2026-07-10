@@ -124,8 +124,53 @@ pub enum AcpEvent {
     /// on the mod.rs side. Emitted at least once per turn (a final `done:true`
     /// frame) even when the agent reports no usage, so the duration/speed UI works.
     Usage(serde_json::Value),
+    /// A tool call resolved to a widget (`outputTemplate`): the desktop should
+    /// render an inline Ryu App widget. Emitted from the MCP bridge (the single
+    /// choke point for both planes, D1) in addition to the normal tool-output
+    /// part for the same tool. Boxed to keep the enum small.
+    ToolWidget(Box<ToolWidgetEvent>),
     /// A fatal error from the session; the stream ends after this.
     Error(String),
+}
+
+/// Fully-resolved payload for [`AcpEvent::ToolWidget`], mapped 1:1 onto the
+/// `data-tool-widget-available` stream part (spec §1.1). The MCP bridge mints the
+/// `instance_id`, resolves the widget HTML, and strips `ryu/widget` from the
+/// forwarded `_meta`; the adapter only serializes.
+#[derive(Debug, Clone)]
+pub struct ToolWidgetEvent {
+    /// The tool-call row this widget attaches to (best-effort correlation).
+    pub tool_call_id: String,
+    /// Fully-qualified tool id (`<server>__<tool>`).
+    pub tool_name: String,
+    /// Minted `WidgetInstanceStore` id (round-trip identity).
+    pub instance_id: String,
+    /// Origin MCP server (same-server provenance gate).
+    pub server_id: String,
+    /// `ui://widget/<slug>.html`.
+    pub template_uri: String,
+    /// Widget HTML (embedded live, R9).
+    pub widget_html: String,
+    /// Widget MIME dialect.
+    pub widget_mime: String,
+    /// Tool arguments (`toolInput`).
+    pub tool_input: serde_json::Value,
+    /// `structuredContent` (`toolOutput`).
+    pub tool_output: serde_json::Value,
+    /// `_meta` minus `ryu/widget` (`toolResponseMetadata`).
+    pub tool_response_metadata: serde_json::Value,
+    /// Whether the widget may `callTool` (gates the local capability).
+    pub widget_accessible: bool,
+    /// Gateway-validated grant subset.
+    pub approved_grants: Vec<String>,
+    /// "invoking…" label.
+    pub invoking: Option<String>,
+    /// "invoked" label.
+    pub invoked: Option<String>,
+    /// Rehydrated widget state (persistence), if any.
+    pub initial_widget_state: Option<serde_json::Value>,
+    /// `"inline" | "fullscreen" | "pip"`.
+    pub display_mode: String,
 }
 
 /// User-chosen ACP session controls applied to a single turn, all read from the
@@ -1311,6 +1356,7 @@ impl AgentAdapter for AcpAdapter {
                     | AcpEvent::ConfigWarning { .. }
                     | AcpEvent::AvailableCommands(_)
                     | AcpEvent::Usage(_)
+                    | AcpEvent::ToolWidget(_)
                     | AcpEvent::PermissionRequest { .. } => {}
                 }
             }

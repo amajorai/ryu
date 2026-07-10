@@ -102,6 +102,7 @@ pub fn tools() -> Vec<RegistryTool> {
                 .to_owned(),
         ),
         input_schema: Some(crawl_schema()),
+        ..Default::default()
     }]
 }
 

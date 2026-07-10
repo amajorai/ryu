@@ -378,6 +378,15 @@ pub struct ChatStreamRequest {
     /// streamed view and a later reload identical.
     #[serde(default = "default_persist")]
     pub persist: bool,
+    /// Skip persisting the incoming user turn for this request, while still
+    /// persisting the assistant reply. Set by the version-tree edit/regenerate
+    /// re-run: the edit route has already created the user sibling (and pointed
+    /// the active leaf at it), or a regenerate carries no new user turn at all, so
+    /// re-appending the last user message here would duplicate it. Defaults
+    /// `false` (normal turns append the user message). Independent of `persist`:
+    /// `persist = false` skips the whole turn; this skips only the user row.
+    #[serde(default)]
+    pub skip_user_append: bool,
     /// Per-request inference / sampling override (temperature, top_p, top_k, …).
     /// Merged on top of the agent's stored [`crate::agents::AgentRecord::inference`]
     /// defaults (request wins per field) and applied to the OpenAI-compat body,
@@ -556,6 +565,39 @@ fn ui_tool_output(tool_call_id: &str, output: &Value, dynamic: bool) -> Vec<u8> 
         "output": output,
         "dynamic": dynamic,
     }))
+}
+
+/// `data-tool-widget-available` part (spec §1.1, nested under `data` per D6) — a
+/// tool call that resolved to a Ryu App widget. Core has already mapped
+/// `structuredContent → toolOutput`, `_meta → toolResponseMetadata` (ryu/widget
+/// stripped), and minted the `instanceId` in the MCP bridge; this only
+/// serializes the resolved [`acp::ToolWidgetEvent`].
+fn ui_tool_widget(w: &crate::sidecar::adapters::acp::ToolWidgetEvent) -> Vec<u8> {
+    ui_data(
+        "tool-widget-available",
+        &serde_json::json!({
+            "toolCallId": w.tool_call_id,
+            "toolName": w.tool_name,
+            "instanceId": w.instance_id,
+            "serverId": w.server_id,
+            "templateUri": w.template_uri,
+            "widget": {
+                "html": w.widget_html,
+                "mimeType": w.widget_mime,
+                "csp": { "resource_domains": [] },
+            },
+            "toolInput": w.tool_input,
+            "toolOutput": w.tool_output,
+            "toolResponseMetadata": w.tool_response_metadata,
+            "widgetAccessible": w.widget_accessible,
+            "approvedGrants": w.approved_grants,
+            "invoking": w.invoking,
+            "invoked": w.invoked,
+            "initialWidgetState": w.initial_widget_state,
+            "maxHeight": Value::Null,
+            "displayMode": w.display_mode,
+        }),
+    )
 }
 
 /// Map an ACP tool call (category `kind`, human `title`, raw `input`) onto the
@@ -2314,6 +2356,7 @@ pub(crate) async fn run_text_turn_in(
         target_agent_id: None,
         team_id: None,
         persist,
+        skip_user_append: false,
         inference: None,
         acp_mode: None,
         acp_config: None,
@@ -2522,6 +2565,7 @@ async fn run_member_text(
         target_agent_id: Some(member_id.to_owned()),
         team_id: None,
         persist: false,
+        skip_user_append: false,
         inference: None,
         acp_mode: None,
         acp_config: None,
@@ -2874,7 +2918,7 @@ pub async fn route_chat_stream(
     // survives even if the connection drops mid-stream. Skipped when `persist`
     // is false (the team orchestrator records the user turn once itself and runs
     // each member with `persist = false` to avoid N duplicate user rows).
-    if req.persist {
+    if req.persist && !req.skip_user_append {
         if let Some(conversation_id) = req.conversation_id.clone() {
             if !user_text.is_empty() {
                 if let Err(e) = conversations
@@ -3283,6 +3327,24 @@ pub async fn route_chat_stream(
                     } else {
                         vec![]
                     };
+                    // Governed chat tool loop (R1 / A2): enabled ONLY on this
+                    // branch — chat egress is via the healthy gateway, so every
+                    // tool dispatch is governed through `/v1/exec/tool` (D5). The
+                    // agent's allowlist narrows which app render tools are offered.
+                    let tool_allowlist = effective_agent_id
+                        .as_deref()
+                        .and_then(|id| registry.allowlist_for(id));
+                    // Offer tools only for an agent whose id resolves to a
+                    // registered agent — Core's `call_mcp_tool` gate rejects a tool
+                    // call whose `agent_id` is empty/unknown (a fail-closed
+                    // security invariant). Gating here means the model is never
+                    // handed tools it cannot actually dispatch, so the bare
+                    // anonymous default stays a clean single-shot chat rather than
+                    // emitting tool calls that would be denied at Core.
+                    let agent_registered = effective_agent_id
+                        .as_deref()
+                        .is_some_and(|id| registry.find_by_prefix(id).is_some());
+                    let chat_tools_enabled = apps_chat_tools_enabled() && agent_registered;
                     return route_openai_stream(
                         req,
                         gateway_base,
@@ -3298,6 +3360,9 @@ pub async fn route_chat_stream(
                         agent_slots,
                         sampling.clone(),
                         sampling_engine,
+                        Arc::clone(&mcp),
+                        chat_tools_enabled,
+                        tool_allowlist,
                     )
                     .await;
                 }
@@ -3332,6 +3397,9 @@ pub async fn route_chat_stream(
             } else {
                 vec![]
             };
+            // Direct-to-provider (registry agent or degraded gateway-down mode):
+            // no gateway to govern tool dispatch, so the chat tool loop is OFF
+            // (no ungoverned dispatch path — D5).
             route_openai_stream(
                 req,
                 base_url,
@@ -3347,6 +3415,9 @@ pub async fn route_chat_stream(
                 agent_slots,
                 sampling.clone(),
                 sampling_engine,
+                Arc::clone(&mcp),
+                false,
+                None,
             )
             .await
         }
@@ -3365,6 +3436,9 @@ pub async fn route_chat_stream(
             // No fallback chain for local-engine routes — they are the fallback.
             // Local engines go direct; slot overrides are gateway-only so we pass
             // an empty default here.
+            // Local engines go direct (no gateway hop), so the governed chat tool
+            // loop is OFF here — dispatch must be gateway-governed (D5). A local
+            // model served THROUGH the gateway takes the OpenAiCompat branch above.
             route_openai_stream(
                 req,
                 base_url,
@@ -3380,6 +3454,9 @@ pub async fn route_chat_stream(
                 AgentSlots::default(),
                 sampling.clone(),
                 sampling_engine,
+                Arc::clone(&mcp),
+                false,
+                None,
             )
             .await
         }
@@ -3458,6 +3535,8 @@ pub async fn route_chat_stream(
             );
             // No fallback chain and no gateway on this hop — the SDK app owns its
             // own provider routing (via injected OPENAI_BASE_URL).
+            // The SDK app owns its own provider routing (injected OPENAI_BASE_URL);
+            // no gateway on this hop, so the governed chat tool loop is OFF (D5).
             route_openai_stream(
                 req,
                 base_url,
@@ -3473,6 +3552,9 @@ pub async fn route_chat_stream(
                 AgentSlots::default(),
                 sampling,
                 sampling_engine,
+                Arc::clone(&mcp),
+                false,
+                None,
             )
             .await
         }
@@ -3594,6 +3676,12 @@ async fn connect_openai(
     // gate lives inside `apply_to_body`).
     sampling: &crate::inference::SamplingConfig,
     sampling_engine: crate::inference::Engine,
+    // OpenAI-compat `tools` array for the Core-owned governed chat tool loop
+    // (R1 / A3-A4). Empty on the ordinary no-tool chat path (unchanged). When
+    // non-empty it is attached to the request body AND `x-ryu-raw-tools: on` is
+    // set so the gateway passes `tools`/`tool_calls` through untouched (Core owns
+    // the loop; the gateway still governs each dispatch via `/v1/exec/tool`).
+    tools: &[Value],
 ) -> Result<reqwest::Response, String> {
     let mut payload_map = serde_json::Map::new();
     payload_map.insert("model".to_owned(), Value::String(model.to_owned()));
@@ -3608,6 +3696,12 @@ async fn connect_openai(
         serde_json::json!({ "include_usage": true }),
     );
     payload_map.insert("messages".to_owned(), Value::Array(messages.to_vec()));
+    // Governed chat tool loop (R1): offer the app tools so the model can call a
+    // widget-rendering tool. Only set when non-empty, so the ordinary no-tool
+    // chat body is byte-for-byte unchanged.
+    if !tools.is_empty() {
+        payload_map.insert("tools".to_owned(), Value::Array(tools.to_vec()));
+    }
     // Merge advanced sampling (temperature/top_p/top_k/penalties/…). No-op when the
     // agent set nothing, so the body stays identical to the pre-feature shape.
     if !sampling.is_empty() {
@@ -3635,6 +3729,13 @@ async fn connect_openai(
     // usage/budgets per feature. This connector serves the chat-completions path
     // exclusively (only reached via `route_openai_stream`).
     builder = builder.header("x-ryu-feature", "chat");
+    // Raw-tools passthrough (R1 / A4): when Core offers its own `tools`, the
+    // gateway must NOT run its managed tool loop over them — it passes `tools` and
+    // the model's `tool_calls` through untouched, so Core owns the loop while chat
+    // egress stays governed. Only set when Core is actually offering tools.
+    if !tools.is_empty() {
+        builder = builder.header("x-ryu-raw-tools", "on");
+    }
     // Thread the Core session/conversation id so the gateway can correlate audit
     // rows back to a specific chat run without a separate session store (M4 / #176).
     if let Some(sid) = session_id.filter(|s| !s.is_empty()) {
@@ -3746,6 +3847,8 @@ async fn connect_with_fallback(
     // Advanced sampling params + the engine governing field-name translation.
     sampling: &crate::inference::SamplingConfig,
     sampling_engine: crate::inference::Engine,
+    // Governed chat tool-loop `tools` array (R1). Empty on the no-tool path.
+    tools: &[Value],
 ) -> Result<reqwest::Response, String> {
     match connect_openai(
         messages,
@@ -3762,6 +3865,7 @@ async fn connect_with_fallback(
         background,
         sampling,
         sampling_engine,
+        tools,
     )
     .await
     {
@@ -3797,6 +3901,7 @@ async fn connect_with_fallback(
                 background,
                 sampling,
                 sampling_engine,
+                tools,
             )
             .await
             {
@@ -3855,6 +3960,18 @@ async fn route_openai_stream<F, Fut>(
     // field-name-translated for `sampling_engine`.
     sampling: crate::inference::SamplingConfig,
     sampling_engine: crate::inference::Engine,
+    // The tool registry, for resolving a widget-rendering tool's binding when the
+    // governed chat tool loop emits its widget part (R1 / A0-A6).
+    mcp: Arc<McpRegistry>,
+    // Enable the governed chat tool loop for this turn. Set ONLY by the caller on
+    // the `via_gateway && gateway_healthy` OpenAI-compat branch, so every tool
+    // dispatch is governed by the Gateway `/v1/exec/tool` front (D5). `false`
+    // everywhere else (direct-provider / local-engine / SDK-app) preserves the
+    // exact prior single-shot behaviour — no tools, no loop.
+    tools_enabled: bool,
+    // The effective agent's tool allowlist, narrowing which app render tools are
+    // offered. `None` = every render tool (the default-agent case).
+    tool_allowlist: Option<Vec<String>>,
 ) -> Response
 where
     F: FnOnce(String, &'static str) -> Fut + Send + 'static,
@@ -3929,185 +4046,412 @@ where
     // attribution and budgets are live. `None` on anonymous/loopback turns.
     let user_id = req.author_user_id.clone();
 
-    // Attempt the primary connection; fall back to the registry-configured
-    // fallback provider (if any) on a transport failure (self-healing, AC1–AC4).
-    let upstream = match connect_with_fallback(
-        &oai_messages,
-        &base_url,
-        &model,
-        api_key.as_deref(),
-        agent_id.as_deref(),
-        user_id.as_deref(),
-        active_skill_ids.as_slice(),
-        composio_actions.as_slice(),
-        session_id.as_deref(),
-        &fallback_chain,
-        &slots,
-        req.companion_source,
-        req.background,
-        &sampling,
-        sampling_engine,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => return error_stream(e),
+    // Governed chat tool loop (R1): resolve the app render tools to offer. Only
+    // render tools (those with a widget binding) are offered to the model;
+    // companion (`widgetAccessible`) tools are called BY a mounted widget over the
+    // D5 `callTool` path, never by the model. Empty when the loop is disabled for
+    // this route, which reduces to the exact prior single-shot behaviour.
+    let tools_payload: Vec<Value> = if tools_enabled {
+        app_render_tools(tool_allowlist.as_deref())
+            .iter()
+            .map(tool_to_function_spec)
+            .collect()
+    } else {
+        Vec::new()
     };
+    // A loop with no tools to offer is just a plain single-shot chat.
+    let tool_loop_active = tools_enabled && !tools_payload.is_empty();
 
-    if !upstream.status().is_success() {
-        let status = upstream.status();
-        // Prefer the gateway's structured error message so a firewall policy
-        // block ("policy_violation"), rate limit, or budget rejection surfaces
-        // a clear, actionable result to the client instead of a bare status
-        // code. The gateway speaks OpenAI's `{ "error": { "message", "type" } }`
-        // shape (see apps/gateway/src/error.rs).
-        let body = upstream.text().await.unwrap_or_default();
-        let detail = serde_json::from_str::<Value>(&body)
-            .ok()
-            .and_then(|json| {
-                let err = &json["error"];
-                let message = err["message"].as_str()?.to_owned();
-                match err["type"].as_str() {
-                    Some(kind) => Some(format!("{message} ({kind})")),
-                    None => Some(message),
-                }
-            })
-            .unwrap_or_else(|| format!("Agent returned HTTP {status}"));
-        return error_stream(detail);
-    }
+    // Values moved into the (`'static`) stream. The connection now happens INSIDE
+    // the stream so it can be re-issued per tool-loop iteration.
+    let companion_source = req.companion_source;
+    let background = req.background;
+    let http_client = shared_http_client();
 
-    let byte_stream = upstream.bytes_stream();
+    // Bounded number of tool-executing rounds. After the cap, one final tool-free
+    // request produces a closing answer instead of terminating mid-tool-result.
+    const MAX_TOOL_ITERATIONS: usize = 8;
 
     let transformed = async_stream::stream! {
-        const TEXT_ID: &str = "0";
-        let mut buf = String::new();
-        // Accumulate the assistant text so it can be persisted on completion.
-        let mut reply = String::new();
         let mut persist = Some(persist);
-        let mut text_open = false;
-
-        // Per-message inference stats (see `build_stats_part`). `stream_open`
-        // anchors TTFT; `first_token_at` marks the start of the generation
-        // window; `delta_count` is the last-resort token count; the engine's
-        // own `timings`/`usage` (kept as the LAST seen, since they arrive on a
-        // trailing `choices: []` chunk) are preferred when present.
-        let stream_open = std::time::Instant::now();
-        let mut first_token_at: Option<std::time::Instant> = None;
-        let mut delta_count: u64 = 0;
-        let mut last_timings: Option<Value> = None;
-        let mut last_usage: Option<Value> = None;
+        // Assistant text accumulated across every iteration, persisted once at the
+        // single terminal exit (or once on any error exit).
+        let mut reply_all = String::new();
+        let mut iteration: usize = 0;
 
         yield Ok::<_, std::convert::Infallible>(ui_start());
 
-        tokio::pin!(byte_stream);
-        while let Some(chunk) = byte_stream.next().await {
-            let chunk = match chunk {
-                Ok(c) => c,
+        loop {
+            // Offer tools only while under the cap. Once at the cap we send a
+            // final tool-free request so the model must produce a text answer,
+            // which lands on the terminal branch below (guaranteed termination).
+            let offer_tools = tool_loop_active && iteration < MAX_TOOL_ITERATIONS;
+            let request_tools: &[Value] = if offer_tools { &tools_payload } else { &[] };
+
+            // Connect (with self-healing fallback, AC1–AC4).
+            let upstream = match connect_with_fallback(
+                &oai_messages,
+                &base_url,
+                &model,
+                api_key.as_deref(),
+                agent_id.as_deref(),
+                user_id.as_deref(),
+                active_skill_ids.as_slice(),
+                composio_actions.as_slice(),
+                session_id.as_deref(),
+                &fallback_chain,
+                &slots,
+                companion_source,
+                background,
+                &sampling,
+                sampling_engine,
+                request_tools,
+            )
+            .await
+            {
+                Ok(r) => r,
                 Err(e) => {
                     if let Some(p) = persist.take() {
-                        p(std::mem::take(&mut reply), "failed").await;
+                        p(std::mem::take(&mut reply_all), "failed").await;
                     }
-                    if text_open {
-                        yield Ok::<_, std::convert::Infallible>(ui_text_end(TEXT_ID));
-                    }
-                    for line in error_ui_lines(&e.to_string()) {
+                    for line in error_ui_lines(&e) {
                         yield Ok::<_, std::convert::Infallible>(line);
                     }
                     return;
                 }
             };
 
-            buf.push_str(&String::from_utf8_lossy(&chunk));
-
-            let mut start = 0;
-            while let Some(rel) = buf[start..].find("\n\n") {
-                let pos = start + rel;
-                let data_owned = buf[start..pos]
-                    .strip_prefix("data:")
-                    .map(|s| s.trim().to_owned());
-                start = pos + 2;
-
-                let Some(data) = data_owned else { continue };
-
-                if data == "[DONE]" {
-                    if let Some(p) = persist.take() {
-                        p(std::mem::take(&mut reply), "completed").await;
-                    }
-                    if text_open {
-                        yield Ok::<_, std::convert::Infallible>(ui_text_end(TEXT_ID));
-                    }
-                    if let Some(stats) = build_stats_part(
-                        stream_open,
-                        first_token_at,
-                        delta_count,
-                        &last_timings,
-                        &last_usage,
-                    ) {
-                        yield Ok::<_, std::convert::Infallible>(stats);
-                    }
-                    yield Ok::<_, std::convert::Infallible>(ui_finish());
-                    yield Ok::<_, std::convert::Infallible>(DONE_SSE_LINE.as_bytes().to_vec());
-                    return;
+            if !upstream.status().is_success() {
+                let status = upstream.status();
+                // Prefer the gateway's structured error message so a firewall
+                // policy block ("policy_violation"), rate limit, or budget
+                // rejection surfaces a clear, actionable result to the client
+                // instead of a bare status code. The gateway speaks OpenAI's
+                // `{ "error": { "message", "type" } }` shape (apps/gateway/src/error.rs).
+                let body = upstream.text().await.unwrap_or_default();
+                let detail = serde_json::from_str::<Value>(&body)
+                    .ok()
+                    .and_then(|json| {
+                        let err = &json["error"];
+                        let message = err["message"].as_str()?.to_owned();
+                        match err["type"].as_str() {
+                            Some(kind) => Some(format!("{message} ({kind})")),
+                            None => Some(message),
+                        }
+                    })
+                    .unwrap_or_else(|| format!("Agent returned HTTP {status}"));
+                if let Some(p) = persist.take() {
+                    p(std::mem::take(&mut reply_all), "failed").await;
                 }
+                for line in error_ui_lines(&detail) {
+                    yield Ok::<_, std::convert::Infallible>(line);
+                }
+                return;
+            }
 
-                if let Ok(json) = serde_json::from_str::<Value>(&data) {
-                    // Stats siblings: the engine reports `timings` (llama.cpp)
-                    // and `usage` on a trailing chunk that carries no
-                    // `delta.content`, so capture them independently of the
-                    // text branch and keep the last one seen.
-                    if json.get("timings").is_some_and(Value::is_object) {
-                        last_timings = json.get("timings").cloned();
+            let byte_stream = upstream.bytes_stream();
+            tokio::pin!(byte_stream);
+
+            // Per-iteration streaming state. A fresh text id per iteration keeps
+            // interleaved text/tool parts unambiguous in the data stream.
+            let text_id = iteration.to_string();
+            let mut buf = String::new();
+            let mut text_open = false;
+            let mut iter_reply = String::new();
+            // Accumulate streamed `tool_calls` fragments by their `index`.
+            let mut tool_calls: Vec<AccToolCall> = Vec::new();
+            // Per-message inference stats (see `build_stats_part`).
+            let stream_open = std::time::Instant::now();
+            let mut first_token_at: Option<std::time::Instant> = None;
+            let mut delta_count: u64 = 0;
+            let mut last_timings: Option<Value> = None;
+            let mut last_usage: Option<Value> = None;
+            let mut saw_done = false;
+
+            while let Some(chunk) = byte_stream.next().await {
+                let chunk = match chunk {
+                    Ok(c) => c,
+                    Err(e) => {
+                        reply_all.push_str(&iter_reply);
+                        if let Some(p) = persist.take() {
+                            p(std::mem::take(&mut reply_all), "failed").await;
+                        }
+                        if text_open {
+                            yield Ok::<_, std::convert::Infallible>(ui_text_end(&text_id));
+                        }
+                        for line in error_ui_lines(&e.to_string()) {
+                            yield Ok::<_, std::convert::Infallible>(line);
+                        }
+                        return;
                     }
-                    if json.get("usage").is_some_and(Value::is_object) {
-                        last_usage = json.get("usage").cloned();
+                };
+
+                buf.push_str(&String::from_utf8_lossy(&chunk));
+
+                let mut start = 0;
+                while let Some(rel) = buf[start..].find("\n\n") {
+                    let pos = start + rel;
+                    let data_owned = buf[start..pos]
+                        .strip_prefix("data:")
+                        .map(|s| s.trim().to_owned());
+                    start = pos + 2;
+
+                    let Some(data) = data_owned else { continue };
+
+                    if data == "[DONE]" {
+                        saw_done = true;
+                        break;
                     }
-                    if let Some(delta_text) = json
-                        .get("choices")
-                        .and_then(|c| c.get(0))
-                        .and_then(|c| c.get("delta"))
-                        .and_then(|d| d.get("content"))
-                        .and_then(|t| t.as_str())
-                    {
-                        if !delta_text.is_empty() {
-                            if first_token_at.is_none() {
-                                first_token_at = Some(std::time::Instant::now());
+
+                    if let Ok(json) = serde_json::from_str::<Value>(&data) {
+                        // Stats siblings (llama.cpp `timings` / OpenAI `usage`)
+                        // arrive on a trailing `choices: []` chunk; keep the last.
+                        if json.get("timings").is_some_and(Value::is_object) {
+                            last_timings = json.get("timings").cloned();
+                        }
+                        if json.get("usage").is_some_and(Value::is_object) {
+                            last_usage = json.get("usage").cloned();
+                        }
+                        let delta = json
+                            .get("choices")
+                            .and_then(|c| c.get(0))
+                            .and_then(|c| c.get("delta"));
+                        if let Some(delta_text) = delta
+                            .and_then(|d| d.get("content"))
+                            .and_then(|t| t.as_str())
+                        {
+                            if !delta_text.is_empty() {
+                                if first_token_at.is_none() {
+                                    first_token_at = Some(std::time::Instant::now());
+                                }
+                                delta_count += 1;
+                                iter_reply.push_str(delta_text);
+                                if !text_open {
+                                    text_open = true;
+                                    yield Ok::<_, std::convert::Infallible>(ui_text_start(&text_id));
+                                }
+                                yield Ok::<_, std::convert::Infallible>(
+                                    ui_text_delta(&text_id, delta_text)
+                                );
                             }
-                            delta_count += 1;
-                            reply.push_str(delta_text);
-                            if !text_open {
-                                text_open = true;
-                                yield Ok::<_, std::convert::Infallible>(ui_text_start(TEXT_ID));
+                        }
+                        // Accumulate `tool_calls` deltas by `index`: each fragment
+                        // carries an `id`/`function.name` once and `function.
+                        // arguments` in streamed pieces to concatenate.
+                        if let Some(tcs) = delta
+                            .and_then(|d| d.get("tool_calls"))
+                            .and_then(Value::as_array)
+                        {
+                            for tc in tcs {
+                                let index = tc
+                                    .get("index")
+                                    .and_then(Value::as_u64)
+                                    .unwrap_or(0) as usize;
+                                while tool_calls.len() <= index {
+                                    tool_calls.push(AccToolCall::default());
+                                }
+                                let slot = &mut tool_calls[index];
+                                if let Some(id) = tc.get("id").and_then(Value::as_str) {
+                                    if !id.is_empty() {
+                                        slot.id = id.to_owned();
+                                    }
+                                }
+                                if let Some(func) = tc.get("function") {
+                                    if let Some(name) =
+                                        func.get("name").and_then(Value::as_str)
+                                    {
+                                        if !name.is_empty() {
+                                            slot.name.push_str(name);
+                                        }
+                                    }
+                                    if let Some(args) =
+                                        func.get("arguments").and_then(Value::as_str)
+                                    {
+                                        slot.arguments.push_str(args);
+                                    }
+                                }
                             }
-                            yield Ok::<_, std::convert::Infallible>(
-                                ui_text_delta(TEXT_ID, delta_text)
-                            );
                         }
                     }
                 }
+                buf.drain(..start);
+                if saw_done {
+                    break;
+                }
             }
-            buf.drain(..start);
-        }
 
-        if let Some(p) = persist.take() {
-            p(std::mem::take(&mut reply), "completed").await;
+            // Close this iteration's text block, then fold its text into the
+            // running reply.
+            if text_open {
+                yield Ok::<_, std::convert::Infallible>(ui_text_end(&text_id));
+            }
+            reply_all.push_str(&iter_reply);
+
+            // Drop malformed (nameless) tool calls defensively.
+            tool_calls.retain(|t| !t.name.is_empty());
+
+            // Terminal iff we did not offer tools this round OR the model asked
+            // for none. Tool calls we did not offer are never executed (the cap
+            // guard), so the loop is bounded to MAX_TOOL_ITERATIONS + 1 requests.
+            let should_execute = offer_tools && !tool_calls.is_empty();
+            if !should_execute {
+                if let Some(p) = persist.take() {
+                    p(std::mem::take(&mut reply_all), "completed").await;
+                }
+                if let Some(stats) = build_stats_part(
+                    stream_open,
+                    first_token_at,
+                    delta_count,
+                    &last_timings,
+                    &last_usage,
+                ) {
+                    yield Ok::<_, std::convert::Infallible>(stats);
+                }
+                yield Ok::<_, std::convert::Infallible>(ui_finish());
+                yield Ok::<_, std::convert::Infallible>(DONE_SSE_LINE.as_bytes().to_vec());
+                return;
+            }
+
+            // Record the assistant tool-call turn (content may be null) so the
+            // next request carries it (standard OpenAI tool-calling shape).
+            let assistant_tool_calls: Vec<Value> = tool_calls
+                .iter()
+                .map(|t| serde_json::json!({
+                    "id": t.id,
+                    "type": "function",
+                    "function": { "name": t.name, "arguments": t.arguments },
+                }))
+                .collect();
+            let assistant_content = if iter_reply.is_empty() {
+                Value::Null
+            } else {
+                Value::String(iter_reply)
+            };
+            oai_messages.push(serde_json::json!({
+                "role": "assistant",
+                "content": assistant_content,
+                "tool_calls": assistant_tool_calls,
+            }));
+
+            // Execute each requested tool through the Gateway `/v1/exec/tool`
+            // front (D5, A7). Core applies the per-agent allowlist + identity;
+            // gateway firewall/DLP/budget/exec-audit on the plain `kind=tool` path
+            // is a Wave-0 gateway follow-up (see `exec_chat_tool`'s doc comment).
+            for t in &tool_calls {
+                let args_val: Value =
+                    serde_json::from_str(&t.arguments).unwrap_or(Value::Object(Default::default()));
+                yield Ok::<_, std::convert::Infallible>(
+                    ui_tool_input(&t.id, &t.name, &args_val, true)
+                );
+                let result = match crate::server::widgets::exec_chat_tool(
+                    &http_client,
+                    &t.name,
+                    args_val.clone(),
+                    agent_id.as_deref(),
+                    session_id.as_deref(),
+                )
+                .await
+                {
+                    Ok(v) => v,
+                    Err(msg) => serde_json::json!({ "isError": true, "error": msg }),
+                };
+                yield Ok::<_, std::convert::Infallible>(
+                    ui_tool_output(&t.id, &result, true)
+                );
+                // Widget emit (D1/D6) with the REAL tool-call id.
+                if let Some(ev) = crate::sidecar::adapters::mcp_bridge::build_widget_event(
+                    &mcp,
+                    &t.name,
+                    &args_val,
+                    &result,
+                    Some(t.id.clone()),
+                    session_id.clone(),
+                    agent_id.clone().unwrap_or_default(),
+                )
+                .await
+                {
+                    yield Ok::<_, std::convert::Infallible>(ui_tool_widget(&ev));
+                }
+                // Feed the result back to the model as a `tool` message.
+                let content = match &result {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                oai_messages.push(serde_json::json!({
+                    "role": "tool",
+                    "tool_call_id": t.id,
+                    "content": content,
+                }));
+            }
+
+            iteration += 1;
         }
-        if text_open {
-            yield Ok::<_, std::convert::Infallible>(ui_text_end(TEXT_ID));
-        }
-        if let Some(stats) = build_stats_part(
-            stream_open,
-            first_token_at,
-            delta_count,
-            &last_timings,
-            &last_usage,
-        ) {
-            yield Ok::<_, std::convert::Infallible>(stats);
-        }
-        yield Ok::<_, std::convert::Infallible>(ui_finish());
-        yield Ok::<_, std::convert::Infallible>(DONE_SSE_LINE.as_bytes().to_vec());
     };
 
     sse_response(Body::from_stream(transformed))
+}
+
+/// One streamed OpenAI-compat `tool_calls[]` entry, reassembled from its deltas:
+/// `id` and `function.name` arrive once; `function.arguments` streams in pieces.
+#[derive(Default)]
+struct AccToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+/// A shared, connection-pooled HTTP client for the governed chat tool loop's
+/// Gateway dispatch calls. Cloning a `reqwest::Client` is cheap (an `Arc` inside).
+fn shared_http_client() -> reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new).clone()
+}
+
+/// The widget-render app tools offered to the governed chat tool loop (R1 / A3).
+/// Only render tools (those carrying a widget binding) are returned — companion
+/// (`widgetAccessible`) tools are called BY a mounted widget over the D5 callTool
+/// path, not offered to the model. Narrowed by the agent allowlist when set
+/// (matching a fully-qualified id, bare name, or owning server, per
+/// `tools_for_agent`'s documented semantics).
+fn app_render_tools(allowlist: Option<&[String]>) -> Vec<crate::sidecar::mcp::RegistryTool> {
+    crate::sidecar::mcp::apps::tools()
+        .into_iter()
+        .filter(|t| t.widget.is_some())
+        .filter(|t| match allowlist {
+            None => true,
+            Some(list) => list
+                .iter()
+                .any(|e| e == &t.id || e == &t.name || e == &t.server),
+        })
+        .collect()
+}
+
+/// Whether the governed chat tool loop (R1) is enabled. Default-on: the flagship
+/// value is a widget-emitting default agent that works on install. A swappable
+/// default, never a lock (AGENTS.md) — an operator can disable it with
+/// `RYU_APPS_CHAT_TOOLS=0` (also `false`/`no`) without a rebuild.
+fn apps_chat_tools_enabled() -> bool {
+    !matches!(
+        std::env::var("RYU_APPS_CHAT_TOOLS").as_deref(),
+        Ok("0") | Ok("false") | Ok("no")
+    )
+}
+
+/// Map a [`crate::sidecar::mcp::RegistryTool`] to an OpenAI `tools[]` function
+/// spec. A tool with no input schema advertises an empty object schema so the
+/// provider accepts it.
+fn tool_to_function_spec(t: &crate::sidecar::mcp::RegistryTool) -> Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": t.id,
+            "description": t.description.clone().unwrap_or_default(),
+            "parameters": t
+                .input_schema
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} })),
+        }
+    })
 }
 
 // ── ACP subprocess streaming ───────────────────────────────────────────────────
@@ -4619,6 +4963,13 @@ async fn route_acp_stream(
                     });
                     emit!(ui_tool_output(&id, &payload, dynamic));
                     acc.tool_output(&id, &payload, is_err);
+                }
+                acp::AcpEvent::ToolWidget(w) => {
+                    // A tool call resolved to a Ryu App widget (D1): emit the
+                    // `data-tool-widget-available` part in addition to the tool
+                    // row (already emitted for the same tool). Emit-only, like the
+                    // other data parts — reload re-emits from the resource cache.
+                    emit!(ui_tool_widget(&w));
                 }
                 acp::AcpEvent::Media { mime, data } => {
                     // A non-text assistant content block (inline image/audio).
@@ -5930,6 +6281,7 @@ mod tests {
             false, // not background fan-out
             &crate::inference::SamplingConfig::default(),
             crate::inference::Engine::Other,
+            &[], // no tools
         )
         .await;
         // Both primary and fallback should fail; the error message must mention
@@ -5966,6 +6318,7 @@ mod tests {
             false, // not background fan-out
             &crate::inference::SamplingConfig::default(),
             crate::inference::Engine::Other,
+            &[], // no tools
         )
         .await;
         let err = result.expect_err("unreachable primary");

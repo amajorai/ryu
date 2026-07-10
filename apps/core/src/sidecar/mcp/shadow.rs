@@ -130,6 +130,7 @@ pub fn tools() -> Vec<RegistryTool> {
             name: t.name.to_owned(),
             description: Some(t.description.to_owned()),
             input_schema: Some((t.schema)()),
+            ..Default::default()
         })
         .collect()
 }

@@ -290,6 +290,41 @@ pub struct Contributes {
     /// the resulting message. Served + rendered the same way.
     #[serde(default)]
     pub slash_commands: Vec<serde_json::Value>,
+
+    /// App widgets the plugin contributes (Ryu Apps). Each binds a tool id to a
+    /// `ui://widget/<slug>.html` template the tool renders inline in chat. The
+    /// field is shape-identical to the SDK `manifest.ts` `WidgetContribution`.
+    #[serde(default)]
+    pub widgets: Vec<WidgetContribution>,
+}
+
+/// One app-widget contribution (Ryu Apps). Binds the tool that renders the widget
+/// to its HTML template. `ui_entry` is the source entry the SDK `ryu pack` builds
+/// into the self-contained HTML for third-party apps; built-in apps serve HTML
+/// from the in-process provider and leave it unset.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WidgetContribution {
+    /// The fully-qualified tool id whose result renders this widget.
+    pub tool_id: String,
+    /// `ui://widget/<slug>.html` — the widget resource uri.
+    pub uri: String,
+    /// Source entry (e.g. `src/apps/checklist/index.tsx`) for `ryu pack`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_entry: Option<String>,
+    /// Widget MIME dialect (default `text/html+skybridge`).
+    #[serde(default = "default_widget_mime")]
+    pub mime: String,
+    /// Default display mode (`inline` | `fullscreen` | `pip`).
+    #[serde(default = "default_widget_display_mode")]
+    pub default_display_mode: String,
+}
+
+fn default_widget_mime() -> String {
+    "text/html+skybridge".to_owned()
+}
+
+fn default_widget_display_mode() -> String {
+    "inline".to_owned()
 }
 
 /// A server-side chat turn hook contributed by a plugin. The `code` is a JS body
@@ -469,6 +504,17 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // surfacing findings as an out-of-band note. Toggle + `/security` command +
     // reviewer-model picker mirror `double-check`. Community-tier, opt-in.
     include_str!("fixtures/security-guidance.plugin.json"),
+    // Ryu Apps (widget-rendering in-process apps). Each declares its tool
+    // runnables + `contributes.widgets[]`; apps that push a follow-up turn also
+    // declare the `chat.sendFollowUp` grant (governance §4.2). Default-on Core.
+    include_str!("fixtures/checklist.plugin.json"),
+    include_str!("fixtures/smart-intake-form.plugin.json"),
+    include_str!("fixtures/data-grid-explorer.plugin.json"),
+    include_str!("fixtures/chart-studio.plugin.json"),
+    include_str!("fixtures/decision-wizard.plugin.json"),
+    include_str!("fixtures/quest-board.plugin.json"),
+    include_str!("fixtures/worktree-diff-review.plugin.json"),
+    include_str!("fixtures/gateway-budget-dial.plugin.json"),
 ];
 
 /// Loader that merges built-in manifests with user-installed ones from

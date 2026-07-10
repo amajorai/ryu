@@ -367,6 +367,60 @@ const ENV_CREDITS_WALLET_EMPTY_ACTION: &str = "GATEWAY_CREDITS_WALLET_EMPTY_ACTI
 /// Default `0` ⇒ tool calls stay free until a deployment sets a real rate.
 const ENV_CREDITS_COST_PER_TOOL_CALL: &str = "GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD";
 
+/// Sandbox per-resource billing rates, in **nano-USD per unit-second** (`u64`),
+/// forwarded to the gateway alongside the credits hook. Rates are nano-USD (not
+/// micro) because the Daytona storage rate (0.03 micro-USD/GiB/s) truncates to 0
+/// in a micro-USD field; the gateway converts nano→micro once, inside
+/// `sandbox_tick_cost_raw_micro`. Defaults mirror the Daytona base table in the
+/// FROZEN CONTRACT §1. The gateway also carries these defaults, but Core injects
+/// them explicitly so an operator can pin rates on Core's env and have them flow
+/// to the managed gateway child (belt-and-suspenders, like the tool-call rate).
+const SANDBOX_RATE_ENVS: &[(&str, u64)] = &[
+    ("GATEWAY_CREDITS_COST_PER_SANDBOX_VCPU_SECOND_NANO_USD", 14_000),
+    (
+        "GATEWAY_CREDITS_COST_PER_SANDBOX_MEM_GIB_SECOND_NANO_USD",
+        4_500,
+    ),
+    (
+        "GATEWAY_CREDITS_COST_PER_SANDBOX_STORAGE_GIB_SECOND_NANO_USD",
+        30,
+    ),
+    (
+        "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD",
+        1_261_000,
+    ),
+    (
+        "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H100_SECOND_NANO_USD",
+        1_097_000,
+    ),
+    (
+        "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_PRO_6000_SECOND_NANO_USD",
+        842_000,
+    ),
+    (
+        "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_5090_SECOND_NANO_USD",
+        358_000,
+    ),
+    (
+        "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_4090_SECOND_NANO_USD",
+        275_000,
+    ),
+    (
+        "GATEWAY_CREDITS_COST_PER_SANDBOX_WINDOWS_VCPU_SECOND_NANO_USD",
+        23_800,
+    ),
+];
+
+/// Free storage allowance (GiB) subtracted before storage billing. Default 5.
+const ENV_CREDITS_SANDBOX_FREE_STORAGE_GIB: &str = "GATEWAY_CREDITS_SANDBOX_FREE_STORAGE_GIB";
+const DEFAULT_SANDBOX_FREE_STORAGE_GIB: u64 = 5;
+
+/// Sandbox markup in basis points. **Distinct from the global
+/// `GATEWAY_CREDITS_MARKUP_BPS` (pinned 0)** — sandbox time is billed with a real
+/// margin (default 3000 = +30%), so this must NOT reuse the global markup field.
+const ENV_CREDITS_SANDBOX_MARKUP_BPS: &str = "GATEWAY_CREDITS_SANDBOX_MARKUP_BPS";
+const DEFAULT_SANDBOX_MARKUP_BPS: u64 = 3000;
+
 /// Env var flagging this Core as a **managed node** (e.g. a Ryu Cloud host).
 /// On a managed node Core self-registers to the control plane and the gateway
 /// is expected to be pre-provisioned with provider creds (OpenRouter, Composio)
@@ -496,14 +550,57 @@ fn credits_spawn_env() -> Vec<(String, String)> {
         tool_call_cost_micro_usd = %tool_call_cost,
         "gateway: activating credits debit hook (usage + tool calls debited at cost, markup_bps=0)"
     );
-    vec![
+    let mut env = vec![
         (ENV_CREDITS_ENABLED.to_owned(), "true".to_owned()),
         (ENV_CREDITS_URL.to_owned(), base),
         (ENV_CREDITS_INTERNAL_SECRET.to_owned(), secret),
         ("GATEWAY_CREDITS_MARKUP_BPS".to_owned(), "0".to_owned()),
         (ENV_CREDITS_COST_PER_TOOL_CALL.to_owned(), tool_call_cost),
         (ENV_CREDITS_WALLET_EMPTY_ACTION.to_owned(), action),
-    ]
+    ];
+    // Sandbox metering rail (Daytona): forward the per-resource nano-USD rates,
+    // the free-storage allowance, and the sandbox markup. Unlike the global
+    // markup (pinned 0 — usage bills at cost), sandbox time carries a real margin
+    // (default 3000 = +30%), so `GATEWAY_CREDITS_SANDBOX_MARKUP_BPS` is forwarded
+    // with its real value, NOT pinned 0.
+    env.extend(sandbox_credits_spawn_env());
+    env
+}
+
+/// Resolve a `u64` env var to its string form, defaulting when unset or invalid.
+/// Only a valid non-negative integer is honoured; anything else falls to
+/// `default` so a malformed operator value never breaks the spawn.
+fn resolve_u64_env_string(name: &str, default: u64) -> String {
+    std::env::var(name)
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| s.parse::<u64>().is_ok())
+        .unwrap_or_else(|| default.to_string())
+}
+
+/// Build the sandbox-billing env pairs forwarded to the gateway (the nine
+/// per-resource nano-USD rates + free-storage allowance + sandbox markup).
+/// Resolved from Core's env with the FROZEN CONTRACT §1 defaults so a managed
+/// gateway child always receives consistent, real sandbox rates.
+fn sandbox_credits_spawn_env() -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = SANDBOX_RATE_ENVS
+        .iter()
+        .map(|(var, default)| ((*var).to_owned(), resolve_u64_env_string(var, *default)))
+        .collect();
+    env.push((
+        ENV_CREDITS_SANDBOX_FREE_STORAGE_GIB.to_owned(),
+        resolve_u64_env_string(
+            ENV_CREDITS_SANDBOX_FREE_STORAGE_GIB,
+            DEFAULT_SANDBOX_FREE_STORAGE_GIB,
+        ),
+    ));
+    let markup = resolve_u64_env_string(ENV_CREDITS_SANDBOX_MARKUP_BPS, DEFAULT_SANDBOX_MARKUP_BPS);
+    tracing::info!(
+        sandbox_markup_bps = %markup,
+        "gateway: forwarding sandbox metering rates (real markup, NOT pinned 0)"
+    );
+    env.push((ENV_CREDITS_SANDBOX_MARKUP_BPS.to_owned(), markup));
+    env
 }
 
 /// Derive the URL the gateway should use to reach *this* Core instance.

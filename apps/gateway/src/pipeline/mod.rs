@@ -557,6 +557,7 @@ fn pre_process(
                 command: None,
                 duration_ms: None,
                 exit_code: None,
+                widget_instance_id: None,
             });
         }
     }
@@ -999,6 +1000,7 @@ pub async fn run(
                     command: None,
                     duration_ms: None,
                     exit_code: None,
+                    widget_instance_id: None,
                 });
 
                 // 14b. Experimental OTel GenAI span (#540, P1): reuse the same
@@ -1159,6 +1161,7 @@ fn audit_cache_hit(
         command: None,
         duration_ms: None,
         exit_code: None,
+        widget_instance_id: None,
     });
 }
 
@@ -1201,6 +1204,7 @@ fn audit_failure(
         command: None,
         duration_ms: None,
         exit_code: None,
+        widget_instance_id: None,
     });
 }
 
@@ -1655,6 +1659,7 @@ pub async fn run_multimodal(
                     command: None,
                     duration_ms: None,
                     exit_code: None,
+                    widget_instance_id: None,
                 });
 
                 // Experimental OTel GenAI span (#540, P1), multimodal path. The
@@ -2534,6 +2539,7 @@ fn audit_debit_failure(state: &AppState, org_id: &str, request_id: &str, error: 
         command: None,
         duration_ms: None,
         exit_code: None,
+        widget_instance_id: None,
     });
 }
 
@@ -2721,6 +2727,7 @@ fn attach_stream_observer(
                         command: None,
                         duration_ms: None,
                         exit_code: None,
+                        widget_instance_id: None,
                     });
 
                     // Experimental OTel GenAI span (#540, P1), streaming path —

@@ -13,6 +13,7 @@
 //! honor here is the per-agent `tools` list, which is part of "what runs."
 
 pub mod advisor;
+pub mod apps;
 pub mod catalog;
 pub mod channel_tool;
 pub mod client;
@@ -32,7 +33,7 @@ pub mod threads;
 pub mod ui_tool;
 pub mod web_fetch;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
@@ -114,7 +115,7 @@ struct McpConfigFile {
 }
 
 /// A tool exposed through the registry, tagged with its owning server.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct RegistryTool {
     /// Fully-qualified id: `<server>__<tool>` — unique across servers.
     pub id: String,
@@ -124,6 +125,113 @@ pub struct RegistryTool {
     pub name: String,
     pub description: Option<String>,
     pub input_schema: Option<Value>,
+    /// `outputSchema`, verbatim (JSON Schema for `structuredContent`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
+    /// `annotations`, verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<Value>,
+    /// `_meta`, verbatim — carries the widget keys (`ryu/*` primary + `openai/*`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
+    /// Resolved widget binding when this tool declares an `outputTemplate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget: Option<WidgetBinding>,
+    /// Flat mirror of `widget.widget_accessible` so `catalog.rs` and the
+    /// provenance gate read it without re-parsing `meta`.
+    #[serde(default)]
+    pub widget_accessible: bool,
+    /// Flat mirror of `widget.template_uri` (the `ui://widget/<slug>.html` uri).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_template: Option<String>,
+}
+
+impl RegistryTool {
+    /// A bare tool descriptor used for allowlist checks and app-tool aliasing.
+    /// New widget/metadata fields default to empty — call sites that need them
+    /// (`tools_for_server`, the in-process apps provider) set them explicitly.
+    pub fn candidate(id: &str, server: &str, name: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            server: server.to_owned(),
+            name: name.to_owned(),
+            description: None,
+            input_schema: None,
+            output_schema: None,
+            annotations: None,
+            meta: None,
+            widget: None,
+            widget_accessible: false,
+            output_template: None,
+        }
+    }
+}
+
+/// A widget binding resolved from a tool's `_meta` (Apps-SDK output template).
+///
+/// Present only on tools that declare an `outputTemplate`; carries the flags the
+/// stream part and provenance gate need. Read from `ryu/*` keys first, then the
+/// `openai/*` aliases (R10).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WidgetBinding {
+    /// `ui://widget/<slug>.html` — the resource uri of the widget HTML.
+    pub template_uri: String,
+    /// Whether the widget may originate `callTool`s (companion write tools).
+    pub widget_accessible: bool,
+    /// Optional "invoking…" status label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invoking_label: Option<String>,
+    /// Optional "invoked" (done) status label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invoked_label: Option<String>,
+}
+
+impl WidgetBinding {
+    /// Resolve a binding from a tool's `_meta`. `ryu/*` keys win; `openai/*` are
+    /// the fallback aliases. Returns `None` when no `outputTemplate` is present.
+    pub fn from_meta(meta: Option<&Value>) -> Option<Self> {
+        let meta = meta?;
+        let get_str = |ryu: &str, openai: &str| -> Option<String> {
+            meta.get(ryu)
+                .or_else(|| meta.get(openai))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        let template_uri = get_str("ryu/outputTemplate", "openai/outputTemplate")?;
+        let widget_accessible = meta
+            .get("ryu/widgetAccessible")
+            .or_else(|| meta.get("openai/widgetAccessible"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let invocation = meta
+            .get("ryu/toolInvocation")
+            .or_else(|| meta.get("openai/toolInvocation"));
+        let invoking_label = invocation
+            .and_then(|v| v.get("invoking"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let invoked_label = invocation
+            .and_then(|v| v.get("invoked"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        Some(Self {
+            template_uri,
+            widget_accessible,
+            invoking_label,
+            invoked_label,
+        })
+    }
+}
+
+/// A prewarmed widget HTML resource resolved from an MCP server's
+/// `resources/read` (or the in-process apps provider), cached per server.
+#[derive(Debug, Clone, Serialize)]
+pub struct WidgetResource {
+    pub uri: String,
+    pub mime_type: String,
+    pub html: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
 }
 
 /// Public summary of a registered server for the listing endpoint.
@@ -172,6 +280,10 @@ pub struct McpRegistry {
     /// Cache of `tools/list` results, keyed by server name. Populated lazily so
     /// startup never blocks on spawning every MCP server.
     tool_cache: Mutex<BTreeMap<String, Vec<RegistryTool>>>,
+    /// Cache of prewarmed widget HTML resources, keyed `server → uri`. Populated
+    /// on demand (`prewarm_widgets`/`widget_resource`) and invalidated wherever
+    /// `tool_cache` is cleared. Never held across an `.await`.
+    resource_cache: Mutex<HashMap<String, HashMap<String, WidgetResource>>>,
     /// In-memory tools registered by enabled apps (tool-as-Runnable, M3).
     /// These are always returned alongside server-provided tools; no spawning
     /// required. Protected by a `Mutex` because writes are rare.
@@ -206,6 +318,21 @@ pub struct McpRegistry {
     /// (`Arc` inside). `None` in test/CLI contexts; the tool then falls back to
     /// env / the bundled default.
     pub preferences: Option<crate::server::preferences::PreferencesStore>,
+    /// Agent team store, wired so the `agent_builder__create_agent_team` tool can
+    /// persist a team after minting its members. Cheap to clone (`Arc` inside).
+    /// `None` in test/CLI contexts; the tool then reports the team store
+    /// unavailable rather than partially creating agents with no team.
+    pub team_store: Option<crate::teams::TeamStore>,
+    /// Quests store, wired so the in-process `ryu.quests` app (quest-board widget)
+    /// reads/writes live quests through the dispatch context. Cheap to clone
+    /// (`Arc` inside). `None` in test/CLI contexts; the app then falls back to the
+    /// process-global quest engine's store when one is published.
+    pub quests: Option<crate::quests::store::QuestStore>,
+    /// Per-run worktree diff store, wired so the in-process `ryu.worktree` app
+    /// (worktree-diff-review widget) resolves a run's diff and applies/discards it.
+    /// Cheap to clone (`Arc` inside). `None` in test/CLI contexts; the app then
+    /// reports its store unavailable rather than acting on the wrong tree.
+    pub worktree_diffs: Option<crate::server::WorktreeDiffStore>,
 }
 
 impl McpRegistry {
@@ -214,6 +341,7 @@ impl McpRegistry {
         Self {
             servers: RwLock::new(BTreeMap::new()),
             tool_cache: Mutex::new(BTreeMap::new()),
+            resource_cache: Mutex::new(HashMap::new()),
             app_tools: Mutex::new(Vec::new()),
             http: reqwest::Client::new(),
             self_build_manifests: None,
@@ -222,6 +350,9 @@ impl McpRegistry {
             conversations: None,
             skills: None,
             preferences: None,
+            team_store: None,
+            quests: None,
+            worktree_diffs: None,
         }
     }
 
@@ -230,6 +361,7 @@ impl McpRegistry {
         Self {
             servers: RwLock::new(servers),
             tool_cache: Mutex::new(BTreeMap::new()),
+            resource_cache: Mutex::new(HashMap::new()),
             app_tools: Mutex::new(Vec::new()),
             http: reqwest::Client::new(),
             self_build_manifests: None,
@@ -238,6 +370,9 @@ impl McpRegistry {
             conversations: None,
             skills: None,
             preferences: None,
+            team_store: None,
+            quests: None,
+            worktree_diffs: None,
         }
     }
 
@@ -257,6 +392,30 @@ impl McpRegistry {
     /// construction to enable the `agent_builder` tools (chat-driven agent edits).
     pub fn with_agent_store(mut self, store: crate::agents::AgentStore) -> Self {
         self.agent_store = Some(store);
+        self
+    }
+
+    /// Wire the agent team store into the registry. Must be called after
+    /// construction to enable `agent_builder__create_agent_team` (mint a roster of
+    /// agents + persist them as a team).
+    pub fn with_team_store(mut self, store: crate::teams::TeamStore) -> Self {
+        self.team_store = Some(store);
+        self
+    }
+
+    /// Wire the quests store into the registry. Must be called after construction
+    /// to let the in-process `ryu.quests` app read/write live quests through the
+    /// dispatch context (the quest-board widget).
+    pub fn with_quests(mut self, store: crate::quests::store::QuestStore) -> Self {
+        self.quests = Some(store);
+        self
+    }
+
+    /// Wire the per-run worktree diff store into the registry. Must be called after
+    /// construction to let the in-process `ryu.worktree` app resolve a run's diff
+    /// and apply/discard it (the worktree-diff-review widget).
+    pub fn with_worktree_diffs(mut self, store: crate::server::WorktreeDiffStore) -> Self {
+        self.worktree_diffs = Some(store);
         self
     }
 
@@ -340,6 +499,7 @@ impl McpRegistry {
         Self {
             servers: RwLock::new(servers),
             tool_cache: Mutex::new(BTreeMap::new()),
+            resource_cache: Mutex::new(HashMap::new()),
             app_tools: Mutex::new(Vec::new()),
             http: reqwest::Client::new(),
             self_build_manifests: None,
@@ -348,6 +508,9 @@ impl McpRegistry {
             conversations: None,
             skills: None,
             preferences: None,
+            team_store: None,
+            quests: None,
+            worktree_diffs: None,
         }
     }
 
@@ -403,6 +566,9 @@ impl McpRegistry {
         if let Ok(mut cache) = self.tool_cache.lock() {
             cache.clear();
         }
+        if let Ok(mut cache) = self.resource_cache.lock() {
+            cache.clear();
+        }
         tracing::info!("McpRegistry: reloaded from disk");
     }
 
@@ -427,6 +593,7 @@ impl McpRegistry {
             || name == advisor::SERVER_NAME
             || name == ui_tool::SERVER_NAME
             || name == research::SERVER_NAME
+            || apps::owns(name)
         {
             return true;
         }
@@ -655,7 +822,7 @@ impl McpRegistry {
     }
 
     /// Split a fully-qualified tool id back into `(server, tool)`.
-    pub(super) fn split_tool_id(id: &str) -> Option<(&str, &str)> {
+    pub fn split_tool_id(id: &str) -> Option<(&str, &str)> {
         id.split_once(TOOL_ID_SEP)
     }
 
@@ -688,12 +855,23 @@ impl McpRegistry {
         let mcp_tools: Vec<McpTool> = client::list_tools(&cmd).await?;
         let tools: Vec<RegistryTool> = mcp_tools
             .into_iter()
-            .map(|t| RegistryTool {
-                id: Self::tool_id(name, &t.name),
-                server: name.to_owned(),
-                name: t.name,
-                description: t.description,
-                input_schema: t.input_schema,
+            .map(|t| {
+                let widget = WidgetBinding::from_meta(t.meta.as_ref());
+                let widget_accessible = widget.as_ref().is_some_and(|w| w.widget_accessible);
+                let output_template = widget.as_ref().map(|w| w.template_uri.clone());
+                RegistryTool {
+                    id: Self::tool_id(name, &t.name),
+                    server: name.to_owned(),
+                    name: t.name,
+                    description: t.description,
+                    input_schema: t.input_schema,
+                    output_schema: t.output_schema,
+                    annotations: t.annotations,
+                    meta: t.meta,
+                    widget,
+                    widget_accessible,
+                    output_template,
+                }
             })
             .collect();
 
@@ -701,6 +879,112 @@ impl McpRegistry {
             cache.insert(name.to_owned(), tools.clone());
         }
         Ok(tools)
+    }
+
+    /// Resolve a tool's [`WidgetBinding`] by its fully-qualified id, if it has one.
+    ///
+    /// The in-process apps provider answers synchronously; other servers are
+    /// resolved via `list_all_tools` (cached). Returns `None` for tools that do
+    /// not render a widget.
+    pub async fn widget_binding(&self, tool_id: &str) -> Option<WidgetBinding> {
+        let (server, _tool) = Self::split_tool_id(tool_id)?;
+        if apps::owns(server) {
+            return apps::tools()
+                .into_iter()
+                .find(|t| t.id == tool_id)
+                .and_then(|t| t.widget);
+        }
+        self.list_all_tools()
+            .await
+            .into_iter()
+            .find(|t| t.id == tool_id)
+            .and_then(|t| t.widget)
+    }
+
+    /// Resolve (and cache) a widget HTML resource for `server` by its `uri`.
+    ///
+    /// The in-process apps provider serves its bundled HTML directly; a config
+    /// MCP server is asked over `resources/read`. Never holds the cache lock
+    /// across an `.await`.
+    pub async fn widget_resource(&self, server: &str, uri: &str) -> Option<WidgetResource> {
+        if apps::owns(server) {
+            return apps::read_resource(uri);
+        }
+        // Cache hit?
+        if let Ok(cache) = self.resource_cache.lock() {
+            if let Some(res) = cache.get(server).and_then(|m| m.get(uri)) {
+                return Some(res.clone());
+            }
+        }
+        // Extract the command under the read lock, drop before .await.
+        let cmd = {
+            let servers = self.servers.read().expect("mcp servers RwLock poisoned");
+            let cfg = servers.get(server)?;
+            if !cfg.enabled {
+                return None;
+            }
+            cfg.to_command()
+        };
+        let contents = client::read_resource(&cmd, uri).await.ok()?;
+        let first = contents.into_iter().find(|c| c.text.is_some())?;
+        let resource = WidgetResource {
+            uri: uri.to_owned(),
+            mime_type: first
+                .mime_type
+                .unwrap_or_else(|| "text/html+skybridge".to_owned()),
+            html: first.text.unwrap_or_default(),
+            meta: first.meta,
+        };
+        if let Ok(mut cache) = self.resource_cache.lock() {
+            cache
+                .entry(server.to_owned())
+                .or_default()
+                .insert(uri.to_owned(), resource.clone());
+        }
+        Some(resource)
+    }
+
+    /// Prewarm every widget resource a server advertises so the emit path can
+    /// resolve HTML without a round-trip. In-process apps are already warm.
+    pub async fn prewarm_widgets(&self, server: &str) -> Result<()> {
+        if apps::owns(server) {
+            return Ok(());
+        }
+        let cmd = {
+            let servers = self.servers.read().expect("mcp servers RwLock poisoned");
+            let Some(cfg) = servers.get(server) else {
+                return Ok(());
+            };
+            if !cfg.enabled {
+                return Ok(());
+            }
+            cfg.to_command()
+        };
+        let resources = client::list_resources(&cmd).await.unwrap_or_default();
+        for r in resources {
+            if r.uri.starts_with("ui://widget/") {
+                let _ = self.widget_resource(server, &r.uri).await;
+            }
+        }
+        Ok(())
+    }
+
+    /// The fully-qualified ids of the widget-accessible (companion) tools on
+    /// `server` — used to bound which tools a mounted widget may `callTool`.
+    pub async fn widget_accessible_tool_ids(&self, server: &str) -> Vec<String> {
+        if apps::owns(server) {
+            return apps::widget_accessible_tool_ids(server);
+        }
+        self.tools_for_server(server)
+            .await
+            .map(|tools| {
+                tools
+                    .into_iter()
+                    .filter(|t| t.widget_accessible)
+                    .map(|t| t.id)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Every tool across every enabled server. A server that fails to start is
@@ -775,6 +1059,10 @@ impl McpRegistry {
                 Err(e) => tracing::warn!("MCP server '{name}' tools/list failed: {e}"),
             }
         }
+        // In-process Ryu Apps provider (widget-rendering tools) — always listed;
+        // dispatch runs in-process. Their widget `_meta` binding drives the
+        // widget-emit path.
+        all.extend(apps::tools());
         // Include in-memory tools registered by enabled apps (tool-as-Runnable).
         if let Ok(app) = self.app_tools.lock() {
             all.extend(app.iter().cloned());
@@ -943,7 +1231,7 @@ impl McpRegistry {
             profile_ids,
             tool_id,
             &arguments,
-            session_id,
+            session_id.clone(),
         )
         .await
         {
@@ -992,13 +1280,7 @@ impl McpRegistry {
                 return Err(anyhow!("unknown app tool '{tool_id}'"));
             }
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1027,16 +1309,32 @@ impl McpRegistry {
             .await;
         }
 
+        // In-process Ryu Apps provider (widget-rendering tools). Allowlist-gated
+        // like the other built-ins. Widget-initiated `callTool`s additionally
+        // require the tool to be `widget_accessible` — enforced upstream at
+        // `/api/widgets/tools/call` (provenance gate), not here.
+        if apps::owns(server) {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            let ctx = apps::AppDispatchCtx {
+                http: &self.http,
+                quests: self.quests.as_ref(),
+                worktree_diffs: self.worktree_diffs.as_ref(),
+                conversation_id: session_id.clone(),
+                agent_id: None,
+                user_id: user_id.map(str::to_owned),
+            };
+            return apps::dispatch(server, tool, arguments, ctx).await;
+        }
+
         // Built-in Shadow provider (U15): dispatched over HTTP.
         if server == shadow::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1047,13 +1345,7 @@ impl McpRegistry {
         // Built-in Spider provider (U040): dispatched by shelling out to the binary.
         if server == spider::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1083,13 +1375,7 @@ impl McpRegistry {
         // (detect-on-PATH). Degrades gracefully to `available: false` when absent.
         if server == rtk::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1100,13 +1386,7 @@ impl McpRegistry {
         // Built-in Exa provider (U040): dispatched over HTTP with a BYOK key.
         if server == exa::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1117,13 +1397,7 @@ impl McpRegistry {
         // Built-in wasmtime sandbox provider (M6 / issue #190).
         if server == sandbox::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1135,13 +1409,7 @@ impl McpRegistry {
         // publishing to the events channel the desktop subscribes to.
         if server == notify_tool::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1153,13 +1421,7 @@ impl McpRegistry {
         // desktop renders the spec from the tool input; dispatch only sanity-checks.
         if server == ui_tool::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1171,13 +1433,7 @@ impl McpRegistry {
         // incoming-webhook URL over HTTP.
         if server == channel_tool::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1190,13 +1446,7 @@ impl McpRegistry {
         // conversation store is not wired (test / CLI contexts).
         if server == search_conversations::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1220,13 +1470,7 @@ impl McpRegistry {
         // the global agent runner and degrades gracefully when it is absent.
         if server == threads::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1248,13 +1492,7 @@ impl McpRegistry {
         // global agent runner (or the gateway default LLM when no runner is wired).
         if server == delegate::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1268,13 +1506,7 @@ impl McpRegistry {
         // (wired via `with_agent_store`), so it fails clearly if that is absent.
         if server == orchestrator::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1294,13 +1526,7 @@ impl McpRegistry {
         // instruction text, never executes it — a skill stays instruction text.
         if server == skills_tool::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1320,13 +1546,7 @@ impl McpRegistry {
         // preferences store, when wired, supplies the configured `advisor-model`.
         if server == advisor::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1340,13 +1560,7 @@ impl McpRegistry {
         // is passed out-of-band — never through `arguments`, never to the model.
         if server == web_fetch::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1359,13 +1573,7 @@ impl McpRegistry {
         // and `self_build_app_store` to be wired via `with_self_build`.
         if server == crate::runnable::self_build::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1388,13 +1596,7 @@ impl McpRegistry {
         // chat. Requires `agent_store` wired via `with_agent_store` at startup.
         if server == crate::runnable::agent_builder::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1405,7 +1607,13 @@ impl McpRegistry {
                      call McpRegistry::with_agent_store at startup"
                 )
             })?;
-            return crate::runnable::agent_builder::dispatch(tool, arguments, store).await;
+            return crate::runnable::agent_builder::dispatch(
+                tool,
+                arguments,
+                store,
+                self.team_store.clone(),
+            )
+            .await;
         }
 
         // Built-in workflow-builder provider: get_workflow, create_workflow,
@@ -1414,13 +1622,7 @@ impl McpRegistry {
         // no handle needs wiring (unlike agent_builder).
         if server == crate::runnable::workflow_builder::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1434,13 +1636,7 @@ impl McpRegistry {
         // engine, so no handle needs wiring (like workflow_builder).
         if server == crate::runnable::dashboard_builder::SERVER_NAME {
             if let Some(list) = allowlist {
-                let candidate = RegistryTool {
-                    id: tool_id.to_owned(),
-                    server: server.to_owned(),
-                    name: tool.to_owned(),
-                    description: None,
-                    input_schema: None,
-                };
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1466,13 +1662,7 @@ impl McpRegistry {
 
         // Enforce the per-agent allowlist before spawning anything.
         if let Some(list) = allowlist {
-            let candidate = RegistryTool {
-                id: tool_id.to_owned(),
-                server: server.to_owned(),
-                name: tool.to_owned(),
-                description: None,
-                input_schema: None,
-            };
+            let candidate = RegistryTool::candidate(tool_id, server, tool);
             if !tool_allowed(&candidate, list) {
                 return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
             }
@@ -1490,11 +1680,8 @@ impl McpRegistry {
     /// allowlists with the entry `"app"`.
     pub fn register_app_tool(&self, id: String, name: String, description: Option<String>) {
         let tool = RegistryTool {
-            id: id.clone(),
-            server: APP_TOOL_SERVER.to_owned(),
-            name,
             description,
-            input_schema: None,
+            ..RegistryTool::candidate(&id, APP_TOOL_SERVER, &name)
         };
         if let Ok(mut tools) = self.app_tools.lock() {
             tools.retain(|t| t.id != id);
@@ -1545,10 +1732,15 @@ fn command_availability(command: &str) -> Option<bool> {
     }
 }
 
-/// The fully-qualified id of the privileged agent-creation tool — the one tool
-/// gated by [`AgentCapabilities::can_create_agents`]. Other `agent_builder__*`
-/// tools (read/configure existing agents) are not creation and stay available.
+/// The fully-qualified id of the privileged agent-creation tool — gated by
+/// [`AgentCapabilities::can_create_agents`]. Other `agent_builder__*` tools
+/// (read/configure existing agents) are not creation and stay available.
 pub const CREATE_AGENT_TOOL_ID: &str = "agent_builder__create_agent";
+
+/// The fully-qualified id of the team-creation tool. It mints permanent agents
+/// (a whole roster), so it is gated by the same [`AgentCapabilities::can_create_agents`]
+/// as [`CREATE_AGENT_TOOL_ID`].
+pub const CREATE_AGENT_TEAM_TOOL_ID: &str = "agent_builder__create_agent_team";
 
 /// An agent's orchestration capabilities, resolved from its config record.
 #[derive(Debug, Clone, Copy)]
@@ -1587,7 +1779,9 @@ pub fn filter_capability_tools(
             {
                 return false;
             }
-            if !caps.can_create_agents && tool.id == CREATE_AGENT_TOOL_ID {
+            if !caps.can_create_agents
+                && (tool.id == CREATE_AGENT_TOOL_ID || tool.id == CREATE_AGENT_TEAM_TOOL_ID)
+            {
                 return false;
             }
             true
@@ -1624,13 +1818,7 @@ mod tests {
     }
 
     fn sample_tool() -> RegistryTool {
-        RegistryTool {
-            id: "fs__read_file".into(),
-            server: "fs".into(),
-            name: "read_file".into(),
-            description: None,
-            input_schema: None,
-        }
+        RegistryTool::candidate("fs__read_file", "fs", "read_file")
     }
 
     #[test]

@@ -126,6 +126,7 @@ pub fn tools() -> Vec<RegistryTool> {
                 .to_owned(),
         ),
         input_schema: Some(fanout_schema()),
+        ..Default::default()
     }]
 }
 
