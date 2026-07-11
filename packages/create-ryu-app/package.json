@@ -20,7 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@ryuhq/sdk": "^0.0.1"
+    "@ryuhq/sdk": "^0.0.2"
   },
   "devDependencies": {
     "@types/bun": "catalog:",
