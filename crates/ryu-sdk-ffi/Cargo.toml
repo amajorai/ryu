@@ -1,6 +1,6 @@
 [package]
 name = "ryu-sdk-ffi"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 description = "C-ABI surface over the ryu-sdk Rust core, consumed by the Go (cgo) binding and any other C-FFI client."
 license = "Apache-2.0"

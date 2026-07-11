@@ -1,6 +1,6 @@
 [package]
 name = "ryu-sdk-napi"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 description = "Node-API (napi-rs) binding exposing the ryu-sdk Rust core to TypeScript/JavaScript as a native addon."
 license = "Apache-2.0"

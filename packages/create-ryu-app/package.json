@@ -1,6 +1,6 @@
 {
   "name": "create-ryu-app",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "description": "Scaffold a starter Ryu SDK project with a Runnable, gateway-pointed model config, and plugin.json manifest",
   "bin": {
