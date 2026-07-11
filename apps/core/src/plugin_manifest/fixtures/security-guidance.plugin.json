@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.security-guidance",
+  "id": "security-guidance",
   "name": "Security Guidance",
   "version": "1.0.0",
   "engines": {

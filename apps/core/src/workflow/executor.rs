@@ -23,9 +23,10 @@ use petgraph::Direction;
 use super::store::{self, NodeRunState, NodeStatus, RunStatus, WorkflowRun};
 use super::{delegation, NodeKind, Workflow, WorkflowGraph};
 
-/// Sentinel error value returned by `execute_node` for an `Awakeable` gate.
-/// The outer loop treats this as a suspend signal rather than a real error.
-const SUSPEND_SENTINEL: &str = "__AWAKEABLE_SUSPEND__";
+/// Sentinel error value returned by `execute_node` for an `Awakeable` gate (and a
+/// `NotifyUser` node whose ack policy requires waiting). The outer loop treats
+/// this as a suspend signal rather than a real error.
+pub(crate) const SUSPEND_SENTINEL: &str = "__AWAKEABLE_SUSPEND__";
 
 /// Maximum nested SubWorkflow depth, guards against accidental deep nesting.
 const MAX_SUBWORKFLOW_DEPTH: usize = 8;
@@ -338,21 +339,22 @@ fn run_workflow_inner(
                             run.updated_at = chrono::Utc::now().to_rfc3339();
                             store::save_run(&run)
                                 .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
-                            // Surface the HITL gate in the approval inbox so the
-                            // user can approve (resume) or reject (fail) it from
-                            // one place. Best-effort + deduped on the run id, so a
-                            // re-suspend at the same gate won't pile up rows.
-                            if let Some(engine) = crate::approvals::global_engine() {
-                                let prompt = match &node.kind {
-                                    NodeKind::Awakeable { prompt } => prompt.as_deref(),
-                                    _ => None,
-                                };
-                                let req = crate::approvals::ApprovalRequest::for_workflow_gate(
-                                    &run.run_id,
-                                    &workflow.name,
-                                    prompt,
-                                );
-                                let _ = engine.request_deduped(req).await;
+                            // Surface an `Awakeable` HITL gate in the approval
+                            // inbox so the user can approve (resume) or reject
+                            // (fail) it from one place. Best-effort + deduped on
+                            // the run id. A `NotifyUser` gate is skipped here: it
+                            // already delivered its own per-member inbox items
+                            // (with an Ack action) inside the node arm, so a
+                            // generic approval row would be a duplicate.
+                            if let NodeKind::Awakeable { prompt } = &node.kind {
+                                if let Some(engine) = crate::approvals::global_engine() {
+                                    let req = crate::approvals::ApprovalRequest::for_workflow_gate(
+                                        &run.run_id,
+                                        &workflow.name,
+                                        prompt.as_deref(),
+                                    );
+                                    let _ = engine.request_deduped(req).await;
+                                }
                             }
                             return Ok(run);
                         }
@@ -940,6 +942,30 @@ async fn execute_node(
                 &run.run_id,
                 &node.id,
                 depth,
+            )
+            .await
+        }
+        NodeKind::NotifyUser {
+            target,
+            title,
+            body,
+            ack_mode,
+            ack_timeout_ms: _,
+        } => {
+            // Resolve the title/body templates before delivery, then hand off to
+            // the notify-user helper. When the ack policy requires waiting it
+            // writes its gate bookkeeping into `run.state` and returns the suspend
+            // sentinel, which the outer loop turns into `AwaitingInput` (identical
+            // to an Awakeable gate); fire-and-forget returns a JSON receipt.
+            let rendered_title = resolve(title, &ctx);
+            let rendered_body = resolve(body, &ctx);
+            super::notify_user::run(
+                target,
+                &rendered_title,
+                &rendered_body,
+                ack_mode,
+                &node.id,
+                run,
             )
             .await
         }

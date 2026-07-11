@@ -77,6 +77,43 @@ A team's reply is produced by the lead agent orchestrating its members under the
 strategy (Broadcast, RoundRobin, DebateSynthesis, or Router). The strategies and how a team is built
 live in [Agent Teams](/docs/core/agent-teams).
 
+## Group chats: when the bot speaks
+
+A bot in a busy group would be unbearable if it answered every message, so each channel carries a
+`groupReplyMode` that gates only **group** chats. Direct messages always get a reply; the mode
+decides the group case. The decision is a pure `decide_reply` helper in each connector
+(`apps/gateway/src/channels/telegram.rs`, `apps/gateway/src/channels/discord.rs`), keyed off the
+`GroupReplyMode` enum in `apps/gateway/src/config.rs`.
+
+| `groupReplyMode` | Group behavior | DM behavior |
+|---|---|---|
+| `mentions` (default) | Reply only when the bot is addressed | Always reply |
+| `all` | Reply to every message | Always reply |
+
+The connector auto-detects group vs DM from the platform payload, so no manual per-chat flag is
+needed. Telegram treats a chat as a group when its `type` is `group` or `supergroup`; Discord's
+watched channels are always guild (multi-user) channels, so the mode applies to all of them.
+
+In `mentions` mode a group message counts as addressed when it @mentions the bot, is a reply to one
+of the bot's own messages (Telegram), or starts with a `/command` (Telegram). To resolve its own
+identity the bot calls `getMe` once (Telegram) or `GET /users/@me` (Discord) at the start of its run
+loop. If that call fails, mention detection is disabled until restart and the bot stays silent in
+`mentions` mode - DMs and `all` mode are unaffected.
+
+Before a matched group message is routed to Core, the connector rewrites it twice:
+
+- **Mention stripping** - the bot's own `@username` / `<@id>` / `<@!id>` mention is removed so the
+  agent sees a clean prompt, not the raw addressing token.
+- **Speaker prefixing** - the sender's display name is prepended (`Ada: what is 2+2`) so Core can
+  attribute turns in a multi-person chat.
+
+<Callout type="info">
+  The default flipped to mentions-only, so an existing group bot becomes mention-gated - intended, to
+  keep bots quiet in busy rooms. Slack and WhatsApp carry the `groupReplyMode` field but have no gate
+  logic yet, and the shared official-token front door (`apps/cloud-bot`) does its own mentions-only
+  detection rather than reading this per-channel field.
+</Callout>
+
 ## Where config lives
 
 Channels are **account-global**, not scoped to the active Core node like the rest of the Gateway

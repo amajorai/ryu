@@ -1,0 +1,25 @@
+{
+  "extends": "@ryu/config/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/react",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strictNullChecks": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
+    "types": ["bun", "react"],
+    // Relaxed only for the vendored termcn components under components/ui, hooks,
+    // and lib (shadcn-style third-party sources imported by src). Our own src/**
+    // code is held to the project standard via ultracite/biome.
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "verbatimModuleSyntax": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": ["src", "components", "hooks", "lib", "scripts"]
+}

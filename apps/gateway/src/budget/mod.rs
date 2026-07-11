@@ -14,7 +14,7 @@
 
 use dashmap::DashMap;
 
-use crate::config::{BudgetAction, BudgetConfig, BudgetRule, SessionBudgetConfig};
+use crate::config::{AlertTier, BudgetAction, BudgetConfig, BudgetRule, SessionBudgetConfig};
 
 /// Soft cap on the per-session counter map (#510). Session ids are ephemeral —
 /// Core mints a fresh one per chat — so this map grows one entry per distinct
@@ -55,6 +55,10 @@ pub struct BudgetDecision {
     pub limit: u64,
     pub downgrade_to: Option<String>,
     pub restrict_max_tokens: u64,
+    /// Notification fan-out tier configured on the matched rule (orthogonal to
+    /// `action`). `enforce_budget` takes the `max` across all matched decisions
+    /// to build the propagated `PolicyAlert`.
+    pub alert: AlertTier,
 }
 
 /// In-memory budget enforcer. Cheap to clone-check on the request path.
@@ -166,6 +170,7 @@ impl BudgetEnforcer {
             action: cfg.action,
             downgrade_to: cfg.downgrade_to.clone(),
             restrict_max_tokens: cfg.restrict_max_tokens,
+            alert: cfg.alert,
         }
     }
 
@@ -195,6 +200,7 @@ impl BudgetEnforcer {
             limit: rule.limit,
             downgrade_to: rule.downgrade_to.clone(),
             restrict_max_tokens: rule.restrict_max_tokens,
+            alert: rule.alert,
         })
     }
 
@@ -284,6 +290,7 @@ mod tests {
             action,
             downgrade_to: None,
             restrict_max_tokens: 256,
+            alert: AlertTier::default(),
         }
     }
 
@@ -350,6 +357,7 @@ mod tests {
             action: BudgetAction::Downgrade,
             downgrade_to: Some("gpt-4o-mini".to_string()),
             restrict_max_tokens: 256,
+            alert: AlertTier::default(),
         };
         let e = BudgetEnforcer::new(config_with_user("u1", r));
         e.record(Some("u1"), None, 20);
@@ -392,6 +400,7 @@ mod tests {
             action,
             downgrade_to: None,
             restrict_max_tokens: 256,
+            alert: AlertTier::default(),
         }
     }
 

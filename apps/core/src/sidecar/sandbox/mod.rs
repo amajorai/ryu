@@ -30,6 +30,7 @@ pub mod docker;
 pub mod heartbeat;
 pub mod microsandbox;
 pub mod opensandbox;
+pub mod session;
 pub mod spec;
 pub mod wasmtime;
 

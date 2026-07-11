@@ -225,6 +225,42 @@ pub struct AssertionResult {
     pub detail: String,
 }
 
+/// Result of scoring one registry [`crate::evaluators::Evaluator`] against a
+/// single case's response (P2 offline runner). Distinct from [`AssertionResult`]:
+/// this carries the evaluator id + its category and an honesty `executed` flag.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvaluatorScore {
+    /// Stable id of the catalog evaluator that produced this score.
+    pub id: String,
+    /// The evaluator's category (snake_case), e.g. "security", "quality".
+    pub category: String,
+    /// Score in [0,1]. Higher is better for quality-style evaluators; for
+    /// deterministic safety regex, 1.0 = safe/no-match, 0.0 = flagged.
+    pub score: f32,
+    /// Whether this case passed the evaluator (see `detail` for the criterion).
+    pub pass: bool,
+    /// Human-readable explanation (match text, judge verdict, or why it was skipped).
+    pub detail: String,
+    /// Honesty flag: `true` only when a real score was computed. `false` for
+    /// evaluators that can't run offline yet (Code — P4), lack the data a text
+    /// dataset provides (Image/Audio), or resolve to an unknown/inline-only id.
+    pub executed: bool,
+}
+
+/// Per-evaluator aggregate across all cases in a run.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvaluatorAggregate {
+    /// Mean `score` over cases where the evaluator actually executed. 0.0 when
+    /// it never executed.
+    pub mean_score: f32,
+    /// Fraction of executed cases that passed. 0.0 when it never executed.
+    pub pass_rate: f32,
+    /// Number of cases where the evaluator actually executed (`executed == true`).
+    pub executed_count: usize,
+}
+
 /// A single case in an eval dataset.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct EvalCase {
@@ -242,6 +278,10 @@ pub struct EvalCase {
     /// Assertions to evaluate against this case's response text.
     #[serde(default)]
     pub assertions: Vec<Assertion>,
+    /// NEW (P2): registry evaluator ids to score this case against, in addition
+    /// to any run-level ids. Empty by default => today's assertion-only behavior.
+    #[serde(default)]
+    pub evaluators: Vec<String>,
 }
 
 /// Per-case scores returned by the dataset runner.
@@ -267,6 +307,11 @@ pub struct CaseScore {
     pub assertions: Vec<AssertionResult>,
     /// NEW: true iff every assertion in `assertions` passed (vacuously true for []).
     pub assertions_pass: bool,
+    /// NEW (P2): per-evaluator scores for the registry evaluators requested for
+    /// this case. Always present ([] when none requested). Additive to `overall`;
+    /// never folded into it.
+    #[serde(default)]
+    pub evaluators: Vec<EvaluatorScore>,
 }
 
 /// Aggregate summary across all eval cases.
@@ -285,6 +330,11 @@ pub struct EvalRunAggregate {
     pub mean_substring_match: Option<f32>,
     /// Total number of cases run.
     pub total_cases: usize,
+    /// NEW (P2): per-evaluator aggregate keyed by evaluator id. Empty when no
+    /// registry evaluators were requested. Lets the UI render one row per
+    /// evaluator (mean score, pass rate, executed count).
+    #[serde(default)]
+    pub evaluators: std::collections::HashMap<String, EvaluatorAggregate>,
 }
 
 /// Score a single case from raw provider output.
@@ -354,6 +404,9 @@ pub fn score_case(
         // where the pipeline state/ctx for llm_judge is in scope).
         assertions: Vec::new(),
         assertions_pass: true,
+        // NEW (P2) — evaluator scores are attached by the api runner after
+        // score_evaluators runs (it needs pipeline state for llm_judge).
+        evaluators: Vec::new(),
     }
 }
 
@@ -509,6 +562,7 @@ pub fn aggregate_scores(cases: &[CaseScore]) -> EvalRunAggregate {
             policy_pass_rate: 0.0,
             mean_substring_match: None,
             total_cases: 0,
+            evaluators: std::collections::HashMap::new(),
         };
     }
 
@@ -525,6 +579,8 @@ pub fn aggregate_scores(cases: &[CaseScore]) -> EvalRunAggregate {
         Some(substring_cases.iter().sum::<f32>() / substring_cases.len() as f32)
     };
 
+    let evaluators = aggregate_evaluators(cases);
+
     EvalRunAggregate {
         mean_overall,
         mean_latency,
@@ -532,7 +588,88 @@ pub fn aggregate_scores(cases: &[CaseScore]) -> EvalRunAggregate {
         policy_pass_rate,
         mean_substring_match,
         total_cases: n,
+        evaluators,
     }
+}
+
+/// Roll per-case [`EvaluatorScore`]s up into one [`EvaluatorAggregate`] per
+/// evaluator id. Means and pass rates are computed over cases where the
+/// evaluator actually executed (`executed == true`); an evaluator that was
+/// requested but never executed still appears with a zeroed aggregate + a
+/// truthful `executed_count` of 0, so the UI can show it was skipped rather than
+/// hiding it.
+fn aggregate_evaluators(
+    cases: &[CaseScore],
+) -> std::collections::HashMap<String, EvaluatorAggregate> {
+    // id -> (sum_score_executed, pass_executed, executed_count, seen)
+    let mut acc: std::collections::HashMap<String, (f32, usize, usize, bool)> =
+        std::collections::HashMap::new();
+
+    for case in cases {
+        for es in &case.evaluators {
+            let entry = acc.entry(es.id.clone()).or_insert((0.0, 0, 0, false));
+            entry.3 = true;
+            if es.executed {
+                entry.0 += es.score;
+                if es.pass {
+                    entry.1 += 1;
+                }
+                entry.2 += 1;
+            }
+        }
+    }
+
+    acc.into_iter()
+        .map(|(id, (sum_score, pass_count, executed_count, _seen))| {
+            let (mean_score, pass_rate) = if executed_count > 0 {
+                (
+                    sum_score / executed_count as f32,
+                    pass_count as f32 / executed_count as f32,
+                )
+            } else {
+                (0.0, 0.0)
+            };
+            (
+                id,
+                EvaluatorAggregate {
+                    mean_score,
+                    pass_rate,
+                    executed_count,
+                },
+            )
+        })
+        .collect()
+}
+
+/// Pure score→pass mapping for offline evaluators, **polarity-aware** so "pass"
+/// always means GOOD regardless of which direction the raw score runs:
+///   * `higher_is_better == true` (quality/correctness; and the security regex
+///     detectors whose 1.0 means "clean") — pass when `score >= threshold`.
+///   * `higher_is_better == false` (negative-signal judges: toxicity, bias,
+///     hallucination, …) — a HIGH score is BAD, so pass when `score < threshold`
+///     (a toxic output scoring 1.0 must NOT pass).
+///
+/// Extracted so the threshold logic is unit-testable without a live provider.
+pub fn judge_pass(score: f32, threshold: f32, higher_is_better: bool) -> bool {
+    if higher_is_better {
+        score >= threshold
+    } else {
+        score < threshold
+    }
+}
+
+/// Resolve which model judges an LLM-judge evaluator offline, in precedence
+/// order: the evaluator's own `offline.judge_model`, else the run-level
+/// `judge_model`, else the provided default. Pure + unit-testable.
+pub fn resolve_judge_model(
+    evaluator_judge_model: Option<&str>,
+    request_judge_model: Option<&str>,
+    default_model: &str,
+) -> String {
+    evaluator_judge_model
+        .or(request_judge_model)
+        .unwrap_or(default_model)
+        .to_string()
 }
 
 /// Built-in 3-case dataset used when the caller sends an empty `dataset` array.
@@ -545,18 +682,21 @@ pub fn builtin_dataset() -> Vec<EvalCase> {
             expected: Some("hello".to_string()),
             vars: std::collections::HashMap::new(),
             assertions: Vec::new(),
+            evaluators: Vec::new(),
         },
         EvalCase {
             prompt: "What is 2 + 2? Answer with just the number.".to_string(),
             expected: Some("4".to_string()),
             vars: std::collections::HashMap::new(),
             assertions: Vec::new(),
+            evaluators: Vec::new(),
         },
         EvalCase {
             prompt: "Name one primary color.".to_string(),
             expected: None,
             vars: std::collections::HashMap::new(),
             assertions: Vec::new(),
+            evaluators: Vec::new(),
         },
     ]
 }
@@ -668,6 +808,7 @@ mod tests {
             expected: None,
             vars: std::collections::HashMap::new(),
             assertions: Vec::new(),
+            evaluators: Vec::new(),
         };
         let resp = make_response(10, 5, "pong");
         let score = score_case(&case, &resp, 500, true, 10_000);
@@ -683,6 +824,7 @@ mod tests {
             expected: Some("hello".to_string()),
             vars: std::collections::HashMap::new(),
             assertions: Vec::new(),
+            evaluators: Vec::new(),
         };
         let resp = make_response(5, 3, "Hello there!");
         let score = score_case(&case, &resp, 200, true, 10_000);
@@ -697,6 +839,7 @@ mod tests {
             expected: Some("hello".to_string()),
             vars: std::collections::HashMap::new(),
             assertions: Vec::new(),
+            evaluators: Vec::new(),
         };
         let resp = make_response(5, 3, "Goodbye!");
         let score = score_case(&case, &resp, 200, true, 10_000);
@@ -711,18 +854,21 @@ mod tests {
                 expected: Some("hello".to_string()),
                 vars: std::collections::HashMap::new(),
                 assertions: Vec::new(),
+                evaluators: Vec::new(),
             },
             EvalCase {
                 prompt: "What is 2+2?".to_string(),
                 expected: Some("4".to_string()),
                 vars: std::collections::HashMap::new(),
                 assertions: Vec::new(),
+                evaluators: Vec::new(),
             },
             EvalCase {
                 prompt: "Name a color.".to_string(),
                 expected: None,
                 vars: std::collections::HashMap::new(),
                 assertions: Vec::new(),
+                evaluators: Vec::new(),
             },
         ];
         let responses = vec![
@@ -753,6 +899,7 @@ mod tests {
             expected: None,
             vars: std::collections::HashMap::new(),
             assertions: Vec::new(),
+            evaluators: Vec::new(),
         }];
         let responses = vec![make_response(5, 3, "pong")];
         let scored: Vec<CaseScore> = cases

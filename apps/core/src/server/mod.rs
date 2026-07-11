@@ -37,7 +37,9 @@ pub mod memory;
 pub mod message_fts;
 pub mod message_index;
 pub mod monitors_api;
+pub mod notifications_api;
 pub mod openapi;
+pub mod plugin_bridge_api;
 pub mod predict_api;
 pub mod preferences;
 pub mod quests_api;
@@ -113,7 +115,7 @@ pub struct ServerState {
     /// provider at the active engine after a swap (U19).
     pub gateway: Arc<crate::sidecar::gateway::GatewayManager>,
     /// Local headroom compression-proxy lifecycle. Started/refreshed when the
-    /// headroom plugin (`io.ryu.headroom`) is enabled/disabled so the gateway's
+    /// headroom plugin (`headroom`) is enabled/disabled so the gateway's
     /// egress compression toggles at runtime (persist+respawn, not env-at-spawn).
     pub headroom: Arc<crate::sidecar::headroom::HeadroomManager>,
     pub retrieval: RetrievalStore,
@@ -169,6 +171,10 @@ pub struct ServerState {
     /// monitors store and runs checks; the scheduler fires each monitor on its
     /// interval via a `JobTarget::Monitor` job.
     pub monitors: crate::monitors::MonitorEngine,
+    /// Self-host Agent Inboxes store (`~/.ryu/mail.db`): receive/store/send agent
+    /// email on the node (BYO domain, no SES). Managed inboxes stay on the control
+    /// plane; this is the Core-owned variant. Routes at `/api/mail/*`.
+    pub mail: crate::mail::MailStore,
     /// Meeting-notes engine (Granola/Notion-AI style): records a call, transcribes
     /// it live (reusing the voice STT path), and generates AI notes via the
     /// gateway. Owns the meetings store + the live SSE event stream. Audio capture
@@ -348,10 +354,72 @@ async fn require_auth(
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(str::to_string);
 
-    match provided {
-        Some(t) if t == expected => Ok(next.run(req).await),
-        _ => Err(StatusCode::UNAUTHORIZED),
+    if let Some(t) = &provided {
+        if *t == expected {
+            return Ok(next.run(req).await);
+        }
     }
+
+    // JWT carve-out: a tiny allowlist of org-scoped READ endpoints may ALSO be
+    // authorized by a valid Better Auth user JWT whose verified identity belongs
+    // to THIS node's bound org. The control plane's server→node callback presents
+    // one instead of the shared `RYU_TOKEN` it does not hold. The RYU_TOKEN check
+    // above still runs first and unchanged; this only adds an alternative for the
+    // allowlisted path, so every other route stays exactly as strict (401).
+    if req.method() == axum::http::Method::GET
+        && path_allows_jwt_auth(req.uri().path())
+        && jwt_authorizes_org_read(req.headers(), provided.as_deref()).await
+    {
+        return Ok(next.run(req).await);
+    }
+
+    Err(StatusCode::UNAUTHORIZED)
+}
+
+/// The tiny, explicit allowlist of routes that a valid, org-matched Better Auth
+/// user JWT may authorize AS AN ALTERNATIVE to the `RYU_TOKEN` node-admittance
+/// bearer. Deliberately org-scoped READ endpoints only; every other route stays
+/// strictly `RYU_TOKEN`-gated. Keep this list minimal and read-only.
+fn path_allows_jwt_auth(path: &str) -> bool {
+    matches!(path, "/api/sandboxes")
+}
+
+/// True when a request to a JWT-allowlisted route carries a Better Auth user JWT
+/// whose verified identity is a member of THIS node's bound org.
+///
+/// Fail-closed at every step:
+///   - the node MUST be org-bound (`registered_org`); an unbound node has no org
+///     to authorize against, so JWT auth is unavailable (RYU_TOKEN still works);
+///   - the JWT is verified entirely offline via `crate::identity_verify`
+///     (EdDSA-only, `iss`/`aud`/`exp` checked) — the same strict path used
+///     everywhere, never a second, weaker verifier;
+///   - after narrowing to the node's org, the caller's `org_id` MUST equal it
+///     (a non-member narrows to `None`, which can never match).
+///
+/// The token is read from the `Authorization: Bearer` header (how the control-
+/// plane fan-out sends it) or the `x-ryu-user-jwt` header (the existing user-
+/// identity channel), so either transport authorizes.
+async fn jwt_authorizes_org_read(
+    headers: &axum::http::HeaderMap,
+    authorization_bearer: Option<&str>,
+) -> bool {
+    let Some(node_org) = crate::sidecar::control_plane::registered_org() else {
+        return false;
+    };
+    let token = authorization_bearer
+        .map(str::to_owned)
+        .or_else(|| header_str(headers, USER_JWT_HEADER));
+    let Some(token) = token else {
+        return false;
+    };
+    let claims = match crate::identity_verify::verify_jwt(&token).await {
+        Ok(claims) => claims,
+        Err(_) => return false,
+    };
+    let caller = crate::identity_verify::to_caller_for_org(&claims, Some(&node_org.id));
+    // Authorization IS the org match: only a JWT whose `orgs` claim contains this
+    // node's org yields `org_id == node_org` after narrowing.
+    caller.org_id.as_deref() == Some(node_org.id.as_str())
 }
 
 /// Read a single trimmed, non-empty header value.
@@ -478,6 +546,69 @@ async fn attach_verified_caller(
     next.run(req).await
 }
 
+/// Org/team RBAC gate for a REST handler. Enforcement is keyed on whether THIS
+/// node is bound to an org (a managed / shared "company brain" node) or is a
+/// truly unbound local/dev node — because per-user RBAC only makes sense on a
+/// node many people share, and the local-first single-user flow must never be
+/// degraded on someone's own machine.
+///
+/// GATING RULE (fail-closed on shared nodes, full-trust only when unbound):
+///   - Node UNBOUND (`registered_org() == None`): the shared `RYU_TOKEN` already
+///     implies a single trusted operator. ALWAYS ALLOW — for both an anonymous
+///     caller and any signed-in user (including a multi-org user with no single
+///     resolvable org, who must NOT be forced read-only on their own machine).
+///   - Node ORG-BOUND (`registered_org() == Some(org)`):
+///       - `None` caller (no / invalid user JWT) → DENY. A tokenless caller must
+///         not inherit full trust, or any holder of the shared node token bypasses
+///         RBAC entirely.
+///       - `Some(caller)` NOT a member of `org` (`org_id != org`) → DENY ALL. A
+///         non-member holds nothing here, matching the control plane's fail-closed
+///         `[]` for non-members; this closes the cross-org read leak where a valid
+///         JWT for a DIFFERENT org was narrowed to a Viewer with default reads.
+///       - `Some(caller)` who IS a member → ALLOW iff the permission is in their
+///         EFFECTIVE set: the built-in role tier (`permissions_for_role`) UNION any
+///         custom-role grant resolved from the control plane. The role tier is
+///         checked first (no network on the common path); a control-plane
+///         resolution failure falls back to the role tier alone, never full access.
+async fn enforce_permission(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    perm: &str,
+) -> Result<(), StatusCode> {
+    let node_org = crate::sidecar::control_plane::registered_org().map(|o| o.id);
+
+    match caller {
+        None => {
+            if node_org.is_some() {
+                Err(StatusCode::FORBIDDEN)
+            } else {
+                Ok(())
+            }
+        }
+        Some(caller) => match node_org.as_deref() {
+            None => Ok(()),
+            Some(node_org) => {
+                if caller.org_id.as_deref() != Some(node_org) {
+                    return Err(StatusCode::FORBIDDEN);
+                }
+                if crate::identity_verify::permissions::can(caller.role, perm) {
+                    return Ok(());
+                }
+                let custom = crate::sidecar::control_plane::resolve_permissions(
+                    &state.client,
+                    &caller.user_id,
+                )
+                .await;
+                if custom.contains(perm) {
+                    Ok(())
+                } else {
+                    Err(StatusCode::FORBIDDEN)
+                }
+            }
+        },
+    }
+}
+
 /// `GET /api/connections` — the clients currently connected to THIS node.
 ///
 /// Presence/attribution only: identities are self-declared behind the shared
@@ -503,6 +634,86 @@ async fn list_connections(State(state): State<ServerState>) -> impl IntoResponse
         "user_count": user_count,
         "ttl_secs": ttl,
     }))
+}
+
+/// `GET /api/sandboxes` — the remote (billable) sandbox runs live on THIS node.
+///
+/// Sibling of [`list_connections`]: a read-only visibility surface for the node
+/// selector so a client can see which metered sandboxes a node is running (and
+/// their elapsed/accrued figures) before routing work to it. Populated by the
+/// sandbox metering registry (`crate::sidecar::sandbox::heartbeat`).
+async fn list_sandboxes() -> impl IntoResponse {
+    let sandboxes = crate::sidecar::sandbox::heartbeat::list_active_runs();
+    Json(json!({ "sandboxes": sandboxes }))
+}
+
+/// `POST /api/sandboxes` — launch a persistent (Daytona) sandbox.
+///
+/// Creates a long-lived Daytona workspace, registers it with the metering
+/// heartbeat (per-second billing + budget-kill), and returns its `run_id` +
+/// real `workspace_id`. Persistent is Daytona-only; the one-shot `sandbox_exec`
+/// tool covers other backends. RYU_TOKEN-only (desktop launch), no JWT
+/// carve-out — the read-only `GET` above stays web-viewable.
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct CreateSandboxRequest {
+    spec: Option<crate::sidecar::sandbox::spec::SandboxSpec>,
+    budget_micro_usd: Option<u64>,
+}
+
+async fn create_sandbox(Json(req): Json<CreateSandboxRequest>) -> impl IntoResponse {
+    match crate::sidecar::sandbox::session::create_sandbox(req.spec, req.budget_micro_usd).await {
+        Ok(c) => Json(c).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /api/sandboxes/{run_id}/exec` — run one command in a live sandbox.
+#[derive(serde::Deserialize)]
+struct ExecSandboxRequest {
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    timeout_secs: Option<u64>,
+}
+
+async fn exec_sandbox(
+    Path(run_id): Path<String>,
+    Json(req): Json<ExecSandboxRequest>,
+) -> impl IntoResponse {
+    match crate::sidecar::sandbox::session::exec_in_sandbox(
+        &run_id,
+        req.command,
+        req.args,
+        req.timeout_secs,
+    )
+    .await
+    {
+        Ok(r) => Json(r).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `DELETE /api/sandboxes/{run_id}` — destroy a live sandbox (final tail debit +
+/// workspace teardown). Idempotent: an already-destroyed run returns `ok`.
+async fn destroy_sandbox(Path(run_id): Path<String>) -> impl IntoResponse {
+    match crate::sidecar::sandbox::session::destroy_sandbox(&run_id).await {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 // ── Data folder ("Storage" setting) ──────────────────────────────────────────────
@@ -724,7 +935,16 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         )
         // Inbound Composio webhook: public (external delivery can't send the bearer
         // token) but HMAC-authenticated fail-closed inside the handler.
-        .route("/api/composio/webhook", post(composio_webhook));
+        .route("/api/composio/webhook", post(composio_webhook))
+        // Inbound per-workflow webhook trigger: public (an external integration/app
+        // can't send the node bearer) but HMAC-authenticated against the trigger's
+        // own secret, fail-closed inside the handler. The universal "any service
+        // that can POST triggers a workflow" path, beyond Composio.
+        .route("/api/workflows/:id/webhook", post(workflow_webhook))
+        // Inbound agent mail: public (a mail provider/forwarder can't send the node
+        // bearer) but HMAC-authenticated against the inbox's `inbound_secret`,
+        // fail-closed inside the handler.
+        .merge(crate::mail::api::public_routes());
 
     let protected = Router::new()
         .route("/api/catalog", get(get_catalog))
@@ -741,6 +961,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/models/context-window", get(models_context_window))
         .route("/api/models/engines", get(models_engines))
         .route("/api/models/installed", get(models_installed))
+        .route("/api/models/updates", get(models_updates))
         // Live hardware snapshot for this node (CPU/RAM/disk/GPU) — backs the
         // desktop node selector's per-node "what's this machine" view.
         .route("/api/system/info", get(system_info_handler))
@@ -763,6 +984,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/skills/catalog", get(skills_catalog_list))
         .route("/api/skills/catalog/detail", get(skills_catalog_detail))
         .route("/api/skills/catalog/install", post(skills_catalog_install))
+        .route("/api/skills/updates", get(skills_updates))
         .route(
             "/api/skills/install-from-source",
             post(skills_install_from_source),
@@ -821,9 +1043,21 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         )
         .route("/api/plugins/:id/install", post(install_app_handler))
         .route("/api/plugins/:id/enable", post(enable_app_handler))
+        .route("/api/plugins/:id/grants", post(set_app_grants_handler))
         .route("/api/plugins/:id/disable", post(disable_app_handler))
         .route("/api/plugins/:id/update", post(update_app_handler))
         .route("/api/plugins/:id/ui-bundle", get(plugin_ui_bundle))
+        // App host-capability bridge (model.complete / agent.run / storage.*).
+        // Protected router → inherits `require_auth`; grant-gated per enabled app.
+        .route(
+            "/api/plugins/:id/host",
+            post(plugin_bridge_api::plugin_bridge_dispatch),
+        )
+        // Streaming agent.run for full-page apps (governance-filtered SSE).
+        .route(
+            "/api/plugins/:id/host/stream",
+            post(plugin_bridge_api::plugin_bridge_stream),
+        )
         // ── DEPRECATED `/api/apps*` aliases (one-release back-compat for #457) ──
         // These point at the same handlers as `/api/plugins*` and exist only so
         // clients that have not yet migrated keep working. Remove after one
@@ -834,6 +1068,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/apps/reload", post(reload_app_manifests))
         .route("/api/apps/:id/install", post(install_app_handler))
         .route("/api/apps/:id/enable", post(enable_app_handler))
+        .route("/api/apps/:id/grants", post(set_app_grants_handler))
         .route("/api/apps/:id/disable", post(disable_app_handler))
         .route("/api/apps/:id/update", post(update_app_handler))
         .route("/api/skills", get(list_skills).post(create_skill_handler))
@@ -974,6 +1209,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/mcp/catalog", get(mcp_catalog_list))
         .route("/api/mcp/catalog/detail", get(mcp_catalog_detail))
         .route("/api/mcp/catalog/install", post(mcp_catalog_install))
+.route("/api/mcp/updates", get(mcp_updates))
         // ── Knowledge catalog (browse + install OKF bundles via the okf module) ──
         .route("/api/knowledge/catalog", get(knowledge_catalog_list))
         .route(
@@ -1077,7 +1313,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/conversations/:id/title",
             post(set_conversation_title_handler),
         )
-        // Goal + double-check are now plugins (io.ryu.goal / io.ryu.double-check)
+        // Goal + double-check are now plugins (goal / double-check)
         // driven by the plugin turn-hook runtime; their old Core endpoints are
         // removed. See docs/plugin-runtime.md.
         // ── Side questions (`/btw`): answer over the conversation, persisted as
@@ -1122,6 +1358,11 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/spaces/:id/pages", post(create_page))
         .route("/api/spaces/:id/databases", post(create_database))
         .route("/api/spaces/:id/whiteboards", post(create_whiteboard))
+        .route("/api/spaces/:id/files", post(create_file))
+        .route(
+            "/api/spaces/:id/documents/:doc_id/blob",
+            get(get_file_blob),
+        )
         .route(
             "/api/spaces/:id/documents/:doc_id",
             get(get_document)
@@ -1173,6 +1414,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // every artifact. SSE `stream` registered before the `:id/*` routes so
         // the static segment is matched first. ─────────────────────────────────
         .route("/api/downloads", get(list_downloads))
+        .route("/api/downloads/history", get(downloads_history))
         .route("/api/downloads/stream", get(downloads_stream))
         .route("/api/downloads/:id/pause", post(download_pause))
         .route("/api/downloads/:id/resume", post(download_resume))
@@ -1311,6 +1553,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             get(gateway_get_config).put(gateway_put_config),
         )
         .route("/api/gateway/status", get(gateway_status))
+        // ── Gateway evaluator catalog proxy (unified-evaluator system) ───────
+        .route("/api/gateway/evaluators", get(gateway_get_evaluators))
         // ── Manual gateway restart (preflight/health page recovery action) ───
         .route("/api/gateway/restart", post(gateway_restart))
         // ── Local-engine admission-queue depth (batching/queue observability) ──
@@ -1346,6 +1590,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/clips", get(clips::list_clips))
         .route("/api/clips/ingest", post(clips::ingest))
         .route("/api/clips/sources", get(clips::get_sources))
+        .route("/api/clips/recent-activity", get(clips::recent_activity))
         .route("/api/clips/start", post(clips::start_clip))
         .route("/api/clips/:id/stop", post(clips::stop_clip))
         .route("/api/clips/:id/pause", post(clips::pause_clip))
@@ -1426,6 +1671,24 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route(
             "/api/monitors/:id/alerts",
             get(monitors_api::list_monitor_alerts),
+        )
+        // ── App-inbox notifications (user-scoped ping feed) ─────────────────
+        // Static `stream` registered before `:id/*` so it matches first.
+        .route(
+            "/api/notifications/stream",
+            get(notifications_api::notifications_stream),
+        )
+        .route(
+            "/api/notifications",
+            get(notifications_api::list_notifications),
+        )
+        .route(
+            "/api/notifications/:id/read",
+            post(notifications_api::read_notification),
+        )
+        .route(
+            "/api/notifications/:id/ack",
+            post(notifications_api::ack_notification),
         )
         // ── Approval inbox (human-in-the-loop) ──────────────────────────────
         // Static `events` / `mode` registered before `:id` so they match first.
@@ -1566,6 +1829,18 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/preferences/:key",
             get(get_preference).put(set_preference),
         )
+        // ── Email transport (BYO SMTP sink config + test send) ──────────────
+        .route(
+            "/api/email/transport",
+            get(get_email_transport).put(put_email_transport),
+        )
+        .route("/api/email/test", post(post_email_test))
+        .route(
+            "/api/alerts/delivery",
+            get(get_alert_delivery).put(put_alert_delivery),
+        )
+        // ── Self-host Agent Inboxes (receive/store/send agent mail) ──────────
+        .merge(crate::mail::api::protected_routes())
         // ── Ghost recipes (record / list / show / run / delete) ─────────────
         // Static `record/*` segments registered before `:name` so they match
         // first (Axum would otherwise capture `record` as a recipe name).
@@ -1590,6 +1865,14 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // Connected-client presence (the "who's on this node" surface). Read by
         // the desktop NodeSelector; populated by `track_connection` below.
         .route("/api/connections", get(list_connections))
+        // Live remote (billable) sandbox runs on this node, for the NodeSelector.
+        // GET is read-only visibility (populated by the sandbox metering
+        // heartbeat); POST/DELETE launch/stop persistent Daytona workspaces and
+        // are RYU_TOKEN-only (desktop-auth; the GET-scoped JWT carve-out does not
+        // reach them).
+        .route("/api/sandboxes", get(list_sandboxes).post(create_sandbox))
+        .route("/api/sandboxes/:run_id/exec", post(exec_sandbox))
+        .route("/api/sandboxes/:run_id", delete(destroy_sandbox))
         // Data folder ("Storage" setting): read location, validate/switch (point-only),
         // reset to default, export a backup zip. Copy-migrate + import run offline as
         // the `ryu-core data-path` subcommand.
@@ -1788,6 +2071,26 @@ async fn set_preference(
             if key == crate::claude_config::CLAUDE_GATEWAY_ROUTING_PREF_KEY {
                 crate::claude_config::set_enabled(&body.value);
             }
+            // RTK per-agent auto-wrap (rtk Phase 2): keep the in-process flag
+            // in sync and reconcile the agent's RTK PreToolUse hook. Spawned so the
+            // (possibly process-launching) `rtk init` never blocks the pref write;
+            // a no-op when rtk is not on PATH.
+            if let Some(agent) = crate::rtk_config::WrapAgent::from_pref_key(&key) {
+                crate::rtk_config::set_enabled(agent, &body.value);
+                let enable = crate::rtk_config::is_enabled(agent);
+                tokio::spawn(async move {
+                    if let Err(e) = crate::rtk_config::configure(agent, enable).await {
+                        tracing::warn!(error = %e, "rtk auto-wrap: reconfigure on pref change failed");
+                    }
+                });
+            }
+            // RTK exclude list: merge into rtk's config.toml so its hooks + the
+            // `rtk__run` tool skip these commands. No-op when rtk is not installed.
+            if key == crate::rtk_config::EXCLUDE_COMMANDS_PREF_KEY {
+                if let Err(e) = crate::rtk_config::set_exclude_commands(&body.value) {
+                    tracing::warn!(error = %e, "rtk auto-wrap: writing exclude_commands failed");
+                }
+            }
             // Untrusted-content wrapping toggle: keep the in-process flag in sync
             // so the next tool result wraps (or, on opt-out, does not) before it
             // re-enters the model. Read on Core's tool-result path.
@@ -1807,6 +2110,18 @@ async fn set_preference(
             if key == crate::agent_routing::AGENT_GATEWAY_ROUTING_PREF_KEY {
                 crate::agent_routing::set_from_json(&body.value);
             }
+            // Per-agent Plane A model-routing overrides (spec §1): keep the
+            // in-process map in sync so the next forwarded chat injects (or omits)
+            // `ryu_smart_route` for the changed agent. No gateway respawn — the map
+            // is read on Core's (async) chat-forward path.
+            if key == crate::agent_routing::AGENT_SMART_ROUTE_PREF_KEY {
+                crate::agent_routing::set_smart_routes_from_json(&body.value);
+            }
+            // Plane B agent-auto routing config (spec §2): keep the in-process
+            // snapshot in sync so the next "auto" turn resolves with the new rules.
+            if key == crate::agent_routing::AGENT_AUTO_ROUTING_PREF_KEY {
+                crate::agent_routing::set_auto_config_from_json(&body.value);
+            }
             (StatusCode::OK, Json(json!({ "ok": true, "key": key }))).into_response()
         }
         Err(e) => (
@@ -1816,6 +2131,233 @@ async fn set_preference(
             .into_response(),
     }
 }
+
+// -- Email transport (BYO SMTP sink config) --------------------------------------
+
+/// Non-secret transport config exchanged with the desktop SMTP card. The password
+/// is write-only (`password`, never returned); `passwordSet` reports whether one
+/// is stored so the card can show a "configured" state without revealing it.
+#[derive(serde::Deserialize)]
+struct EmailTransportBody {
+    #[serde(default)]
+    host: String,
+    #[serde(default = "default_smtp_port")]
+    port: u16,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    from: String,
+    #[serde(default = "default_true_bool")]
+    starttls: bool,
+    /// Optional secret. When present + non-empty it is persisted; an omitted /
+    /// empty value leaves the stored password untouched.
+    #[serde(default)]
+    password: Option<String>,
+}
+
+fn default_smtp_port() -> u16 {
+    587
+}
+
+fn default_true_bool() -> bool {
+    true
+}
+
+/// `GET /api/email/transport` - the current non-secret SMTP transport config plus
+/// a `passwordSet` flag. Never returns the password.
+async fn get_email_transport(State(_state): State<ServerState>) -> axum::response::Response {
+    let prefs = crate::email::current_transport_prefs();
+    let password_set = crate::smtp_auth::password().is_some();
+    let body = match prefs {
+        Some(t) => json!({
+            "host": t.host,
+            "port": t.port,
+            "username": t.username,
+            "from": t.from,
+            "starttls": t.starttls,
+            "passwordSet": password_set,
+        }),
+        None => json!({
+            "host": "",
+            "port": default_smtp_port(),
+            "username": "",
+            "from": "",
+            "starttls": true,
+            "passwordSet": password_set,
+        }),
+    };
+    (StatusCode::OK, Json(body)).into_response()
+}
+
+/// `PUT /api/email/transport` - persist the non-secret transport config (and,
+/// when supplied, the password) and apply both to the in-process sink without a
+/// restart.
+async fn put_email_transport(
+    State(state): State<ServerState>,
+    Json(body): Json<EmailTransportBody>,
+) -> axum::response::Response {
+    let transport = crate::email::TransportPrefs {
+        host: body.host.clone(),
+        port: body.port,
+        username: body.username.clone(),
+        from: body.from.clone(),
+        starttls: body.starttls,
+    };
+    let json = match serde_json::to_string(&transport) {
+        Ok(j) => j,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+    if let Err(e) = state
+        .preferences
+        .set(crate::email::SMTP_TRANSPORT_PREF_KEY, &json)
+        .await
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response();
+    }
+    crate::email::set_transport(
+        &body.host,
+        body.port,
+        &body.username,
+        &body.from,
+        body.starttls,
+    );
+
+    // Persist the password only when supplied + non-empty (a blank/omitted value
+    // leaves the stored secret intact).
+    if let Some(password) = body.password.as_deref() {
+        if !password.trim().is_empty() {
+            if let Err(e) = state
+                .preferences
+                .set(crate::smtp_auth::SMTP_PASSWORD_PREF_KEY, password)
+                .await
+            {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": e.to_string() })),
+                )
+                    .into_response();
+            }
+            crate::smtp_auth::set_password(password);
+        }
+    }
+
+    (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+}
+
+/// Body for `POST /api/email/test`.
+#[derive(serde::Deserialize)]
+struct EmailTestBody {
+    to: String,
+}
+
+/// `POST /api/email/test` - send a test email over the currently-configured
+/// transport, surfacing any [`crate::email::EmailError`] to the caller.
+async fn post_email_test(
+    State(_state): State<ServerState>,
+    Json(body): Json<EmailTestBody>,
+) -> axum::response::Response {
+    let Some(cfg) = crate::email::resolve_transport() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "email transport is not configured" })),
+        )
+            .into_response();
+    };
+    match crate::email::send_email_alert(
+        &cfg,
+        body.to.trim(),
+        "Ryu test email",
+        "This is a test email from your Ryu node. Your SMTP transport is working.",
+    )
+    .await
+    {
+        Ok(id) => (StatusCode::OK, Json(json!({ "ok": true, "messageId": id }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "ok": false, "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+
+// -- Alert delivery targets (node-level policy-alert recipients) ------------------
+
+/// Node-level alert delivery targets for self-host policy alerts. `targets` are
+/// the Fanout-tier channels (webhook / Telegram / Expo push); `emails` are the
+/// Email-tier recipients (sent over the shared BYO SMTP transport).
+#[derive(serde::Deserialize)]
+struct AlertDeliveryBody {
+    #[serde(default)]
+    targets: Vec<crate::monitors::notify::NotifyTarget>,
+    #[serde(default)]
+    emails: Vec<String>,
+}
+
+/// `GET /api/alerts/delivery` - the node's configured policy-alert delivery
+/// targets (empty default when unset).
+async fn get_alert_delivery(State(state): State<ServerState>) -> axum::response::Response {
+    let store = match crate::monitors::global_engine() {
+        Some(engine) => engine.store.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": "monitor engine not ready" })),
+            )
+                .into_response()
+        }
+    };
+    let _ = &state;
+    match store.get_alert_delivery().await {
+        Ok(cfg) => (StatusCode::OK, Json(json!(cfg))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `PUT /api/alerts/delivery` - persist the node's policy-alert delivery targets.
+async fn put_alert_delivery(
+    State(state): State<ServerState>,
+    Json(body): Json<AlertDeliveryBody>,
+) -> axum::response::Response {
+    let store = match crate::monitors::global_engine() {
+        Some(engine) => engine.store.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": "monitor engine not ready" })),
+            )
+                .into_response()
+        }
+    };
+    let _ = &state;
+    let cfg = crate::policy_alerts::AlertDeliveryTargets {
+        targets: body.targets,
+        emails: body.emails,
+    };
+    match store.set_alert_delivery(&cfg).await {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 
 // ── Per-model launch config (advanced inference) ───────────────────────────────
 
@@ -1948,6 +2490,15 @@ async fn notifications_stream() -> axum::response::sse::Sse<
         loop {
             match rx.recv().await {
                 Ok(ev) => {
+                    // This legacy stream is unauthenticated (no viewer identity), so
+                    // it carries only BROADCAST notifications. A user-targeted ping
+                    // (`target_user_id` set) must not fan out here — it would toast
+                    // on every connected desktop on a shared team node. Those are
+                    // delivered exclusively via the per-user, filtered
+                    // `/api/notifications/stream`.
+                    if ev.target_user_id.is_some() {
+                        continue;
+                    }
                     let data = serde_json::to_string(&ev).unwrap_or_default();
                     return Some((Ok(Event::default().data(data)), rx));
                 }
@@ -2041,8 +2592,35 @@ async fn all_events_stream(
         },
     ));
 
+    // Notifications need a FILTERED tap (not the generic `tagged`): this unified
+    // stream is unauthenticated, so it may only carry BROADCAST notifications.
+    // User-targeted pings (`target_user_id` set) are dropped here and reach the
+    // right member solely via the per-user `/api/notifications/stream`; otherwise
+    // a ping for one teammate would toast on every desktop sharing a team node.
+    let notifications: TaggedStream = Box::pin(stream::unfold(
+        crate::events::subscribe(),
+        |mut rx| async move {
+            loop {
+                match rx.recv().await {
+                    Ok(ev) => {
+                        if ev.target_user_id.is_some() {
+                            continue;
+                        }
+                        let data = serde_json::to_string(&ev).unwrap_or_default();
+                        return Some((
+                            Ok(Event::default().event("notifications").data(data)),
+                            rx,
+                        ));
+                    }
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => return None,
+                }
+            }
+        },
+    ));
+
     let streams: Vec<TaggedStream> = vec![
-        tagged("notifications", crate::events::subscribe()),
+        notifications,
         tagged("quests", state.quests.store.subscribe()),
         tagged("monitors", state.monitors.store.subscribe()),
         tagged("approvals", state.approvals.store.subscribe()),
@@ -2067,6 +2645,21 @@ async fn all_events_stream(
 async fn list_downloads(State(state): State<ServerState>) -> Json<serde_json::Value> {
     let tasks = state.downloads.snapshot().await;
     Json(json!({ "downloads": tasks }))
+}
+
+/// `GET /api/downloads/history` — the durable log of finished downloads (newest
+/// first), which survives restart even though live terminal tasks are dropped
+/// from the active snapshot.
+#[utoipa::path(
+    get,
+    path = "/api/downloads/history",
+    tag = "Downloads",
+    summary = "List previously finished downloads (durable history)",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn downloads_history(State(state): State<ServerState>) -> Json<serde_json::Value> {
+    let history = state.downloads.history().await;
+    Json(json!({ "history": history }))
 }
 
 /// `GET /api/downloads/stream` — SSE: a full snapshot on connect, then deltas.
@@ -2449,6 +3042,19 @@ async fn chat_stream(
     // anonymous). `author_user_id` is `#[serde(skip)]`, so this server-side write
     // is the ONLY source — a client request body can neither set nor spoof it.
     req.author_user_id = caller.as_ref().map(|c| c.user_id.clone());
+    // Org/team RBAC: running an agent (a chat turn) requires `agent.run`. This is
+    // the run path for agents — there is no separate REST "run" endpoint — so the
+    // gate lands here, before either the team or single-agent branch dispatches.
+    // Non-breaking: an anonymous (node-token-only) caller is allowed unchanged.
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_RUN)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: agent.run".to_owned(),
+        );
+    }
     // Wake any `onChat`-gated plugins the first time a chat turn is handled
     // (once per process, off the hot path — see `fire_on_chat_once`). Cheap
     // atomic on every subsequent request; covers both the single- and team-chat
@@ -2595,6 +3201,70 @@ async fn build_hook_context(
         agent_id: agent_id.map(str::to_string),
         transcript,
         flags: flags.clone(),
+        input: None,
+        ..Default::default()
+    }
+}
+
+/// The process-global plugin-hook dispatcher: holds a [`ServerState`] so hook
+/// phases fired from code with no `State` extractor in scope (the tool-dispatch
+/// core, the delegation engine, the notification fan-out) can still run their
+/// hooks. Installed once at boot by [`install_global_hook_dispatcher`].
+struct GlobalHookDispatcher {
+    state: ServerState,
+}
+
+impl crate::plugin_host::HookDispatch for GlobalHookDispatcher {
+    fn dispatch<'a>(
+        &'a self,
+        phase: &'a str,
+        ctx: crate::plugin_host::HookContext,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Vec<crate::plugin_host::HookDirective>> + Send + 'a>,
+    > {
+        Box::pin(async move { crate::plugin_host::dispatch_phase(&self.state, phase, &ctx).await })
+    }
+}
+
+/// Install the global hook dispatcher (idempotent). Called from `main` after the
+/// `ServerState` is built.
+pub fn install_global_hook_dispatcher(state: ServerState) {
+    crate::plugin_host::set_global(std::sync::Arc::new(GlobalHookDispatcher { state }));
+}
+
+/// Build the pre-user-turn hook context from the OUTGOING request — the pending
+/// user message has not been sent to the model or persisted yet, so it comes from
+/// `req.messages`, not the store. `input` is the last user message's text (what a
+/// `pre_user_turn` hook rewrites); the recent request messages become the
+/// transcript so the hook's `match` gate (flag / slash-command prefix) can
+/// evaluate. Used by the auto-expand prompt-improver.
+fn build_pre_hook_context(
+    req: &crate::sidecar::adapters::ChatStreamRequest,
+    flags: &std::collections::HashMap<String, bool>,
+) -> crate::plugin_host::HookContext {
+    const MAX_TRANSCRIPT: usize = 20;
+    let skip = req.messages.len().saturating_sub(MAX_TRANSCRIPT);
+    let transcript: Vec<crate::plugin_host::HookMessage> = req
+        .messages
+        .iter()
+        .skip(skip)
+        .map(|m| crate::plugin_host::HookMessage {
+            role: m.role.clone(),
+            content: crate::sidecar::adapters::ui_message_text(m),
+        })
+        .collect();
+    let input = transcript
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .map(|m| m.content.clone());
+    crate::plugin_host::HookContext {
+        conversation_id: req.conversation_id.clone(),
+        agent_id: req.agent_id.clone(),
+        transcript,
+        flags: flags.clone(),
+        input,
+        ..Default::default()
     }
 }
 
@@ -2673,10 +3343,108 @@ async fn run_chat_with_hooks(
     let conversation_id = req.conversation_id.clone().unwrap_or_default();
     let agent_id = req.agent_id.clone();
     let flags = req.plugin_flags.clone();
+    // Which pre-model phases are live? Cheap checks so a post-turn-only install
+    // does zero extra work before the first turn.
+    let has_pre = hooks
+        .iter()
+        .any(|h| h.on == crate::plugin_host::ON_PRE_USER_TURN);
+    let has_session_start = hooks
+        .iter()
+        .any(|h| h.on == crate::plugin_host::ON_SESSION_START);
 
     let stream = async_stream::stream! {
         let mut current = req;
         let mut turn: u32 = 0;
+
+        // Session start (Claude's SessionStart): on the FIRST turn of a
+        // conversation, let a hook inject setup context or surface a note. First
+        // turn = the store has no prior messages (the incoming user turn is not
+        // persisted yet). Fail-open. Injected context is appended to the outgoing
+        // user message so it reaches the model this turn.
+        if has_session_start {
+            let first_turn = state
+                .conversations
+                .get_active_messages(&conversation_id)
+                .await
+                .map(|m| m.is_empty())
+                .unwrap_or(false);
+            if first_turn {
+                let sctx = build_pre_hook_context(&current, &flags);
+                let directives = crate::plugin_host::run_hooks(
+                    &state,
+                    &sctx,
+                    &hooks,
+                    crate::plugin_host::ON_SESSION_START,
+                )
+                .await;
+                for directive in directives {
+                    match directive {
+                        crate::plugin_host::HookDirective::Inject { text } => {
+                            let t = text.trim();
+                            if !t.is_empty() {
+                                crate::sidecar::adapters::append_last_user_text(
+                                    &mut current.messages,
+                                    t,
+                                );
+                            }
+                        }
+                        crate::plugin_host::HookDirective::Note { text } => {
+                            yield Ok::<_, std::convert::Infallible>(plugin_note_frame(&text));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Pre-turn transform: before the first model turn, let a `pre_user_turn`
+        // hook rewrite (`Replace`) or augment (`Inject`) the outgoing user message
+        // (e.g. auto-expand's prompt improver). The result is what gets sent AND
+        // persisted, so a reload shows the prompt that actually ran. Fail-open:
+        // any hook error is a no-op and the original prompt is sent. Runs inside
+        // the stream so the `sideModel` round-trip streams a note rather than
+        // stalling before any bytes reach the client.
+        if has_pre {
+            let pre_ctx = build_pre_hook_context(&current, &flags);
+            let directives = crate::plugin_host::run_hooks(
+                &state,
+                &pre_ctx,
+                &hooks,
+                crate::plugin_host::ON_PRE_USER_TURN,
+            )
+            .await;
+            for directive in directives {
+                match directive {
+                    crate::plugin_host::HookDirective::Replace { text } => {
+                        let t = text.trim();
+                        if !t.is_empty()
+                            && crate::sidecar::adapters::set_last_user_text(
+                                &mut current.messages,
+                                t.to_string(),
+                            )
+                        {
+                            yield Ok::<_, std::convert::Infallible>(plugin_note_frame(&format!(
+                                "Expanded prompt sent:\n\n{t}"
+                            )));
+                            // Apply at most one rewrite; a second pre-hook would
+                            // fight over the same message.
+                            break;
+                        }
+                    }
+                    crate::plugin_host::HookDirective::Inject { text } => {
+                        let t = text.trim();
+                        if !t.is_empty() {
+                            crate::sidecar::adapters::append_last_user_text(
+                                &mut current.messages,
+                                t,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         loop {
             // Stream one turn, forwarding every UI part except its terminal [DONE].
             let inner = route_single_turn(&state, current.clone()).await;
@@ -2695,7 +3463,13 @@ async fn run_chat_with_hooks(
 
             // Post-turn hooks: build context from the persisted transcript.
             let ctx = build_hook_context(&state, &conversation_id, agent_id.as_deref(), &flags).await;
-            let directives = crate::plugin_host::run_hooks(&state, &ctx, &hooks).await;
+            let directives = crate::plugin_host::run_hooks(
+                &state,
+                &ctx,
+                &hooks,
+                crate::plugin_host::ON_POST_ASSISTANT_TURN,
+            )
+            .await;
             let mut next_text: Option<String> = None;
             for directive in directives {
                 match directive {
@@ -2707,6 +3481,11 @@ async fn run_chat_with_hooks(
                             next_text = Some(text);
                         }
                     }
+                    // Pre-turn / tool-phase directives are no-ops post-turn (no
+                    // outgoing message to rewrite, no tool call to block here).
+                    crate::plugin_host::HookDirective::Replace { .. }
+                    | crate::plugin_host::HookDirective::Inject { .. }
+                    | crate::plugin_host::HookDirective::Deny { .. } => {}
                     crate::plugin_host::HookDirective::None => {}
                 }
             }
@@ -3997,6 +4776,29 @@ async fn list_apps(State(state): State<ServerState>) -> Json<serde_json::Value> 
                     obj.insert("windows_first".to_owned(), serde_json::Value::Bool(false));
                     obj.insert("local_only".to_owned(), serde_json::Value::Bool(false));
                 }
+                // Rich marketplace-detail contract alignment (Phase 1.5): the raw
+                // manifest already serializes `tagline`/`iconUrl`/`screenshots`/
+                // `category`/`license`/`privacyPolicyUrl`/`termsOfServiceUrl`/
+                // `examplePrompts`/`setup` under their contract keys, and the raw
+                // `runnables` (with `config`) is left intact. Only the derived
+                // keys are added here so the installed-plugin surface matches the
+                // detail contract with no `author`/`developer` split.
+                if let Some(dev) = m.developer() {
+                    obj.insert("developer".to_owned(), serde_json::Value::String(dev));
+                }
+                if let Some(site) = &m.homepage {
+                    obj.insert(
+                        "website".to_owned(),
+                        serde_json::Value::String(site.clone()),
+                    );
+                }
+                if m.capabilities.is_empty() {
+                    obj.insert(
+                        "capabilities".to_owned(),
+                        serde_json::to_value(m.resolved_capabilities())
+                            .unwrap_or(serde_json::Value::Array(vec![])),
+                    );
+                }
             }
             v
         })
@@ -4063,16 +4865,42 @@ async fn merged_plugin_catalog_entries(state: &ServerState) -> Vec<serde_json::V
         }
     }
 
-    // 3. Legacy remote registry.
+    // 2b. First-party OPEN catalog: the git `amajorai/ryu-marketplace` repo, read
+    // via the `ryu-catalog` git MarketplaceSource (Phase 2). Best-effort — a fetch
+    // failure leaves this empty and never blanks the loaded built-ins.
+    let mut git_catalog_entries: Vec<serde_json::Value> = Vec::new();
+    if let Some(source) = state
+        .catalog_sources
+        .source_by_id(crate::catalog_source::CatalogKind::Plugin, "ryu-catalog")
+    {
+        let q = crate::catalog_source::CatalogQuery {
+            limit: 100,
+            ..Default::default()
+        };
+        if let Ok(val) = source.search(&state.client, &q).await {
+            if let Some(items) = val.get("items").and_then(|v| v.as_array()) {
+                git_catalog_entries = items
+                    .iter()
+                    .filter_map(|it| plugin_marketplace_item_to_entry(it, source.id()))
+                    .collect();
+            }
+        }
+    }
+
+    // 3. Legacy remote registry (retained as a lower-priority fallback while the
+    // git catalog is the first-party source of record; retire in a later cleanup).
     let catalog = state.catalog_client.fetch_catalog().await;
     let registry_entries: Vec<serde_json::Value> = serde_json::to_value(&catalog)
         .ok()
         .and_then(|v| v.get("entries").and_then(|e| e.as_array()).cloned())
         .unwrap_or_default();
 
+    // Dedup by id, first-writer-wins: loaded built-ins > Mongo marketplace > git
+    // catalog > legacy registry.
     merge_plugin_catalog_entries(vec![
         manifest_entries,
         marketplace_entries,
+        git_catalog_entries,
         registry_entries,
     ])
 }
@@ -4239,17 +5067,85 @@ fn plugin_manifest_to_entry(m: &crate::plugin_manifest::PluginManifest) -> serde
             })
             .collect()
     };
-    json!({
+    let mut entry = json!({
         "id": m.id,
         "name": m.name,
-        "description": "",
+        "description": m.description.clone().unwrap_or_default(),
         "version": m.version,
         "source": "built-in",
         "kinds": kinds,
-        "tags": [],
+        "tags": if m.keywords.is_empty() { Vec::<String>::new() } else { m.keywords.clone() },
         "permission_grants": m.permission_grants,
         "built_in": crate::plugins::builtins::find_system_plugin(&m.id).is_some(),
-    })
+    });
+    // Rich marketplace-detail contract keys (Phase 1.5). Additive — emitted only
+    // when the manifest carries the source data (capabilities/runnables are always
+    // present because they derive from grants/runnables). Never invents data.
+    if let Some(obj) = entry.as_object_mut() {
+        merge_plugin_contract_fields(obj, m);
+    }
+    entry
+}
+
+/// Insert the rich marketplace **detail** contract keys derived from a manifest
+/// into `obj`. Shared by the built-in catalog card ([`plugin_manifest_to_entry`])
+/// and the installed-plugin list ([`list_apps`]) so both built-in surfaces emit
+/// the same contract shape (no `author`/`developer` split). Every key is emitted
+/// only when the manifest carries the data (capabilities/runnables always, since
+/// they derive from grants/runnables).
+fn merge_plugin_contract_fields(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    m: &crate::plugin_manifest::PluginManifest,
+) {
+    if let Some(tagline) = &m.tagline {
+        obj.insert("tagline".to_owned(), json!(tagline));
+    }
+    if let Some(icon) = &m.icon_url {
+        obj.insert("iconUrl".to_owned(), json!(icon));
+    }
+    if !m.screenshots.is_empty() {
+        obj.insert("screenshots".to_owned(), json!(m.screenshots));
+    }
+    if let Some(dev) = m.developer() {
+        obj.insert("developer".to_owned(), json!(dev));
+    }
+    if let Some(category) = &m.category {
+        obj.insert("category".to_owned(), json!(category));
+    }
+    if let Some(site) = &m.homepage {
+        obj.insert("website".to_owned(), json!(site));
+    }
+    if let Some(license) = &m.license {
+        obj.insert("license".to_owned(), json!(license));
+    }
+    if let Some(privacy) = &m.privacy_policy_url {
+        obj.insert("privacyPolicyUrl".to_owned(), json!(privacy));
+    }
+    if let Some(terms) = &m.terms_of_service_url {
+        obj.insert("termsOfServiceUrl".to_owned(), json!(terms));
+    }
+    if !m.example_prompts.is_empty() {
+        obj.insert("examplePrompts".to_owned(), json!(m.example_prompts));
+    }
+    if let Some(setup) = &m.setup {
+        obj.insert("setup".to_owned(), setup.clone());
+    }
+    // capabilities: declared, else derived from permission_grants.
+    obj.insert("capabilities".to_owned(), json!(m.resolved_capabilities()));
+    // runnables: bundled runnables as {id, kind, name}. `enabled` is intentionally
+    // omitted here — the desktop overlays enable state from the app_store.
+    let runnables: Vec<serde_json::Value> = m
+        .runnables
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "kind": r.kind.as_str(),
+                "name": r.name,
+            })
+        })
+        .collect();
+    obj.insert("runnables".to_owned(), json!(runnables));
 }
 
 /// Map one Ryu-marketplace plugin item (`{ id, name, description, version, … }`,
@@ -5448,6 +6344,13 @@ async fn enable_app_handler(
     // precedent (a Python venv) is the shape.
     provision_external_runtime(&manifest, &record.approved_grants, state.downloads.clone());
 
+    // Register + start the plugin's declared managed sidecars (the app ⇄ sidecar
+    // bridge, M3): each rides the SidecarManager lifecycle (health monitor +
+    // resource sampler + `/api/sidecar/status`) like a built-in. Gated on tier +
+    // approved `sidecar:process` grant; spawned + best-effort so a slow binary
+    // download never blocks the enable response.
+    apply_sidecars(&state, &manifest, &record.approved_grants, true).await;
+
     // Collect per-Runnable outcomes for the response (success + failures both
     // surfaced so the caller can observe partial failures without silent drops).
     let runnable_statuses: Vec<serde_json::Value> = runnable_results
@@ -5992,6 +6895,7 @@ fn manifest_policies(
 /// - `firewall` — force the gateway firewall on (flag only; gateway enforces).
 /// - `routing` — force smart (classifier) routing on (flag only).
 /// - `sandbox` — Core wasmtime sandbox availability (in-process flag, no gateway).
+/// - `predict` — system-wide predictive typing on/off (Core-local flag, no gateway).
 async fn apply_policy(
     state: &ServerState,
     manifest: &crate::plugin_manifest::PluginManifest,
@@ -6010,7 +6914,7 @@ async fn apply_policy(
                 // Data-drive the compression service from the policy `definition`
                 // (url/token/timeout_ms/min_messages/service) rather than a
                 // hardcoded URL, so any compression plugin — not just the bundled
-                // `io.ryu.headroom` — works by pointing at its own `/v1/compress`
+                // `headroom` — works by pointing at its own `/v1/compress`
                 // service. The gateway transform (`compression.rs`) is the generic
                 // protocol host; the *service* is the plugin (MCP-style split).
                 if enabled {
@@ -6051,6 +6955,14 @@ async fn apply_policy(
                 // The wasmtime sandbox is a Core-local tool, not a gateway feature
                 // — toggling it needs no gateway respawn.
                 crate::sidecar::mcp::sandbox::set_enabled(enabled);
+            }
+            "predict" => {
+                // System-wide predictive typing (the `/api/predict/*` brain used by
+                // the `apps/predict` overlay and any predict client) — a Core-local
+                // feature, no gateway respawn. Enabling this plugin IS the on/off
+                // switch (there is no separate settings toggle); disabling makes
+                // `complete()` refuse every request, so the feature is fully inert.
+                crate::predict::set_enabled(enabled);
             }
             other => {
                 tracing::debug!(
@@ -6128,6 +7040,164 @@ fn provision_external_runtime(
             ),
         }
     });
+}
+
+/// Register + start (on enable) or stop + deregister (on disable) every
+/// manifest-declared **managed sidecar** for a plugin — the live call path for the
+/// app ⇄ sidecar bridge ([`crate::sidecar::manifest_sidecar`]).
+///
+/// On enable each spec is gated by
+/// [`crate::sidecar::manifest_sidecar::may_run_sidecar`] (Core-tier auto; Community
+/// needs the approved `sidecar:process` grant, read from `approved_grants` — never
+/// the manifest's unvalidated declarations). Work is **spawned** and best-effort so
+/// a slow binary download / venv build never blocks the enable (or disable)
+/// response — the same graceful-degrade contract as `provision_external_runtime`.
+/// Stop is ungated (disabling always tears down), so the disable path ignores
+/// `approved_grants`.
+async fn apply_sidecars(
+    state: &ServerState,
+    manifest: &crate::plugin_manifest::PluginManifest,
+    approved_grants: &[String],
+    enabled: bool,
+) {
+    if manifest.sidecars.is_empty() {
+        return;
+    }
+    let tier = crate::plugins::builtins::tier_for(&manifest.id);
+    for spec in &manifest.sidecars {
+        let manager = state.manager.clone();
+        if enabled {
+            if !crate::sidecar::manifest_sidecar::may_run_sidecar(tier, approved_grants) {
+                tracing::info!(
+                    "plugin '{}' declares sidecar '{}' but is Community-tier without an \
+                     approved '{}' grant; start skipped (fail-closed)",
+                    manifest.id,
+                    spec.name,
+                    crate::sidecar::manifest_sidecar::GRANT_SIDECAR_PROCESS
+                );
+                continue;
+            }
+            let sidecar =
+                std::sync::Arc::new(crate::sidecar::manifest_sidecar::ManifestSidecar::new(
+                    manifest.id.clone(),
+                    spec.clone(),
+                    state.downloads.clone(),
+                ));
+            let plugin_id = manifest.id.clone();
+            let spec_name = spec.name.clone();
+            tokio::spawn(async move {
+                if let Err(e) = manager.register_and_start(sidecar).await {
+                    tracing::warn!(
+                        "plugin '{plugin_id}': manifest sidecar '{spec_name}' failed to start \
+                         (best-effort): {e}"
+                    );
+                }
+            });
+        } else {
+            let name =
+                crate::sidecar::manifest_sidecar::namespaced_name(&manifest.id, &spec.name);
+            tokio::spawn(async move {
+                if let Err(e) = manager.stop_and_deregister(&name).await {
+                    tracing::warn!("manifest sidecar '{name}' failed to stop: {e}");
+                }
+            });
+        }
+    }
+}
+
+/// Re-register + start every enabled plugin's declared managed sidecars on Core
+/// boot. Manifest sidecars are NOT in the manager's `startup_order`, so nothing
+/// else restarts them after a Core restart — without this pass an enabled plugin's
+/// sidecar stays dead while the plugin still reads as enabled (a half-built flow
+/// that doesn't survive restart). Spawned from `main.rs` once `ServerState` exists,
+/// alongside the `onStartup` activation fire. Idempotent via
+/// [`crate::sidecar::SidecarManager::register_and_start`].
+pub async fn reconcile_plugin_sidecars(state: &ServerState) {
+    let records = match state.app_store.list().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("reconcile_plugin_sidecars: listing plugins failed: {e}");
+            return;
+        }
+    };
+    let manifests = state.app_manifests.read().await.clone();
+    for rec in records.into_iter().filter(|r| r.enabled) {
+        let Some(manifest) = manifests.iter().find(|m| m.id == rec.id) else {
+            continue;
+        };
+        if manifest.sidecars.is_empty() {
+            continue;
+        }
+        apply_sidecars(state, manifest, &rec.approved_grants, true).await;
+    }
+}
+
+/// Body for `POST /api/plugins/:id/grants` — the explicit set of grants the user
+/// wants this (already-enabled) app to keep. A subset of the app's declared grants;
+/// used by the desktop per-app permissions view to revoke (or restore) individual
+/// capabilities without disabling the whole app.
+#[derive(serde::Deserialize)]
+struct SetGrantsBody {
+    grants: Vec<String>,
+}
+
+/// `POST /api/plugins/:id/grants` — set an enabled app's approved grants to an
+/// explicit subset (per-grant revocation). Delegates to
+/// [`crate::plugins::lifecycle::set_app_grants`], which escalation-guards against
+/// the manifest's declared set, re-validates through the Gateway, and refuses on a
+/// disabled app (no backdoor enable). Returns the new approved set.
+async fn set_app_grants_handler(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+    Json(body): Json<SetGrantsBody>,
+) -> axum::response::Response {
+    use crate::plugins::lifecycle::{set_app_grants, EnableError};
+    use crate::sidecar::gateway::{gateway_token, gateway_url};
+
+    let Some(manifest) = find_manifest(&state, &id).await else {
+        return json_error(
+            StatusCode::NOT_FOUND,
+            format!("no manifest found for app '{id}'"),
+        );
+    };
+
+    match set_app_grants(
+        &state.app_store,
+        &manifest,
+        &body.grants,
+        &gateway_url(),
+        gateway_token().as_deref(),
+        &state.client,
+    )
+    .await
+    {
+        Ok(record) => Json(json!({
+            "success": true,
+            "approved_grants": record.approved_grants,
+        }))
+        .into_response(),
+        Err(EnableError::GrantsDenied { denied }) => (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "success": false,
+                "error": "Gateway denied one or more grants",
+                "denied_grants": denied,
+            })),
+        )
+            .into_response(),
+        Err(EnableError::GatewayUnreachable { reason }) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "success": false,
+                "error": "Gateway unreachable; grant update fails closed",
+                "reason": reason,
+            })),
+        )
+            .into_response(),
+        Err(EnableError::Other(e)) => {
+            json_error(StatusCode::BAD_REQUEST, e.to_string())
+        }
+    }
 }
 
 /// `POST /api/apps/:id/disable` — disable the app and clear its approved grants.
@@ -6220,6 +7290,10 @@ async fn disable_app_handler(
                 // Symmetric to enable: each Policy runnable (compression / firewall
                 // / routing / sandbox) is turned back OFF.
                 apply_policy(&state, &manifest, false).await;
+                // Symmetric to enable: stop + deregister the plugin's managed
+                // sidecars so a disabled plugin's process stops instead of lingering
+                // (the app ⇄ sidecar bridge teardown). Stop is ungated.
+                apply_sidecars(&state, &manifest, &[], false).await;
             }
             Json(json!({ "success": true, "app": record })).into_response()
         }
@@ -6373,7 +7447,19 @@ async fn engine_models() -> Json<serde_json::Value> {
     summary = "List installed agents",
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-async fn list_agents(State(state): State<ServerState>) -> Json<serde_json::Value> {
+async fn list_agents(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_VIEW)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: agent.view".to_owned(),
+        );
+    }
     // Load the registry once per request so the default_agent_id is consistent
     // across both the ACP registry entries and the DB-backed custom records.
     // Config is authoritative for `enabled` (AC4 of U041 — not a DB column).
@@ -6439,7 +7525,7 @@ async fn list_agents(State(state): State<ServerState>) -> Json<serde_json::Value
         Err(e) => tracing::error!("list_agents: failed to read agent store: {e:#}"),
     }
 
-    Json(json!({ "agents": agents }))
+    Json(json!({ "agents": agents })).into_response()
 }
 
 /// The full installable agent catalog: every built-in registry agent, with two
@@ -6836,8 +7922,18 @@ async fn uninstall_agent_handler(
 )]
 async fn create_agent(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(input): Json<CreateAgent>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_EDIT)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "insufficient permissions: agent.edit" })),
+        );
+    }
     if input.name.trim().is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -6863,8 +7959,18 @@ async fn create_agent(
 )]
 async fn get_agent(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_VIEW)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "insufficient permissions: agent.view" })),
+        );
+    }
     match state.agent_store.get(&id).await {
         Ok(Some(record)) => (StatusCode::OK, Json(json!({ "agent": record }))),
         Ok(None) => (
@@ -6889,9 +7995,19 @@ async fn get_agent(
 )]
 async fn update_agent(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(patch): Json<UpdateAgent>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_EDIT)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "insufficient permissions: agent.edit" })),
+        );
+    }
     match state.agent_store.update(&id, patch).await {
         Ok(Some(record)) => (StatusCode::OK, Json(json!({ "agent": record }))),
         Ok(None) => (
@@ -6923,8 +8039,20 @@ async fn update_agent(
 )]
 async fn delete_agent(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    // No `agent.delete` permission in the vocab; deletion is a mutation, gated at
+    // the `agent.edit` tier.
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_EDIT)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "insufficient permissions: agent.edit" })),
+        );
+    }
     match state.agent_store.delete(&id).await {
         Ok(true) => (StatusCode::OK, Json(json!({ "success": true }))),
         Ok(false) => (
@@ -7617,10 +8745,45 @@ async fn delete_conversation(
     State(state): State<ServerState>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
+    // SessionEnd hooks (Claude parity): fire BEFORE the delete so a hook can still
+    // observe the transcript (snapshotted into `event`). Observation-only + fully
+    // detached — never blocks or fails the deletion.
+    fire_session_end_hooks(&state, &id).await;
     match state.conversations.delete_conversation(&id).await {
         Ok(removed) => Json(json!({ "success": true, "removed": removed })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
+}
+
+/// Snapshot a conversation's transcript and fire `session_end` hooks detached
+/// (observation-only). Cheap DB-free early-out when no `session_end` plugin is
+/// loaded, so a normal delete pays nothing.
+async fn fire_session_end_hooks(state: &ServerState, conversation_id: &str) {
+    if !crate::plugin_host::any_manifest_declares(state, crate::plugin_host::ON_SESSION_END).await {
+        return;
+    }
+    let transcript = state
+        .conversations
+        .get_active_messages(conversation_id)
+        .await
+        .map(|msgs| {
+            msgs.into_iter()
+                .map(|m| crate::plugin_host::HookMessage {
+                    role: m.role,
+                    content: m.content,
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let ctx = crate::plugin_host::HookContext {
+        conversation_id: Some(conversation_id.to_string()),
+        transcript,
+        event: Some(json!({ "reason": "deleted" })),
+        ..Default::default()
+    };
+    tokio::spawn(async move {
+        let _ = crate::plugin_host::dispatch_global(crate::plugin_host::ON_SESSION_END, ctx).await;
+    });
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -7984,8 +9147,8 @@ async fn set_conversation_title_handler(
 // client for now; Core owns the reusable headless primitives: persist the goal and
 // evaluate progress on demand.
 
-// Goal + double-check preference keys moved to their plugins (io.ryu.goal /
-// io.ryu.double-check); the model/effort prefs (`goal-judge-model`,
+// Goal + double-check preference keys moved to their plugins (goal /
+// double-check); the model/effort prefs (`goal-judge-model`,
 // `double-check-model`, …) are still read by the plugin host's side-model
 // capability, just not by hardcoded Core handlers.
 
@@ -9271,6 +10434,9 @@ async fn create_mcp_server(
             env: body.env.clone(),
             description: body.description.clone(),
             enabled: true,
+            // Manually-added server — no catalog provenance, so no update signal.
+            version: None,
+            catalog_id: None,
         };
         move || -> Result<(), (StatusCode, String)> {
             // Ensure the parent directory exists.
@@ -9500,6 +10666,45 @@ async fn mcp_catalog_detail(
 struct McpCatalogInstallBody {
     /// The registry server name / id to install.
     id: String,
+    /// Overwrite an already-installed server (the update flow) instead of
+    /// failing on a name collision. Preserves the server's enabled state + env.
+    #[serde(default)]
+    force: bool,
+}
+
+/// `GET /api/mcp/updates` — installed MCP servers whose recorded catalog version
+/// trails the registry's current version. Only servers installed **through the
+/// catalog** carry a version + catalog id (captured at install), so manually
+/// added or pre-existing servers never report an update. The registry is fetched
+/// once and compared against every installed server. Uses the default registry
+/// base (servers from a custom source simply won't match, which is safe).
+#[utoipa::path(
+    get,
+    path = "/api/mcp/updates",
+    tag = "MCP",
+    summary = "Installed MCP servers with a newer catalog version",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn mcp_updates(State(_state): State<ServerState>) -> Json<serde_json::Value> {
+    let installed = crate::sidecar::mcp::installed_configs();
+    let latest = crate::mcp_catalog::latest_versions(None).await;
+    let mut updates = Vec::new();
+    for (name, cfg) in installed {
+        let (Some(catalog_id), Some(current)) = (cfg.catalog_id, cfg.version) else {
+            continue;
+        };
+        if let Some(latest_v) = latest.get(&catalog_id) {
+            if latest_v != &current {
+                updates.push(json!({
+                    "name": name,
+                    "catalog_id": catalog_id,
+                    "current_version": current,
+                    "latest_version": latest_v,
+                }));
+            }
+        }
+    }
+    Json(json!({ "updates": updates }))
 }
 
 /// `POST /api/mcp/catalog/install { id }` — resolve the chosen registry server to
@@ -9570,8 +10775,8 @@ async fn mcp_catalog_install(
     };
 
     // Reject a name collision with an already-registered server (built-ins
-    // included) before writing.
-    if state.mcp.contains_server(&plan.server_name) {
+    // included) before writing — unless this is a forced update overwrite.
+    if !body.force && state.mcp.contains_server(&plan.server_name) {
         return (
             StatusCode::CONFLICT,
             Json(
@@ -9602,6 +10807,9 @@ async fn mcp_catalog_install(
         &command,
         &args,
         plan.description.as_deref(),
+        plan.version.as_deref(),
+        Some(plan.catalog_id.as_str()),
+        body.force,
     )
     .await
     {
@@ -9637,18 +10845,27 @@ async fn write_mcp_entry(
     command: &str,
     args: &[String],
     description: Option<&str>,
+    version: Option<&str>,
+    catalog_id: Option<&str>,
+    // When true, overwrite an existing entry (used by the update flow) instead of
+    // refusing on a name collision — preserving its `enabled` + `env`.
+    force: bool,
 ) -> Result<(), (StatusCode, String)> {
     use crate::sidecar::mcp::McpServerConfig;
 
     let cfg_path = crate::sidecar::mcp::McpRegistry::config_path();
     let name = name.to_string();
-    let new_cfg = McpServerConfig {
+    let mut new_cfg = McpServerConfig {
         command: command.to_string(),
         args: args.to_vec(),
         env: std::collections::BTreeMap::new(),
         description: description.map(str::to_string),
         // Installed disabled — never auto-launch on install.
         enabled: false,
+        // Catalog provenance — lets the update check compare against the
+        // registry's current version later.
+        version: version.map(str::to_string),
+        catalog_id: catalog_id.map(str::to_string),
     };
 
     let result = tokio::task::spawn_blocking(move || -> Result<(), (StatusCode, String)> {
@@ -9687,11 +10904,18 @@ async fn write_mcp_entry(
             std::collections::BTreeMap::new()
         };
 
-        if file_map.contains_key(&name) {
-            return Err((
-                StatusCode::CONFLICT,
-                format!("MCP server '{name}' is already in mcp.json"),
-            ));
+        if let Some(existing) = file_map.get(&name) {
+            if force {
+                // Updating: keep the user's enabled state + env; swap in the new
+                // command/args/version.
+                new_cfg.enabled = existing.enabled;
+                new_cfg.env = existing.env.clone();
+            } else {
+                return Err((
+                    StatusCode::CONFLICT,
+                    format!("MCP server '{name}' is already in mcp.json"),
+                ));
+            }
         }
         file_map.insert(name, new_cfg);
 
@@ -10281,8 +11505,18 @@ struct CreateSpaceBody {
 )]
 async fn create_space(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<CreateSpaceBody>,
 ) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_WRITE)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.write".to_owned(),
+        );
+    }
     if body.name.trim().is_empty() {
         return json_error(StatusCode::BAD_REQUEST, "name is required".to_owned());
     }
@@ -10303,7 +11537,19 @@ async fn create_space(
     summary = "List spaces",
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-async fn list_spaces(State(state): State<ServerState>) -> axum::response::Response {
+async fn list_spaces(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.read".to_owned(),
+        );
+    }
     match state.spaces.list_spaces().await {
         Ok(items) => Json(json!({ "spaces": items })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -10320,8 +11566,18 @@ async fn list_spaces(State(state): State<ServerState>) -> axum::response::Respon
 )]
 async fn delete_space(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_DELETE)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.delete".to_owned(),
+        );
+    }
     match state.spaces.delete_space(&id).await {
         Ok(removed) => Json(json!({ "success": true, "removed": removed })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -10338,8 +11594,18 @@ async fn delete_space(
 )]
 async fn list_documents(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.read".to_owned(),
+        );
+    }
     match state.spaces.list_documents(&id).await {
         Ok(documents) => Json(json!({ "space_id": id, "documents": documents })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -10363,9 +11629,19 @@ struct IngestBody {
 )]
 async fn ingest_document(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<IngestBody>,
 ) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_WRITE)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.write".to_owned(),
+        );
+    }
     match state
         .spaces
         .ingest_document(&id, body.title.trim(), &body.content)
@@ -10551,6 +11827,207 @@ async fn create_whiteboard(
     }
 }
 
+/// Max decoded size for a single uploaded file artifact (200 MiB). Bounds memory
+/// on the create path; larger assets should stream via a future chunked upload.
+const MAX_FILE_BYTES: usize = 200 * 1024 * 1024;
+
+#[derive(serde::Deserialize)]
+struct CreateFileBody {
+    title: String,
+    /// MIME type of the file (e.g. `application/pdf`, `image/png`).
+    #[serde(default)]
+    mime: Option<String>,
+    /// Standard base64-encoded file bytes.
+    data_base64: String,
+}
+
+/// `POST /api/spaces/:id/files` — store a binary file as a first-class Space
+/// document (`kind = 'file'`). The bytes go to the content-addressed blob store;
+/// the row carries the mime + sha + size. This is the substrate the
+/// `create_artifact` tool and chat auto-filing of generated pptx/xlsx/csv/pdf/png
+/// build on. Writing requires `space.write` (org/team RBAC) — the same governed
+/// gate every external-agent write flows through.
+#[utoipa::path(
+    post,
+    path = "/api/spaces/{id}/files",
+    tag = "Spaces",
+    summary = "Store a binary file document",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn create_file(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<CreateFileBody>,
+) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_WRITE)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.write".to_owned(),
+        );
+    }
+    let title = if body.title.trim().is_empty() {
+        "Untitled"
+    } else {
+        body.title.trim()
+    };
+    let mime = body
+        .mime
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or("application/octet-stream");
+    use base64::Engine as _;
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(body.data_base64.as_bytes())
+    {
+        Ok(b) => b,
+        Err(e) => {
+            return json_error(StatusCode::BAD_REQUEST, format!("invalid base64: {e}"));
+        }
+    };
+    if bytes.len() > MAX_FILE_BYTES {
+        return json_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("file exceeds {MAX_FILE_BYTES} byte limit"),
+        );
+    }
+    match state.spaces.create_file(&id, title, &bytes, mime).await {
+        Ok(document_id) => Json(json!({
+            "id": document_id,
+            "mime": mime,
+            "byte_size": bytes.len(),
+        }))
+        .into_response(),
+        Err(e) => {
+            let msg = e.to_string();
+            let status = if msg.contains("not found") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            json_error(status, msg)
+        }
+    }
+}
+
+/// `GET /api/spaces/:id/documents/:doc_id/blob` — stream a file document's bytes
+/// with its stored MIME type. Reading requires `space.read`.
+#[utoipa::path(
+    get,
+    path = "/api/spaces/{id}/documents/{doc_id}/blob",
+    tag = "Spaces",
+    summary = "Download a file document's bytes",
+    params(("id" = String, Path), ("doc_id" = String, Path)),
+    responses((status = 200, description = "OK"))
+)]
+async fn get_file_blob(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
+) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.read".to_owned(),
+        );
+    }
+    match state.spaces.read_file_blob(&doc_id).await {
+        Ok(Some((mime, bytes))) => {
+            use axum::http::header;
+            // Stored-XSS defense: a blob's stored Content-Type is caller-controlled,
+            // so an uploaded `text/html` / `image/svg+xml` would otherwise render
+            // in-origin. Force safe delivery — normalize risky renderable MIME types
+            // to octet-stream, force download (`Content-Disposition: attachment`),
+            // forbid MIME sniffing, and sandbox via CSP so even a mis-typed blob
+            // cannot execute script in the app origin.
+            (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, normalize_blob_mime(&mime)),
+                    (header::CONTENT_DISPOSITION, "attachment".to_owned()),
+                    (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
+                    (
+                        header::CONTENT_SECURITY_POLICY,
+                        "sandbox; default-src 'none'".to_owned(),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "file not found".to_owned()),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Normalize a stored blob's caller-controlled MIME type for safe HTTP delivery.
+///
+/// Renderable, script-capable types (HTML, XHTML, SVG, any `*+xml`, bare XML) and
+/// an empty/absent type are collapsed to `application/octet-stream` so the browser
+/// never parses them as active content in the app origin. Everything else (images,
+/// audio, PDF, plain data) passes through unchanged — the `Content-Disposition:
+/// attachment` + `nosniff` + CSP `sandbox` headers on the response are the primary
+/// guarantee; this normalization is defense in depth.
+fn normalize_blob_mime(mime: &str) -> String {
+    let base = mime
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let risky = matches!(
+        base.as_str(),
+        "text/html" | "application/xhtml+xml" | "image/svg+xml" | "application/xml" | "text/xml"
+    ) || base.ends_with("+xml")
+        || base.is_empty();
+    if risky {
+        "application/octet-stream".to_owned()
+    } else {
+        mime.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod blob_mime_tests {
+    use super::normalize_blob_mime;
+
+    #[test]
+    fn risky_types_are_neutralized() {
+        for m in [
+            "text/html",
+            "text/html; charset=utf-8",
+            "image/svg+xml",
+            "application/xhtml+xml",
+            "application/atom+xml",
+            "application/xml",
+            "TEXT/HTML",
+            "",
+            "   ",
+        ] {
+            assert_eq!(
+                normalize_blob_mime(m),
+                "application/octet-stream",
+                "'{m}' should be neutralized"
+            );
+        }
+    }
+
+    #[test]
+    fn safe_types_pass_through() {
+        for m in ["image/png", "application/pdf", "audio/mpeg", "text/plain"] {
+            assert_eq!(normalize_blob_mime(m), m, "'{m}' should pass through");
+        }
+    }
+}
+
 /// `GET /api/spaces/:id/documents/:doc_id` — fetch a document's markdown source.
 #[utoipa::path(
     get,
@@ -10562,11 +12039,22 @@ async fn create_whiteboard(
 )]
 async fn get_document(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
-    // TODO (Phase 1 realtime join): enforce read ACL here. Extract
-    // `Extension<Option<VerifiedCaller>>`, load the document's
-    // owner_user_id/org_id/visibility/team_id, and gate on
+    // Org/team RBAC (coarse): reading a document requires `space.read`.
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.read".to_owned(),
+        );
+    }
+    // TODO (Phase 1 realtime join): per-resource ACL is a SEPARATE mechanism from
+    // the coarse RBAC gate above. Load the document's
+    // owner_user_id/org_id/visibility/team_id and additionally gate on
     // `crate::identity_verify::can_access(...) != Access::None`. Not enforced in
     // Phase 0 so the single-tenant flow is unchanged.
     match state.spaces.get_document(&doc_id).await {
@@ -10594,9 +12082,19 @@ struct UpdateDocumentBody {
 )]
 async fn update_document(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
     Json(body): Json<UpdateDocumentBody>,
 ) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_WRITE)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.write".to_owned(),
+        );
+    }
     match state
         .spaces
         .update_document(&doc_id, body.title.trim(), &body.source)
@@ -10626,8 +12124,18 @@ async fn update_document(
 )]
 async fn delete_document(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_DELETE)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.delete".to_owned(),
+        );
+    }
     match state.spaces.delete_document(&doc_id).await {
         Ok(removed) => Json(json!({ "success": true, "removed": removed })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -11426,6 +12934,95 @@ async fn composio_webhook(
     (StatusCode::OK, Json(json!({ "ok": true, "fired": fired })))
 }
 
+/// `POST /api/workflows/:id/webhook`
+///
+/// Public inbound trigger for a workflow that declares a `WorkflowTrigger::Webhook`.
+/// The external caller (an integration, app, or any service that can POST) cannot
+/// send the node bearer, so the route is unauthenticated at the router level and
+/// instead authenticates the raw body with an HMAC-SHA256 over the trigger's own
+/// `secret`. Fail-closed: a workflow with no webhook trigger, or a webhook trigger
+/// with no configured secret, never fires. On success the raw JSON body is seeded
+/// as the run's `trigger` state (readable in node templates as `{{trigger.<field>}}`).
+#[utoipa::path(
+    post,
+    path = "/api/workflows/{id}/webhook",
+    tag = "Workflows",
+    summary = "Fire a workflow from an inbound webhook (HMAC-authenticated)",
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Run started", body = serde_json::Value),
+        (status = 400, description = "Body is not valid JSON"),
+        (status = 401, description = "Missing/invalid signature or no secret configured"),
+        (status = 404, description = "No webhook trigger on this workflow")
+    )
+)]
+async fn workflow_webhook(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Ok(workflow) = crate::workflow::store::load_workflow(&id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("workflow '{id}' not found") })),
+        );
+    };
+    // Find the workflow's webhook trigger + its per-trigger secret.
+    let trigger_secret = workflow.triggers.iter().find_map(|t| match t {
+        crate::workflow::WorkflowTrigger::Webhook { secret } => Some(secret.clone()),
+        _ => None,
+    });
+    let Some(trigger_secret) = trigger_secret else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "workflow has no webhook trigger" })),
+        );
+    };
+    // Fail closed: a webhook trigger without a configured secret never fires — an
+    // unauthenticated public trigger would be a request-forgery vector.
+    let Some(secret) = trigger_secret.filter(|s| !s.trim().is_empty()) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "webhook trigger has no secret configured" })),
+        );
+    };
+    // Authenticate the raw bytes BEFORE parsing — verify exactly what was received,
+    // never a re-serialized value. Accept the common signature-header spellings.
+    let signature = ["webhook-signature", "x-signature", "x-hub-signature-256"]
+        .iter()
+        .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()));
+    if !crate::composio_triggers::verify_workflow_webhook_signature(&secret, &body, signature) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "invalid or missing webhook signature" })),
+        );
+    }
+    // The raw JSON body becomes the run's trigger payload. Validate it parses so a
+    // malformed body fails fast rather than seeding unusable trigger state.
+    let Ok(body_str) = std::str::from_utf8(&body) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "body is not valid UTF-8" })),
+        );
+    };
+    if serde_json::from_str::<serde_json::Value>(body_str).is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "body must be valid JSON" })),
+        );
+    }
+    match crate::composio_triggers::run_workflow_for_trigger(&id, body_str).await {
+        Ok(run_id) => (
+            StatusCode::OK,
+            Json(json!({ "ok": true, "run_id": run_id })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
 /// `GET /api/models/catalog?query=&sort=&limit=&installed_only=`
 #[utoipa::path(
     get,
@@ -11858,6 +13455,81 @@ async fn models_installed() -> Json<serde_json::Value> {
     Json(json!({ "models": models }))
 }
 
+/// `GET /api/models/updates` — which installed GGUF models have a newer file
+/// upstream. Detection is a cheap, retroactive **file-size compare**: the model
+/// author re-uploading a quant changes the file's byte size, so an installed
+/// model whose on-disk `size_bytes` differs from the Hub's current size for the
+/// same filename is stale. This avoids re-hashing multi-GB files on every check
+/// and never false-positives on a README edit (unlike a repo `lastModified`
+/// timestamp). The per-repo detail lookup is cached (see `model_detail_json`).
+///
+/// Snapshot (safetensors/MLX) models are skipped for now — they are multi-file
+/// repos with no single `size_bytes` to compare.
+#[utoipa::path(
+    get,
+    path = "/api/models/updates",
+    tag = "Models",
+    summary = "Installed GGUF models with a newer file available upstream",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn models_updates(State(state): State<ServerState>) -> Json<serde_json::Value> {
+    use crate::model_format::ModelFormat;
+
+    let installed = crate::model_catalog::installed::load_present();
+    let endpoint = active_model_endpoint(&state).await;
+    // One detail fetch per distinct repo, reused across its files.
+    let mut detail_by_repo: std::collections::HashMap<String, Option<serde_json::Value>> =
+        std::collections::HashMap::new();
+    let mut updates = Vec::new();
+
+    for m in installed {
+        if !matches!(m.format, ModelFormat::Gguf) {
+            continue;
+        }
+        let Some(installed_size) = m.size_bytes else {
+            continue;
+        };
+        if !detail_by_repo.contains_key(&m.repo_id) {
+            let detail = crate::model_catalog::model_detail_json(
+                &state.client,
+                &endpoint,
+                &m.repo_id,
+                ModelFormat::Gguf,
+            )
+            .await
+            .ok();
+            detail_by_repo.insert(m.repo_id.clone(), detail);
+        }
+        let Some(Some(detail)) = detail_by_repo.get(&m.repo_id) else {
+            continue;
+        };
+        let Some(files) = detail.get("files").and_then(|f| f.as_array()) else {
+            continue;
+        };
+        let latest = files.iter().find(|f| {
+            f.get("filename").and_then(serde_json::Value::as_str) == Some(m.filename.as_str())
+        });
+        let Some(latest_size) = latest
+            .and_then(|f| f.get("size_bytes"))
+            .and_then(serde_json::Value::as_u64)
+        else {
+            continue;
+        };
+        if latest_size != installed_size {
+            updates.push(json!({
+                "stem": m.stem,
+                "repo_id": m.repo_id,
+                "filename": m.filename,
+                "name": m.repo_id,
+                "installed_size": installed_size,
+                "latest_size": latest_size,
+            }));
+        }
+    }
+
+    Json(json!({ "updates": updates }))
+}
+
 /// `GET /api/models/engines` — the format → engine capability map for THIS node,
 /// with per-engine `supported` flags and the currently resident engine. The
 /// desktop renders compatibility annotations + the format facet from this
@@ -11970,6 +13642,10 @@ struct AddCatalogSourceBody {
     display_name: String,
     #[serde(default)]
     base_url: Option<String>,
+    /// Optional auth for a PRIVATE git/HTTP marketplace (Phase 5c). Prefer
+    /// `${ENV_VAR}` templates so no secret is persisted to disk.
+    #[serde(default)]
+    auth: Option<crate::catalog_source::SourceAuth>,
 }
 
 /// SSRF guard for a user-supplied custom catalog-source `base_url`. A custom
@@ -12223,6 +13899,61 @@ pub(crate) async fn guarded_get_bytes_with_bearer(
     read_capped_body(guarded_get_with_bearer(url, bearer).await?, url).await
 }
 
+/// SSRF-guarded HTTPS GET that attaches caller-supplied request headers (e.g. a
+/// private marketplace's `Authorization`/API-key headers). Shares the exact
+/// resolve/screen/pin/redirect-none/https-only guard as [`guarded_get`], so an
+/// injected credential can never bypass the SSRF protections. Invalid header
+/// names/values are skipped (never sent); **header values are never logged.**
+pub(crate) async fn guarded_get_with_headers(
+    url: &str,
+    headers: &[(String, String)],
+) -> anyhow::Result<reqwest::Response> {
+    let trimmed = url.trim();
+    let parsed =
+        url::Url::parse(trimmed).map_err(|e| anyhow::anyhow!("invalid URL {trimmed}: {e}"))?;
+    if parsed.scheme() != "https" {
+        anyhow::bail!("remote catalog URL must use https: {trimmed}");
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("URL has no host: {trimmed}"))?
+        .to_owned();
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let resolved = resolve_guarded_host(&host, port)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&host, &resolved)
+        .build()
+        .map_err(|e| anyhow::anyhow!("failed to build HTTP client: {e}"))?;
+    let mut req = client
+        .get(trimmed)
+        .header("User-Agent", crate::skills_catalog::USER_AGENT);
+    for (name, value) in headers {
+        match (
+            reqwest::header::HeaderName::from_bytes(name.as_bytes()),
+            reqwest::header::HeaderValue::from_str(value),
+        ) {
+            (Ok(n), Ok(v)) => req = req.header(n, v),
+            // Skip a malformed header name; the VALUE is never logged (may be secret).
+            _ => tracing::warn!("catalog fetch: skipping invalid header name '{name}'"),
+        }
+    }
+    req.send()
+        .await
+        .map_err(|e| anyhow::anyhow!("requesting {trimmed}: {e}"))
+}
+
+/// Header-bearing variant of [`guarded_get_bytes`] for private/authed catalogs.
+pub(crate) async fn guarded_get_bytes_with_headers(
+    url: &str,
+    headers: &[(String, String)],
+) -> anyhow::Result<Vec<u8>> {
+    read_capped_body(guarded_get_with_headers(url, headers).await?, url).await
+}
+
 /// Max bytes read from a `web_fetch` page body. A logged-in dashboard page is
 /// typically tens to hundreds of KB; 5 MB bounds memory against a hostile/large
 /// response. Read streamed, so a lying `Content-Length` can't bypass it; the body
@@ -12360,6 +14091,7 @@ async fn catalog_sources_add(
         id: body.id,
         display_name: body.display_name,
         base_url: body.base_url,
+        auth: body.auth,
     };
     match state.catalog_sources.add_custom(spec) {
         Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))),
@@ -12945,6 +14677,21 @@ async fn skills_catalog_detail(
 #[derive(serde::Deserialize)]
 struct SkillInstallBody {
     id: String,
+}
+
+/// `GET /api/skills/updates` — installed (through-Ryu) skills whose local
+/// SKILL.md differs from the current upstream package. Content-diff detection;
+/// see `skills_catalog::check_updates`.
+#[utoipa::path(
+    get,
+    path = "/api/skills/updates",
+    tag = "Skills",
+    summary = "Installed skills with a newer upstream SKILL.md",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn skills_updates(State(state): State<ServerState>) -> Json<serde_json::Value> {
+    let updates = crate::skills_catalog::check_updates(&state.client).await;
+    Json(json!({ "updates": updates }))
 }
 
 /// `POST /api/skills/catalog/install { id }` — installs into the universal
@@ -14852,9 +16599,20 @@ async fn gateway_get_config(
 )]
 async fn gateway_put_config(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(patch): Json<serde_json::Value>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     use crate::sidecar::gateway::{gateway_token, gateway_url};
+
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::GATEWAY_CONFIGURE)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "insufficient permissions: gateway.configure" })),
+        );
+    }
 
     let base = gateway_url();
     let base = base.trim_end_matches('/');
@@ -14865,6 +16623,61 @@ async fn gateway_put_config(
         .put(format!("{base}/v1/config"))
         .timeout(std::time::Duration::from_millis(5000))
         .json(&patch);
+    if let Some(t) = token.as_deref() {
+        req = req.bearer_auth(t);
+    }
+
+    match req.send().await {
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "reachable": false, "error": e.to_string() })),
+        ),
+        Ok(resp) => {
+            let status =
+                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            let body = resp
+                .json::<serde_json::Value>()
+                .await
+                .unwrap_or_else(|_| json!({}));
+            (status, Json(body))
+        }
+    }
+}
+
+// ── Gateway evaluator catalog proxy (unified-evaluator system) ──────────────
+//
+// `GET /api/gateway/evaluators` forwards to the gateway's `GET /v1/evaluators`,
+// carrying the bearer token server-side so the desktop never handles the master
+// key. Returns the gateway's response (the full evaluator catalog: built-ins
+// merged with `config.custom_evaluators`) verbatim. Fail-closed like
+// `gateway_get_config`: a structured 502 when the gateway is unreachable, so the
+// desktop catalog UI never renders a partial/stale set as if it were live.
+
+#[utoipa::path(
+    get,
+    path = "/api/gateway/evaluators",
+    tag = "Gateway",
+    summary = "Get the gateway evaluator catalog (proxied)",
+    description = "Forwards to the gateway's GET /v1/evaluators. Returns the full shared \
+evaluator catalog (8 categories) with `capabilities` + `enforced` flags: the built-in seed \
+table merged with any user-authored `custom_evaluators` (custom entries override a built-in by \
+`id` and report `builtin: false`). Fail-closed: a 502 is returned when the gateway is \
+unreachable.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn gateway_get_evaluators(
+    State(state): State<ServerState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    use crate::sidecar::gateway::{gateway_token, gateway_url};
+
+    let base = gateway_url();
+    let base = base.trim_end_matches('/');
+    let token = gateway_token();
+
+    let mut req = state
+        .client
+        .get(format!("{base}/v1/evaluators"))
+        .timeout(std::time::Duration::from_millis(3000));
     if let Some(t) = token.as_deref() {
         req = req.bearer_auth(t);
     }
@@ -15071,6 +16884,14 @@ async fn gateway_set_provider(
     path = "/api/gateway/evals/run",
     tag = "Gateway",
     summary = "Run a gateway eval dataset (proxied)",
+    description = "Forwards to the gateway's POST /v1/evals/run. An OPTIONAL run-level \
+`evaluators: [\"id\", …]` array of registry evaluator ids is forwarded to the gateway, which \
+scores each dataset case against those built-in/LLM-judge evaluators and returns per-evaluator \
+scores + aggregates. A separate OPTIONAL `code_evaluators: [{ id, lang, source }]` field (lang = \
+\"js\" | \"python\") is stripped before forwarding: Core runs those user functions locally (JS in \
+the deny-all Deno sandbox, Python via the sandbox backend or a host fallback) and merges the real \
+`executed:true` scores into each case's `evaluators` array, re-aggregating the affected ids. A \
+request without either field behaves exactly as before.",
     request_body = serde_json::Value,
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
@@ -15081,6 +16902,30 @@ async fn gateway_run_evals(
 ) -> (StatusCode, Json<serde_json::Value>) {
     use crate::sidecar::gateway::{gateway_token, gateway_url};
 
+    // Code evaluators are a CORE capability: pull them out, run them here, and
+    // NEVER forward them to the gateway (which would reject/ignore them). Also
+    // snapshot the request dataset so each case's payload can be enriched with
+    // `expected` + `vars` (the gateway's response case carries neither).
+    let code_specs: Vec<crate::eval_code::CodeEvaluatorSpec> = body
+        .get("code_evaluators")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let case_inputs: Vec<crate::eval_code::CaseInput> = body
+        .get("dataset")
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .map(crate::eval_code::CaseInput::from_case)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Strip `code_evaluators` from the forwarded body (keep the shape unchanged).
+    let mut fwd_body = body;
+    if let Some(obj) = fwd_body.as_object_mut() {
+        obj.remove("code_evaluators");
+    }
+
     let base = gateway_url();
     let base = base.trim_end_matches('/');
     let token = gateway_token();
@@ -15089,7 +16934,7 @@ async fn gateway_run_evals(
         .client
         .post(format!("{base}/v1/evals/run"))
         .timeout(std::time::Duration::from_secs(120))
-        .json(&body);
+        .json(&fwd_body);
 
     // Prefer the gateway token if configured; otherwise forward the caller's
     // Authorization header so per-key budgets are tracked for the eval run.
@@ -15110,10 +16955,27 @@ async fn gateway_run_evals(
         Ok(resp) => {
             let status =
                 StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let response_body = resp
+            let mut response_body = resp
                 .json::<serde_json::Value>()
                 .await
                 .unwrap_or_else(|_| json!({}));
+
+            // Merge Code evaluator scores in on the success path only. On any
+            // non-2xx (or an unparseable response missing `cases`) we pass the
+            // gateway's body through untouched — never fabricate scores over an
+            // error, and never 500 on a shape we don't recognise.
+            if status.is_success()
+                && !code_specs.is_empty()
+                && response_body.get("cases").is_some()
+            {
+                crate::eval_code::merge_code_evaluators(
+                    &mut response_body,
+                    &case_inputs,
+                    &code_specs,
+                )
+                .await;
+            }
+
             (status, Json(response_body))
         }
     }
@@ -15242,9 +17104,21 @@ fn urlencoding_simple(s: &str) -> String {
     summary = "List workflows",
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-async fn list_workflows() -> Json<serde_json::Value> {
+async fn list_workflows(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+) -> axum::response::Response {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::WORKFLOW_VIEW)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: workflow.view".to_owned(),
+        );
+    }
     let workflows = crate::workflow::store::list_workflows();
-    Json(json!({ "workflows": workflows }))
+    Json(json!({ "workflows": workflows })).into_response()
 }
 
 /// `GET /api/workflows/catalog` — list the curated workflow templates
@@ -15342,8 +17216,19 @@ async fn install_workflow_template(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn create_workflow(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(workflow): Json<crate::workflow::Workflow>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::WORKFLOW_EDIT)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "insufficient permissions: workflow.edit" })),
+        );
+    }
     // Validate → stamp → save → reconcile triggers via the single shared write
     // path so the REST handler and the chat-driven workflow_builder behave
     // identically. A DAG-validation failure surfaces as a 400; any other error
@@ -15376,8 +17261,19 @@ async fn create_workflow(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn get_workflow(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::WORKFLOW_VIEW)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "insufficient permissions: workflow.view" })),
+        );
+    }
     match crate::workflow::store::load_workflow(&id) {
         Ok(wf) => (StatusCode::OK, Json(json!({ "workflow": wf }))),
         Err(_) => (
@@ -15396,8 +17292,19 @@ async fn get_workflow(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn delete_workflow(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::WORKFLOW_DELETE)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "insufficient permissions: workflow.delete" })),
+        );
+    }
     match crate::workflow::store::delete_workflow(&id) {
         Ok(true) => {
             // Tear down the trigger resources the workflow created so a deleted
@@ -15598,9 +17505,20 @@ struct RunWorkflowBody {
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn run_workflow(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     body: Option<Json<RunWorkflowBody>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::WORKFLOW_RUN)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "insufficient permissions: workflow.run" })),
+        );
+    }
     let body = body.map(|b| b.0).unwrap_or_default();
 
     let workflow = match crate::workflow::store::load_workflow(&id) {
@@ -16515,11 +18433,11 @@ mod plugin_catalog_tests {
     /// best-effort and never run in a test).
     #[test]
     fn plugin_runtime_dir_is_namespaced_and_venv_derives() {
-        let dir = plugin_runtime_dir("io.ryu.durable");
+        let dir = plugin_runtime_dir("durable");
         // Namespaced under the plugin id, ending in the `runtime` segment.
         assert!(dir.ends_with("runtime"), "dir: {}", dir.display());
         assert!(
-            dir.to_string_lossy().contains("io.ryu.durable"),
+            dir.to_string_lossy().contains("durable"),
             "dir must be namespaced by plugin id: {}",
             dir.display()
         );
@@ -16541,7 +18459,7 @@ mod plugin_catalog_tests {
     #[test]
     fn manifest_policy_types_collects_policy_kinds() {
         let with_policies = PluginManifest {
-            id: "io.ryu.firewall".to_owned(),
+            id: "firewall".to_owned(),
             name: "FW".to_owned(),
             version: "1.0.0".to_owned(),
             runnables: vec![
@@ -16563,7 +18481,7 @@ mod plugin_catalog_tests {
         assert_eq!(manifest_policy_types(&with_policies), vec!["firewall"]);
 
         let no_policies = PluginManifest {
-            id: "io.ryu.spider".to_owned(),
+            id: "spider".to_owned(),
             name: "Spider".to_owned(),
             version: "1.0.0".to_owned(),
             runnables: vec![RunnableEntry {
@@ -16580,7 +18498,7 @@ mod plugin_catalog_tests {
     #[test]
     fn manifest_maps_to_entry_with_kinds() {
         let m = PluginManifest {
-            id: "io.ryu.spider".to_owned(),
+            id: "spider".to_owned(),
             name: "Spider".to_owned(),
             version: "1.2.3".to_owned(),
             runnables: vec![
@@ -16602,7 +18520,7 @@ mod plugin_catalog_tests {
             ..Default::default()
         };
         let e = plugin_manifest_to_entry(&m);
-        assert_eq!(e["id"], "io.ryu.spider");
+        assert_eq!(e["id"], "spider");
         assert_eq!(e["name"], "Spider");
         assert_eq!(e["version"], "1.2.3");
         assert_eq!(e["source"], "built-in");

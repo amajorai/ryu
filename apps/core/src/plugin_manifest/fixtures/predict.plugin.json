@@ -1,0 +1,26 @@
+{
+  "id": "predict",
+  "name": "Predictive Typing",
+  "version": "1.0.0",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
+  "runnables": [
+    {
+      "id": "policy-predict",
+      "name": "System-wide predictive typing (on/off)",
+      "kind": "policy",
+      "config": {
+        "policy_type": "predict",
+        "definition": {
+          "surface": "system-wide",
+          "note": "On/off switch for system-wide inline autocomplete: the /api/predict/* brain used by the apps/predict overlay and any predict client. Enabling this plugin is the single switch — there is no separate settings toggle. Each prediction still routes through the Gateway. Core-local — no gateway restart."
+        }
+      }
+    }
+  ],
+  "contributes": {
+    "policies": [{ "id": "policy-predict", "title": "Predictive Typing" }]
+  },
+  "permission_grants": []
+}

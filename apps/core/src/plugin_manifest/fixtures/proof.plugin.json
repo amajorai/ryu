@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.proof",
+  "id": "proof",
   "name": "Proof of Work",
   "version": "1.0.0",
   "runnables": [],

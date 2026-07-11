@@ -94,6 +94,25 @@ The Island (`apps/island`) is an Electron dynamic-island overlay that also **hos
   they need a real display to exercise. Shadow context capture is Windows-first.
 </Callout>
 
+### System-wide dictation
+
+The Island also hosts **system-wide dictation** - a separate global shortcut (default
+`CommandOrControl+Shift+D`) that captures speech and types the transcript straight into whatever
+native app has OS focus. This is distinct from the Island's voice input, which drops what you say
+into the Island chat to run an agent; dictation just types.
+
+Insertion goes through **Ghost** (`apps/island/src/main/services/dictation.ts`): the transcript is
+sent to Core's tool call endpoint as a `ghost__ghost_type` action with no target app, so it lands in
+the currently focused window. Paste mode uses the clipboard plus a Ghost hotkey instead, and an
+optional post-process step can clean the transcript up first. The shortcut deliberately never
+focuses the Island - stealing focus would break typing into your target app.
+
+<Callout type="warn">
+  Dictation is a companion feature that needs a display, a microphone, and the Ghost sidecar to
+  exercise, so it is not yet live-verified. The preference lives at `DICTATION_PREF_KEY`
+  (`apps/island/src/shared/dictation.ts`); configure it in the desktop under the Island settings.
+</Callout>
+
 ## See also
 
 <Cards>

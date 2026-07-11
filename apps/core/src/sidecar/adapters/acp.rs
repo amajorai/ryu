@@ -1189,6 +1189,14 @@ pub fn spawn_acp_task(
     permission_scope_id: Option<String>,
 ) -> mpsc::UnboundedReceiver<AcpEvent> {
     let (events_tx, events_rx) = mpsc::unbounded_channel();
+    // Resolved concrete agent id for this turn (== the effective/bridge agent id).
+    // Folded into the pool key below so the session is keyed by (conversation,
+    // agent, spawn_cmd, cwd): switching agents mid-conversation — including the
+    // Plane B agent-auto case (spec §2.3) — starts a FRESH session for the newly
+    // chosen agent while the previous agent's instance is kept warm in the pool.
+    // Keying on the agent id (not just spawn_cmd) is what separates two agent
+    // records that happen to share a binary/spawn command but differ in config.
+    let agent_key = agent_id.clone();
     let acp_turn = AcpTurn {
         prompt,
         delta_prompt,
@@ -1220,7 +1228,10 @@ pub fn spawn_acp_task(
         return events_rx;
     }
 
-    let key = format!("{conversation}\u{1}{spawn_cmd}\u{1}{}", cwd.display());
+    let key = format!(
+        "{conversation}\u{1}{agent_key}\u{1}{spawn_cmd}\u{1}{}",
+        cwd.display()
+    );
     let mut pool = acp_pool().lock().expect("acp pool mutex poisoned");
     // Drop dead instances (idle-TTL expired or crashed) so the map can't grow.
     pool.retain(|_, turns| !turns.is_closed());
@@ -1233,7 +1244,18 @@ pub fn spawn_acp_task(
         }
     }
 
-    // No live instance for this chat: spawn one and enqueue the turn.
+    // No live instance for this (conversation, agent) key: spawn one and enqueue
+    // the turn. On a mid-conversation harness switch (Plane B agent-auto picking a
+    // different agent than last turn) this is the newly-chosen agent's first turn.
+    //
+    // TODO(cross-harness transcript replay, spec §2.3): a freshly-spawned agent's
+    // FIRST turn is already seeded with recent context — `build_acp_prompt` folds
+    // the caller's `short_term` (a window of recent conversation turns) into the
+    // prompt preamble, so the new harness is not blind to the conversation. What is
+    // NOT yet replayed is the WHOLE conversation history (a full transcript
+    // summary/prefix) into the new ACP session, and in-subprocess ephemeral state
+    // (open files the previous agent was editing) is intentionally not carried over
+    // — history is replayed, live subprocess state is not.
     let (turns_tx, turns_rx) = mpsc::unbounded_channel();
     let _ = turns_tx.send(pending.expect("turn present"));
     let spawn_cmd_task = spawn_cmd.clone();
@@ -2278,12 +2300,69 @@ fn extract_exec_command(tool_call: &serde_json::Value) -> Option<String> {
     None
 }
 
-/// Run an ACP tool call's command (if any) through the gateway command-approval
-/// scanner. `Allow` when no command is recoverable; `check_exec_scan` itself
+/// Extract a scannable representation of a FILE-MUTATING tool call
+/// (Write/Edit/MultiEdit/NotebookEdit and the like) so path-based gateway deny
+/// rules apply to native file tools that carry no shell command. Native coding
+/// agents (Claude Code, Codex, …) edit files through dedicated tools whose input
+/// is `{ file_path, content }` / `{ file_path, new_string }` — there is no
+/// `command` field, so [`extract_exec_command`] misses them and the write slips
+/// the gate. We synthesize a `"write <path>"` string so a policy that denies
+/// writes under, e.g., `.ssh` / `.env` / `/etc` still fires. Read-only tools
+/// (Read/Grep with a path but no content/edit payload) are deliberately NOT swept
+/// in. Returns `None` when nothing write-like is present.
+fn extract_file_write(tool_call: &serde_json::Value) -> Option<String> {
+    fn path_in(obj: &serde_json::Value) -> Option<String> {
+        for key in [
+            "file_path",
+            "filePath",
+            "path",
+            "abs_path",
+            "absPath",
+            "notebook_path",
+            "notebookPath",
+        ] {
+            if let Some(s) = obj.get(key).and_then(serde_json::Value::as_str) {
+                if !s.trim().is_empty() {
+                    return Some(s.to_owned());
+                }
+            }
+        }
+        None
+    }
+    // A write is a path PLUS a mutating payload; without the payload it may be a
+    // read (Read/Grep take a path too), which must not be treated as a write.
+    fn is_write(obj: &serde_json::Value) -> bool {
+        ["content", "new_string", "newString", "edits", "new_source", "newSource"]
+            .iter()
+            .any(|k| obj.get(k).is_some())
+    }
+    fn write_path(obj: &serde_json::Value) -> Option<String> {
+        if is_write(obj) {
+            path_in(obj)
+        } else {
+            None
+        }
+    }
+
+    if let Some(p) = write_path(tool_call) {
+        return Some(format!("write {p}"));
+    }
+    for key in ["rawInput", "raw_input", "input"] {
+        if let Some(p) = tool_call.get(key).and_then(write_path) {
+            return Some(format!("write {p}"));
+        }
+    }
+    None
+}
+
+/// Run an ACP tool call through the gateway command-approval scanner. Scans the
+/// shell command for exec tools, else a synthesized `"write <path>"` for
+/// file-mutating tools, so native file tools are governed too (not just shell
+/// exec). `Allow` when nothing scannable is recoverable; `check_exec_scan` itself
 /// short-circuits to `Allow` when `RYU_EXEC_APPROVAL_MODE` is unset or `off`.
 async fn acp_exec_scan_verdict(tool_call: &serde_json::Value, agent: &str) -> ExecScanOutcome {
-    match extract_exec_command(tool_call) {
-        Some(command) => check_exec_scan("acp", &command, None, Some(agent)).await,
+    match extract_exec_command(tool_call).or_else(|| extract_file_write(tool_call)) {
+        Some(scannable) => check_exec_scan("acp", &scannable, None, Some(agent)).await,
         None => ExecScanOutcome::Allow,
     }
 }
@@ -3584,6 +3663,28 @@ mod tests {
         // Empty command string is treated as absent.
         let tc = serde_json::json!({ "command": "   " });
         assert!(extract_exec_command(&tc).is_none());
+    }
+
+    #[test]
+    fn extract_file_write_finds_write_shapes_not_reads() {
+        // Write tool: file_path + content → synthesized "write <path>".
+        let tc = serde_json::json!({ "file_path": "/home/u/.ssh/authorized_keys", "content": "x" });
+        assert_eq!(
+            extract_file_write(&tc).as_deref(),
+            Some("write /home/u/.ssh/authorized_keys")
+        );
+        // Edit tool nested under rawInput: file_path + new_string.
+        let tc = serde_json::json!({
+            "kind": "edit",
+            "rawInput": { "file_path": "/etc/hosts", "old_string": "a", "new_string": "b" }
+        });
+        assert_eq!(extract_file_write(&tc).as_deref(), Some("write /etc/hosts"));
+        // A read (path but NO mutating payload) is NOT treated as a write.
+        let tc = serde_json::json!({ "kind": "read", "path": "/etc/hosts" });
+        assert!(extract_file_write(&tc).is_none());
+        // A shell exec (has a command, no file payload) is out of scope here.
+        let tc = serde_json::json!({ "command": "ls" });
+        assert!(extract_file_write(&tc).is_none());
     }
 
     // ── Pi as default-installed+enabled agent (U041) ──────────────────────────

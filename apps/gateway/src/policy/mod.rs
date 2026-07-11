@@ -46,6 +46,17 @@ pub struct EffectivePolicy {
     /// Provider/data regions permitted (e.g. "us", "eu"). Empty = no restriction.
     #[serde(default)]
     pub allowed_regions: Vec<String>,
+    /// The org-effective firewall overlay cascaded by the control plane (hosted
+    /// hierarchical policy). `None` ⇒ no org override; the gateway's node base
+    /// (and any standalone-local overlay) applies. Fed to
+    /// [`crate::firewall::resolve::FirewallResolver`]. Wire key: top-level
+    /// `firewall` on the resolve response; its own fields are snake_case.
+    #[serde(default)]
+    pub firewall: Option<crate::config::FirewallOverlay>,
+    /// Per-agent firewall overlays for this org, keyed by agent id. Wire key:
+    /// top-level `agentOverlays` (camelCase) on the resolve response.
+    #[serde(default)]
+    pub agent_overlays: std::collections::HashMap<String, crate::config::FirewallOverlay>,
 }
 
 impl EffectivePolicy {
@@ -97,6 +108,14 @@ struct ResolveResponse {
     #[serde(default)]
     #[allow(dead_code)]
     monthly_credit_pool_micro_usd: i64,
+    /// Org-effective firewall overlay (hosted hierarchical policy). Top-level on
+    /// the resolve response; its own fields are snake_case. Emitted by the
+    /// control plane (§5); the gateway feeds it to the firewall resolver.
+    #[serde(default)]
+    firewall: Option<crate::config::FirewallOverlay>,
+    /// Per-agent firewall overlays keyed by agent id (top-level `agentOverlays`).
+    #[serde(default)]
+    agent_overlays: std::collections::HashMap<String, crate::config::FirewallOverlay>,
 }
 
 /// The `organization` field of the resolve response. We only need the id.
@@ -117,6 +136,8 @@ impl ResolveResponse {
                 locked_guardrails: self.policy.rules.locked_guardrails,
                 approved_models: self.policy.rules.approved_models,
                 allowed_regions: self.policy.rules.allowed_regions,
+                firewall: self.firewall,
+                agent_overlays: self.agent_overlays,
             },
         }
     }

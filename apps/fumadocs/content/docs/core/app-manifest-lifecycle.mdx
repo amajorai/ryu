@@ -50,6 +50,7 @@ A manifest carries the fields below. The serde shapes are owned by the SDK schem
 | `activation_events` | no | Lazy-wake events (empty list means eager) |
 | `engines` | no | `engines.ryu` semver requirement the running Core must satisfy |
 | `runtime` | no | A declarative external runtime (e.g. a Python venv + pip deps + assets) |
+| `sidecars` | no | Managed child processes Core downloads, spawns, and health-checks (see [Managed sidecars](#manifest-declared-managed-sidecars)) |
 
 ## Per-kind Runnable validation
 
@@ -137,12 +138,49 @@ field, so a plugin cannot promote itself. The lists live in `apps/core/src/plugi
 | `core` | First-party, shipped with Ryu. Listed in `CORE_PLUGINS`. Renders in the "Core" store section |
 | `community` | Everything else, including user-installed plugins and built-in fixtures not in `CORE_PLUGINS`. Always install-then-enable opt-in |
 
-A subset of Core plugins is seeded enabled on a fresh install. `CORE_DEFAULT_ON` is currently
-`io.ryu.engines` (local llama.cpp for zero-setup chat) and `io.ryu.durable` (the in-process durable
-workflow engine). The seed runs once at startup and respects user choice: it acts only when there is
-no prior record for that plugin, so a later disable survives a restart (`main.rs` default-on seeding,
-#444). The opt-in Core plugins (`firewall`, `routing`, `sandbox`, `headroom`) are Core-tier but
-deliberately excluded from default-on because they change gateway or sandbox behaviour.
+A subset of Core plugins is seeded enabled on a fresh install (`CORE_DEFAULT_ON` in
+`apps/core/src/plugins/builtins.rs`). It spans the local engine (`engines`) and durable workflow
+engine (`durable`), the four default tool apps (`ghost`, `shadow`, `spider`, `agentbrowser` - see
+[Default tool apps](#default-tool-apps-auto-seed)), the chat turn-hook plugins (`goal`, `proof`,
+`double-check`), the pre-turn prompt improver (`com.ryuhq.auto-expand`), and the bundled Ryu Apps
+(`checklist`, `smart-intake-form`, `data-grid-explorer`, `chart-studio`, `decision-wizard`,
+`quest-board`, `worktree-diff-review`, `gateway-budget-dial`). Ids are the bare manifest `id`
+(e.g. `engines`, not `io.ryu.engines`). The seed runs once at startup and respects user choice: it
+acts only when there is no prior record for that plugin, so a later disable survives a restart
+(`main.rs` default-on seeding, #444). The opt-in Core plugins (`firewall`, `routing`, `sandbox`,
+`predict`) are Core-tier but deliberately excluded from default-on because they change gateway,
+sandbox, or capture behaviour.
+
+## Default tool apps auto-seed
+
+Ghost, Shadow, Spider, and Agent Browser are the batteries-included tool apps. Their manifest ids
+are in both `CORE_PLUGINS` and `CORE_DEFAULT_ON` (`apps/core/src/plugins/builtins.rs`), so on a
+fresh install the plugin seeder auto-installs and enables each one - they appear installed exactly
+like the auto-downloaded default models, rather than waiting for a manual install-then-enable.
+
+| App | Tool | Cross-platform | Reaches the web |
+|---|---|---|---|
+| `ghost` | Desktop automation (30 tools) | Windows-first | no |
+| `shadow` | Screen and audio capture + semantic memory | Windows-first | no |
+| `spider` | Web crawler (Rust `spider-rs/spider`) | yes | yes |
+| `agentbrowser` | Web browsing (npx-launched MCP server) | yes | yes |
+
+The seeded record is a **governance shell**: each fixture declares `runnables: []`. The actual tools
+are served by their own dedicated provider - Ghost and Shadow through Core's MCP registry, Agent
+Browser as an npx MCP server, Spider as a Rust sidecar - so declaring zero runnables means the seed
+never double-lists a tool that already comes from the MCP provider. Enabling the record just makes
+each one a first-class, governed, disable-able App; the tool process still runs through its own
+sidecar/MCP lifecycle. This is why they are also **system plugins** (`SYSTEM_PLUGINS`,
+`is_builtin`): the record is the governed App surface, the sidecar/MCP provider is the run path, and
+the two facts coexist.
+
+<Callout type="info">
+Because the run path is the sidecar/MCP provider, not the plugin record, the tool process still has
+to be installed and started on its own (`POST /api/setup/:name/install`,
+`POST /api/sidecar/:name/start`). The auto-seeded record makes the App show as installed; it does not
+by itself download a Windows-only binary onto a non-Windows host. See the Ghost/Shadow note under
+[Built-in manifests](#built-in-manifests).
+</Callout>
 
 ## Built-in manifests
 
@@ -168,6 +206,51 @@ Ghost and Shadow are **Windows-first** and **sidecar-managed**. Their lifecycle 
 (`POST /api/setup/:name/install` to install, `POST /api/sidecar/:name/start|stop` to run), not the
 `PluginStore` install/enable path, so they never appear in the SQLite plugins table. On other
 platforms the desktop renders a graceful unavailable state.
+</Callout>
+
+## Manifest-declared managed sidecars
+
+A manifest can declare `sidecars[]` - long-running child processes Core owns end-to-end (download or
+provision, spawn, health-check, stop). This is the **app to sidecar bridge**: a capability sidecar
+(Ghost, Shadow, a TTS engine) can be a fully manifest-defined app instead of hardcoded Rust, and a
+third-party app can ship its own process. Infra sidecars (llama.cpp, the Gateway, embeddings) stay
+Core substrate and are deliberately not expressible here. The type is `SidecarSpec` in
+`apps/core/src/plugin_manifest/schema.rs`; the generic driver is `ManifestSidecar`
+(`apps/core/src/sidecar/manifest_sidecar.rs`). The manifest field itself is documented in
+[Bundle Runnables with plugin.json](/docs/develop/extensions/plugin-json-manifest#declare-a-managed-sidecar).
+
+Each `SidecarSpec` carries a `name` (unique within the plugin), a `process`, a `port`, and a
+`health_path` (default `/health`). The process is obtained one of two ways.
+
+| `process.kind` | How Core runs it |
+|---|---|
+| `binary` | Fetches the executable (or a `tar.gz`/`tar.bz2`/`zip` archive) via the shared `DownloadCenter` - streaming `.part` + resume + SHA-256 verify - into a version-namespaced `bin/<version>/` dir, extracts if archived (whole tree so sibling libraries stay co-located), makes it executable, then spawns it with the declared `args` + `env` |
+| `python` | Reuses the external-runtime provisioner (venv + pip + assets), then spawns `python -m <entry>` |
+
+The URL must be `https` and is screened by the SSRF egress check at download time. Without a
+`sha256` an already-present artifact is trusted (idempotent skip); with one, a mismatch re-fetches
+(fail closed).
+
+**The `sidecar:process` grant gates it.** Downloading and spawning an arbitrary process is a broader
+surface than the manifest metadata path, so `may_run_sidecar` (`manifest_sidecar.rs`) fails closed - a
+Core-tier plugin is auto-allowed, and a Community-tier plugin must hold the Gateway-approved
+`sidecar:process` grant, read from the plugin's *approved* grants (post-Gateway validation), never its
+declared, unvalidated `permission_grants`. For the Python flavor this one grant also stands in for
+`runtime:external`, since binary execution is the broader surface.
+
+Once permitted, the sidecar is registered under the namespaced key `<plugin_id>/<name>` into the live
+`SidecarManager`, so it rides the same managed lifecycle - health monitor, resource sampler,
+`/api/sidecar/status`, graceful stop - as any built-in. Before spawning, the manager claims the
+declared `port` with a `TcpListener` bind-probe, which rejects a collision with a built-in (e.g.
+llama.cpp on 8080) or another plugin. There is no port registry in v1, so the plugin author is
+responsible for choosing a free port.
+
+<Callout type="warn">
+Manifest sidecars are **not** in the `SidecarManager` startup order, so nothing restarts them after a
+Core restart on its own. `reconcile_plugin_sidecars` (spawned from `main.rs` next to the `onStartup`
+fire) is the load-bearing boot step: it re-registers and starts every enabled plugin's declared
+sidecar. A manifest sidecar is always optional (`is_required` is false), so a plugin process failing
+to start never aborts Core boot.
 </Callout>
 
 ## Activation events

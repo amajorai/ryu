@@ -75,6 +75,8 @@ pub async fn dispatch(tool: &str, arguments: Value) -> Result<Value> {
                 title: title.clone(),
                 body,
                 level,
+                target_user_id: None,
+                notification_id: None,
             });
             Ok(json!({ "ok": true, "delivered": true, "title": title }))
         }

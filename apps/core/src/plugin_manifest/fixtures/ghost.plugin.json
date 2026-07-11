@@ -1,38 +1,7 @@
 {
-  "id": "io.ryu.ghost",
+  "id": "ghost",
   "name": "Ghost",
   "version": "1.0.0",
-  "runnables": [
-    {
-      "id": "tool-ghost-screenshot",
-      "name": "Screenshot",
-      "kind": "tool",
-      "config": { "slug": "ghost__screenshot" }
-    },
-    {
-      "id": "tool-ghost-click",
-      "name": "Click",
-      "kind": "tool",
-      "config": { "slug": "ghost__click" }
-    },
-    {
-      "id": "tool-ghost-type",
-      "name": "Type",
-      "kind": "tool",
-      "config": { "slug": "ghost__type" }
-    },
-    {
-      "id": "tool-ghost-find",
-      "name": "Find Element",
-      "kind": "tool",
-      "config": { "slug": "ghost__find" }
-    },
-    {
-      "id": "tool-ghost-context",
-      "name": "Screen Context",
-      "kind": "tool",
-      "config": { "slug": "ghost__context" }
-    }
-  ],
+  "runnables": [],
   "permission_grants": ["mcp:ghost"]
 }

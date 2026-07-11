@@ -18,7 +18,7 @@ Runnable in code, see [Authoring workflows](/docs/develop/extensions/author-work
 A workflow is a set of `WorkflowNode` entries connected by `WorkflowEdge` edges
 (`apps/core/src/workflow/mod.rs`). An edge can carry an optional `branch` label, so a `Condition`
 or one-shot `While` routes down a true or false path. `NodeKind` is a tagged enum (`type`,
-snake_case) with 17 variants:
+snake_case) with 22 variants:
 
 | Node (`type`) | What it does | Key fields |
 |---|---|---|
@@ -28,6 +28,7 @@ snake_case) with 17 variants:
 | `condition` | Branches on a boolean expression, following the true or false edge | `expr` |
 | `transform` | A pure data op (uppercase, lowercase, trim, json_parse, template, identity) | `op`, `template?` |
 | `tool` | Invokes a Core tool by its fully qualified id `<server>__<tool>` (for example `spider__crawl`) | `name`, `args` |
+| `mcp` | The explicit two-field form of `tool` - names an MCP `server` and `tool` separately, joined into `<server>__<tool>` before the call | `server`, `tool`, `args` |
 | `webhook` | POSTs the resolved value to an external URL | `url` |
 | `set_state` | Writes a resolved template into the run's `state` map, then passes input through unchanged | `key`, `value` |
 | `delay` | Pauses for `ms` milliseconds (a durable timer, see below) | `ms` |
@@ -36,13 +37,45 @@ snake_case) with 17 variants:
 | `guardrails` | Routes the incoming text through the Gateway firewall and fails the run on a block | `checks` |
 | `sub_workflow` | Runs another persisted workflow by id and forwards its output (max depth 8) | `workflow_id` |
 | `agent_delegate` | Fans out to sub-agents with caps (see [Delegation](/docs/core/delegation)) | - |
+| `agent` | Runs one installed agent on a task as a single in-context step (the first-class alternative to a raw `prompt`) | `agent_id`, `task?` |
+| `skill` | Applies an installed Agent Skill (its `SKILL.md` body) to the input, under an optional `agent_id` or the default gateway LLM | `skill`, `agent_id?`, `task?` |
+| `plugin` | Runs a Runnable an installed plugin bundles, dispatched to that kind's path (tool, agent, workflow, or skill) | `plugin_id`, `runnable_id`, `args` |
 | `awakeable` | A durable pause for human-in-the-loop input | - |
 | `recipe` | Replays a whole recorded ghost desktop automation by name | `recipe`, `params` |
 | `ghost_action` | Runs a single recorded desktop action (click, type, scroll, ...) | `action`, `target`, `params` |
+| `notify_user` | Pings org/team/members across devices, optionally suspending as a HITL ack gate (see [Notify and provider steps](#notify-and-provider-steps)) | `target`, `title`, `body`, `ack_mode`, `ack_timeout_ms?` |
 
 The `guardrails` `checks` field names the firewall categories to enforce (`pii`, `jailbreak`,
 `moderation`), mapped to the Gateway firewall's scan categories server side. The `recipe` and
 `ghost_action` nodes drive recorded desktop automations through the ghost engine.
+
+### Notify and provider steps
+
+Five of the kinds are the object-model bridge - a workflow step that runs any peer Runnable
+(`AGENTS.md` Runnable union), so the graph is not limited to prompts and raw tools. `agent`, `skill`,
+and `plugin` each decide *what runs* (Core), while every model call they make stays gateway-governed.
+`mcp` is the two-field sibling of `tool` - an author picks a `server` and a `tool` separately instead
+of hand-assembling the compound `<server>__<tool>` id, and the executor reuses the `tool` path so the
+idempotency key and `input` folding behave identically
+(`apps/core/src/workflow/executor.rs`, the `Mcp` arm).
+
+`notify_user` pings one or more org members, a team, or an explicit member set across their devices
+(the app inbox, the desktop OS toast, and mobile push). Its `target` is a tagged `NotifyTargetSpec`
+with three forms:
+
+| `target.kind` | Pings | Extra field |
+|---|---|---|
+| `org` | Every member of the node's bound organization | - |
+| `team` | Every member of one team in the org | `team_id` |
+| `members` | A hand-picked set of member user ids (no roster lookup) | `user_ids` |
+
+The `ack_mode` field decides the node's shape (`AckMode` in `apps/core/src/workflow/mod.rs`). Absent
+or `none` is fire-and-forget - deliver, emit a JSON receipt as the node output, and continue
+downstream. Any of `first`, `all`, or `quorum` (with `n`) turns the node into a human-in-the-loop
+gate - it delivers, then suspends the run to `AwaitingInput` until the ack policy is met, exactly like
+an `awakeable`. Each acking member's inbox resumes the run once the threshold is reached; an optional
+`ack_timeout_ms` auto-fails a stalled gate. Membership is resolved over the gateway key against the
+node's bound org (the control plane owns *who is a member*).
 
 <Callout type="warn">
   `recipe` and `ghost_action` are Windows-first and no-op with a clear error until the ghost sidecar
@@ -91,9 +124,9 @@ node's state to disk after every step. Runs are stored as JSON under
 `~/.ryu/workflow-runs/<id>.json`.
 
 A run carries a `RunStatus` of `Running`, `Completed`, `Failed`, or `AwaitingInput`. When an
-`awakeable` node is reached, the run suspends to `AwaitingInput` and waits for a human or an external
-signal. Because node state is persisted, a resumed run skips already-completed nodes and reuses their
-output.
+`awakeable` node is reached (or a `notify_user` node whose `ack_mode` requires waiting), the run
+suspends to `AwaitingInput` and waits for a human or an external signal. Because node state is
+persisted, a resumed run skips already-completed nodes and reuses their output.
 
 ```mermaid
 stateDiagram-v2
@@ -203,6 +236,55 @@ canvas through `TriggerConfig` (`apps/desktop/src/components/workflows/TriggerCo
 <Callout type="info">
   Composio webhook delivery depends on the public webhook-ingress backend reaching a Core node. See
   [Node and presence](/docs/core/node-and-presence) for the ingress seam.
+</Callout>
+
+## Version history
+
+Every workflow keeps a bounded, server-backed history of past definitions under
+`~/.ryu/workflow-versions/<workflow_id>/<version_id>.json` (`apps/core/src/workflow/store.rs`,
+`save_workflow_version`). A version wraps a full `Workflow` snapshot plus light metadata (a `label`,
+`created_at`), and lists load metadata only so the graph is not re-read for a picker. Snapshots are
+created manually with a "Save version" call or automatically just before a restore.
+
+A restore re-persists the captured definition through the shared `persist_workflow` write path, so
+triggers reconcile and `updated_at` is re-stamped. Before overwriting, the restore handler first
+snapshots the *current* definition as a version labelled `Before restore`
+(`apps/core/src/server/mod.rs`, `restore_workflow_version`), so a restore is itself undoable. History
+is capped at 50 versions per workflow (`MAX_WORKFLOW_VERSIONS`); the oldest beyond that are pruned on
+each new snapshot.
+
+| Action | Endpoint |
+|---|---|
+| List a workflow's versions (newest first) | `GET /workflows/:id/versions` |
+| Snapshot the current definition | `POST /workflows/:id/versions` |
+| Fetch one version in full | `GET /workflows/:id/versions/:version_id` |
+| Restore a version (snapshots current first) | `POST /workflows/:id/versions/:version_id/restore` |
+
+This is the same snapshot / diff / restore shape Spaces documents use through `document_versions`
+(`apps/core/src/spaces.rs`); see [Spaces and RAG](/docs/core/spaces-rag) for that surface.
+
+## Natural-language builder
+
+A workflow can be assembled by chat instead of by hand on the canvas. The builder meta-agent (the
+left pane of the desktop Workflows page) drives three in-process tools exposed through the MCP
+registry (`apps/core/src/runnable/workflow_builder.rs`): `workflow_builder__get_workflow`,
+`workflow_builder__create_workflow`, and `workflow_builder__configure_workflow`. This is the workflow
+analog of the agent builder - describe a flow in natural language and the model authors the DAG.
+
+`configure_workflow` applies a partial patch, so the model edits incrementally rather than rewriting
+the whole graph - `nodes_upsert` (add or replace nodes by id), `nodes_remove` (with automatic incident
+-edge cascade), `edges_add`, and `edges_remove`. A DAG-validation failure returns a **soft**
+`{ success: false, error }` value rather than a hard tool error, so the model reads the message and
+self-corrects within the same turn.
+
+Every save routes through the shared `persist_workflow` path - the same write path the REST
+`POST /workflows` handler uses - so a chat edit and a canvas save behave identically, including DAG
+validation, id minting, and trigger reconciliation.
+
+<Callout type="warn">
+  The builder reads and writes the **persisted** definition, and the React Flow canvas is a second
+  editor with its own Save button. Unsaved canvas edits are clobbered when the builder writes and the
+  canvas reloads, so save canvas edits before driving the chat.
 </Callout>
 
 ## Working with workflows

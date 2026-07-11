@@ -318,6 +318,10 @@ pub struct PushTokenBody {
     pub token: String,
     #[serde(default)]
     pub platform: Option<String>,
+    /// The member registering this device, so notifications can be pushed to a
+    /// specific person's phones. Omitted by anonymous / single-user nodes.
+    #[serde(default)]
+    pub user_id: Option<String>,
 }
 
 /// `POST /api/monitors/push-tokens` — register a mobile Expo push token.
@@ -328,7 +332,11 @@ pub async fn register_push_token(
     match state
         .monitors
         .store
-        .register_push_token(&body.token, body.platform.as_deref())
+        .register_push_token(
+            &body.token,
+            body.platform.as_deref(),
+            body.user_id.as_deref(),
+        )
         .await
     {
         Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))),

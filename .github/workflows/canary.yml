@@ -1,0 +1,120 @@
+name: canary
+
+# Bleeding-edge build of the open-core headless trio (core / gateway / cli) on EVERY push to
+# main that touches the built sources, published as a rolling `canary` PRERELEASE. This is the
+# fresh-on-merge companion to nightly.yml (which is the once-a-day snapshot); use canary to test
+# the very latest main, nightly for a steadier daily build.
+#
+# Free-minutes note: like nightly.yml this reaches amajorai/ryu via the monorepo overlay
+# (mirror/overlay/) and only ever runs on the public repo, never in ryu-closed.
+#
+# Prerelease safety (same as nightly): Core's updater resolves `releases/latest`, which GitHub
+# excludes prereleases from, so installed nodes never auto-update onto a canary even though the
+# assets reuse the real updater's names. Only signed `v*` releases are ever "latest".
+#
+# Concurrency: `cancel-in-progress: false` — a burst of merges QUEUES builds instead of killing
+# an in-flight one. Cancelling mid-run would leave the `canary` release with a mix of new and
+# --clobber'd old assets; queuing guarantees each run leaves a complete, consistent asset set.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/core/**"
+      - "apps/gateway/**"
+      - "apps/cli/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+jobs:
+  # Roll the `canary` tag + prerelease forward to this push's HEAD before the matrix uploads,
+  # so parallel build jobs upload into an existing release instead of racing to create it.
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reset the rolling canary tag + prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh release delete canary --yes --cleanup-tag || true
+          STAMP=$(date -u +'%Y-%m-%d %H:%M UTC')
+          gh release create canary \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Canary (${GITHUB_SHA:0:7})" \
+            --notes "Bleeding-edge build of the Ryu open-core binaries (core / gateway / cli) from \`main\` @ ${GITHUB_SHA:0:7}, $STAMP. Unsigned prereleases rebuilt on every merge — installed Ryu nodes never auto-update onto them (the updater only tracks the latest tagged \`v*\` release). For a steadier build use the \`nightly\` release; for anything real use the tagged releases."
+
+  build:
+    needs: prepare
+    name: ${{ matrix.bin }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # headless trio — all three desktop OSes (mirrors release.yml / nightly.yml)
+          - { os: ubuntu-latest,  dir: core,    bin: ryu-core,    ext: "" }
+          - { os: macos-latest,   dir: core,    bin: ryu-core,    ext: "" }
+          - { os: windows-latest, dir: core,    bin: ryu-core,    ext: ".exe" }
+          - { os: ubuntu-latest,  dir: gateway, bin: ryu-gateway, ext: "" }
+          - { os: macos-latest,   dir: gateway, bin: ryu-gateway, ext: "" }
+          - { os: windows-latest, dir: gateway, bin: ryu-gateway, ext: ".exe" }
+          - { os: ubuntu-latest,  dir: cli,     bin: ryu,         ext: "" }
+          - { os: macos-latest,   dir: cli,     bin: ryu,         ext: "" }
+          - { os: windows-latest, dir: cli,     bin: ryu,         ext: ".exe" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux build deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+
+      - name: macOS build deps (Core)
+        if: runner.os == 'macOS' && matrix.dir == 'core'
+        run: brew install dbus pkg-config
+
+      - name: Install protoc (Core needs prost-build)
+        if: matrix.dir == 'core'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/${{ matrix.dir }}
+
+      - name: Build
+        run: cargo build --release --manifest-path apps/${{ matrix.dir }}/Cargo.toml
+
+      - name: Package
+        shell: bash
+        run: |
+          set -e
+          src="apps/${{ matrix.dir }}/target/release/${{ matrix.bin }}${{ matrix.ext }}"
+          name="${{ matrix.bin }}"; [ "$name" = "ryu" ] && name="ryu-cli"
+          case "${{ runner.os }}" in
+            Linux)   plat="linux-x86_64" ;;
+            macOS)   plat="macos-aarch64" ;;
+            Windows) plat="windows-x86_64" ;;
+          esac
+          asset="${name}-${plat}${{ matrix.ext }}"
+          mkdir -p dist
+          cp "$src" "dist/$asset"
+
+      - name: Upload to the canary prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload canary dist/* --clobber

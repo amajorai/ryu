@@ -6,6 +6,7 @@
   "pages": [
     "index",
     "quickstart",
+    "coding-agents",
     "tools",
     "configuration",
     "security"

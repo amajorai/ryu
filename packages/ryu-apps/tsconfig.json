@@ -1,0 +1,12 @@
+{
+	"extends": "@ryu/config/tsconfig.base.json",
+	"compilerOptions": {
+		"lib": ["ESNext", "DOM", "DOM.Iterable"],
+		"jsx": "react-jsx",
+		"types": ["bun"],
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"noEmit": true
+	},
+	"include": ["src/**/*", "scripts/**/*", "vite.config.ts"]
+}

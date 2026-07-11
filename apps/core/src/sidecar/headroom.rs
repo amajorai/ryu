@@ -30,7 +30,7 @@ pub const DEFAULT_HEADROOM_URL: &str = "http://127.0.0.1:8787";
 /// enabled state in the `PluginStore` is the single source of truth for whether
 /// compression is active (set into [`set_enabled`] at startup and on
 /// enable/disable); `RYU_HEADROOM_ENABLED` is only the dev seed default.
-pub const HEADROOM_PLUGIN_ID: &str = "io.ryu.headroom";
+pub const HEADROOM_PLUGIN_ID: &str = "headroom";
 
 /// Env var: master switch for context compression. Default off (opt-in).
 const ENV_HEADROOM_ENABLED: &str = "RYU_HEADROOM_ENABLED";

@@ -100,6 +100,93 @@ direction without disturbing the original thread. Conversations stay linear - th
 message tree. For how the fork is stored, see
 [Conversations and Sessions](/docs/core/conversations-sessions).
 
+## Edit and regenerate with versions
+
+Every user message has an **edit** action, and every assistant reply a **regenerate** action, in
+its hover toolbar. Editing a message or regenerating a reply forks a new version in place rather
+than overwriting: a `< n / m >` pager appears on the affected turn so you can page between versions
+and pick the one to keep. Unlike branching, this stays in the same conversation. The backend keeps a
+lazy tree over the flat history (`POST /api/conversations/:id/messages/:mid/edit`, `/regenerate`,
+`/select`); the pager and inline editor live in
+`packages/blocks/src/desktop/agent-elements/user-message-editor.tsx`.
+
+## Quote a selection to reply
+
+Select any text in a message and a floating **Quote** button appears. Clicking it drops the
+selection into the composer as a pending quote; when you send, it is prepended to your message as a
+leading markdown blockquote, so the model sees exactly what you quoted and the quote survives a
+reload (`packages/blocks/src/desktop/agent-elements/quote.tsx`).
+
+## Message timestamps
+
+Hover any message, user or assistant, and its send time shows in the hover toolbar beside Copy and
+Branch. The time comes from Core's stored `created_at` (stamped at persist), formatted in place - no
+extra round-trip.
+
+## Rate replies with 👍 / 👎
+
+Each assistant reply carries thumbs-up and thumbs-down buttons in its hover toolbar
+(`POST /api/conversations/:id/messages/:mid/feedback`). One vote fans out to three sinks: it is
+persisted on the message, it upgrades the continual-learning reward from a model guess to your human
+label, and (on by default, local and private) it writes a memory fact. Vote again to clear it.
+
+<Callout type="info">
+  Voting a reply you just received works via a latest-turn fallback. Voting an older reply in a
+  session you have not reloaded may need a reload first - a known v1 limitation.
+</Callout>
+
+## Token-speed and context stats
+
+On a live reply, a small stats readout shows inference speed (tokens per second) with a hover card
+breaking down token counts, and a context-usage ring shows how full the window is
+(`packages/blocks/src/desktop/agent-elements/message-stats.tsx`, fed by a `data-ryu-stats` stream
+part). These stats are live-only - they show while a reply streams, not on a reloaded conversation.
+
+## Jump around with the TOC rail
+
+A Notion-style table-of-contents rail runs down the left gutter of the message list, one marker per
+user message. Hover the rail to reveal each message's text, click to scroll that turn into view; the
+active turn's marker is highlighted (`packages/blocks/src/desktop/agent-elements/chat-toc.tsx`). The
+rail hides on narrow windows and short threads.
+
+## Queue messages while a reply streams
+
+You can keep typing and sending while a reply is still streaming: extra messages stack in a
+**queue** above the composer and drain automatically, one per turn, when the run finishes
+(`packages/blocks/src/desktop/agent-elements/queue/`). Each queued item has send-now and remove
+actions, plus Send all. Choose the drain order (oldest-first, latest-first, or send-all-combined) in
+**Settings -> General -> Chats**.
+
+## Tune how much tool detail you see
+
+Agent tool calls can render compactly or in full. **Settings -> Appearance -> Chat** has a
+**Tool detail** knob with three presets - Compact, Minimal, and Detailed - a monotonic ramp from
+grouped-and-collapsed to fully expanded (`apps/desktop/src/components/settings/AppearanceTab.tsx`).
+The individual toggles it drives sit under **Advanced** for fine control.
+
+## The composer picker
+
+The composer's agent and model picker is one grouped dropdown with a search box and three sections
+(`packages/blocks/src/desktop/agent-elements/input-bar.tsx`):
+
+- **Ryu Portal** - the flagship `ryu` agent, with its live model and reasoning-effort pickers when active.
+- **Providers** - your configured Pi providers; an unconfigured one links straight to credential setup.
+- **External Agents** - installed ACP agents, each probed lazily for its model and permission options when you drill in; agents you have not added yet show an Install button.
+
+## Attach a Clip as context
+
+**Clips** are agent-native screen recordings. Record your screen (with audio) or paste a video URL,
+and Ryu turns it into a frame-plus-transcript context bundle you can attach to a chat message so the
+agent can watch what happened (`apps/desktop/src/components/clips/`). You can also attach the last
+few minutes of ambient activity without a discrete recording. Finished clips are filed into a
+default **Clips** Space.
+
+<Callout type="warn">
+  Recording sources (display and window enumeration) are Windows-first, and the full
+  desktop-to-Core-to-Shadow live path is not yet fully runtime-verified. Frame extraction and local
+  ingest are proven; treat live capture as early.
+</Callout>
+
 ## Image generation
 
 Image generation runs on a local engine you install from the Store. The backend is live

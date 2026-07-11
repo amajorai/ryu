@@ -5,14 +5,21 @@
   "icon": "ShieldCheck",
   "pages": [
     "index",
+    "---Model---",
     "trust-model",
-    "sandboxing-isolation",
+    "---Access Control---",
+    "permissions",
     "command-approval",
+    "---Isolation---",
+    "sandboxing-isolation",
+    "---Data Protection---",
     "credential-scrubbing",
     "outbound-dlp",
+    "---Network---",
     "ssrf-protection",
     "network-binding-auth",
     "channel-allowlists",
+    "---Deployment---",
     "hardening-checklist"
   ]
 }

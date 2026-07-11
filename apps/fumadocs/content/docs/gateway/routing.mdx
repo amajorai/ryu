@@ -40,16 +40,31 @@ On top of the prefix rules, several strategies layer in, all driven by `gateway.
 
 The strategies above pick a provider from the *requested* model. Smart routing picks the
 model itself, from plain-language rules. You write rules like *"coding or debugging → claude-sonnet-4-5"*
-and *"simple chit-chat → a local model"*, and a cheap classifier model decides which rule each
-request matches.
+and *"simple chit-chat → a local model"*, and a **strategy** decides which rule each request matches.
 
 It runs before the normal routing in `apply_smart_routing` (`apps/gateway/src/pipeline/mod.rs`):
-the classifier (`apps/gateway/src/router/smart.rs`) reads only the latest user message, enumerates
-the rules, and replies with a single rule number. The chosen rule's model rewrites `body["model"]`
+`SmartRouter::resolve` (`apps/gateway/src/router/smart.rs`) reads only the latest user message,
+enumerates the rules, and returns a single rule index. The chosen rule's model rewrites `body["model"]`
 *before* `pre_process` runs, so the rewritten model then resolves its provider through the ordinary
 `ModelRouter`. Nothing about providers is hardcoded: the target is any routable model id, including
-local models and `openrouter/…` slugs, and the classifier model is itself resolved through the
-router (it can be local, hosted, or an `openrouter/…` slug).
+local models and `openrouter/…` slugs.
+
+This is **Plane A** model routing - it rewrites the model inside one completion request. It is one of
+two routing planes; the model-vs-agent split and the ownership rule are on the
+[Routing planes](/docs/gateway/routing-planes) page.
+
+### Strategies
+
+The `strategy` field (serialized `"llm" | "embedding" | "keyword"`, `RouteStrategy` in
+`apps/gateway/src/config.rs`) chooses *how* a rule is matched. All three are opt-in and fail open
+(any miss, timeout, or error keeps the originally requested model), and all resolve the classifier or
+embedder *directly* - never as a governed chat turn - so routing can never recurse into routing.
+
+| Strategy | How it matches | Cost | Notes |
+|---|---|---|---|
+| `llm` (default) | A cheap classifier model reads the message, enumerates the rules, and replies with the matching rule number - one LLM round-trip per uncached decision. | One extra completion | Requires a non-empty `classifier_model`. The classifier is itself resolved through the router, so it can be local, hosted, or an `openrouter/…` slug. |
+| `embedding` | RAG: embed each rule's description once + the query, then route to the cosine-nearest rule above `similarity_threshold`. **No LLM call.** | One embedding per turn (cheap/local) | Reuses the semantic-cache embedder (`embed_text` / `cosine_similarity`) against the local `nomic-embed` sidecar. Rule embeddings are cached. |
+| `keyword` | Case-insensitive significant-word match of a rule's description terms against the message. | Zero cost, zero network | The crude, fully-local fallback. |
 
 ### Configuration
 
@@ -59,16 +74,34 @@ Smart routing is configured under `routing.smart_routing` in `gateway.toml`
 | Field | Meaning | Default |
 |---|---|---|
 | `enabled` | Master switch | off |
-| `classifier_model` | The cheap model that sorts requests | empty (inert) |
+| `strategy` | `llm` \| `embedding` \| `keyword` (how a rule is matched) | `llm` |
+| `classifier_model` | The cheap model that sorts requests (**`llm` strategy only**) | empty (inert) |
+| `embedding_model` | Embedder for the `embedding` strategy; empty → `nomic-embed-text-v1.5` on the local sidecar | empty (falls back to the semantic-cache embedder) |
+| `similarity_threshold` | Min cosine similarity for `embedding` to accept a rule | 0.35 |
 | `rules` | Ordered list of `{ description, model }` entries | empty (inert) |
 | `default_model` | Model to use when no rule matches | none (keep requested model) |
 | `cache_by_session` | Classify once per `x-ryu-session-id` and reuse the decision | on |
 | `timeout_ms` | Per-classification timeout | 4000 |
 
-Smart routing only runs when `enabled` is set with a non-empty `classifier_model` and at least one
-rule. Two env vars set the basics for a standalone Gateway: `GATEWAY_SMART_ROUTING_ENABLED` and
-`GATEWAY_SMART_ROUTING_MODEL`. The rules themselves are config-file-only. Like all routing config,
-changes are a startup snapshot and take effect on the next Gateway refresh/restart.
+Smart routing only runs when `enabled` is set with at least one rule (`is_active` in
+`apps/gateway/src/config.rs`). The `llm` strategy *additionally* requires a non-empty
+`classifier_model`; `embedding` and `keyword` need only `enabled` + rules. Two env vars set the basics
+for a standalone Gateway: `GATEWAY_SMART_ROUTING_ENABLED` and `GATEWAY_SMART_ROUTING_MODEL`. The rules
+themselves are config-file-only. Like all routing config, changes are a startup snapshot and take
+effect on the next Gateway refresh/restart.
+
+### Per-agent override (`ryu_smart_route`)
+
+Global `smart_routing` is the *default*. An individual agent can override it - the "both" config
+scope: global as the fallback, per-agent as the override. Core stores a per-agent
+`SmartRoutingConfig` (keyed by agent id) and, when forwarding that agent's OpenAI-compat chat request,
+injects it as a private `ryu_smart_route` body field carrying the full config as JSON.
+
+The gateway (`per_request_smart_router` in `apps/gateway/src/pipeline/mod.rs`) strips `ryu_smart_route`
+before the provider call, builds or reuses one ephemeral `SmartRouter` per distinct config (hashed
+JSON, cached in `AppState.per_agent_routers`), and uses it for that request only. An absent or
+unparseable field falls open to the global router. Core sends the field only for agents that have an
+override, so agents without one keep the global path unchanged.
 
 On the desktop, edit smart routing under Gateway - Routing - Smart routing
 (`SmartRoutingCard` in `apps/desktop/src/components/gateway/GatewayDialog.tsx`), which reads and
@@ -87,6 +120,74 @@ writes the routing config through the same config endpoint the rest of the dialo
   `x-ryu-session-id` so a conversation is classified once rather than every turn.
 - **Observability.** The model that actually handled the request is returned in the
   `x-routed-model` response header (`apps/gateway/src/api/chat.rs`).
+
+## Agent-auto (Plane B): picking the agent
+
+Smart routing above is **Plane A** - it picks a *model* inside one governed completion. A separate,
+higher-level route picks the *agent* that serves the turn. In the universal picker an **"Auto"** entry
+sits above the agent list; selecting it sets the composer's agent to the sentinel `auto`, and Core
+resolves the concrete agent per turn from your own rules, then continues exactly as if you had picked
+that agent.
+
+Agent-auto reuses the **same strategy vocabulary** as smart routing (`llm` / `embedding` / `keyword`),
+but the rule *targets are agent ids*, not model ids. It is configured by the Core `agent-auto-routing`
+preference:
+
+```jsonc
+{
+  "enabled": true,
+  "strategy": "embedding",          // llm | embedding | keyword - same vocabulary as Plane A
+  "classifier_model": "gemma-local",// for the llm strategy; resolved via Core's chat path
+  "embedding_model": "",            // for embedding; empty -> default local embedder
+  "similarity_threshold": 0.35,
+  "rules": [
+    { "description": "writing, refactoring or debugging code", "agent_id": "claude-code" },
+    { "description": "quick web lookups and browsing",         "agent_id": "ryu" },
+    { "description": "long-form research and analysis",         "agent_id": "gemini" }
+  ],
+  "default_agent_id": "ryu",        // when no rule matches
+  "cache_by_session": true
+}
+```
+
+<Callout type="info">
+  The Plane B backend split (an OpenAI-compat agent's chat is governed by the Gateway; an ACP agent
+  self-routes) is shipped - see [Routing planes](/docs/gateway/routing-planes). The **agent-auto
+  picker** that resolves the `auto` sentinel per turn is the planned Core feature described here; the
+  config shape above is the contract it builds against.
+</Callout>
+
+**Cross-harness session caveat.** Auto may pick a *different harness* than last turn (Ryu/Pi → Claude
+Code → Gemini). ACP agents own stateful subprocesses, so switching agents starts a fresh session for
+the newly-chosen agent (the previous one is kept warm for a switch-back). Conversation history is
+**replayed** into the new agent as prior context, but live in-subprocess state is *not* - files an ACP
+agent had open, its working buffers, and so on are lost across a harness switch; only the transcript
+carries over. To avoid swinging harness every turn, `cache_by_session` classifies once per
+conversation and reuses that pick, which prevents flapping.
+
+### The three "auto"s, disambiguated
+
+"Auto" is overloaded. These are three different things:
+
+| Name | Plane | Picks | Config | Where it runs |
+|---|---|---|---|---|
+| Ryu smart-route | A | A **model** (rewrites `body["model"]`) | Gateway `smart_routing` (+ per-agent `ryu_smart_route`) | Gateway pipeline |
+| Ryu agent-auto | B | An **agent id** | Core `agent-auto-routing` preference | Core, before backend dispatch |
+| `openrouter/auto` | (neither) | An upstream model, chosen by OpenRouter | Just a model id in the request | OpenRouter, after the Gateway forwards |
+
+`openrouter/auto` is not a Ryu router at all - it is a model id (it appears in `GET /v1/models`) that
+the Gateway routes to the OpenRouter provider, which then selects an upstream model. It has no rules
+and no Ryu-side classifier.
+
+## How the gateway intercepts agent egress
+
+Smart routing and agent-auto decide *what* runs. A separate question is *how* the Gateway gets in
+front of an agent's model calls in the first place - the base-URL swap (`OPENAI_BASE_URL` /
+`ANTHROPIC_BASE_URL` injection), the subscription-preserving passthrough proxy for Claude Code and
+Codex, the per-agent `agent-gateway-routing` toggle, and the bypass list for agents that ignore the
+base URL (Gemini CLI, OpenClaw, Hermes). That is documented in full on
+[Gateway for any agent](/docs/gateway/gateway-for-any-agent) - start there to point an existing agent
+at the Gateway.
 
 ## The model list
 

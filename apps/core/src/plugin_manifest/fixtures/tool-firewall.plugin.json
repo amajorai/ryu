@@ -1,0 +1,24 @@
+{
+  "id": "com.ryuhq.tool-firewall",
+  "name": "Tool Firewall",
+  "version": "1.0.0",
+  "runnables": [],
+  "permission_grants": [],
+  "activation_events": ["*"],
+  "contributes": {
+    "turn_hooks": [
+      {
+        "id": "tool-firewall.pre",
+        "on": "pre_tool_use",
+        "match": { "tools": ["*"] },
+        "code": "const name = ctx.tool_name || ''; const input = JSON.stringify(ctx.tool_input || {}); const danger = /(rm\\s+-rf)|(DROP\\s+TABLE)|(mkfs)/i; if (danger.test(input)) { return { kind: 'deny', reason: 'Blocked a destructive command (' + name + ') by the tool-firewall policy.' }; } return { kind: 'none' };"
+      },
+      {
+        "id": "tool-firewall.post",
+        "on": "post_tool_use",
+        "match": { "tools": ["*"] },
+        "code": "const out = JSON.stringify(ctx.tool_output || null); return { kind: 'note', text: 'tool-firewall observed ' + (ctx.tool_name || '?') + ' -> ' + out.slice(0, 80) };"
+      }
+    ]
+  }
+}

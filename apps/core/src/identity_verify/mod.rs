@@ -28,6 +28,8 @@
 //! for now.
 #![allow(dead_code)]
 
+pub mod permissions;
+
 use std::{
     collections::HashMap,
     sync::{Arc, OnceLock},

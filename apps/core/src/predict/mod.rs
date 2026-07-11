@@ -1,7 +1,8 @@
 //! Predictive typing — the "brain" behind system-wide inline autocomplete.
 //!
-//! This module owns everything that decides *what to suggest*: the config
-//! (enabled / model / per-app allowlist / debounce), the privacy denylist for
+//! This module owns everything that decides *what to suggest*: the config (model
+//! / per-app allowlist / debounce), the process-global enabled flag driven by the
+//! built-in **Predict** plugin ([`is_enabled`]), the privacy denylist for
 //! password & secure controls, the prompt assembly, and the cleanup of the raw
 //! model reply. The native overlay (`apps/predict`) stays deliberately dumb — it
 //! reads the caret context, POSTs it here, and renders whatever string comes
@@ -17,12 +18,43 @@
 //! directly from the desktop webview; this endpoint is the *system-wide* sibling
 //! for arbitrary native apps, but both speak the same predictive contract.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use serde::{Deserialize, Serialize};
 
 /// Preference key holding the predictive-typing config blob (one JSON object,
 /// mirroring how `editor-ai` is stored). The desktop settings tab and the
 /// `apps/predict` overlay both read/write this single key.
 pub const PREDICT_CONFIG_PREF: &str = "predict-config";
+
+/// Manifest id of the built-in **Predict** plugin. Installing/enabling that
+/// plugin is the *single* on/off switch for system-wide predictive typing: Core
+/// seeds [`set_enabled`] from the plugin's persisted state at boot (`main.rs`) and
+/// flips it live from the plugin enable/disable path (`apply_policy`). There is no
+/// separate config toggle — the plugin **is** the switch (CLAUDE.md "nothing
+/// hardcoded, one source of truth"). Matches its `CORE_PLUGINS` membership + the
+/// desktop's plugin-enabled gate on the settings tab.
+pub const PREDICT_PLUGIN_ID: &str = "predict";
+
+/// Process-global "predictive typing is on" flag, owned by the Predict plugin's
+/// enabled state. [`super::server::predict_api::complete`] refuses every request
+/// while this is false, so the feature is fully inert until the user installs and
+/// enables the plugin. Mirrors the `claude_config` / gateway-policy flag pattern:
+/// one atomic, flipped on enable, read on the request path.
+static ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Set the predictive-typing enabled flag. Called from boot seeding and the
+/// plugin enable/disable path (`apply_policy`'s `predict` arm) — never inline in
+/// the request handler.
+pub fn set_enabled(on: bool) {
+    ENABLED.store(on, Ordering::Relaxed);
+}
+
+/// Whether system-wide predictive typing is currently enabled (i.e. the Predict
+/// plugin is installed and enabled).
+pub fn is_enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
 
 /// Default debounce between caret changes and a prediction request (ms).
 pub const DEFAULT_DEBOUNCE_MS: u64 = 400;
@@ -36,10 +68,6 @@ pub const DEFAULT_MAX_CHARS: usize = 240;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PredictConfig {
-    /// Master switch. Default **off** — predictive typing ships disabled and the
-    /// user opts in (it sends text from arbitrary apps to a model).
-    #[serde(default)]
-    pub enabled: bool,
     /// Gateway-routable model id. Empty → resolved from the agent / env / default.
     #[serde(default)]
     pub model: String,
@@ -74,7 +102,6 @@ fn default_max_chars() -> usize {
 impl Default for PredictConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
             model: String::new(),
             effort: String::new(),
             agent_id: None,
@@ -252,7 +279,6 @@ mod tests {
     #[test]
     fn config_roundtrips_through_pref() {
         let cfg = PredictConfig {
-            enabled: true,
             model: "gpt-4o-mini".to_string(),
             effort: "low".to_string(),
             agent_id: Some("ryu".to_string()),
@@ -266,11 +292,22 @@ mod tests {
     }
 
     #[test]
-    fn missing_pref_is_default_disabled() {
+    fn missing_pref_is_default() {
         let cfg = PredictConfig::from_pref(None);
-        assert!(!cfg.enabled);
         assert_eq!(cfg.debounce_ms, DEFAULT_DEBOUNCE_MS);
+        assert_eq!(cfg.max_chars, DEFAULT_MAX_CHARS);
         assert!(cfg.app_allowlist.is_empty());
+    }
+
+    #[test]
+    fn enabled_flag_defaults_off_and_toggles() {
+        // The plugin owns the switch: off until enabled, flips both ways.
+        set_enabled(false);
+        assert!(!is_enabled());
+        set_enabled(true);
+        assert!(is_enabled());
+        set_enabled(false);
+        assert!(!is_enabled());
     }
 
     #[test]

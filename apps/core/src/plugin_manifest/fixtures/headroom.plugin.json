@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.headroom",
+  "id": "headroom",
   "name": "Headroom Compression",
   "version": "1.0.0",
   "runnables": [

@@ -1,0 +1,22 @@
+{
+	"id": "com.ryu.whiteboard",
+	"name": "Whiteboard",
+	"version": "1.0.0",
+	"runnables": [
+		{
+			"id": "whiteboard-companion",
+			"name": "Whiteboard",
+			"kind": "companion",
+			"config": {
+				"label": "Whiteboard",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"permission_grants": ["spaces:docs", "hook:side-model"],
+	"companion": {
+		"label": "Whiteboard",
+		"icon": "shapes"
+	}
+}

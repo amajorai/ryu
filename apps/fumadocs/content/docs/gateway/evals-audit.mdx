@@ -105,6 +105,54 @@ From Core, `POST /api/gateway/evals/run` proxies the dataset run.
   matrix can time out at the proxy even though no field is dropped. Keep matrices small.
 </Callout>
 
+## Evaluator catalog
+
+The eval runner above scores responses on three fixed dimensions. Separately, the Gateway ships a **unified evaluator catalog** - one shared taxonomy meant to power both inline guardrails and offline eval scoring from a single definition. `GET /v1/evaluators` returns the full catalog.
+
+```
+GET /v1/evaluators
+```
+
+It is a read-only computation over static seed data (`EvaluatorRegistry`, seeded by `apps/gateway/src/evaluators/catalog.rs`), so it mutates no state and exposes no secret - it is ungated like `GET /v1/evals` and `POST /v1/firewall/check`.
+
+### The catalog
+
+30 built-in evaluators across 8 categories (`builtin_catalog`).
+
+| Category | Count | Examples |
+|---|---|---|
+| Custom (create from scratch) | 2 | `llm_as_a_judge`, `code_evaluator` (blank rubric / code templates) |
+| Security | 3 | `pii_leakage`, `code_injection`, `prompt_injection` |
+| Safety | 2 | `toxicity`, `bias_fairness` |
+| Quality | 7 | `hallucination`, `correctness`, `answer_relevance`, `exact_match` |
+| Conversation | 6 | `tone`, `task_completion`, `user_satisfaction` |
+| Trajectory | 3 | `plan_adherence`, `trajectory_accuracy`, `tool_selection` |
+| Image | 2 | `explicit_content`, `sensitive_imagery` |
+| Voice | 5 | `audio_quality`, `transcription_accuracy`, `vocal_affect` |
+
+Each entry carries a `capabilities` object with two booleans, `inline` and `offline`, derived from the entry's own config so they can never disagree with it. This is a first-class **gate**: an evaluator that is offline-only (every Quality, Conversation, Trajectory, and Voice entry, because it needs a reference, history, or trajectory) is never offered as an inline guardrail. An entry is inline-capable only when it defines an inline action, and offline-capable only when it defines an offline config.
+
+Two more flags keep the catalog honest:
+
+- `enforced` - whether the evaluator is actually wired to execution. Five text detectors (`pii_leakage`, `code_injection`, `prompt_injection`, `toxicity`, `bias_fairness`) report `enforced: true`; every other entry reports `false` so the UI can distinguish catalogued from wired.
+- `higherIsBetter` - score polarity. Negative-signal judges (toxicity, bias, hallucination, and similar) score a BAD signal, so a high score is worse and this flag is `false`.
+
+### Binding an evaluator
+
+Evaluators are bound to a firewall scope through `FirewallConfig.evaluators`, a list of `EvaluatorBinding` entries that cascade node → org → agent with the same union-plus-lock semantics as the firewall dials (see [Hierarchical policy resolution](/docs/gateway/security)).
+
+| Binding field | Meaning |
+|---|---|
+| `id` | The catalog evaluator this binding enables |
+| `enabled` | Whether the binding is active in this scope |
+| `inline_action` | The `FirewallPolicy` (Block / Sanitize / Warn) applied inline when it fires |
+| `offline` | Offline scoring config (threshold, judge model) |
+| `locked` | Freeze the binding so a narrower scope can only tighten it |
+
+<Callout type="warn">
+This documents the catalog and the `GET /v1/evaluators` endpoint, not execution. Binding **execution** is still in progress - the `EvaluatorBinding` dial is "config plumbing + cascade + persistence only" today, with inline scanning and the offline runner as later phases (`apps/gateway/src/config.rs`, the `FirewallConfig.evaluators` doc comment). The `enforced` flag exists precisely so a surface never claims an evaluator runs when it does not.
+</Callout>
+
 ## Audit
 
 The audit log (`apps/gateway/src/audit/mod.rs`, `AuditLogger`) records every model call to a SQLite

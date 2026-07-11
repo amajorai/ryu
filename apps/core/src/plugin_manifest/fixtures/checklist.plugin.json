@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.checklist",
+  "id": "checklist",
   "name": "Checklist",
   "version": "1.0.0",
   "runnables": [

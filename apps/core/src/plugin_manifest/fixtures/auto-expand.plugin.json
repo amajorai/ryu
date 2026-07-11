@@ -1,0 +1,47 @@
+{
+  "id": "com.ryuhq.auto-expand",
+  "name": "Auto-Expand Prompt",
+  "version": "1.0.0",
+  "runnables": [],
+  "permission_grants": ["hook:side-model"],
+  "activation_events": ["*"],
+  "contributes": {
+    "composer_controls": [
+      {
+        "id": "auto-expand.toggle",
+        "type": "toggle",
+        "flag": "com.ryuhq.auto-expand",
+        "label": "Auto-expand prompt",
+        "description": "Before each message is sent, a model rewrites it into a clearer, more effective prompt and sends the improved version instead."
+      }
+    ],
+    "settings_tabs": [
+      {
+        "id": "auto-expand.settings",
+        "title": "Auto-Expand",
+        "fields": [
+          {
+            "type": "model_picker",
+            "pref_key": "auto-expand-model",
+            "label": "Prompt-expansion model"
+          }
+        ]
+      }
+    ],
+    "slash_commands": [
+      {
+        "id": "auto-expand.expand",
+        "command": "/expand",
+        "description": "Expand and send an improved version of this one prompt, e.g. '/expand fix the login bug'. Works without the toggle."
+      }
+    ],
+    "turn_hooks": [
+      {
+        "id": "auto-expand.rewrite",
+        "on": "pre_user_turn",
+        "match": { "flag": "com.ryuhq.auto-expand", "commands": ["/expand"] },
+        "code": "const input = (ctx.input || '').trim(); if (!input) { return { kind: 'none' }; } const onDemand = input.indexOf('/expand ') === 0; const toggled = !!(ctx.flags && ctx.flags['com.ryuhq.auto-expand']); if (!onDemand && !toggled) { return { kind: 'none' }; } const target = (onDemand ? input.slice(8) : input).trim(); if (!target || target.indexOf('/') === 0) { return { kind: 'none' }; } const system = 'You are a prompt engineer. Rewrite the user message into a clearer, more specific, well-structured prompt that gets a better answer from an AI assistant. Preserve their intent and every concrete detail, constraint, example, and formatting request they gave. Do not answer it, and add no preamble or commentary. Return ONLY the improved prompt text.'; const improved = await host.sideModel({ system: system, prompt: 'Improve this prompt:\\n\\n' + target, model_pref_key: 'auto-expand-model', effort: 'low' }); if (!improved || !improved.trim()) { return { kind: 'none' }; } return { kind: 'replace', text: improved.trim() };"
+      }
+    ]
+  }
+}

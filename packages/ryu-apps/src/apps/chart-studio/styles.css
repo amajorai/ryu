@@ -1,0 +1,390 @@
+/*
+ * Chart Studio widget styles. Everything resolves against the shared `--ryu-*`
+ * design tokens (tokens.css) so light/dark theming is automatic. The categorical
+ * series palette is defined here (theme-aware) and referenced from the component
+ * via `var(--ryu-chart-N)`.
+ */
+
+:root {
+	--ryu-chart-1: #4f46e5;
+	--ryu-chart-2: #0ea5e9;
+	--ryu-chart-3: #16a34a;
+	--ryu-chart-4: #d97706;
+	--ryu-chart-5: #db2777;
+	--ryu-chart-6: #7c3aed;
+	--ryu-chart-7: #0d9488;
+	--ryu-chart-8: #dc2626;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--ryu-chart-1: #818cf8;
+		--ryu-chart-2: #38bdf8;
+		--ryu-chart-3: #4ade80;
+		--ryu-chart-4: #fbbf24;
+		--ryu-chart-5: #f472b6;
+		--ryu-chart-6: #c084fc;
+		--ryu-chart-7: #2dd4bf;
+		--ryu-chart-8: #f87171;
+	}
+}
+
+:root[data-theme="light"] {
+	--ryu-chart-1: #4f46e5;
+	--ryu-chart-2: #0ea5e9;
+	--ryu-chart-3: #16a34a;
+	--ryu-chart-4: #d97706;
+	--ryu-chart-5: #db2777;
+	--ryu-chart-6: #7c3aed;
+	--ryu-chart-7: #0d9488;
+	--ryu-chart-8: #dc2626;
+}
+
+:root[data-theme="dark"] {
+	--ryu-chart-1: #818cf8;
+	--ryu-chart-2: #38bdf8;
+	--ryu-chart-3: #4ade80;
+	--ryu-chart-4: #fbbf24;
+	--ryu-chart-5: #f472b6;
+	--ryu-chart-6: #c084fc;
+	--ryu-chart-7: #2dd4bf;
+	--ryu-chart-8: #f87171;
+}
+
+.cs-root {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ryu-space-3);
+}
+
+.cs-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--ryu-space-3);
+}
+
+.cs-titles {
+	min-width: 0;
+}
+
+.cs-title {
+	margin: 0;
+	font-size: var(--ryu-text-lg);
+	font-weight: 600;
+	line-height: 1.25;
+}
+
+.cs-subtitle {
+	margin: 2px 0 0;
+	font-size: var(--ryu-text-xs);
+	color: var(--ryu-text-muted);
+}
+
+.cs-toolbar {
+	display: flex;
+	align-items: center;
+	gap: var(--ryu-space-2);
+}
+
+.cs-segment {
+	display: inline-flex;
+	margin: 0;
+	min-inline-size: 0;
+	padding: 2px;
+	border: 1px solid var(--ryu-border);
+	border-radius: var(--ryu-radius);
+	background: var(--ryu-surface);
+}
+
+.cs-segment-btn {
+	appearance: none;
+	border: none;
+	background: transparent;
+	color: var(--ryu-text-muted);
+	font: inherit;
+	font-size: var(--ryu-text-xs);
+	text-transform: capitalize;
+	padding: 4px 10px;
+	border-radius: var(--ryu-radius-sm);
+	cursor: pointer;
+}
+
+.cs-segment-btn[aria-pressed="true"] {
+	background: var(--ryu-bg);
+	color: var(--ryu-text);
+	box-shadow: var(--ryu-shadow);
+}
+
+.cs-icon-btn {
+	appearance: none;
+	border: 1px solid var(--ryu-border);
+	background: var(--ryu-surface);
+	color: var(--ryu-text);
+	font: inherit;
+	font-size: var(--ryu-text-xs);
+	padding: 6px 10px;
+	border-radius: var(--ryu-radius-sm);
+	cursor: pointer;
+}
+
+.cs-icon-btn:hover {
+	background: var(--ryu-surface-hover);
+}
+
+.cs-plot {
+	position: relative;
+	width: 100%;
+}
+
+.cs-svg {
+	display: block;
+	width: 100%;
+	touch-action: none;
+	user-select: none;
+}
+
+.cs-grid {
+	stroke: var(--ryu-border);
+	stroke-width: 1;
+	opacity: 0.6;
+}
+
+.cs-axis-label {
+	fill: var(--ryu-text-muted);
+	font-size: 10px;
+	text-anchor: end;
+}
+
+.cs-axis-x {
+	text-anchor: middle;
+}
+
+.cs-axis-title {
+	fill: var(--ryu-text-muted);
+	font-size: 11px;
+	text-anchor: middle;
+}
+
+.cs-annotation {
+	stroke: var(--ryu-warning);
+	stroke-width: 1;
+	stroke-dasharray: 4 3;
+	opacity: 0.8;
+}
+
+.cs-annotation-label {
+	fill: var(--ryu-warning);
+	font-size: 10px;
+}
+
+.cs-brush {
+	fill: var(--ryu-focus-ring);
+	opacity: 0.35;
+}
+
+.cs-hover-guide {
+	stroke: var(--ryu-text-muted);
+	stroke-width: 1;
+	stroke-dasharray: 3 3;
+	opacity: 0.7;
+}
+
+.cs-tooltip {
+	position: absolute;
+	pointer-events: none;
+	max-width: 160px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: var(--ryu-space-2);
+	background: var(--ryu-bg);
+	border: 1px solid var(--ryu-border);
+	border-radius: var(--ryu-radius-sm);
+	box-shadow: var(--ryu-shadow);
+	font-size: var(--ryu-text-xs);
+	z-index: 2;
+}
+
+.cs-tooltip-name {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: 600;
+}
+
+.cs-tooltip-value {
+	color: var(--ryu-text-muted);
+}
+
+.cs-swatch {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 3px;
+	flex: none;
+}
+
+.cs-brush-bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--ryu-space-2);
+	margin: 0;
+	min-inline-size: 0;
+	padding: var(--ryu-space-2) var(--ryu-space-3);
+	background: var(--ryu-surface);
+	border: 1px solid var(--ryu-border);
+	border-radius: var(--ryu-radius);
+}
+
+.cs-brush-label {
+	font-size: var(--ryu-text-sm);
+	font-weight: 600;
+}
+
+.cs-brush-actions {
+	display: flex;
+	gap: var(--ryu-space-2);
+	margin-left: auto;
+}
+
+.cs-brush-status {
+	flex-basis: 100%;
+	font-size: var(--ryu-text-xs);
+	color: var(--ryu-success);
+}
+
+.cs-brush-status-error {
+	color: var(--ryu-danger);
+}
+
+.cs-btn {
+	appearance: none;
+	border: 1px solid var(--ryu-border);
+	background: var(--ryu-bg);
+	color: var(--ryu-text);
+	font: inherit;
+	font-size: var(--ryu-text-xs);
+	padding: 6px 12px;
+	border-radius: var(--ryu-radius-sm);
+	cursor: pointer;
+}
+
+.cs-btn:hover {
+	background: var(--ryu-surface-hover);
+}
+
+.cs-btn:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.cs-btn-primary {
+	background: var(--ryu-primary);
+	color: var(--ryu-primary-contrast);
+	border-color: transparent;
+}
+
+.cs-btn-primary:hover {
+	background: var(--ryu-primary);
+	filter: brightness(1.05);
+}
+
+.cs-btn-ghost {
+	border-color: transparent;
+	background: transparent;
+	color: var(--ryu-text-muted);
+}
+
+.cs-hint {
+	margin: 0;
+	font-size: var(--ryu-text-xs);
+	color: var(--ryu-text-muted);
+}
+
+.cs-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--ryu-space-2);
+	margin: 0;
+	min-inline-size: 0;
+	padding: 0;
+	border: 0;
+}
+
+.cs-legend-item {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	border: 1px solid var(--ryu-border);
+	background: var(--ryu-surface);
+	color: var(--ryu-text);
+	font: inherit;
+	font-size: var(--ryu-text-xs);
+	padding: 4px 10px;
+	border-radius: 999px;
+	cursor: pointer;
+}
+
+.cs-legend-item:hover {
+	background: var(--ryu-surface-hover);
+}
+
+.cs-legend-off {
+	opacity: 0.45;
+}
+
+.cs-legend-off .cs-swatch {
+	filter: grayscale(1);
+}
+
+.cs-status {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: var(--ryu-space-2);
+	min-height: 180px;
+	text-align: center;
+	color: var(--ryu-text-muted);
+}
+
+.cs-status-title {
+	margin: 0;
+	font-size: var(--ryu-text-base);
+	font-weight: 600;
+	color: var(--ryu-text);
+}
+
+.cs-status-hint {
+	margin: 0;
+	font-size: var(--ryu-text-sm);
+}
+
+.cs-status-error .cs-status-title {
+	color: var(--ryu-danger);
+}
+
+.cs-spinner {
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	border: 3px solid var(--ryu-border);
+	border-top-color: var(--ryu-primary);
+	animation: cs-spin 0.8s linear infinite;
+}
+
+@keyframes cs-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.cs-spinner {
+		animation-duration: 2s;
+	}
+}

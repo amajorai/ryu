@@ -49,12 +49,12 @@ const MAX_PLUGIN_ID_LEN: usize = 128;
 /// uses a strict **allowlist** (not a blocklist) because the project is
 /// Windows-first: `\`, `/`, `:`, and a leading `.` must all be rejected, and on
 /// Windows `PathBuf::join` with an absolute or drive-qualified component silently
-/// replaces the base. The legal alphabet mirrors the reverse-domain ids the
-/// built-in manifests use (e.g. `com.example.research-assistant`):
+/// replaces the base. The legal alphabet accepts both bare-kebab ids the built-in
+/// manifests use (e.g. `ghost`, `data-grid-explorer`) and any legacy dotted
+/// third-party id (e.g. `com.example.research-assistant`) for back-compat:
 ///
 /// - non-empty, at most [`MAX_PLUGIN_ID_LEN`] bytes
 /// - characters limited to ASCII `[a-zA-Z0-9.-_]`
-/// - must contain at least one `.` (reverse-domain shape)
 /// - no `..` sequence anywhere, no leading/trailing `.`, no leading `-`
 ///
 /// Returns `Ok(())` when the id is safe, else a descriptive `Err(String)`.
@@ -84,11 +84,6 @@ pub fn validate_plugin_id(id: &str) -> Result<(), String> {
     }
     if id.starts_with('-') {
         return Err(format!("app id '{id}' must not start with '-'"));
-    }
-    if !id.contains('.') {
-        return Err(format!(
-            "app id '{id}' must be reverse-domain (contain at least one '.')"
-        ));
     }
     Ok(())
 }
@@ -181,6 +176,124 @@ pub struct PluginManifest {
     /// Absent for the common case (no external interpreter needed).
     #[serde(default)]
     pub runtime: Option<schema::ExternalRuntimeConfig>,
+
+    /// Declarative **managed sidecars** the plugin ships (the app ⇄ sidecar
+    /// bridge): each is a long-running child process Core downloads/provisions,
+    /// spawns, and health-monitors via the [`crate::sidecar::SidecarManager`] on
+    /// enable, exactly like a built-in sidecar. Gated at enable by the
+    /// `sidecar:process` grant (Core-tier auto; Community needs the approved
+    /// grant). Empty for the common case (no bundled process).
+    #[serde(default)]
+    pub sidecars: Vec<schema::SidecarSpec>,
+
+    // ── Rich marketplace metadata (Phase 1.5) ─────────────────────────────────
+    //
+    // All optional/additive so older manifests still load and render. These feed
+    // the marketplace **detail** contract the desktop dialog consumes; where a
+    // field aligns with the Claude `.claude-plugin/marketplace.json` plugin-entry
+    // standard it keeps that JSON key (`author`, `homepage`, `category`,
+    // `license`, `keywords`), and the Ryu extensions use their contract key.
+    /// Long plaintext/markdown description. Empty when absent (the built-in card
+    /// historically emitted `""` for this; preserved).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Short one-line tagline shown under the name (Ryu extension).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tagline: Option<String>,
+
+    /// Logo URL (contract key `iconUrl`; Ryu extension).
+    #[serde(default, rename = "iconUrl", skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+
+    /// App-Store gallery screenshot URLs (Ryu extension).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub screenshots: Vec<String>,
+
+    /// Publisher/author. Claude `author` — a bare string or an object with a
+    /// `name` field; the detail builder extracts the display string into
+    /// `developer`. Kept as a raw value so both shapes round-trip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<serde_json::Value>,
+
+    /// Free-text category (Claude `category`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+
+    /// Homepage/website URL (Claude `homepage`; emitted as `website`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homepage: Option<String>,
+
+    /// SPDX license identifier (Claude `license`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+
+    /// Search keywords / tags (Claude `keywords`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keywords: Vec<String>,
+
+    /// Privacy policy URL (contract key `privacyPolicyUrl`; Ryu extension).
+    #[serde(
+        default,
+        rename = "privacyPolicyUrl",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub privacy_policy_url: Option<String>,
+
+    /// Terms-of-service URL (contract key `termsOfServiceUrl`; Ryu extension).
+    #[serde(
+        default,
+        rename = "termsOfServiceUrl",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub terms_of_service_url: Option<String>,
+
+    /// Human-readable capability strings (Ryu extension). When absent the detail
+    /// builder DERIVES these from `permission_grants` via
+    /// [`schema::capabilities_from_grants`]; declared values are used verbatim.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+
+    /// Prompt-chip examples (contract key `examplePrompts`; Ryu extension).
+    #[serde(
+        default,
+        rename = "examplePrompts",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub example_prompts: Vec<String>,
+
+    /// Optional companion/config setup card, or an array of such steps (Ryu
+    /// extension). Opaque to Core — passed through to the detail payload verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<serde_json::Value>,
+}
+
+impl PluginManifest {
+    /// The `developer` display string for the detail contract, extracted from the
+    /// Claude `author` field: a bare string is used directly, an object's `name`
+    /// field is read, any other shape yields `None`.
+    pub fn developer(&self) -> Option<String> {
+        match self.author.as_ref()? {
+            serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
+            serde_json::Value::Object(map) => map
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            _ => None,
+        }
+    }
+
+    /// Resolve the `capabilities` label list for the detail contract: declared
+    /// values verbatim, else derived from `permission_grants`.
+    pub fn resolved_capabilities(&self) -> Vec<String> {
+        if self.capabilities.is_empty() {
+            schema::capabilities_from_grants(&self.permission_grants)
+        } else {
+            self.capabilities.clone()
+        }
+    }
 }
 
 impl PluginManifest {
@@ -369,6 +482,13 @@ pub struct HookMatch {
     /// namespace has a value keyed by `conversation_id`), e.g. an active goal.
     #[serde(default)]
     pub stateful: bool,
+    /// Run if the tool being called (`ctx.tool_name`) matches any of these
+    /// patterns — for `pre_tool_use` / `post_tool_use` hooks. A pattern is a tool
+    /// id with optional leading/trailing `*` wildcards (`"*"` = every tool,
+    /// `"bash*"` = ids starting with `bash`). This keeps a tool-firewall hook from
+    /// spawning the sandbox on every unrelated tool call.
+    #[serde(default)]
+    pub tools: Vec<String>,
 }
 
 impl Contributes {
@@ -457,18 +577,31 @@ const MANIFEST_FILE_NAMES: &[&str] = &["plugin.json", "ryu.json"];
 ///
 /// (`sample.plugin.json` — the Research Assistant demo — is kept as a test-only
 /// fixture and is deliberately NOT shipped as a built-in.)
-/// - `spider.plugin.json` — Spider web crawler tool plugin (U040).
+/// - `spider.plugin.json` — Spider web crawler tool (system plugin, sidecar-backed).
+/// - `agentbrowser.plugin.json` — Agent Browser web-browsing tool (system plugin, npx MCP-backed).
 /// - `exa.plugin.json` — Exa neural search tool plugin (U040, BYOK).
 /// - `ghost.plugin.json` — Ghost desktop-automation MCP tool (system plugin, Windows-first).
 /// - `shadow.plugin.json` — Shadow screen/audio capture + semantic memory (system plugin, Windows-first).
+///
+/// The four sidecar-backed system tools (`spider`, `agentbrowser`, `ghost`,
+/// `shadow`) declare an **empty** `runnables` list on purpose: their tools are
+/// owned by their dedicated MCP provider (the `ghost`/`shadow`/`spider` modules
+/// in `sidecar/mcp/`, and the `agentbrowser` npx MCP server registered in
+/// `sidecar/mcp/mod.rs::builtin_servers`). The plugin record is the
+/// install/enable/tier **governance shell** around that provider; declaring the
+/// tools again here would double-list every one as an `app__<slug>` alias
+/// (`fire_activation_event` → the Tool handler in `server/mod.rs`). Do not
+/// re-add tool runnables to these fixtures.
 /// - `headroom.plugin.json` — Headroom gateway egress compression (a `compression` Policy runnable, #425).
 /// - `firewall.plugin.json` — Gateway firewall on/off Policy plugin (#447, Core-tier, opt-in).
 /// - `routing.plugin.json` — Smart (classifier) routing on/off Policy plugin (#447, Core-tier, opt-in).
 /// - `sandbox.plugin.json` — Wasmtime ephemeral sandbox on/off Policy plugin (#448, Core-tier, opt-in).
 /// - `engines.plugin.json` — Local engine bindings (llama.cpp + embeddings) as a default-on Core plugin (#448).
 /// - `durable.plugin.json` — Durable workflow execution engine as a default-on Core plugin (#448 dogfood).
+/// - `predict.plugin.json` — System-wide predictive typing on/off (a `predict` Policy runnable; Core-tier, opt-in). The plugin is the single switch for the `/api/predict/*` brain.
 const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("fixtures/spider.plugin.json"),
+    include_str!("fixtures/agentbrowser.plugin.json"),
     include_str!("fixtures/exa.plugin.json"),
     include_str!("fixtures/ghost.plugin.json"),
     include_str!("fixtures/shadow.plugin.json"),
@@ -478,6 +611,10 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("fixtures/sandbox.plugin.json"),
     include_str!("fixtures/engines.plugin.json"),
     include_str!("fixtures/durable.plugin.json"),
+    // System-wide predictive typing on/off (Policy-gated, Core-local). Opt-in like
+    // firewall/routing/sandbox: enabling the plugin is the single switch for the
+    // /api/predict/* brain — there is no separate config toggle.
+    include_str!("fixtures/predict.plugin.json"),
     // Turn-hook plugins (the migrated, formerly-hardcoded features). These ship
     // as built-in fixtures but are built exactly like a third-party plugin would
     // be: a manifest + an inline JS hook reaching Core only through the
@@ -504,6 +641,23 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // surfacing findings as an out-of-band note. Toggle + `/security` command +
     // reviewer-model picker mirror `double-check`. Community-tier, opt-in.
     include_str!("fixtures/security-guidance.plugin.json"),
+    // `auto-expand` is the first `pre_user_turn` hook: before a message is sent it
+    // calls a configurable model (`hook:side-model`) to rewrite the prompt into a
+    // clearer form and returns a `replace` directive, so the improved prompt is
+    // what gets sent and persisted. Composer toggle (auto-expand every message) +
+    // `/expand` command (one-off). Core-tier, default-on; the flag/command `match`
+    // keeps it free when idle.
+    include_str!("fixtures/auto-expand.plugin.json"),
+    // `session-context` is a reference `session_start` hook: on the first turn of a
+    // conversation it injects the current date/time (a common blind spot for local
+    // models) via a `replace`/`inject` directive. Community-tier, opt-in; the
+    // reference a third party forks for richer setup-context injection. The other
+    // new phases (pre/post_tool_use, subagent_stop, session_end, notification) fire
+    // from off-chat-path sites through the process-global dispatcher; their
+    // reference fixtures (`tool-firewall`, `hook-observers`) are deliberately NOT
+    // registered here so those hot paths (esp. per tool call) stay lookup-free
+    // until a user installs a plugin that actually uses them.
+    include_str!("fixtures/hook-session-context.plugin.json"),
     // Ryu Apps (widget-rendering in-process apps). Each declares its tool
     // runnables + `contributes.widgets[]`; apps that push a follow-up turn also
     // declare the `chat.sendFollowUp` grant (governance §4.2). Default-on Core.
@@ -515,7 +669,26 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("fixtures/quest-board.plugin.json"),
     include_str!("fixtures/worktree-diff-review.plugin.json"),
     include_str!("fixtures/gateway-budget-dial.plugin.json"),
+    // The Whiteboard app — a full-page Companion (`ui_format:"html"`, Path B) that
+    // OWNS its Space documents via `spaces:docs`. Ships default-on with a UI bundle
+    // + host-bridge grants seeded in `main.rs` (the generic CORE_DEFAULT_ON loop
+    // seeds neither, so it has a dedicated seed block). Replaces the built-in
+    // whiteboard editor.
+    include_str!("fixtures/whiteboard.plugin.json"),
 ];
+
+/// The Whiteboard app's plugin id (its Space documents are `kind = app:<this>`).
+/// Shared by the default-on seed (`main.rs`), the legacy-kind migration
+/// (`server/spaces.rs`), and the desktop create/route flow.
+pub const WHITEBOARD_PLUGIN_ID: &str = "com.ryu.whiteboard";
+
+/// The Whiteboard app's prebuilt, self-contained UI bundle (a
+/// `vite-plugin-singlefile` build of `packages/whiteboard-app`, all JS/CSS/fonts
+/// inlined). Seeded as the plugin's `ui_code` on a fresh install so the default-on
+/// companion has a UI without going through `ryu pack` / install-bundle. Rebuild
+/// with `bun run --cwd packages/whiteboard-app build` and copy `dist/index.html`
+/// to `fixtures/whiteboard.ui.html` to refresh it.
+pub const WHITEBOARD_UI_HTML: &str = include_str!("fixtures/whiteboard.ui.html");
 
 /// Loader that merges built-in manifests with user-installed ones from
 /// `~/.ryu/plugins/*/plugin.json` (the path is overridable via `RYU_PLUGINS_DIR`,
@@ -667,6 +840,23 @@ impl PluginManifestLoader {
         for entry in &manifest.runnables {
             validate_runnable(entry)
                 .map_err(|e| format!("app '{}' (source: {source}): {e}", manifest.id))?;
+        }
+
+        // Validate each declared managed sidecar (name safety, health path, and
+        // per-process-kind required fields). Duplicate local names would collide on
+        // the same `<plugin_id>/<name>` manager key, so reject them at load.
+        {
+            let mut seen: HashSet<&str> = HashSet::new();
+            for spec in &manifest.sidecars {
+                crate::plugin_manifest::schema::validate_sidecar_spec(spec)
+                    .map_err(|e| format!("app '{}' (source: {source}): {e}", manifest.id))?;
+                if !seen.insert(spec.name.as_str()) {
+                    return Err(format!(
+                        "app '{}' declares duplicate sidecar name '{}' (source: {source})",
+                        manifest.id, spec.name
+                    ));
+                }
+            }
         }
 
         // Manifest-level companion surface: anti-impersonation on the visible label
@@ -827,7 +1017,12 @@ mod tests {
     // ── app id validation (path-traversal hardening) ─────────────────────────
 
     #[test]
-    fn validate_plugin_id_accepts_reverse_domain() {
+    fn validate_plugin_id_accepts_bare_kebab_and_legacy_dotted() {
+        // Bare-kebab ids (the new built-in convention) must pass.
+        assert!(validate_plugin_id("ghost").is_ok());
+        assert!(validate_plugin_id("data-grid-explorer").is_ok());
+        assert!(validate_plugin_id("rtk").is_ok());
+        // Legacy dotted third-party ids must still pass (back-compat).
         assert!(validate_plugin_id("com.example.research-assistant").is_ok());
         assert!(validate_plugin_id("io.ryu.ghost").is_ok());
         assert!(validate_plugin_id("com.example.my_app").is_ok());
@@ -847,7 +1042,6 @@ mod tests {
             "app.",
             "-leading.dash",
             "",
-            "no-dot",
         ] {
             assert!(
                 validate_plugin_id(bad).is_err(),
@@ -920,13 +1114,7 @@ mod tests {
         );
         // The new Core-tier policy/engine plugins must load (their engines.ryu
         // requirement is satisfied by this Core version).
-        for id in [
-            "io.ryu.firewall",
-            "io.ryu.routing",
-            "io.ryu.sandbox",
-            "io.ryu.engines",
-            "io.ryu.durable",
-        ] {
+        for id in ["firewall", "routing", "sandbox", "engines", "durable"] {
             assert!(
                 manifests.iter().any(|m| m.id == id),
                 "built-in '{id}' must load (engines.ryu must be satisfiable)"
@@ -941,28 +1129,56 @@ mod tests {
             "sample research assistant manifest must not be a built-in"
         );
         assert!(
-            manifests.iter().any(|m| m.id == "io.ryu.spider"),
+            manifests.iter().any(|m| m.id == "spider"),
             "built-in Spider manifest should be loaded"
         );
         assert!(
-            manifests.iter().any(|m| m.id == "io.ryu.exa"),
+            manifests.iter().any(|m| m.id == "exa"),
             "built-in Exa manifest should be loaded"
         );
         assert!(
-            manifests.iter().any(|m| m.id == "io.ryu.ghost"),
+            manifests.iter().any(|m| m.id == "ghost"),
             "built-in Ghost manifest should be loaded"
         );
         assert!(
-            manifests.iter().any(|m| m.id == "io.ryu.shadow"),
+            manifests.iter().any(|m| m.id == "shadow"),
             "built-in Shadow manifest should be loaded"
         );
         assert!(
-            manifests.iter().any(|m| m.id == "io.ryu.proof"),
+            manifests.iter().any(|m| m.id == "proof"),
             "built-in Proof of Work manifest should be loaded"
         );
         assert!(
-            manifests.iter().any(|m| m.id == "io.ryu.security-guidance"),
+            manifests.iter().any(|m| m.id == "security-guidance"),
             "built-in Security Guidance manifest should be loaded"
+        );
+        // The Whiteboard app (the FIRST companion runnable in BUILTIN_MANIFESTS) must
+        // load AND validate as a companion whose config carries `ui_entry` + the
+        // Path B `ui_format:"html"` discriminator. `cargo check` compiles the
+        // `include_str!` but never RUNS this loader, so without this a fixture that
+        // fails `parse_and_validate` would be silently dropped → the default-on seed
+        // finds no version → the whole feature is inert while every check stays green.
+        let whiteboard = manifests
+            .iter()
+            .find(|m| m.id == WHITEBOARD_PLUGIN_ID)
+            .expect("whiteboard app manifest must load and validate");
+        let companion = whiteboard
+            .runnables()
+            .iter()
+            .find(|r| r.kind == RunnableKind::Companion)
+            .expect("whiteboard must expose a companion runnable");
+        let cfg = companion
+            .config
+            .as_ref()
+            .expect("whiteboard companion must carry a config");
+        assert!(
+            cfg.get("ui_entry").and_then(|v| v.as_str()).is_some(),
+            "whiteboard companion config must set ui_entry (so has_ui is true)"
+        );
+        assert_eq!(
+            cfg.get("ui_format").and_then(|v| v.as_str()),
+            Some("html"),
+            "whiteboard companion must declare ui_format:\"html\" (Path B)"
         );
     }
 
@@ -974,7 +1190,7 @@ mod tests {
         let manifests = PluginManifestLoader::load();
         let m = manifests
             .iter()
-            .find(|m| m.id == "io.ryu.security-guidance")
+            .find(|m| m.id == "security-guidance")
             .expect("security-guidance must load");
         assert!(
             m.permission_grants.iter().any(|g| g == "hook:side-model"),

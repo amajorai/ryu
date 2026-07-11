@@ -5,16 +5,23 @@
   "icon": "Shield",
   "pages": [
     "index",
+    "---Routing---",
     "routing",
+    "routing-planes",
+    "gateway-for-any-agent",
+    "---Configuration & Security---",
     "configuration",
     "security",
     "governance",
-    "tools",
     "agent-hardening",
+    "---Tools & Channels---",
+    "tools",
     "channels",
+    "---Observability & Reliability---",
     "evals-audit",
     "reliability",
     "compression",
-    "gateway-for-any-agent"
+    "---Hosted Fleet---",
+    "managed-data-plane"
   ]
 }

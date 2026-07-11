@@ -26,6 +26,16 @@ pub struct DesktopNotification {
     pub body: Option<String>,
     /// One of `info` | `success` | `warning` | `error`. Advisory only.
     pub level: String,
+    /// When set, this notification is meant for one specific member. A connected
+    /// desktop whose logged-in user differs ignores it, so a shared team node can
+    /// fan a workflow ping to the right person only. Unset = broadcast to every
+    /// connected surface (the prior behavior).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_user_id: Option<String>,
+    /// The app-inbox row this event mirrors, so the desktop can deep-link a tapped
+    /// OS toast straight to the inbox item (and its Ack action).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_id: Option<String>,
 }
 
 static EVENTS: OnceLock<broadcast::Sender<DesktopNotification>> = OnceLock::new();

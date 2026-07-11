@@ -22,6 +22,33 @@ The exact cache evicts expired entries with a background task. The semantic cach
   acceptable.
 </Callout>
 
+### Provider prompt caching
+
+The two caches above are the Gateway's own. Separately, upstream providers (OpenRouter, OpenAI,
+Anthropic) run their **own** prompt cache - a repeated prefix (system prompt, tool definitions, long
+context) is served cheaper and faster on the second hit. This is a cost and latency win, not a
+correctness mechanism, and the Gateway does not manage it; it passes the breakpoints through and
+meters the result.
+
+For explicit-cache providers the request must carry `cache_control` breakpoints. Managed Pi only
+emits them when the model's `compat.cacheControlFormat` is `anthropic`, so Core stamps that flag for
+model ids containing `claude`, `anthropic`, or `qwen` - the OpenRouter explicit-cache families
+(`apply_cache_compat` / `explicit_cache_control_format`, `apps/core/src/pi_config/mod.rs`). OpenAI,
+Gemini 2.5, DeepSeek, and Grok auto-cache with no marker, so they get no flag; the local llama.cpp
+default stays bare (no upstream cache to hit). The Gateway's firewall leaves array-form content and
+`cache_control` keys untouched, so those breakpoints survive to the provider.
+
+On the way back, the Gateway meters cached input tokens: `pipeline/mod.rs` reads
+`usage.prompt_tokens_details.cached_tokens` (non-streaming) or parses the streamed usage, and feeds
+`provider_cached_input_tokens` (`add_cached_tokens`, `apps/gateway/src/metrics/mod.rs`), surfaced as
+`tokens.cached_input` on the metrics snapshot.
+
+<Callout type="info">
+  Provider prompt-cache billing is already correct without extra work - OpenRouter's `usage.cost`
+  nets the cache discount and the credit path bills from that authoritative figure. The
+  `provider_cached_input_tokens` counter is for observability, not a second pricing input.
+</Callout>
+
 ## Rate limiting
 
 The rate limiter (`apps/gateway/src/rate_limit/`) applies token-bucket limits per key across three dimensions: requests per minute, tokens per minute, and a per-second burst cap for bot detection. Per-key overrides in the auth config let one key have a higher ceiling than the global default. Idle buckets are evicted to bound memory.

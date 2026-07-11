@@ -599,6 +599,33 @@ pub async fn install_from_source(client: &reqwest::Client, source: &str) -> Resu
     result
 }
 
+/// Install a skill from an in-memory `.tar.gz` bundle — the entitlement-gated
+/// **Ryu-bundle** path for a PAID marketplace skill (Phase 4A). Unlike
+/// [`install_from_source`], there is no public git repo / URL: the archive bytes
+/// were served from the control plane behind the 402 license gate and their
+/// integrity was already verified (sha256 over these exact bytes against the
+/// signed `manifest.artifact_sha256`) by the caller. This extracts to a temp dir
+/// and installs the first discovered skill, mirroring the remote path minus the
+/// fetch. Synchronous (extraction is CPU-bound, no I/O await).
+pub fn install_from_tarball_bytes(bytes: &[u8]) -> Result<InstallResult> {
+    let workdir = temp_workdir()?;
+    let extract_root = workdir.join("extract");
+    // Extract + install inside a closure so the temp tree is always cleaned up,
+    // success or failure, exactly like `install_from_source`'s remote path.
+    let result = (|| {
+        crate::sidecar::download_manager::extract_tar_gz_to_dir(bytes, &extract_root, None)
+            .context("extracting paid skill bundle")?;
+        // A well-formed skill bundle is either a single top-level dir (as a github
+        // tarball expands) or the skill files at the archive root; `resolve_subdir`
+        // (no subdir) + `repo_root_name` handle both, reusing the remote path's
+        // discovery so naming/lookup stay identical.
+        let search_root = resolve_subdir(&extract_root, None)?;
+        install_from_dir(&search_root, repo_root_name(&extract_root))
+    })();
+    let _ = std::fs::remove_dir_all(&workdir);
+    result
+}
+
 /// Fetch a remote source into `workdir` then install. Tarball is tried first; a
 /// clone is the fallback for tarball-failure or SSH/other-host strategies.
 async fn install_remote(

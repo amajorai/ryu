@@ -20,7 +20,7 @@ pub use registry::{CatalogSourceRegistry, CustomSourceSpec, SourceMeta};
 pub use sources::{
     with_buyer_token, HfSource, IntegrationsShSource, MarketplaceSource, ModelIndexSource,
     OfficialMcpSource, OkfBundleSource, RyuHostedMcpSource, RyuMarketplaceSource, SkillsShSource,
-    SmitherySource, Source, StubSource, RYU_MARKETPLACE_API_ENV, SMITHERY_API_KEY_PREF,
+    SmitherySource, Source, SourceAuth, StubSource, RYU_MARKETPLACE_API_ENV, SMITHERY_API_KEY_PREF,
 };
 
 use anyhow::{bail, Result};

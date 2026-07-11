@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.decision-wizard",
+  "id": "decision-wizard",
   "name": "Decision Wizard",
   "version": "1.0.0",
   "runnables": [

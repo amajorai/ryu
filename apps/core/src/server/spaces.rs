@@ -115,6 +115,11 @@ pub struct Space {
     pub document_count: i64,
     /// Retrieval algorithm for this Space.
     pub retrieval_mode: RetrievalMode,
+    /// True for Ryu-owned system Spaces (Artifacts, Meetings) — undeletable and
+    /// skipped by the danger-zone bulk clear. Drives the desktop's delete-action
+    /// suppression + the "Artifacts" resolver.
+    #[serde(default)]
+    pub system: bool,
 }
 
 /// A document belonging to a Space.
@@ -131,6 +136,12 @@ pub struct Document {
     /// Parent document id when this is a database "row page"; `None` for
     /// top-level documents.
     pub parent_id: Option<String>,
+    /// MIME type for `kind='file'` documents (`None` for page/database/whiteboard).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime: Option<String>,
+    /// Byte size for `kind='file'` documents (`None` otherwise).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byte_size: Option<i64>,
 }
 
 /// A document with its full editable markdown source (Notion-style page).
@@ -151,6 +162,43 @@ pub struct DocumentContent {
     pub kind: String,
     /// Parent document id when this is a database "row page"; `None` otherwise.
     pub parent_id: Option<String>,
+}
+
+/// One app-owned document as returned to a full-page Companion app (grant
+/// `spaces:docs`). This is the kind-isolated view: an app only ever sees a doc
+/// whose `kind == "app:<its plugin id>"`, never another app's or a built-in
+/// page/database/whiteboard/file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppDoc {
+    pub id: String,
+    pub title: String,
+    /// The document's raw source (an app's own JSON/text — the app owns the shape).
+    pub source: String,
+    /// Always `app:<plugin_id>` for a doc an app can see.
+    pub kind: String,
+}
+
+/// A lightweight listing row for an app's own documents in a Space.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppDocSummary {
+    pub id: String,
+    pub title: String,
+    /// Unix milliseconds.
+    pub updated_at: i64,
+}
+
+/// Metadata for a binary file document (`kind = 'file'`). The bytes live in the
+/// content-addressed blob store keyed by `sha256`; this is the row-level pointer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileMeta {
+    pub id: String,
+    pub space_id: String,
+    pub title: String,
+    pub mime: String,
+    pub sha256: String,
+    pub byte_size: i64,
+    /// Unix milliseconds.
+    pub created_at: i64,
 }
 
 /// Metadata for one saved version of a document (no `source`, so version lists
@@ -598,6 +646,61 @@ fn default_db_path() -> PathBuf {
     crate::paths::ryu_dir().join("spaces.db")
 }
 
+/// Root of the content-addressed blob store (`~/.ryu/blobs`). File-kind Space
+/// documents keep their bytes here, sharded by the first two hex chars of the
+/// sha256 so a single directory never holds unbounded entries.
+fn blob_root() -> PathBuf {
+    crate::paths::ryu_dir().join("blobs")
+}
+
+/// On-disk path for a blob given its lowercase hex sha256 (`blobs/ab/abcd…`).
+fn blob_path(sha256: &str) -> PathBuf {
+    let shard = sha256.get(0..2).unwrap_or("00");
+    blob_root().join(shard).join(sha256)
+}
+
+/// Lowercase hex sha256 of `bytes`.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
+/// Write `bytes` into the content-addressed blob store and return its sha256.
+/// Content-addressed, so writing identical bytes twice is a no-op (dedupe).
+fn write_blob(bytes: &[u8]) -> Result<String> {
+    let sha = sha256_hex(bytes);
+    let path = blob_path(&sha);
+    if path.exists() {
+        return Ok(sha);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating blob dir {}", parent.display()))?;
+    }
+    // Write to a temp sibling then rename so a reader never sees a partial blob.
+    let tmp = path.with_extension("part");
+    std::fs::write(&tmp, bytes).with_context(|| format!("writing blob {sha}"))?;
+    std::fs::rename(&tmp, &path).with_context(|| format!("finalizing blob {sha}"))?;
+    Ok(sha)
+}
+
+/// Read a blob's bytes back by its sha256. Returns `Ok(None)` when absent.
+fn read_blob(sha256: &str) -> Result<Option<Vec<u8>>> {
+    let path = blob_path(sha256);
+    match std::fs::read(&path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e).with_context(|| format!("reading blob {sha256}")),
+    }
+}
+
 impl SpaceStore {
     /// Open (or create) the store at the default path using the environment-
     /// configured model registry to determine the embedding model and dims.
@@ -775,6 +878,17 @@ impl SpaceStore {
         let _ = conn
             .execute_batch("ALTER TABLE documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'page';");
 
+        // Idempotent migration: the built-in whiteboard editor was ported to the
+        // Whiteboard Ryu App, which OWNS its documents under `kind = app:<plugin_id>`
+        // (so the app's sandboxed frame can load/save them via `spaces:docs`). Re-key
+        // every legacy `kind='whiteboard'` document to the app's kind so existing
+        // boards open in the app instead of the removed built-in renderer. Naturally
+        // idempotent: after the first run no rows match, so re-running each startup is
+        // a no-op. `flatten_app_source` handles the reflattened text on next re-embed.
+        let _ = conn.execute_batch(
+            "UPDATE documents SET kind = 'app:com.ryu.whiteboard' WHERE kind = 'whiteboard';",
+        );
+
         // Idempotent migration: a document may belong to a parent document — used by
         // database "row pages" (a row's body is a child `kind='page'` doc whose
         // `parent_id` is the database). Top-level listings filter `parent_id IS NULL`
@@ -864,6 +978,23 @@ impl SpaceStore {
             }
         }
 
+        // Idempotent migration: binary "file" documents (kind = 'file'). Unlike
+        // page/database/whiteboard docs, a file's bytes live in the content-
+        // addressed blob store (`~/.ryu/blobs/<sha256>`), not in `source`. These
+        // columns carry the pointer + metadata; `source` holds a short text
+        // descriptor (title + mime) so the file stays findable in RAG. Additive
+        // columns only, so existing dbs upgrade in place.
+        let _ = conn.execute_batch("ALTER TABLE documents ADD COLUMN mime TEXT;");
+        let _ = conn.execute_batch("ALTER TABLE documents ADD COLUMN blob_sha256 TEXT;");
+        let _ = conn.execute_batch("ALTER TABLE documents ADD COLUMN byte_size INTEGER;");
+
+        // Idempotent migration: system Spaces. A system Space (e.g. the default
+        // "Artifacts" and "Meetings" spaces) is created by Ryu itself, cannot be
+        // deleted individually, and is skipped by the danger-zone bulk clear. This
+        // generalizes the old name-matched "Meetings" special-case into a flag.
+        let _ =
+            conn.execute_batch("ALTER TABLE spaces ADD COLUMN system INTEGER NOT NULL DEFAULT 0;");
+
         Ok(())
     }
 
@@ -901,7 +1032,7 @@ impl SpaceStore {
             "SELECT s.id, s.name, s.description, s.created_at, s.updated_at,
                     (SELECT COUNT(*) FROM documents d
                         WHERE d.space_id = s.id AND d.parent_id IS NULL),
-                    s.retrieval_mode
+                    s.retrieval_mode, s.system
              FROM spaces s
              ORDER BY s.updated_at DESC",
         )?;
@@ -915,6 +1046,7 @@ impl SpaceStore {
                 updated_at: row.get(4)?,
                 document_count: row.get(5)?,
                 retrieval_mode: RetrievalMode::from_str(&mode_str),
+                system: row.get(7)?,
             })
         })?;
         let mut out = Vec::new();
@@ -930,7 +1062,7 @@ impl SpaceStore {
         let mut stmt = conn.prepare(
             "SELECT d.id, d.space_id, d.title, d.created_at,
                     (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id),
-                    d.kind, d.parent_id
+                    d.kind, d.parent_id, d.mime, d.byte_size
              FROM documents d
              WHERE d.space_id = ?1 AND d.parent_id IS NULL
              ORDER BY d.created_at ASC",
@@ -944,6 +1076,8 @@ impl SpaceStore {
                 chunk_count: row.get(4)?,
                 kind: row.get(5)?,
                 parent_id: row.get(6)?,
+                mime: row.get(7)?,
+                byte_size: row.get(8)?,
             })
         })?;
         let mut out = Vec::new();
@@ -1059,6 +1193,127 @@ impl SpaceStore {
             .await
     }
 
+    // ── App-owned documents (grant `spaces:docs`) ───────────────────────────────
+    //
+    // Full-page Companion apps OWN Space documents through these methods, so a
+    // whiteboard-as-app (or any app) gets the full Spaces integration: persisted in
+    // the `documents` table, search-embedded, `[[backlinked]]`, versioned, and
+    // Space-routed. Isolation is by `kind`: every app doc carries
+    // `kind = "app:<plugin_id>"`, and every read/update/delete verifies that kind
+    // FIRST — one app can never see or mutate another app's docs, nor any built-in
+    // page/database/whiteboard/file. The owning `plugin_id` comes from the bridge's
+    // path-bound id (never the body), so it cannot be spoofed.
+
+    /// The isolation `kind` for a given app's documents.
+    fn app_kind(plugin_id: &str) -> String {
+        format!("app:{plugin_id}")
+    }
+
+    /// Create an app-owned document in a Space (`kind = app:<plugin_id>`). Returns
+    /// the new document id. Same lifecycle as a page/database/whiteboard — empty
+    /// until the app fills it via [`app_update_doc`](Self::app_update_doc).
+    pub async fn app_create_doc(
+        &self,
+        plugin_id: &str,
+        space_id: &str,
+        title: &str,
+    ) -> Result<String> {
+        let kind = Self::app_kind(plugin_id);
+        self.create_document_of_kind(space_id, title, &kind, None)
+            .await
+    }
+
+    /// Fetch one app-owned document. Returns `Ok(None)` unless the document exists
+    /// AND its `kind` is exactly `app:<plugin_id>` — so it never exposes another
+    /// app's doc or a built-in page/database/whiteboard/file.
+    pub async fn app_get_doc(&self, plugin_id: &str, doc_id: &str) -> Result<Option<AppDoc>> {
+        let want = Self::app_kind(plugin_id);
+        let Some(doc) = self.get_document(doc_id).await? else {
+            return Ok(None);
+        };
+        if doc.kind != want {
+            return Ok(None);
+        }
+        Ok(Some(AppDoc {
+            id: doc.id,
+            title: doc.title,
+            source: doc.source,
+            kind: doc.kind,
+        }))
+    }
+
+    /// Update an app-owned document. The kind is verified FIRST (an app may only
+    /// touch its own `app:<plugin_id>` docs), then the write reuses the normal
+    /// [`update_document`](Self::update_document) path so flatten + search
+    /// re-embedding + `[[backlink]]` re-resolution all run. `title = None` keeps
+    /// the current title.
+    pub async fn app_update_doc(
+        &self,
+        plugin_id: &str,
+        doc_id: &str,
+        title: Option<&str>,
+        source: &str,
+    ) -> Result<()> {
+        let want = Self::app_kind(plugin_id);
+        let doc = self
+            .get_document(doc_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("document '{doc_id}' not found"))?;
+        if doc.kind != want {
+            anyhow::bail!("document '{doc_id}' is not owned by app '{plugin_id}'");
+        }
+        let title = title.unwrap_or(&doc.title);
+        self.update_document(doc_id, title, source).await
+    }
+
+    /// List an app's own documents in a Space (only `kind = app:<plugin_id>`),
+    /// most-recently-updated first.
+    pub async fn app_list_docs(
+        &self,
+        plugin_id: &str,
+        space_id: &str,
+    ) -> Result<Vec<AppDocSummary>> {
+        let want = Self::app_kind(plugin_id);
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, updated_at FROM documents
+                 WHERE space_id = ?1 AND kind = ?2
+                 ORDER BY updated_at DESC, id DESC",
+            )
+            .context("preparing app doc list")?;
+        let rows = stmt
+            .query_map(params![space_id, want], |row| {
+                Ok(AppDocSummary {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    updated_at: row.get(2)?,
+                })
+            })
+            .context("querying app docs")?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Delete an app-owned document (kind-verified FIRST). Reuses
+    /// [`delete_document`](Self::delete_document), which also removes the doc's
+    /// links and version history.
+    pub async fn app_delete_doc(&self, plugin_id: &str, doc_id: &str) -> Result<()> {
+        let want = Self::app_kind(plugin_id);
+        let doc = self
+            .get_document(doc_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("document '{doc_id}' not found"))?;
+        if doc.kind != want {
+            anyhow::bail!("document '{doc_id}' is not owned by app '{plugin_id}'");
+        }
+        self.delete_document(doc_id).await?;
+        Ok(())
+    }
+
     /// Shared constructor for an empty document of a given `kind`
     /// (`"page"` | `"database"`), optionally parented to another document.
     async fn create_document_of_kind(
@@ -1096,6 +1351,160 @@ impl SpaceStore {
         // A new page may satisfy pending `[[Title]]` links from other documents.
         reresolve_pending_links(&conn, space_id, &document_id, title)?;
         Ok(document_id)
+    }
+
+    /// Get-or-create a **system** Space by name. System spaces (e.g. the default
+    /// "Artifacts" and "Meetings" collections) are Ryu-owned: they cannot be
+    /// deleted individually and are skipped by the danger-zone bulk clear. Called
+    /// idempotently at startup, so a matching row is reused and its `system` flag
+    /// is (re-)asserted. Returns the space id.
+    pub async fn ensure_system_space(&self, name: &str, description: Option<&str>) -> Result<String> {
+        let conn = self.conn.lock().await;
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM spaces WHERE name = ?1",
+                params![name],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("looking up system space")?;
+        if let Some(id) = existing {
+            conn.execute("UPDATE spaces SET system = 1 WHERE id = ?1", params![id])
+                .context("asserting system flag")?;
+            return Ok(id);
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_millis();
+        conn.execute(
+            "INSERT INTO spaces (id, name, description, created_at, updated_at, retrieval_mode, system)
+             VALUES (?1, ?2, ?3, ?4, ?4, 'vector', 1)",
+            params![id, name, description, now],
+        )
+        .context("creating system space")?;
+        Ok(id)
+    }
+
+    /// Create a binary **file** document in a Space. Writes `bytes` to the content-
+    /// addressed blob store, inserts a `kind = 'file'` document pointing at the
+    /// blob, and embeds a short text descriptor (`title` + `mime`) so the file is
+    /// discoverable via RAG search. Returns the new document id.
+    ///
+    /// This is the substrate the `create_artifact` tool and chat auto-filing sit
+    /// on: a generated pptx/xlsx/csv/pdf/png lands here as a first-class Space doc.
+    pub async fn create_file(
+        &self,
+        space_id: &str,
+        title: &str,
+        bytes: &[u8],
+        mime: &str,
+    ) -> Result<String> {
+        // Persist the bytes first (content-addressed, deduped). Done outside the
+        // db lock — filesystem I/O should not hold the sqlite mutex.
+        let sha = write_blob(bytes)?;
+        let byte_size = bytes.len() as i64;
+
+        // A file has no editable markdown, but a short descriptor keeps it findable
+        // in RAG (title + mime). Embed it like a tiny page.
+        let descriptor = format!("{title}\n{mime}");
+        let emb = self.embedder_snapshot().await;
+        let model_id = emb.model_id().to_string();
+        let dims = emb.dims();
+        let vector = emb.embed(&descriptor).await?;
+
+        let document_id = uuid::Uuid::new_v4().to_string();
+        let now = now_millis();
+        let mut conn = self.conn.lock().await;
+        let exists: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM spaces WHERE id = ?1",
+                params![space_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("verifying space exists")?;
+        if exists.is_none() {
+            anyhow::bail!("space '{space_id}' not found");
+        }
+        let tx = conn.transaction().context("starting file insert")?;
+        tx.execute(
+            "INSERT INTO documents
+               (id, space_id, title, created_at, source, updated_at, kind, parent_id,
+                mime, blob_sha256, byte_size)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?4, 'file', NULL, ?6, ?7, ?8)",
+            params![
+                document_id,
+                space_id,
+                title,
+                now,
+                descriptor,
+                mime,
+                sha,
+                byte_size
+            ],
+        )
+        .context("inserting file document")?;
+        // Store the single descriptor chunk + its vector so the file is retrievable.
+        insert_chunks(
+            &tx,
+            &document_id,
+            space_id,
+            &[(descriptor.clone(), vector)],
+            now,
+            &model_id,
+            dims,
+            RetrievalMode::Vector,
+        )?;
+        tx.execute(
+            "UPDATE spaces SET updated_at = ?1 WHERE id = ?2",
+            params![now, space_id],
+        )
+        .context("bumping space updated_at")?;
+        tx.commit().context("committing file insert")?;
+        Ok(document_id)
+    }
+
+    /// Fetch a file document's blob metadata (mime, sha256, size). Returns
+    /// `Ok(None)` when the id is not a `kind = 'file'` document.
+    pub async fn get_file_meta(&self, doc_id: &str) -> Result<Option<FileMeta>> {
+        let conn = self.conn.lock().await;
+        let meta = conn
+            .query_row(
+                "SELECT id, space_id, title,
+                        COALESCE(mime, 'application/octet-stream'),
+                        blob_sha256, COALESCE(byte_size, 0), created_at
+                 FROM documents WHERE id = ?1 AND kind = 'file'",
+                params![doc_id],
+                |row| {
+                    let sha: Option<String> = row.get(4)?;
+                    Ok(FileMeta {
+                        id: row.get(0)?,
+                        space_id: row.get(1)?,
+                        title: row.get(2)?,
+                        mime: row.get(3)?,
+                        sha256: sha.unwrap_or_default(),
+                        byte_size: row.get(5)?,
+                        created_at: row.get(6)?,
+                    })
+                },
+            )
+            .optional()
+            .context("reading file meta")?;
+        Ok(meta)
+    }
+
+    /// Read a file document's bytes (mime + blob). Returns `Ok(None)` when the doc
+    /// is not a file or its blob is missing from the store.
+    pub async fn read_file_blob(&self, doc_id: &str) -> Result<Option<(String, Vec<u8>)>> {
+        let Some(meta) = self.get_file_meta(doc_id).await? else {
+            return Ok(None);
+        };
+        if meta.sha256.is_empty() {
+            return Ok(None);
+        }
+        match read_blob(&meta.sha256)? {
+            Some(bytes) => Ok(Some((meta.mime, bytes))),
+            None => Ok(None),
+        }
     }
 
     /// Fetch a single document with its full markdown source.
@@ -1178,6 +1587,10 @@ impl SpaceStore {
         let chunk_source = match kind.as_deref() {
             Some("database") => flatten_database_source(source),
             Some("whiteboard") => flatten_whiteboard_source(source),
+            // App-owned docs (`kind = app:<plugin_id>`) carry app-defined JSON we
+            // can't know the shape of; extract every string value so they stay
+            // search-embeddable like a whiteboard/database.
+            Some(k) if k.starts_with("app:") => flatten_app_source(source),
             _ => source.to_string(),
         };
         let chunks = chunk_text(&chunk_source);
@@ -1915,6 +2328,18 @@ impl SpaceStore {
     /// a Space row was removed.
     pub async fn delete_space(&self, space_id: &str) -> Result<bool> {
         let mut conn = self.conn.lock().await;
+        // System spaces (Artifacts, Meetings) are Ryu-owned and undeletable.
+        let is_system: Option<i64> = conn
+            .query_row(
+                "SELECT system FROM spaces WHERE id = ?1",
+                params![space_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("checking system flag")?;
+        if is_system == Some(1) {
+            anyhow::bail!("space '{space_id}' is a system space and cannot be deleted");
+        }
         let tx = conn.transaction().context("starting delete transaction")?;
         // Remove vectors first (vec0 has no foreign-key cascade).
         tx.execute(
@@ -1939,7 +2364,7 @@ impl SpaceStore {
     pub async fn count_spaces(&self) -> Result<u64> {
         let conn = self.conn.lock().await;
         let n: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM spaces WHERE name != ?1",
+            "SELECT COUNT(*) FROM spaces WHERE system = 0 AND name != ?1",
             params![MEETINGS_SPACE_NAME],
             |r| r.get(0),
         )?;
@@ -1963,14 +2388,14 @@ impl SpaceStore {
             "DELETE FROM chunk_vectors WHERE rowid IN (
                  SELECT c.rowid FROM chunks c
                  JOIN spaces s ON s.id = c.space_id
-                 WHERE s.name != ?1
+                 WHERE s.system = 0 AND s.name != ?1
              )",
             params![MEETINGS_SPACE_NAME],
         )
         .context("deleting chunk vectors")?;
         let removed = tx
             .execute(
-                "DELETE FROM spaces WHERE name != ?1",
+                "DELETE FROM spaces WHERE system = 0 AND name != ?1",
                 params![MEETINGS_SPACE_NAME],
             )
             .context("deleting spaces")?;
@@ -2267,6 +2692,68 @@ fn flatten_whiteboard_source(source: &str) -> String {
     parts.join("\n")
 }
 
+/// Max bytes of flattened text kept from an app document's source. Bounds the
+/// embedding work + row size for an arbitrarily large app-defined JSON blob.
+const APP_FLATTEN_CAP: usize = 64 * 1024;
+
+/// Flatten an app document's source into searchable text: recursively concatenate
+/// every string value in the source JSON (object values + array items, at any
+/// depth), newline-joined and capped at [`APP_FLATTEN_CAP`]. App docs carry
+/// app-defined JSON whose shape Core can't know, so — unlike the database/
+/// whiteboard flatteners — this extracts strings generically. If `source` is not
+/// valid JSON it falls back to the raw text (capped) so the doc is still
+/// searchable. The stored `source` is never modified; this is only the embedding
+/// text.
+fn flatten_app_source(source: &str) -> String {
+    let mut out = String::new();
+    match serde_json::from_str::<serde_json::Value>(source) {
+        Ok(value) => collect_json_strings(&value, &mut out),
+        // Not JSON — treat the whole source as one text blob.
+        Err(_) => out.push_str(source),
+    }
+    if out.len() > APP_FLATTEN_CAP {
+        let mut end = APP_FLATTEN_CAP;
+        while end > 0 && !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+    }
+    out
+}
+
+/// Recursively append every string value found in `value` to `out`, newline-
+/// separated. Object keys and non-string scalars (numbers/booleans/null) are
+/// skipped — only string *values* are searchable text. Stops descending once
+/// `out` has reached [`APP_FLATTEN_CAP`] to bound work on a huge/deeply-nested
+/// blob (the final truncation still enforces the exact cap).
+fn collect_json_strings(value: &serde_json::Value, out: &mut String) {
+    if out.len() >= APP_FLATTEN_CAP {
+        return;
+    }
+    match value {
+        serde_json::Value::String(s) => {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(trimmed);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_json_strings(item, out);
+            }
+        }
+        serde_json::Value::Object(obj) => {
+            for v in obj.values() {
+                collect_json_strings(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Flatten one grid cell value to searchable text across all cell variants
 /// (text/number/checkbox/select → scalar; multi-select → array; file → `name`).
 fn json_cell_to_text(value: &serde_json::Value) -> String {
@@ -2454,6 +2941,57 @@ mod tests {
         let remaining = store.list_spaces().await.unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].name, MEETINGS_SPACE_NAME);
+    }
+
+    #[test]
+    fn blob_store_round_trips_and_dedupes() {
+        // sha256 is deterministic and content-addressed.
+        let bytes = b"hello artifact";
+        let sha1 = write_blob(bytes).unwrap();
+        let sha2 = write_blob(bytes).unwrap();
+        assert_eq!(sha1, sha2, "identical bytes dedupe to one blob");
+        assert_eq!(sha1, sha256_hex(bytes), "returned sha matches content hash");
+        let read = read_blob(&sha1).unwrap();
+        assert_eq!(read.as_deref(), Some(&bytes[..]));
+        // Unknown sha reads as absent, not error.
+        assert!(read_blob("0".repeat(64).as_str()).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn file_document_and_system_space_are_governed() {
+        let store = SpaceStore::open_in_memory().unwrap();
+
+        // A system space is created, flagged, and excluded from the user count.
+        let artifacts = store
+            .ensure_system_space("Artifacts", Some("Generated files"))
+            .await
+            .unwrap();
+        // ensure_* is idempotent: same name reuses the row.
+        let again = store.ensure_system_space("Artifacts", None).await.unwrap();
+        assert_eq!(artifacts, again);
+        store.create_space("Notes", None).await.unwrap();
+        assert_eq!(store.count_spaces().await.unwrap(), 1, "system space uncounted");
+
+        // A file document stores its bytes in the blob store and stays retrievable.
+        let png = b"\x89PNG\r\n\x1a\n binary artifact bytes";
+        let doc = store
+            .create_file(&artifacts, "chart.png", png, "image/png")
+            .await
+            .unwrap();
+        let meta = store.get_file_meta(&doc).await.unwrap().unwrap();
+        assert_eq!(meta.mime, "image/png");
+        assert_eq!(meta.byte_size, png.len() as i64);
+        assert!(!meta.sha256.is_empty());
+        let (mime, bytes) = store.read_file_blob(&doc).await.unwrap().unwrap();
+        assert_eq!(mime, "image/png");
+        assert_eq!(bytes, png);
+
+        // A system space cannot be deleted individually.
+        assert!(store.delete_space(&artifacts).await.is_err());
+        // And bulk-clear leaves it intact.
+        store.clear_all_spaces().await.unwrap();
+        let remaining = store.list_spaces().await.unwrap();
+        assert!(remaining.iter().any(|s| s.id == artifacts));
     }
 
     #[tokio::test]
@@ -2786,6 +3324,86 @@ mod tests {
         let chunks = chunk_text(&big);
         assert!(chunks.len() > 1);
         assert!(chunks.iter().all(|c| c.chars().count() <= CHUNK_CHAR_SIZE));
+    }
+
+    #[test]
+    fn flatten_app_source_extracts_nested_strings() {
+        let src = r#"{
+            "title": "hello",
+            "nested": { "deep": "world", "count": 42, "flag": true },
+            "items": ["one", "two", null, ["three"]]
+        }"#;
+        let flat = flatten_app_source(src);
+        for want in ["hello", "world", "one", "two", "three"] {
+            assert!(flat.contains(want), "flattened text missing {want:?}: {flat:?}");
+        }
+        // Non-string scalars (numbers/booleans/null) are not searchable text.
+        assert!(!flat.contains("42"));
+        assert!(!flat.contains("true"));
+        // Non-JSON falls back to the raw source so it stays searchable.
+        assert_eq!(flatten_app_source("just plain text"), "just plain text");
+    }
+
+    #[test]
+    fn flatten_app_source_caps_output() {
+        // A huge JSON array of strings is capped at APP_FLATTEN_CAP bytes.
+        let big: Vec<String> = (0..20_000).map(|i| format!("token{i}")).collect();
+        let src = serde_json::to_string(&big).unwrap();
+        let flat = flatten_app_source(&src);
+        assert!(flat.len() <= APP_FLATTEN_CAP);
+    }
+
+    #[tokio::test]
+    async fn app_docs_are_kind_isolated_and_embed() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let space = store.create_space("AppSpace", None).await.unwrap();
+
+        // App A creates and can read its own doc.
+        let doc = store.app_create_doc("app.a", &space, "Doc A").await.unwrap();
+        let got = store.app_get_doc("app.a", &doc).await.unwrap();
+        assert!(got.is_some());
+        assert_eq!(got.unwrap().kind, "app:app.a");
+
+        // App B cannot read app A's doc (foreign kind → None, not an error).
+        assert!(store.app_get_doc("app.b", &doc).await.unwrap().is_none());
+
+        // A built-in page is invisible to any app.
+        let page = store.create_page(&space, "Builtin Page").await.unwrap();
+        assert!(store.app_get_doc("app.a", &page).await.unwrap().is_none());
+
+        // App B cannot mutate app A's doc (kind-checked FIRST → error).
+        assert!(store
+            .app_update_doc("app.b", &doc, None, "x")
+            .await
+            .is_err());
+        assert!(store.app_delete_doc("app.b", &doc).await.is_err());
+
+        // App A can update its own doc — this runs the flatten + embed path, so the
+        // doc gains chunks and becomes searchable.
+        store
+            .app_update_doc(
+                "app.a",
+                &doc,
+                Some("Renamed"),
+                r#"{"note":"searchable app content here"}"#,
+            )
+            .await
+            .unwrap();
+
+        // Listing is scoped per app: A sees exactly its one doc (not the page); B none.
+        let list_a = store.app_list_docs("app.a", &space).await.unwrap();
+        assert_eq!(list_a.len(), 1);
+        assert_eq!(list_a[0].id, doc);
+        assert_eq!(list_a[0].title, "Renamed");
+        assert!(store.app_list_docs("app.b", &space).await.unwrap().is_empty());
+
+        // The flattened app content is embedded and retrievable.
+        let hits = store.search(&space, "searchable app content", 5).await.unwrap();
+        assert!(hits.iter().any(|c| c.content.contains("searchable app content")));
+
+        // App A can delete its own doc; afterwards its list is empty.
+        store.app_delete_doc("app.a", &doc).await.unwrap();
+        assert!(store.app_list_docs("app.a", &space).await.unwrap().is_empty());
     }
 
     // ── AC1: existing vector-mode Spaces are unchanged ─────────────────────────

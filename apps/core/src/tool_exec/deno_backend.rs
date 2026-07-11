@@ -633,6 +633,156 @@ impl FlattenNull for Option<Value> {
     }
 }
 
+// ── Pure eval-function runner (P4) ───────────────────────────────────────────
+//
+// A *code evaluator* is not a PTC program: it takes no `tools` proxy and makes
+// no tool calls. It is a pure function `(ctx) -> {score, pass?, detail?}` run in
+// the SAME deny-all Deno sandbox (no net/FS/env, `env_clear`, deadline-bounded,
+// `kill_on_drop`) via [`spawn_deno`]. There is NO stdin tool-bridge here: the
+// payload is embedded in the script and the return value is serialized to a
+// tagged stdout line and read back. This reuses the hardened sandbox posture
+// WITHOUT weakening the tool-exec path (a separate, simpler script + reader).
+
+/// stdout tags the eval-runner script emits (distinct from the tool-bridge tags
+/// so the two protocols never collide).
+const TAG_EVAL_OK: &str = "@@RYU_EVAL_OK@@";
+const TAG_EVAL_ERR: &str = "@@RYU_EVAL_ERR@@";
+
+/// Outcome of running a pure JS eval-evaluator function in the deny-all sandbox.
+pub(crate) enum EvalJsOutcome {
+    /// The user function returned a JSON value (its `{score,pass?,detail?}`).
+    Value(Value),
+    /// The user function threw, or the runtime/spawn errored. Carries the message.
+    Error(String),
+}
+
+/// Run a pure JS eval-evaluator `source` in the deny-all Deno sandbox. `source`
+/// is a function body that receives `ctx` (the JSON `payload`) and returns
+/// `{score, pass?, detail?}`. The value is serialized to a tagged stdout line and
+/// parsed back. Never hangs past `deadline`; never panics; deny-all like the
+/// tool-exec path (zero `--allow-*`, `env_clear`, `kill_on_drop`).
+pub(crate) async fn run_eval_js(source: &str, payload: &Value, deadline: Duration) -> EvalJsOutcome {
+    if !deno_on_path() {
+        return EvalJsOutcome::Error(
+            "deno is not installed (JS code evaluators require the deno binary on PATH)".to_owned(),
+        );
+    }
+
+    let program = build_eval_program(source, payload);
+    let script_path =
+        std::env::temp_dir().join(format!("ryu-eval-{}.js", uuid::Uuid::new_v4()));
+    // Secure write mirrors the tool-exec path: owner-only (`0o600`) + `create_new`
+    // so a pre-planted symlink at the (uuid-random) path can't redirect the write.
+    let write_result = (|| -> std::io::Result<()> {
+        use std::io::Write as _;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            opts.mode(0o600);
+        }
+        let mut file = opts.open(&script_path)?;
+        file.write_all(program.as_bytes())?;
+        file.flush()
+    })();
+    if let Err(e) = write_result {
+        return EvalJsOutcome::Error(format!("failed to write eval program: {e}"));
+    }
+
+    // RAII cleanup: the temp script is removed on every exit path.
+    struct TempScript(std::path::PathBuf);
+    impl Drop for TempScript {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _cleanup = TempScript(script_path.clone());
+
+    let mut child = match spawn_deno(&script_path) {
+        Ok(c) => c,
+        Err(e) => return EvalJsOutcome::Error(format!("failed to spawn deno: {e}")),
+    };
+    // The eval script never reads stdin; close it so nothing can block on it.
+    drop(child.stdin.take());
+    let mut stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
+
+    let read_result = async {
+        loop {
+            let mut line = String::new();
+            match stdout.read_line(&mut line).await {
+                Ok(0) => return None, // EOF before any tag.
+                Ok(_) => {
+                    let line = line.trim_end_matches(['\n', '\r']);
+                    if let Some(rest) = line.strip_prefix(TAG_EVAL_OK) {
+                        return Some(match serde_json::from_str::<Value>(rest) {
+                            Ok(v) => EvalJsOutcome::Value(v),
+                            Err(e) => {
+                                EvalJsOutcome::Error(format!("unparseable eval output: {e}"))
+                            }
+                        });
+                    }
+                    if let Some(rest) = line.strip_prefix(TAG_EVAL_ERR) {
+                        return Some(EvalJsOutcome::Error(rest.to_owned()));
+                    }
+                    // Any other line (a stray console.log) is ignored.
+                }
+                Err(e) => {
+                    return Some(EvalJsOutcome::Error(format!(
+                        "error reading eval output: {e}"
+                    )))
+                }
+            }
+        }
+    };
+
+    let outcome = match tokio::time::timeout(deadline, read_result).await {
+        Ok(Some(o)) => o,
+        Ok(None) => EvalJsOutcome::Error("eval produced no result before exit".to_owned()),
+        Err(_) => EvalJsOutcome::Error(
+            "eval exceeded the wall-clock deadline and was killed".to_owned(),
+        ),
+    };
+    // Reap the child (kill_on_drop covers the timeout path; this is belt-and-braces).
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    outcome
+}
+
+/// Build the eval script: bind `ctx` to the embedded payload, run the user
+/// `source` as an async function body, and emit its return value on a tagged
+/// stdout line. An uncaught throw is emitted on the error tag instead.
+fn build_eval_program(user_source: &str, payload: &Value) -> String {
+    let ctx_json = serde_json::to_string(payload).unwrap_or_else(|_| "null".to_owned());
+    format!(
+        r#"
+const __enc = new TextEncoder();
+function __emit(s) {{ Deno.stdout.writeSync(__enc.encode(s + "\n")); }}
+const __ctx = {ctx};
+(async () => {{
+    let __out;
+    try {{
+        __out = await (async (ctx) => {{
+{user}
+        }})(__ctx);
+    }} catch (e) {{
+        __emit("{err}" + (e && e.message ? e.message : String(e)));
+        return;
+    }}
+    try {{
+        __emit("{ok}" + JSON.stringify(__out ?? null));
+    }} catch (e) {{
+        __emit("{err}" + "evaluator returned a non-serializable value: " + (e && e.message ? e.message : String(e)));
+    }}
+}})();
+"#,
+        ctx = ctx_json,
+        user = user_source,
+        ok = TAG_EVAL_OK,
+        err = TAG_EVAL_ERR,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

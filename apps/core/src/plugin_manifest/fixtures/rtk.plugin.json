@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.rtk",
+  "id": "rtk",
   "name": "RTK (Rust Token Killer)",
   "version": "1.0.0",
   "runnables": [],

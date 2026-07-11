@@ -41,6 +41,12 @@ mod parked;
 #[cfg(feature = "tool-exec-deno")]
 mod deno_backend;
 
+// The pure eval-function runner (P4). Reuses the same deny-all Deno sandbox as
+// the PTC path but with NO tool bridge — a `(ctx) -> {score,pass?,detail?}`
+// function. Consumed by [`crate::eval_code`]; gated on the Deno backend feature.
+#[cfg(feature = "tool-exec-deno")]
+pub(crate) use deno_backend::{run_eval_js, EvalJsOutcome};
+
 #[cfg(feature = "tool-exec-quickjs")]
 mod rquickjs_backend;
 

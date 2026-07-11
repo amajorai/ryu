@@ -46,6 +46,7 @@ fn tool(name: &str, description: &str, schema: Value) -> RegistryTool {
         name: name.to_owned(),
         description: Some(description.to_owned()),
         input_schema: Some(schema),
+        ..Default::default()
     }
 }
 

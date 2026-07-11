@@ -26,9 +26,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 /// Plugin id of the built-in gateway-firewall policy plugin.
-pub const FIREWALL_PLUGIN_ID: &str = "io.ryu.firewall";
+pub const FIREWALL_PLUGIN_ID: &str = "firewall";
 /// Plugin id of the built-in smart-routing policy plugin.
-pub const ROUTING_PLUGIN_ID: &str = "io.ryu.routing";
+pub const ROUTING_PLUGIN_ID: &str = "routing";
 
 /// Dev seed env var for the firewall policy (default off — opt-in).
 const ENV_FIREWALL_SEED: &str = "GATEWAY_FIREWALL_ENABLED";

@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.gateway-budget-dial",
+  "id": "gateway-budget-dial",
   "name": "Gateway Budget Dial",
   "version": "1.0.0",
   "runnables": [

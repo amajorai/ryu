@@ -16,17 +16,24 @@
 use std::time::Duration;
 
 use dashmap::DashMap;
+use reqwest::Client;
 use serde_json::{json, Value};
+use tokio::sync::OnceCell;
 use tracing::{debug, warn};
 
 use crate::{
-    config::{SmartRoutingConfig, SmartRule},
+    config::{OpenAiProviderConfig, RouteStrategy, SmartRoutingConfig, SmartRule},
     providers::ProviderRegistry,
     router::ModelRouter,
+    semantic_cache::{cosine_similarity, embed_text},
 };
 
 /// Cap the user message sent to the classifier so a huge paste stays cheap.
 const MAX_CLASSIFIER_INPUT_CHARS: usize = 2000;
+
+/// Fallback embedding model for the `Embedding` strategy when the config leaves
+/// `embedding_model` empty (matches the semantic cache's default local sidecar).
+const DEFAULT_EMBED_MODEL: &str = "nomic-embed-text-v1.5";
 
 /// Holds the smart-routing config snapshot plus a per-session decision cache.
 ///
@@ -38,6 +45,10 @@ pub struct SmartRouter {
     /// `x-ryu-session-id` → chosen target model. Only used when
     /// `config.cache_by_session` is set.
     decisions: DashMap<String, String>,
+    /// Lazily-computed embeddings for each rule's description, in rule order.
+    /// Computed once on the first `Embedding`-strategy request. A `None` entry is
+    /// a rule whose description could not be embedded (skipped when matching).
+    rule_embeddings: OnceCell<Vec<Option<Vec<f32>>>>,
 }
 
 impl SmartRouter {
@@ -45,6 +56,7 @@ impl SmartRouter {
         Self {
             config,
             decisions: DashMap::new(),
+            rule_embeddings: OnceCell::new(),
         }
     }
 
@@ -64,6 +76,8 @@ impl SmartRouter {
         session_id: Option<&str>,
         providers: &ProviderRegistry,
         router: &ModelRouter,
+        http: &Client,
+        embed_provider: Option<&OpenAiProviderConfig>,
     ) -> Option<String> {
         if !self.is_active() {
             return None;
@@ -79,7 +93,14 @@ impl SmartRouter {
             }
         }
 
-        let chosen = self.classify(messages, providers, router).await?;
+        // 2. Dispatch to the configured strategy. Each fails open (→ None).
+        let chosen = match self.config.strategy {
+            RouteStrategy::Llm => self.classify_llm(messages, providers, router).await,
+            RouteStrategy::Embedding => {
+                self.classify_embedding(messages, http, embed_provider).await
+            }
+            RouteStrategy::Keyword => self.classify_keyword(messages),
+        }?;
 
         if self.config.cache_by_session {
             if let Some(sid) = session_id {
@@ -89,8 +110,118 @@ impl SmartRouter {
         Some(chosen)
     }
 
-    /// Run the classifier once and map its reply to a target model.
-    async fn classify(
+    /// Map a rule index (0-based) or the no-match case to a target model, sharing
+    /// the fail-open `default_model` fallback across strategies.
+    fn model_for_match(&self, matched: Option<usize>) -> Option<String> {
+        match matched {
+            Some(idx) => {
+                let rule = &self.config.rules[idx];
+                debug!(rule = idx, model = %rule.model, "smart routing: matched rule");
+                Some(rule.model.clone())
+            }
+            None => {
+                let fallback = self
+                    .config
+                    .default_model
+                    .as_ref()
+                    .map(|m| m.trim())
+                    .filter(|m| !m.is_empty())
+                    .map(str::to_owned);
+                debug!(
+                    default = ?fallback,
+                    "smart routing: no rule matched; using default_model fallback"
+                );
+                fallback
+            }
+        }
+    }
+
+    /// `Embedding` (RAG) strategy: embed the query and each rule description, then
+    /// route to the nearest rule above `similarity_threshold`. No LLM call.
+    async fn classify_embedding(
+        &self,
+        messages: &Value,
+        http: &Client,
+        embed_provider: Option<&OpenAiProviderConfig>,
+    ) -> Option<String> {
+        let user_msg = last_user_message(messages)?;
+        let Some(openai) = embed_provider else {
+            warn!("smart routing: embedding strategy but no embedder configured; keeping requested model");
+            return None;
+        };
+        let model = if self.config.embedding_model.trim().is_empty() {
+            DEFAULT_EMBED_MODEL
+        } else {
+            self.config.embedding_model.trim()
+        };
+
+        // Rule embeddings are computed once and reused (config is a snapshot).
+        let rule_embs = self
+            .rule_embeddings
+            .get_or_init(|| async {
+                let mut out = Vec::with_capacity(self.config.rules.len());
+                for rule in &self.config.rules {
+                    match embed_text(&rule.description, http, openai, model).await {
+                        Ok(v) => out.push(Some(v)),
+                        Err(e) => {
+                            warn!(rule = %rule.description, error = %e, "smart routing: failed to embed rule description; rule disabled");
+                            out.push(None);
+                        }
+                    }
+                }
+                out
+            })
+            .await;
+
+        let query_emb = match embed_text(
+            truncate(&user_msg, MAX_CLASSIFIER_INPUT_CHARS),
+            http,
+            openai,
+            model,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(error = %e, "smart routing: failed to embed query; keeping requested model");
+                return None;
+            }
+        };
+
+        let mut best_idx: Option<usize> = None;
+        let mut best_score = self.config.similarity_threshold;
+        for (idx, emb) in rule_embs.iter().enumerate() {
+            let Some(emb) = emb else { continue };
+            let score = cosine_similarity(&query_emb, emb);
+            if score >= best_score {
+                best_score = score;
+                best_idx = Some(idx);
+            }
+        }
+        debug!(?best_idx, best_score, "smart routing: embedding nearest match");
+        self.model_for_match(best_idx)
+    }
+
+    /// `Keyword` strategy: first rule whose description shares a significant word
+    /// (case-insensitive, length > 2) with the message wins. Zero cost.
+    fn classify_keyword(&self, messages: &Value) -> Option<String> {
+        let user_msg = last_user_message(messages)?.to_lowercase();
+        for (idx, rule) in self.config.rules.iter().enumerate() {
+            let hit = rule
+                .description
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| w.len() > 2)
+                .any(|w| user_msg.contains(&w.to_lowercase()));
+            if hit {
+                return self.model_for_match(Some(idx));
+            }
+        }
+        self.model_for_match(None)
+    }
+
+    /// `Llm` strategy: run the cheap classifier model once and map its reply to a
+    /// target model.
+    async fn classify_llm(
         &self,
         messages: &Value,
         providers: &ProviderRegistry,
@@ -144,27 +275,9 @@ impl SmartRouter {
 
         match parse_choice(text, self.config.rules.len()) {
             // A valid rule number (1..=N) → route to that rule's model.
-            Some(n) if n >= 1 => {
-                let rule = &self.config.rules[n - 1];
-                debug!(rule = n - 1, model = %rule.model, "smart routing: matched rule");
-                Some(rule.model.clone())
-            }
-            // "0" = explicitly no rule matched → fall back to default_model if set,
-            // otherwise keep the requested model.
-            Some(_) => {
-                let fallback = self
-                    .config
-                    .default_model
-                    .as_ref()
-                    .map(|m| m.trim())
-                    .filter(|m| !m.is_empty())
-                    .map(str::to_owned);
-                debug!(
-                    default = ?fallback,
-                    "smart routing: no rule matched; using default_model fallback"
-                );
-                fallback
-            }
+            Some(n) if n >= 1 => self.model_for_match(Some(n - 1)),
+            // "0" = explicitly no rule matched → default_model fallback.
+            Some(_) => self.model_for_match(None),
             // Unparseable reply → fail open (keep the requested model).
             None => {
                 warn!(reply = %text, "smart routing: unparseable classifier reply; keeping requested model");

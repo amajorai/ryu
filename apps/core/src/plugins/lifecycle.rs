@@ -167,6 +167,83 @@ pub async fn enable_app(
         })
 }
 
+/// Set an ALREADY-ENABLED app's approved grants to an explicit subset — the
+/// backend for per-grant revocation (a user turning off "use AI models" without
+/// disabling the whole app). The desired set is re-validated through the Gateway
+/// exactly like [`enable_app`], so:
+///   - **Escalation is impossible**: every desired grant must be one the manifest
+///     DECLARED (a client can't approve a grant the app never asked for), and the
+///     Gateway still gets the final say (restoring a previously-denied grant stays
+///     denied). Narrowing is always safe; widening back within the declared set
+///     goes through the same policy gate.
+///   - **No backdoor enable**: refuses unless the app is already enabled, so this
+///     never bypasses the Gateway validation `enable_app` performs on first enable.
+/// An empty `desired` is valid — the app stays enabled but every capability call
+/// is denied (revoke-all without uninstalling).
+pub async fn set_app_grants(
+    store: &PluginStore,
+    manifest: &PluginManifest,
+    desired: &[String],
+    gateway_base_url: &str,
+    gateway_token: Option<&str>,
+    http_client: &reqwest::Client,
+) -> Result<PluginRecord, EnableError> {
+    let record = store
+        .get(&manifest.id)
+        .await
+        .map_err(EnableError::Other)?
+        .ok_or_else(|| {
+            EnableError::Other(anyhow::anyhow!("app '{}' is not installed", manifest.id))
+        })?;
+    // Security: only an already-enabled app may have its grants edited. Using this
+    // on a disabled app would set `enabled = 1` while skipping the first-enable
+    // Gateway gate — a backdoor enable. Force the caller through `enable_app` first.
+    if !record.enabled {
+        return Err(EnableError::Other(anyhow::anyhow!(
+            "app '{}' must be enabled before its grants can be edited",
+            manifest.id
+        )));
+    }
+    // Escalation guard: every desired grant must be one the app DECLARED in its
+    // manifest. A grant outside the declared set can never be approved here.
+    let declared: std::collections::HashSet<&str> =
+        manifest.permission_grants.iter().map(String::as_str).collect();
+    for grant in desired {
+        if !declared.contains(grant.as_str()) {
+            return Err(EnableError::Other(anyhow::anyhow!(
+                "grant '{grant}' is not declared by app '{}'",
+                manifest.id
+            )));
+        }
+    }
+    // Re-validate the desired subset through the Gateway (same gate as enable), so
+    // re-adding a grant the Gateway would deny stays denied. Narrowing passes
+    // trivially. Fail-closed on an unreachable Gateway.
+    let validation = validate_grants_via_gateway(
+        desired,
+        &manifest.id,
+        gateway_base_url,
+        gateway_token,
+        http_client,
+    )
+    .await?;
+    if !validation.all_approved {
+        return Err(EnableError::GrantsDenied {
+            denied: validation.denied,
+        });
+    }
+    store
+        .set_enabled(&manifest.id, &validation.approved)
+        .await
+        .map_err(EnableError::Other)?
+        .ok_or_else(|| {
+            EnableError::Other(anyhow::anyhow!(
+                "app '{}' disappeared during grant update",
+                manifest.id
+            ))
+        })
+}
+
 /// Disable an app: flip `enabled = false` and clear approved grants.
 pub async fn disable_app(store: &PluginStore, id: &str) -> Result<PluginRecord> {
     store
@@ -458,6 +535,116 @@ mod tests {
         let rec = disable_app(&s, "com.test.app").await.unwrap();
         assert!(!rec.enabled);
         assert!(rec.approved_grants.is_empty());
+
+        match prev {
+            Some(v) => std::env::set_var(super::ENV_STUB_GRANTS, v),
+            None => std::env::remove_var(super::ENV_STUB_GRANTS),
+        }
+    }
+
+    // ── set_app_grants (per-grant revocation) ──────────────────────────────────
+
+    #[tokio::test]
+    async fn set_app_grants_narrows_approved_set() {
+        let _env = stub_grants_guard();
+        let prev = std::env::var(super::ENV_STUB_GRANTS).ok();
+        std::env::set_var(super::ENV_STUB_GRANTS, "1");
+
+        let s = store();
+        let m = make_manifest(
+            "com.test.app",
+            "1.0.0",
+            vec!["spaces:docs", "hook:side-model"],
+        );
+        install_app(&s, &m).await.unwrap();
+        let client = reqwest::Client::new();
+        enable_app(&s, &m, "http://127.0.0.1:7981", None, &client)
+            .await
+            .unwrap();
+
+        // Revoke hook:side-model, keep spaces:docs — the app stays enabled.
+        let rec = set_app_grants(
+            &s,
+            &m,
+            &["spaces:docs".to_owned()],
+            "http://127.0.0.1:7981",
+            None,
+            &client,
+        )
+        .await
+        .unwrap();
+        assert!(rec.enabled, "app stays enabled after revoking a grant");
+        assert_eq!(rec.approved_grants, vec!["spaces:docs"]);
+
+        match prev {
+            Some(v) => std::env::set_var(super::ENV_STUB_GRANTS, v),
+            None => std::env::remove_var(super::ENV_STUB_GRANTS),
+        }
+    }
+
+    #[tokio::test]
+    async fn set_app_grants_rejects_undeclared_grant() {
+        let _env = stub_grants_guard();
+        let prev = std::env::var(super::ENV_STUB_GRANTS).ok();
+        std::env::set_var(super::ENV_STUB_GRANTS, "1");
+
+        let s = store();
+        let m = make_manifest("com.test.app", "1.0.0", vec!["spaces:docs"]);
+        install_app(&s, &m).await.unwrap();
+        let client = reqwest::Client::new();
+        enable_app(&s, &m, "http://127.0.0.1:7981", None, &client)
+            .await
+            .unwrap();
+
+        // A grant the app never declared can never be approved (escalation guard).
+        let res = set_app_grants(
+            &s,
+            &m,
+            &["hook:run-agent".to_owned()],
+            "http://127.0.0.1:7981",
+            None,
+            &client,
+        )
+        .await;
+        assert!(
+            matches!(res, Err(EnableError::Other(_))),
+            "undeclared grant must be rejected"
+        );
+
+        match prev {
+            Some(v) => std::env::set_var(super::ENV_STUB_GRANTS, v),
+            None => std::env::remove_var(super::ENV_STUB_GRANTS),
+        }
+    }
+
+    #[tokio::test]
+    async fn set_app_grants_rejects_disabled_app() {
+        let _env = stub_grants_guard();
+        let prev = std::env::var(super::ENV_STUB_GRANTS).ok();
+        std::env::set_var(super::ENV_STUB_GRANTS, "1");
+
+        let s = store();
+        let m = make_manifest("com.test.app", "1.0.0", vec!["spaces:docs"]);
+        install_app(&s, &m).await.unwrap(); // installed but NOT enabled
+        let client = reqwest::Client::new();
+
+        // Editing grants on a disabled app is refused — it must never set
+        // enabled = 1 while skipping the first-enable Gateway gate (backdoor enable).
+        let res = set_app_grants(
+            &s,
+            &m,
+            &["spaces:docs".to_owned()],
+            "http://127.0.0.1:7981",
+            None,
+            &client,
+        )
+        .await;
+        assert!(
+            matches!(res, Err(EnableError::Other(_))),
+            "grant edit on a disabled app must be rejected"
+        );
+        let rec = s.get("com.test.app").await.unwrap().unwrap();
+        assert!(!rec.enabled, "app must remain disabled");
 
         match prev {
             Some(v) => std::env::set_var(super::ENV_STUB_GRANTS, v),

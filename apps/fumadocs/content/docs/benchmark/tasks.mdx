@@ -1,0 +1,84 @@
+---
+title: Tasks
+description: The nine RyuBench task categories, what each asks the agent to do, and how it is verified against persisted state.
+---
+
+RyuBench v1 ships **40 tasks** across nine categories. Eight are Tier A (deterministic
+API-state, the scored core); computer-use is Tier B (reported separately).
+
+Every task is a small object with a natural-language `prompt` (the only thing the agent sees),
+an optional `setup`, and an `assert` that reads real state through the public API. The prompt is
+deliberately **under-specified** — it tests whether the model understands Ryu, not whether it
+can follow a checklist — but it always pins an exact resource name so the assertion can find
+what the agent built.
+
+<Callout type="info">
+  The `assert` never inspects the transcript. It calls `GET`/`POST` against the node and grades
+  the result. If the resource was never created, the task fails safe. This is the whole design:
+  the agent is graded on what it *did*, not what it *said*.
+</Callout>
+
+## Tier A — the scored core
+
+| Category | The agent must… | Verified by (public API) |
+|---|---|---|
+| **workflow** | build a DAG via `POST /workflows` (nodes, edges, templates), run it, or park it at a human-in-the-loop node | `GET /workflows` structure match; `GET /workflows/runs/:id` reaches `completed` / `awaiting_input` |
+| **agent** | create/update an agent card with the right slots (name, system prompt, `chat_model`, tools allowlist, tts voice) | `GET /api/agents/:id` echoes the slots; `GET /api/agents/:id/tools` matches |
+| **tool** | register an MCP server, find a tool via the catalog, or compute a digest in the PTC exec sandbox and persist it | recompute the reference digest in-harness and compare the persisted memory; confirm tool ids are real catalog entries |
+| **gateway** | configure a budget or firewall policy via `PUT /v1/config` so behavior changes | `GET /v1/config` shows the rule; `POST /v1/firewall/check` returns the expected verdict |
+| **spaces** | create a Space, store a document, or ingest a fact so it becomes RAG-retrievable | `GET /api/spaces/:id/documents`; independent `POST /api/spaces/:id/search` returns the fact |
+| **plugin** | build a valid manifest and pass grant validation / signing, or toggle a plugin | `POST /v1/grants/validate` `all_approved`; `POST /v1/manifests/verify` `valid`; `GET /api/plugins` enabled flag |
+| **monitor** | create a monitor + condition and run it, or file a quest | `GET /api/monitors` shape; `GET /api/monitors/:id/snapshots`; `GET /api/quests` |
+| **chat** | drive a session to a stateful outcome (record a memory, capture a quest, fork a conversation) | the downstream artifact exists — asserted, not the reply text |
+
+## Tier B — computer-use (separate track)
+
+| Category | The agent must… | Verified by |
+|---|---|---|
+| **computer-use** | reach the Ghost/Shadow desktop tools via `POST /api/mcp/tools/call` | tool **reachability** / graceful degradation — never deterministic screen content |
+
+Computer-use is non-deterministic and needs a sandbox VM to score for real, so its result is
+reported beside the Tier-A headline and never folded in. Letting it into the core number would
+hand the "benchmarks are fake" crowd their reproducibility headline.
+
+## Anatomy of a task
+
+```ts
+{
+  id: "workflow-passthrough-run",
+  category: "workflow",
+  tier: "A",
+  title: "Author and run an input→output passthrough workflow",
+  // prompt can be a function so it can pin a run-namespaced name
+  prompt: (ctx) =>
+    `Create a workflow named exactly "${nsName(ctx, "passthrough")}" that takes an ` +
+    `input value and returns it unchanged, then run it and make sure it completes.`,
+  async assert(ctx) {
+    const list = await getJson<{ workflows?: { name?: string; id?: string }[] }>(
+      ctx.node, "/workflows",
+    );
+    const wf = (list?.workflows ?? []).find((w) => w.name === nsName(ctx, "passthrough"));
+    if (!wf) return fail("workflow-exists", "agent never created the workflow");
+    // …assert a run reached status "completed"…
+    return grade([ /* CheckLine[] */ ]);
+  },
+  async teardown(ctx) { /* best-effort DELETE */ },
+}
+```
+
+Key rules for task authors:
+
+- **Pin the name.** The same `nsName(ctx, "base")` is recomputed in `prompt`, `assert`, and
+  `teardown` so parallel/repeated runs never collide.
+- **Assert real fields only.** Every field an assertion reads is confirmed against the Core /
+  Gateway response struct — no guessed shapes. If a field cannot be confirmed, the check is
+  weakened to something that can (an HTTP status, a top-level id).
+- **Fail safe.** A missing resource returns `fail(...)`, not a thrown error.
+- **Under-specify the prompt, pin the checkable.** Test comprehension, grade state.
+
+## Adding a task
+
+Each category is one module in `apps/benchmark/src/tasks/<category>.ts` exporting a
+`Task[]`. Add your task to the array, keep the id kebab-unique, and register nothing else —
+`registry.ts` already aggregates every category. Bump `TASK_SET_VERSION` in `config.ts` when
+you change the suite so scores stay comparable across versions.

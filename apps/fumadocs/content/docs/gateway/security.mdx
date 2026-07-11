@@ -22,10 +22,11 @@ Inbound scans run on the prompt before the provider call (`scan_inbound`, inject
 priority). Outbound scans run on the response (`scan_outbound`, secrets and PII).
 
 <Callout type="warn">
-  Only the curated pattern sets above ship today. There is no UI or config field for custom
-  user-authored firewall patterns yet, and the desktop configuration surface that exposes these
-  controls is part of the remaining Gateway moat-surface work. Configure the firewall through
-  `gateway.toml` or `PUT /v1/config`.
+  The curated pattern sets above ship built in. Custom user-authored patterns are now supported as
+  a config field - each `custom_patterns` entry carries a `name`, `regex`, and `kind` (PII / secret)
+  and is unioned onto the built-in sets through the policy cascade below. The desktop scope selector
+  and custom-pattern rule editor exist (`GatewayDialog.tsx`) but are Biome-clean only, not yet
+  runtime-verified. Configure the firewall through `gateway.toml` or `PUT /v1/config`.
 </Callout>
 
 ## Policies
@@ -57,6 +58,47 @@ When the Gateway is governed by a control plane, an organization can require a b
 guardrails (for example `pii` and `secrets`). `scan_locked_guardrails` ignores the local
 `enabled` / `scan_inbound` config and runs the required categories regardless, so a lower level
 cannot bypass an admin-locked guardrail.
+
+## Hierarchical policy resolution
+
+The Gateway's firewall is not one flat process-global config. It resolves as a three-level cascade per request (`FirewallResolver`, `apps/gateway/src/firewall/resolve.rs`), so a box admin, an organization, and an individual agent can each set policy.
+
+```text
+node  (base)    the box's gateway.toml firewall - the admin baseline
+  ▼
+org   (mid)     a control-plane bundle (hosted) or a gateway-local overlay (standalone)
+  ▼
+agent (leaf)    a per-agent overlay, keyed by the x-ryu-agent-id header
+```
+
+Resolution rules:
+
+- **Most-specific set wins.** Start from the node base. Each overlay is a partial config where every scalar is optional - `Some` overrides the inherited value, `None` inherits it. So the agent leaf beats the org, which beats the node, for any field it sets.
+- **Custom patterns union.** `custom_patterns` are appended across scopes, never replaced, so a narrower scope adds detectors without dropping the broader scope's.
+- **No-loosen `locked_fields`.** Any field a broader scope locks cannot be weakened by a narrower one. Locks union upward, and on a conflict the **stricter** value wins (for example a locked `Sanitize` policy can be tightened to `Block` but never downgraded to `Warn`). A narrower scope may still tighten a locked field.
+
+One field is node-only - `wrap_untrusted_tool_results` is a process-global flag set by the node base, so `normalize_overlay` strips it (value and lock) from any org or agent overlay with a warning, rather than let it become a silent no-op.
+
+Hosted org and agent overlays arrive already cascaded on the control plane's resolve response (see [Managed data plane](/docs/gateway/managed-data-plane)); the Gateway adds only the node base and the agent leaf. A standalone Gateway reads overlays from its own local store instead.
+
+Evaluator bindings (`FirewallConfig.evaluators`) cascade by the same union-plus-per-binding-lock semantics; the binding shape and the evaluator catalog live on [Evals and audit](/docs/gateway/evals-audit).
+
+### Scanner cache
+
+Compiling a firewall's regexes per request would be wasteful, so `FirewallResolver::scanner_for` caches a compiled `FirewallScanner` keyed by a stable hash of the resolved config. Identical resolved policies share one scanner. Because a 64-bit hash can collide, the cache stores the config alongside the scanner and re-verifies equality on every hit, so a collision costs at most a rebuild, never a wrong-scanner hit. Any config or overlay write invalidates the whole cache.
+
+## LLM traffic inspector
+
+Alongside the regex scanner, the firewall can run an opt-in cheap-LLM inspector (`apps/gateway/src/firewall/inspector.rs`) that asks a model whether the inbound turn is a prompt injection or leaks PII / secrets, then applies the same `FirewallPolicy` action (Block / Sanitize / Warn) to a flagged turn.
+
+- **Swappable model.** The inspector model resolves through the normal `ModelRouter` (an empty `model` uses the router default) and is called via `provider.complete` directly - exactly like smart routing - so it can never recurse back into the pipeline or the tool loop.
+- **Fail-open everywhere.** A disabled config, a too-short turn (below `min_chars`), an unconfigured provider, a provider error, a timeout, or an unparseable reply all resolve to "not flagged" (allow) with a warning. A cheap local model emits dirty JSON, so the verdict is parsed defensively (the first `{…}` block; on any failure, allow).
+
+The inspector config is part of the cascade (`InspectorConfig` with `enabled`, `model`, `mode`, `min_chars`, `timeout_ms`, `action`), so a locked inspector at a broader scope can only be tightened by a narrower one.
+
+<Callout type="warn">
+The inspector is **opt-in** (`enabled` defaults off) and **inbound-only** in v1 - it inspects the prompt, not the response. Outbound streaming LLM inspection is a deliberate follow-on. Because it fails open, a misconfiguration or a flaky model degrades to the regex scanner alone, never to a blocked request.
+</Callout>
 
 ## Companion egress redaction
 

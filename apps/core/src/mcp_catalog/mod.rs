@@ -474,6 +474,41 @@ pub struct InstallPlan {
     pub entry: McpEntryPlan,
     /// Human description carried into the mcp.json entry's `description`.
     pub description: Option<String>,
+    /// Registry version at install time (recorded so an update can be detected).
+    pub version: Option<String>,
+    /// The catalog id (registry server name) — how to look the server up later.
+    pub catalog_id: String,
+}
+
+/// Map of registry server name (catalog id) → current version, from one registry
+/// fetch. The update check compares this against installed servers' recorded
+/// versions. Best-effort: any fetch/parse error yields an empty map (no updates
+/// reported rather than an error).
+pub async fn latest_versions(
+    base_url: Option<&str>,
+) -> std::collections::HashMap<String, String> {
+    // Page through the whole registry (following `next_cursor`) so a server that
+    // sits beyond the first page can still report an update. Bounded by a page
+    // cap so a broken/looping cursor can never spin forever.
+    const MAX_PAGES: usize = 50;
+    let mut map = std::collections::HashMap::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_PAGES {
+        let (servers, next) = match fetch_servers(base_url, 200, cursor.as_deref()).await {
+            Ok(page) => page,
+            Err(_) => break,
+        };
+        for s in servers {
+            if let Some(v) = s.version {
+                map.insert(s.name, v);
+            }
+        }
+        match next {
+            Some(c) if !c.is_empty() => cursor = Some(c),
+            _ => break,
+        }
+    }
+    map
 }
 
 /// Resolve a registry server `id` into a validated [`InstallPlan`]. Prefers a
@@ -496,6 +531,9 @@ pub async fn plan_install(base_url: Option<&str>, id: &str) -> Result<InstallPla
 pub(crate) fn plan_from_server(server: &ServerJson) -> Result<InstallPlan> {
     let server_name = sanitize_server_name(&server.name)?;
     let description = server.description.clone();
+    // Recorded on the installed entry so an update check can compare later.
+    let version = server.version.clone();
+    let catalog_id = server.name.clone();
 
     // Prefer a stdio package (a local launch). Fall back to a remote URL.
     if let Some(pkg) = server.packages.iter().find(|p| p.is_stdio()) {
@@ -504,6 +542,8 @@ pub(crate) fn plan_from_server(server: &ServerJson) -> Result<InstallPlan> {
             server_name,
             entry,
             description,
+            version,
+            catalog_id,
         });
     }
     if let Some(remote) = server.remotes.iter().find_map(|r| {
@@ -517,6 +557,8 @@ pub(crate) fn plan_from_server(server: &ServerJson) -> Result<InstallPlan> {
             server_name,
             entry: McpEntryPlan::Remote { url },
             description,
+            version,
+            catalog_id,
         });
     }
     // A non-stdio package with no remote (e.g. an http package carrying a URL).
@@ -528,6 +570,8 @@ pub(crate) fn plan_from_server(server: &ServerJson) -> Result<InstallPlan> {
                     server_name,
                     entry: McpEntryPlan::Remote { url },
                     description,
+                    version,
+                    catalog_id,
                 });
             }
         }

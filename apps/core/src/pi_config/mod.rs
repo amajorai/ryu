@@ -370,7 +370,9 @@ fn gateway_openai_patch(model: Option<&str>) -> Map<String, Value> {
 fn gateway_model_entry(id: &str, existing: Option<&Value>) -> Value {
     let local_id = default_gateway_model();
     if id != local_id {
-        return existing.cloned().unwrap_or_else(|| json!({ "id": id }));
+        let mut entry = existing.cloned().unwrap_or_else(|| json!({ "id": id }));
+        apply_cache_compat(id, &mut entry);
+        return entry;
     }
 
     let mut entry = existing.cloned().unwrap_or_else(|| json!({ "id": id }));
@@ -399,6 +401,44 @@ fn gateway_model_entry(id: &str, existing: Option<&Value>) -> Value {
     obj.entry("maxTokens".to_owned())
         .or_insert_with(|| json!(8_192));
     entry
+}
+
+/// Anthropic-style prompt caching over the Gateway is opt-in per model in Pi:
+/// it only emits `cache_control` breakpoints (on the system prompt, the last
+/// tool definition, and the last user/assistant text) when the model's
+/// `compat.cacheControlFormat` is `"anthropic"`. Providers that cache
+/// automatically (OpenAI, DeepSeek, Grok, Gemini 2.5) need no marker, and Pi
+/// already sends `prompt_cache_key` on the OpenAI path, so we only stamp the
+/// flag for the families that expose Anthropic-style *explicit* caching through
+/// the Gateway/OpenRouter: Claude and Qwen. This matches OpenRouter's caching
+/// contract (`cache_control: { type: "ephemeral" }` breakpoints on those
+/// providers). Returns the format string, or `None` when the model does not use
+/// explicit `cache_control` markers. Nothing is hardcoded per model: the family
+/// is derived from the id so any future Claude/Qwen id inherits it.
+fn explicit_cache_control_format(id: &str) -> Option<&'static str> {
+    let lid = id.to_ascii_lowercase();
+    let anthropic_style =
+        lid.contains("claude") || lid.contains("anthropic") || lid.contains("qwen");
+    anthropic_style.then_some("anthropic")
+}
+
+/// Merge the explicit prompt-cache `compat.cacheControlFormat` into a Pi model
+/// entry when the model family supports it, without clobbering a
+/// caller-declared `compat` block or an existing `cacheControlFormat`.
+/// Idempotent; a no-op for auto-caching / non-caching families.
+fn apply_cache_compat(id: &str, entry: &mut Value) {
+    let Some(format) = explicit_cache_control_format(id) else {
+        return;
+    };
+    let Some(obj) = entry.as_object_mut() else {
+        return;
+    };
+    let compat = obj.entry("compat".to_owned()).or_insert_with(|| json!({}));
+    if let Some(compat_obj) = compat.as_object_mut() {
+        compat_obj
+            .entry("cacheControlFormat".to_owned())
+            .or_insert_with(|| Value::String(format.to_owned()));
+    }
 }
 
 /// The zero-key default model for the managed Pi in Gateway-routed mode: the
@@ -2005,6 +2045,55 @@ mod tests {
             assert_eq!(view.provider, GATEWAY_PROVIDER_ID);
             assert_eq!(view.routing, "gateway");
         });
+    }
+
+    #[test]
+    fn explicit_cache_control_format_matches_claude_and_qwen_only() {
+        // Explicit Anthropic-style cache_control families.
+        assert_eq!(explicit_cache_control_format("claude-sonnet-4"), Some("anthropic"));
+        assert_eq!(
+            explicit_cache_control_format("anthropic/claude-3.5-sonnet"),
+            Some("anthropic")
+        );
+        assert_eq!(
+            explicit_cache_control_format("qwen/qwen3-coder-plus"),
+            Some("anthropic")
+        );
+        // Auto-caching or non-caching families: no marker.
+        assert_eq!(explicit_cache_control_format("gpt-4o"), None);
+        assert_eq!(explicit_cache_control_format("openai/gpt-4o"), None);
+        assert_eq!(explicit_cache_control_format("google/gemini-2.5-pro"), None);
+        assert_eq!(explicit_cache_control_format("deepseek/deepseek-chat"), None);
+        assert_eq!(explicit_cache_control_format("x-ai/grok-4"), None);
+    }
+
+    #[test]
+    fn gateway_model_entry_stamps_cache_control_for_claude() {
+        // A cache-capable non-local id gets the compat flag so Pi emits
+        // cache_control breakpoints toward the gateway/OpenRouter.
+        let entry = gateway_model_entry("anthropic/claude-sonnet-4", None);
+        assert_eq!(
+            entry["compat"]["cacheControlFormat"],
+            json!("anthropic"),
+            "claude entry should opt into anthropic cache_control markers"
+        );
+        assert_eq!(entry["id"], json!("anthropic/claude-sonnet-4"));
+
+        // An OpenAI id (auto-caches, Pi sends prompt_cache_key) stays bare.
+        let openai = gateway_model_entry("gpt-4o", None);
+        assert!(openai.get("compat").is_none());
+    }
+
+    #[test]
+    fn apply_cache_compat_preserves_caller_declared_compat() {
+        // Do not clobber an existing compat block or a caller's own format.
+        let mut entry = json!({
+            "id": "anthropic/claude-sonnet-4",
+            "compat": { "cacheControlFormat": "anthropic", "supportsStrictMode": true }
+        });
+        apply_cache_compat("anthropic/claude-sonnet-4", &mut entry);
+        assert_eq!(entry["compat"]["supportsStrictMode"], json!(true));
+        assert_eq!(entry["compat"]["cacheControlFormat"], json!("anthropic"));
     }
 
     #[test]

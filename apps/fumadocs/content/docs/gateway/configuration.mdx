@@ -252,6 +252,45 @@ manifest signing (marketplace governance) are separate endpoints documented on
 [Grants and Manifest Signing](/docs/gateway/governance).
 </Callout>
 
+## Policy alert delivery
+
+Budget, session-budget, wallet-empty, and firewall rules can each request a notification tier when they match, orthogonally to the enforcement action they take. The Gateway **decides** the tier and stamps it on the response; Core **delivers** it. This keeps the Gateway (which owns "what is measured") out of the business of opening notification sockets (which Core owns).
+
+### Alert tiers
+
+`AlertTier` (`apps/gateway/src/config.rs`) is set per rule via an `alert` field on the budget rules, session budget, firewall config, and the wallet-empty action. It defaults to `Silent`, so a pre-existing config is unchanged.
+
+| Tier | Wire value | Delivery |
+|---|---|---|
+| Silent | `silent` (default) | No alert |
+| Warn | `warn` | Live SSE warning to the desktop only, no external fan-out |
+| Fanout | `fanout` | Fan out to webhook / Telegram / Expo push |
+| Email | `email` | Fan out AND send email to the node's configured recipients |
+
+The Gateway only builds a stamp at `>= Warn`. When a matched rule's tier rides, the verdict is written to the `x-ryu-policy-alert` response header as `base64(json)` (`PolicyAlert`, `apps/gateway/src/policy_alert.rs`). It is stamped on **both** the success (2xx) response and the error response (a budget `402` or a firewall-block `403`), so a block-tier alert - which returns before any success response exists - is never dropped.
+
+### How Core delivers
+
+Core reads the header off every gateway-fronted response (`apps/core/src/policy_alerts/mod.rs`) and, when present and parseable, delivers it. A malformed header is a silent no-op, never fatal.
+
+- **Dedupe.** The stamp carries a stable `dedupe_key` (a fixed sha256 over source / scope / subject / limit, deterministic across restarts). Core claims it atomically with a 300-second cooldown, so one chat turn's multi-iteration tool loop - which re-reads the same stamp each iteration - delivers once, not N times.
+- **SSE mirror.** Every delivered alert is mirrored to the live desktop feed regardless of tier.
+- **Fan-out per tier.** `Fanout` calls `notify_all` over the node's webhook / Telegram / Expo-push targets; `Email` additionally resolves the BYO SMTP transport (`resolve_transport`, `apps/core/src/email/mod.rs`, a lettre client) and sends to the configured recipients.
+
+Core exposes the delivery config over these routes (`apps/core/src/server/mod.rs`):
+
+| Route | Purpose |
+|---|---|
+| `GET` / `PUT /api/email/transport` | The node's non-secret SMTP transport config |
+| `POST /api/email/test` | Send a test email over the configured transport |
+| `GET` / `PUT /api/alerts/delivery` | The node's policy-alert delivery targets (fan-out channels + email recipients) |
+
+Budget rules themselves are documented on [Reliability](/docs/gateway/reliability) and firewall policy on [Security](/docs/gateway/security); this section covers only the alert tier and its delivery.
+
+<Callout type="warn">
+Delivery is best-effort - a failing sink logs and drops so one channel never blocks the others. The self-host BYO SMTP transport needs a real mail relay to verify end to end and has not been exercised against a live relay. On a managed node the email leg goes through the control plane instead of the local SMTP sink.
+</Callout>
+
 ## Key environment variables
 
 These override `gateway.toml` keys at load time. Setting `GATEWAY_MASTER_KEY` also forces

@@ -22,8 +22,11 @@ the runtime that executes it.
   `host.sideModel` / `host.storage` through the capability bridge, and assert the correct directives.
   The **desktop** side is compile-checked only. The `data-plugin_note` banner render, the `continue`
   multi-turn streamed render, and the end-to-end double-check / goal flow through a running desktop
-  are not yet live-verified. Only the `post_assistant_turn` boundary exists today; there is no
-  pre-turn or per-token hook.
+  are not yet live-verified. Beyond `post_assistant_turn`, a `pre_user_turn` boundary and a set of
+  Claude-Code-style phases (`session_start`, `pre_tool_use`, `post_tool_use`, `subagent_stop`,
+  `session_end`, `notification`) also exist, but their maturity varies - see
+  [Beyond the turn boundary](#beyond-the-turn-boundary-the-claude-parity-phases). There is no
+  per-token hook.
 </Callout>
 
 ## What a turn hook is
@@ -98,6 +101,63 @@ A hook returns a directive that the chat path applies. The shape is the `HookDir
 A missing, `null`, or unparseable return value, an explicit `{ kind: "none" }`, a thrown hook, an
 unsupported sandbox pause, or a missing Deno binary all resolve to `{ kind: "none" }`. The runtime is
 fail-open by construction: a plugin can never wedge a turn.
+
+## Beyond the turn boundary: the Claude-parity phases
+
+`post_assistant_turn` is one of several **phases** a hook can declare (via the `on` field of a
+`contributes.turn_hooks` entry). The additional phase constants live in `plugin_host/mod.rs`, each
+mapping to a Claude Code hook event. A plugin authored against Claude's naming can use `stop`, which
+`phase_matches` normalises to `post_assistant_turn`.
+
+| Phase constant | `on` value | Fires | Directives applied |
+|---|---|---|---|
+| `ON_PRE_USER_TURN` | `pre_user_turn` | Before the user message reaches the model | `Replace`, `Inject` |
+| `ON_SESSION_START` | `session_start` | On the first turn of a conversation | `Inject`, `Note` |
+| `ON_PRE_TOOL_USE` | `pre_tool_use` | Before a tool call executes | `Deny` (blocks the call) |
+| `ON_POST_TOOL_USE` | `post_tool_use` | After a tool call returns | none (observation only, v1) |
+| `ON_SUBAGENT_STOP` | `subagent_stop` | When a delegated sub-agent finishes | none (observation only) |
+| `ON_SESSION_END` | `session_end` | When a conversation is deleted | none (observation only) |
+| `ON_NOTIFICATION` | `notification` | When a notification is fanned out | none (observation only) |
+
+The `pre_*` phases add directives to the small set from
+[the directive contract](#the-directive-contract):
+
+| Directive | Effect |
+|---|---|
+| `{ kind: "replace", text }` | Swap the pending outgoing user message for `text` before it reaches the model. The rewritten text is what gets sent and persisted (a `pre_user_turn` directive - the auto-expand plugin uses this). |
+| `{ kind: "inject", text }` | Append `text` as additional context to the outgoing message (additive, not a replacement). Emitted by `session_start` (setup context) and `pre_user_turn` (per-message context), mirroring Claude Code's `SessionStart` / `UserPromptSubmit`. |
+| `{ kind: "deny", reason }` | Block a pending tool call (a `pre_tool_use` directive). `reason` is returned to the model as the tool's error result, so it can adapt instead of treating the call as done - a plugin-authored tool firewall. |
+
+### The process-global dispatcher
+
+The on-chat-path phases (`session_start`, `stop`) fire inside `run_chat_with_hooks` where the
+`ServerState` is already in scope. The off-path phases fire at sites that have no `ServerState` - the
+shared tool-dispatch core (`pre_tool_use` / `post_tool_use`), the delegation engine
+(`subagent_stop`), and the notification fan-out. Those reach the runtime through a **process-global
+dispatcher** - `dispatch_global(phase, ctx)` over the `HookDispatch` trait, installed once at boot
+via `set_global` (`plugin_host/mod.rs`). It returns an empty vec when no dispatcher is installed, so
+callers stay fail-open. Every off-path dispatch first runs a DB-free gate (`any_manifest_declares`):
+if no loaded manifest declares the phase, it returns instantly, so a tool call pays nothing on the
+hot path unless a tool-hook plugin is actually loaded.
+
+### The `tools` glob gate
+
+A `pre_tool_use` / `post_tool_use` hook usually cares about only some tools. The manifest `match`
+block's `tools` list is a spawn-avoidance gate evaluated in Rust before any sandbox spawn: the hook
+runs only when the tool being called matches one of its patterns. The matcher (`glob_match`) is
+deliberately tiny - `*` matches everything, `bash*` a prefix, `*write` a suffix, `*edit*` a
+substring, anything else an exact match. A hook whose gate does not match the current tool never
+spawns Deno.
+
+<Callout type="warn">
+Maturity varies by phase. `session_start`, `pre_user_turn`, and `post_assistant_turn` fire on the
+chat path; `pre_tool_use` fires at the tool-dispatch core and its `Deny` **is** applied (the call is
+blocked). `post_tool_use`, `subagent_stop`, `session_end`, and `notification` are **observation only**
+in v1 - they fire (detached, fail-open) but their directives are not applied to the result. The same
+live-verification caveat from the top of this page applies: the sandbox and the `post_assistant_turn`
+path are live-tested, the extended phases are wired but not all exercised end-to-end. Treat the
+observation-only phases as telemetry, not control points, until that changes.
+</Callout>
 
 ## Where it runs (Core vs Gateway)
 

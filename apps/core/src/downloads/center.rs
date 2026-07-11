@@ -55,6 +55,10 @@ struct Inner {
     events: broadcast::Sender<DownloadEvent>,
     sem: Arc<tokio::sync::Semaphore>,
     client: reqwest::Client,
+    /// Durable log of finished downloads (newest first), so "previous downloads"
+    /// survives a restart even though live terminal tasks are dropped from the
+    /// active registry. Persisted to `~/.ryu/downloads-history.json`.
+    history: Mutex<Vec<DownloadTask>>,
 }
 
 /// Process-wide download registry. Cheap to clone (wraps an `Arc`).
@@ -68,6 +72,16 @@ fn downloads_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|_| ryu_dir().join("downloads.json"))
 }
+
+/// Where the durable "previous downloads" log lives.
+fn history_path() -> PathBuf {
+    std::env::var("RYU_DOWNLOADS_HISTORY_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| ryu_dir().join("downloads-history.json"))
+}
+
+/// Cap on retained history entries (newest kept). Bounds the file + response.
+const HISTORY_CAP: usize = 200;
 
 fn max_concurrency() -> usize {
     std::env::var("RYU_MAX_CONCURRENT_DOWNLOADS")
@@ -105,6 +119,7 @@ impl DownloadCenter {
                 events,
                 sem: Arc::new(tokio::sync::Semaphore::new(max_concurrency())),
                 client,
+                history: Mutex::new(Vec::new()),
             }),
         }
     }
@@ -400,7 +415,19 @@ impl DownloadCenter {
     /// files: a task that was `Active` when the process died comes back `Paused`
     /// (interrupted) so the user/desktop can resume from offset. Auto-resumes when
     /// `RYU_DOWNLOADS_AUTORESUME=1`.
+    /// The durable "previous downloads" log, newest first.
+    pub async fn history(&self) -> Vec<DownloadTask> {
+        self.inner.history.lock().await.clone()
+    }
+
     pub async fn load(&self) {
+        // Restore the durable history log first (independent of the resumable
+        // active tasks below).
+        if let Ok(raw) = std::fs::read_to_string(history_path()) {
+            let hist: Vec<DownloadTask> = serde_json::from_str(&raw).unwrap_or_default();
+            *self.inner.history.lock().await = hist;
+        }
+
         let raw = match std::fs::read_to_string(downloads_path()) {
             Ok(s) => s,
             Err(_) => return,
@@ -475,6 +502,30 @@ async fn persist_inner(inner: &Inner) {
     };
     let path = downloads_path();
     // Tiny file; a blocking write off the async path keeps it simple.
+    let _ = tokio::task::spawn_blocking(move || {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&to_save) {
+            let _ = std::fs::write(&path, json);
+        }
+    })
+    .await;
+}
+
+/// Append a finished download to the durable history log (newest first),
+/// de-duping by id so a re-download replaces its prior entry, then persist the
+/// capped list. Called when a task reaches a terminal state (Completed /
+/// Cancelled) — the only ones that leave the active registry.
+async fn record_history(inner: &Inner, task: &DownloadTask) {
+    let to_save = {
+        let mut hist = inner.history.lock().await;
+        hist.retain(|t| t.id != task.id);
+        hist.insert(0, task.clone());
+        hist.truncate(HISTORY_CAP);
+        hist.clone()
+    };
+    let path = history_path();
     let _ = tokio::task::spawn_blocking(move || {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -859,6 +910,9 @@ async fn finish_completed(
     })
     .await;
     persist_inner(inner).await;
+    if let Some(t) = inner.tasks.read().await.get(id).cloned() {
+        record_history(inner, &t).await;
+    }
     inner.handles.lock().await.remove(id);
     let _ = done_tx.send(Some(Ok(path)));
     let _ = spec; // dest already captured in path
@@ -877,6 +931,9 @@ async fn cleanup_cancelled(
     })
     .await;
     persist_inner(inner).await;
+    if let Some(t) = inner.tasks.read().await.get(id).cloned() {
+        record_history(inner, &t).await;
+    }
     inner.handles.lock().await.remove(id);
     let _ = done_tx.send(Some(Err("cancelled".to_string())));
 }

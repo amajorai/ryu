@@ -1,10 +1,12 @@
 use axum::{
-    http::StatusCode,
+    http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 use serde_json::json;
 use thiserror::Error;
+
+use crate::policy_alert::{PolicyAlert, POLICY_ALERT_HEADER};
 
 #[derive(Debug, Error)]
 pub enum GatewayError {
@@ -14,8 +16,12 @@ pub enum GatewayError {
     #[error("Rate limit exceeded")]
     RateLimited,
 
+    /// A firewall / DLP inbound match blocked the request (403). Carries the
+    /// optional [`PolicyAlert`] stamped when the matched firewall rule's `alert`
+    /// tier is `>= Warn`, so `into_response` emits `x-ryu-policy-alert` on the
+    /// error response (the F1 error-path stamp — this Response only exists here).
     #[error("Request blocked by firewall: {0}")]
-    FirewallBlocked(String),
+    FirewallBlocked(String, Option<PolicyAlert>),
 
     #[error("Blocked by control-plane policy: {0}")]
     PolicyViolation(String),
@@ -48,9 +54,12 @@ pub enum GatewayError {
     #[error("Engine overloaded: {0}")]
     Overloaded(String),
 
+    /// A per-user / per-agent / per-session token budget (or the wallet-empty
+    /// rule) hit `Stop` (402). Carries the optional [`PolicyAlert`] stamped when
+    /// the matched rule's `alert` tier is `>= Warn`, so `into_response` emits
+    /// `x-ryu-policy-alert` on the 402 (the F1 error-path stamp).
     #[error("Budget exceeded")]
-    #[allow(dead_code)]
-    BudgetExceeded,
+    BudgetExceeded(Option<PolicyAlert>),
 
     /// A managed-inference org's credit balance is exhausted (pre-flight gate).
     /// Distinct from [`GatewayError::BudgetExceeded`] (token-budget period cap):
@@ -82,7 +91,7 @@ impl IntoResponse for GatewayError {
                 "rate_limit_exceeded",
                 "Rate limit exceeded. Please retry after a moment.",
             ),
-            GatewayError::FirewallBlocked(msg) => {
+            GatewayError::FirewallBlocked(msg, _) => {
                 (StatusCode::FORBIDDEN, "policy_violation", msg.as_str())
             }
             GatewayError::PolicyViolation(msg) => {
@@ -107,7 +116,7 @@ impl IntoResponse for GatewayError {
                 "engine_overloaded",
                 msg.as_str(),
             ),
-            GatewayError::BudgetExceeded => (
+            GatewayError::BudgetExceeded(_) => (
                 StatusCode::PAYMENT_REQUIRED,
                 "budget_exceeded",
                 "Token budget exceeded for this period.",
@@ -142,6 +151,23 @@ impl IntoResponse for GatewayError {
             }
         });
 
-        (status, Json(body)).into_response()
+        let mut response = (status, Json(body)).into_response();
+
+        // F1 error-path stamp: budget-stop (402) and firewall-block (403) return
+        // BEFORE any Ok Response exists, so the ONLY place their PolicyAlert can be
+        // written onto the wire is here. Mirror the Ok-path `x-ryu-policy-alert`
+        // header so a block-tier alert reaches Core on the error response too.
+        let alert = match &self {
+            GatewayError::BudgetExceeded(a) => a.as_ref(),
+            GatewayError::FirewallBlocked(_, a) => a.as_ref(),
+            _ => None,
+        };
+        if let Some(alert) = alert {
+            if let Ok(v) = HeaderValue::from_str(&alert.to_header()) {
+                response.headers_mut().insert(POLICY_ALERT_HEADER, v);
+            }
+        }
+
+        response
     }
 }

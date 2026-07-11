@@ -20,6 +20,7 @@ pub mod client;
 pub mod composio;
 pub mod delegate;
 pub mod exa;
+pub mod artifact_tool;
 pub mod notify_tool;
 pub mod orchestrator;
 pub mod research;
@@ -45,6 +46,80 @@ use tokio::sync::RwLock as TokioRwLock;
 use client::{McpStdioCommand, McpTool};
 
 use crate::plugin_manifest::PluginManifest;
+
+tokio::task_local! {
+    /// Set while a tool-use hook runs, so a hook that itself triggers a tool call
+    /// (via `host.runAgent`) in the SAME task does not re-enter the tool-hook
+    /// phase. Note: task-locals do not propagate to spawned sub-agent tasks, so a
+    /// delegated sub-agent's tool calls ARE still governed (by design); runaway
+    /// recursion is bounded by the delegation wall-time/depth caps.
+    static IN_TOOL_HOOK: ();
+}
+
+fn in_tool_hook() -> bool {
+    IN_TOOL_HOOK.try_with(|()| ()).is_ok()
+}
+
+/// How long a `pre_tool_use` hook may run before the call is allowed through
+/// anyway. Fail-open: a stuck or slow hook must never wedge tool dispatch.
+const PRE_TOOL_HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Run `pre_tool_use` hooks for a tool call. Returns `Some(reason)` if a hook
+/// blocked it (Claude's PreToolUse deny), else `None`. Fail-open on every error /
+/// timeout / absent-Deno path (returns `None` = allow). Reentrancy-guarded.
+async fn run_pre_tool_hooks(
+    tool_id: &str,
+    arguments: &Value,
+    session_id: Option<&str>,
+) -> Option<String> {
+    if in_tool_hook() {
+        return None;
+    }
+    let ctx = crate::plugin_host::HookContext {
+        conversation_id: session_id.map(str::to_string),
+        tool_name: Some(tool_id.to_string()),
+        tool_input: Some(arguments.clone()),
+        ..Default::default()
+    };
+    let fut = IN_TOOL_HOOK.scope(
+        (),
+        crate::plugin_host::dispatch_global(crate::plugin_host::ON_PRE_TOOL_USE, ctx),
+    );
+    let directives = match tokio::time::timeout(PRE_TOOL_HOOK_TIMEOUT, fut).await {
+        Ok(d) => d,
+        Err(_) => {
+            tracing::warn!("plugin_host: pre_tool_use hook timed out for '{tool_id}'; allowing");
+            return None;
+        }
+    };
+    directives.into_iter().find_map(|d| match d {
+        crate::plugin_host::HookDirective::Deny { reason } => Some(reason),
+        _ => None,
+    })
+}
+
+/// Fire `post_tool_use` hooks (Claude's PostToolUse) DETACHED — observation-only,
+/// so it never adds latency or blocks the caller, and cannot fail the tool call.
+/// Directives are ignored in v1.
+fn fire_post_tool_hooks(tool_id: String, arguments: Value, output: Value) {
+    if in_tool_hook() {
+        return;
+    }
+    tokio::spawn(async move {
+        let ctx = crate::plugin_host::HookContext {
+            tool_name: Some(tool_id),
+            tool_input: Some(arguments),
+            tool_output: Some(output),
+            ..Default::default()
+        };
+        let _ = IN_TOOL_HOOK
+            .scope(
+                (),
+                crate::plugin_host::dispatch_global(crate::plugin_host::ON_POST_TOOL_USE, ctx),
+            )
+            .await;
+    });
+}
 
 /// Process-global MCP registry, published once at startup.
 ///
@@ -81,6 +156,29 @@ pub struct McpServerConfig {
     /// to true so a bare `{ command, args }` entry just works.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Registry version recorded at install (the catalog `ServerJson.version`),
+    /// compared against the current catalog version to detect updates. `None`
+    /// for servers pasted manually or installed before this was captured — those
+    /// simply can't report an available update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// The catalog id this server was installed from (the registry server name),
+    /// used to look up its current version. `None` for manually-added servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
+}
+
+/// The installed MCP servers as recorded in `~/.ryu/mcp.json` (the `mcpServers`
+/// map). Best-effort: an unreadable/malformed file yields an empty map. Used by
+/// the update check to compare each server's recorded `version` against the
+/// catalog's current version.
+pub fn installed_configs() -> BTreeMap<String, McpServerConfig> {
+    let path = McpRegistry::config_path();
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<McpConfigFile>(&raw).ok())
+        .map(|f| f.mcp_servers)
+        .unwrap_or_default()
 }
 
 const fn default_true() -> bool {
@@ -255,6 +353,12 @@ pub struct ServerSummary {
 /// and the registry degrades gracefully (see `builtin_servers`).
 pub const GHOST_SERVER: &str = "ghost";
 
+/// Name under which the built-in Agent Browser MCP server is registered. Agent
+/// Browser is the default web-browsing tool (npm `agentbrowser`), launched via
+/// `npx`. Like Ghost, the registry degrades gracefully when the package can't be
+/// spawned (not installed / no Node), so registering it unconditionally is safe.
+pub const AGENTBROWSER_SERVER: &str = "agentbrowser";
+
 /// Separator between server name and tool name in a fully-qualified tool id.
 const TOOL_ID_SEP: &str = "__";
 
@@ -333,6 +437,12 @@ pub struct McpRegistry {
     /// Cheap to clone (`Arc` inside). `None` in test/CLI contexts; the app then
     /// reports its store unavailable rather than acting on the wrong tree.
     pub worktree_diffs: Option<crate::server::WorktreeDiffStore>,
+    /// Spaces store, wired so the built-in `artifact__create` tool can save a
+    /// generated file into a Space (default: the Artifacts system space) and the
+    /// ACP auto-file hook can persist assistant-message media. Cheap to clone
+    /// (`Arc` inside). `None` in test/CLI contexts; the tool then reports itself
+    /// unavailable rather than dropping the artifact.
+    pub spaces: Option<crate::server::spaces::SpaceStore>,
 }
 
 impl McpRegistry {
@@ -353,6 +463,7 @@ impl McpRegistry {
             team_store: None,
             quests: None,
             worktree_diffs: None,
+            spaces: None,
         }
     }
 
@@ -373,6 +484,7 @@ impl McpRegistry {
             team_store: None,
             quests: None,
             worktree_diffs: None,
+            spaces: None,
         }
     }
 
@@ -430,6 +542,14 @@ impl McpRegistry {
         self
     }
 
+    /// Wire the Spaces store into the registry. Must be called after construction
+    /// to enable the built-in `artifact__create` tool + the ACP artifact auto-file
+    /// hook to persist files into a Space.
+    pub fn with_spaces(mut self, spaces: crate::server::spaces::SpaceStore) -> Self {
+        self.spaces = Some(spaces);
+        self
+    }
+
     /// Wire the skill registry into the registry. Must be called after
     /// construction to enable the `skills` built-in tools (`skills__search` /
     /// `skills__load`, progressive disclosure of Agent Skills).
@@ -483,9 +603,31 @@ impl McpRegistry {
                     .to_owned(),
             ),
             enabled: true,
+            version: None,
+            catalog_id: None,
+        };
+        // Agent Browser — default web-browsing tool, launched via `npx agentbrowser`.
+        // Best-effort: the exact package entrypoint is provided by the npm package;
+        // if it isn't installed (or Node/npx is absent) the stdio client fails to
+        // spawn and this server is logged-and-skipped, so it never hides the rest.
+        // A user config entry named `agentbrowser` overrides this (see `load`).
+        let agentbrowser = McpServerConfig {
+            command: "npx".to_owned(),
+            args: vec!["-y".to_owned(), "agentbrowser".to_owned()],
+            env: BTreeMap::new(),
+            description: Some(
+                "Agent Browser — AI-powered web browsing (navigate, extract, interact). \
+                 Launched via `npx agentbrowser`; unavailable until the package (and Node) \
+                 are installed."
+                    .to_owned(),
+            ),
+            enabled: true,
+            version: None,
+            catalog_id: None,
         };
         let mut servers = BTreeMap::new();
         servers.insert(GHOST_SERVER.to_owned(), ghost);
+        servers.insert(AGENTBROWSER_SERVER.to_owned(), agentbrowser);
         servers
     }
 
@@ -511,6 +653,7 @@ impl McpRegistry {
             team_store: None,
             quests: None,
             worktree_diffs: None,
+            spaces: None,
         }
     }
 
@@ -584,6 +727,7 @@ impl McpRegistry {
             || name == web_fetch::SERVER_NAME
             || name == sandbox::SERVER_NAME
             || name == notify_tool::SERVER_NAME
+            || name == artifact_tool::SERVER_NAME
             || name == channel_tool::SERVER_NAME
             || name == search_conversations::SERVER_NAME
             || name == threads::SERVER_NAME
@@ -1017,6 +1161,7 @@ impl McpRegistry {
         all.extend(sandbox::tools());
         // Built-in actions (#456): desktop notification + send-to-channel.
         all.extend(notify_tool::tools());
+        all.extend(artifact_tool::tools());
         all.extend(channel_tool::tools());
         // Built-in semantic search over past chat messages — always listed;
         // dispatch returns `available: false` when the conversation store / index
@@ -1193,15 +1338,36 @@ impl McpRegistry {
             // mistaken for a completed side effect; the engine runs it on approve.
             return Err(err);
         }
-        self.call_tool_with_identity_no_gate(
-            tool_id,
-            arguments,
-            allowlist,
-            user_id,
-            profile_ids,
-            session_id,
-        )
-        .await
+
+        // PreToolUse hooks (Claude parity): a plugin tool-firewall may block the
+        // call. This is a per-agent plugin layer ON TOP of the Gateway's own tool
+        // governance, not a replacement for it. Fail-open + bounded timeout +
+        // reentrancy-guarded, so installing a hook plugin can never wedge or break
+        // tool dispatch. Skipped instantly (DB-free) when no tool-hook plugin is
+        // loaded (`any_manifest_declares`).
+        if let Some(reason) = run_pre_tool_hooks(tool_id, &arguments, session_id.as_deref()).await {
+            return Err(anyhow!("tool '{tool_id}' blocked by a plugin hook: {reason}"));
+        }
+        // Keep a copy for the (detached) post-hook before `arguments` is consumed.
+        let tool_input = arguments.clone();
+
+        let result = self
+            .call_tool_with_identity_no_gate(
+                tool_id,
+                arguments,
+                allowlist,
+                user_id,
+                profile_ids,
+                session_id,
+            )
+            .await;
+
+        // PostToolUse hooks: observe-only, fired detached so they add no latency
+        // and cannot fail the call. Only on a successful result.
+        if let Ok(ref output) = result {
+            fire_post_tool_hooks(tool_id.to_string(), tool_input, output.clone());
+        }
+        result
     }
 
     /// The ungated tool-dispatch core: identity consult + provider dispatch, with
@@ -1363,6 +1529,7 @@ impl McpRegistry {
                     name: tool.to_owned(),
                     description: None,
                     input_schema: None,
+                    ..Default::default()
                 };
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
@@ -1415,6 +1582,18 @@ impl McpRegistry {
                 }
             }
             return notify_tool::dispatch(tool, arguments).await;
+        }
+
+        // Built-in artifact provider: saves a generated file into a Space (default
+        // Artifacts). Dispatched in-process against the wired SpaceStore.
+        if server == artifact_tool::SERVER_NAME {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            return artifact_tool::dispatch(tool, arguments, self.spaces.as_ref()).await;
         }
 
         // Built-in generative-UI provider: client-rendered (no-op in Core). The

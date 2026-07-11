@@ -943,6 +943,64 @@ pub async fn install_skill(client: &reqwest::Client, id: &str) -> Result<Install
     })
 }
 
+/// One installed skill whose local SKILL.md differs from the current upstream
+/// package — i.e. an update is available. Content-diff is the only viable signal
+/// because skills.sh exposes no per-skill version; it is also fully retroactive
+/// (works for skills installed before this check existed).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SkillUpdate {
+    /// On-disk skill slug (`~/.claude/skills/<slug>/`).
+    pub slug: String,
+    /// Full catalog id (`owner/repo/slug`) — the apply/re-install key.
+    pub id: String,
+    /// Display name (the slug; skills.sh has no separate title on the package).
+    pub name: String,
+}
+
+/// Normalise SKILL.md text for comparison: unify line endings and ignore
+/// trailing whitespace so a checkout/CRLF difference never reads as an update.
+fn normalise_skill_md(s: &str) -> String {
+    s.replace("\r\n", "\n").trim_end().to_string()
+}
+
+/// Detect which installed (through-Ryu) skills have a newer upstream SKILL.md.
+/// For each skill with recorded provenance (`slug → owner/repo/slug`), re-fetch
+/// the upstream package and byte-compare its SKILL.md against the on-disk copy.
+/// Best-effort per skill: a failed fetch/read skips that one rather than failing
+/// the whole check.
+pub async fn check_updates(client: &reqwest::Client) -> Vec<SkillUpdate> {
+    let provenance = load_provenance();
+    let mut out = Vec::new();
+    for (slug, id) in provenance {
+        let local_path = crate::skills::SkillRegistry::skills_dir()
+            .join(&slug)
+            .join("SKILL.md");
+        let Ok(local) = tokio::fs::read_to_string(&local_path).await else {
+            continue;
+        };
+        let Ok(files) = download(client, &id).await else {
+            continue;
+        };
+        // Match how install_skill locates the doc — `ends_with("skill.md")` — so a
+        // package that ships SKILL.md at a nested path (e.g. `slug/SKILL.md`) is
+        // still update-checked rather than silently skipped.
+        let Some(remote) = files
+            .iter()
+            .find(|f| f.path.to_lowercase().ends_with("skill.md"))
+        else {
+            continue;
+        };
+        if normalise_skill_md(&local) != normalise_skill_md(&remote.contents) {
+            out.push(SkillUpdate {
+                name: slug.clone(),
+                slug,
+                id,
+            });
+        }
+    }
+    out
+}
+
 /// Join a package-declared relative path onto `base`, rejecting anything that
 /// would escape the skill directory (absolute paths, `..`, drive/root
 /// components). Returns `None` for an unsafe or empty path.

@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.firewall",
+  "id": "firewall",
   "name": "Gateway Firewall",
   "version": "1.0.0",
   "engines": {

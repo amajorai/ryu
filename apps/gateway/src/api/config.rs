@@ -8,10 +8,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use std::collections::HashMap;
+
 use crate::{
     config::{
-        ApiKeyConfig, AuthConfig, BudgetConfig, FirewallConfig, GatewayConfig, ProviderKind,
-        ProvidersConfig, RoutingConfig, SmartRoutingConfig, ToolProfile, ToolsConfig,
+        ApiKeyConfig, AuthConfig, BudgetConfig, FirewallConfig, FirewallOverlay, GatewayConfig,
+        ProviderKind, ProvidersConfig, RoutingConfig, SmartRoutingConfig, ToolProfile, ToolsConfig,
     },
     error::GatewayError,
     pipeline::{authenticate, AuthInputs},
@@ -32,6 +34,17 @@ struct ConfigView {
     /// carry no secrets, so they are returned verbatim for the UI to read/edit
     /// (mirrors how `firewall` / `smart_routing` are surfaced).
     tools: ToolsConfigView,
+    /// Gateway-local standalone-desktop firewall overlay stores (§6 of the
+    /// hierarchical-policy spec): the org and per-agent [`FirewallOverlay`]s
+    /// authored via `PUT /v1/config` when there is no control plane. Keyed by org
+    /// id / agent id; `{}` on a fresh node. These are the mid + leaf scopes of the
+    /// node→org→agent cascade for the standalone path; the node scope (base
+    /// firewall) plus its `inspector` + `locked_fields` are carried inside
+    /// `firewall`. Persisted to `gateway.toml`
+    /// (`GatewayConfig::firewall_{org,agent}_overlays`) and reseeded into the
+    /// resolver at startup (FIX 4), so they survive a gateway restart.
+    firewall_org_overlays: HashMap<String, FirewallOverlay>,
+    firewall_agent_overlays: HashMap<String, FirewallOverlay>,
     /// Static policy-drift warnings (dangerous-tool-combo + elevation drift).
     /// Computed from the LIVE firewall config plus the tool / composio / exec
     /// budget config and the distributed policy. Empty on a clean config.
@@ -286,6 +299,11 @@ pub async fn get_config(
         auth: redact_auth(&auth_cfg),
         routing: routing_view,
         tools: tools_view,
+        // Snapshot the resolver's standalone-local overlay stores so the desktop
+        // can read-modify-write them. Empty on the hosted path (overlays arrive
+        // on the resolve response there, not via this store).
+        firewall_org_overlays: state.resolver.org_overlays(),
+        firewall_agent_overlays: state.resolver.agent_overlays(),
         drift,
     };
 
@@ -322,6 +340,92 @@ pub struct ConfigPatch {
     /// on the next gateway restart; the request path reads `state.config.tools`
     /// directly, which is fixed at startup.
     pub tools: Option<ToolsConfig>,
+    /// Full replacement of the gateway-local standalone org overlay store (§6).
+    /// Full-replacement semantics, matching `auth.api_keys`: any org id absent
+    /// from this map is removed. Applied to the resolver's in-memory store
+    /// (invalidating the scanner cache) AND persisted to `gateway.toml` (FIX 4)
+    /// so it survives a restart — but only when a writable config path exists; an
+    /// overlay-only patch on a node with no config path still applies live and
+    /// simply skips disk, so authoring never hard-errors. Each overlay is
+    /// normalized first (the node-only `wrap_untrusted_tool_results` value/lock is
+    /// stripped, FIX 2).
+    #[serde(default)]
+    pub firewall_org_overlays: Option<HashMap<String, FirewallOverlay>>,
+    /// Full replacement of the gateway-local standalone per-agent overlay store
+    /// (§6), keyed by agent id. Same full-replacement + persist-when-path-exists
+    /// + normalize semantics as `firewall_org_overlays`.
+    #[serde(default)]
+    pub firewall_agent_overlays: Option<HashMap<String, FirewallOverlay>>,
+    /// Full replacement of the user-authored custom evaluator set
+    /// ([`GatewayConfig::custom_evaluators`]). Validated
+    /// ([`crate::evaluators::validate_custom_evaluators`]: non-empty ids, no dupes)
+    /// then persisted to `gateway.toml`. Like `routing`/`tools` it is NOT
+    /// hot-swapped — the request path reads the startup snapshot, so it takes effect
+    /// on the next gateway restart (the desktop save flow triggers one). Absent ⇒
+    /// the existing set is preserved.
+    #[serde(default)]
+    pub custom_evaluators: Option<Vec<crate::evaluators::Evaluator>>,
+}
+
+/// Whether a [`ConfigPatch`] carries no updatable field at all. Extracted as a
+/// pure predicate (mirroring [`admin_loopback_allowed`]) so the "empty patch"
+/// rejection — which must now also accept an overlay-only patch — is
+/// unit-testable without building a request. Each argument is one
+/// `patch.<field>.is_some()`.
+#[allow(clippy::fn_params_excessive_bools, clippy::too_many_arguments)]
+fn patch_is_empty(
+    firewall: bool,
+    budgets: bool,
+    auth: bool,
+    routing: bool,
+    tools: bool,
+    org_overlays: bool,
+    agent_overlays: bool,
+    custom_evaluators: bool,
+) -> bool {
+    !(firewall
+        || budgets
+        || auth
+        || routing
+        || tools
+        || org_overlays
+        || agent_overlays
+        || custom_evaluators)
+}
+
+/// Normalize every overlay in a full-replacement map (FIX 2): each entry has its
+/// node-only `wrap_untrusted_tool_results` value + lock stripped (see
+/// [`crate::firewall::resolve::normalize_overlay`]) before it is stored,
+/// persisted, or resolved — an org/agent scope may neither set nor lock it.
+fn normalize_overlay_map(
+    m: HashMap<String, FirewallOverlay>,
+) -> HashMap<String, FirewallOverlay> {
+    m.into_iter()
+        .map(|(k, v)| (k, crate::firewall::resolve::normalize_overlay(&v)))
+        .collect()
+}
+
+/// Apply a full-replacement update to a standalone overlay store on the resolver.
+/// `remove` drops overlays absent from `next`; `set` (re)authors the rest. Each
+/// call invalidates the resolver's scanner cache, so the next request resolves a
+/// fresh cascade. Generic over the org/agent store via the two closures.
+fn replace_overlay_store<R, S>(
+    current_ids: Vec<String>,
+    next: HashMap<String, FirewallOverlay>,
+    mut remove: R,
+    mut set: S,
+) where
+    R: FnMut(&str),
+    S: FnMut(String, FirewallOverlay),
+{
+    for id in &current_ids {
+        if !next.contains_key(id) {
+            remove(id);
+        }
+    }
+    for (id, overlay) in next {
+        set(id, overlay);
+    }
 }
 
 /// Apply a config change live, then persist to `gateway.toml`. The live state
@@ -342,45 +446,109 @@ pub async fn put_config(
     // master-key-gated otherwise (remote peers always need the master key).
     require_local_admin(&state, &peer, ctx.is_master_key, "Config updates")?;
 
-    if patch.firewall.is_none()
-        && patch.budgets.is_none()
-        && patch.auth.is_none()
-        && patch.routing.is_none()
-        && patch.tools.is_none()
-    {
+    if patch_is_empty(
+        patch.firewall.is_some(),
+        patch.budgets.is_some(),
+        patch.auth.is_some(),
+        patch.routing.is_some(),
+        patch.tools.is_some(),
+        patch.firewall_org_overlays.is_some(),
+        patch.firewall_agent_overlays.is_some(),
+        patch.custom_evaluators.is_some(),
+    ) {
         return Err(GatewayError::BadRequest(
-            "Patch body must include at least one of: firewall, budgets, auth, routing, tools"
+            "Patch body must include at least one of: firewall, budgets, auth, routing, tools, \
+             firewall_org_overlays, firewall_agent_overlays, custom_evaluators"
                 .to_string(),
         ));
     }
 
-    // Build the updated persisted config by cloning the current one and
-    // applying the patch fields. We do NOT touch provider keys or master_key.
-    let mut updated_config: GatewayConfig = state.config.clone();
-    if let Some(fw) = &patch.firewall {
-        updated_config.firewall = fw.clone();
-    }
-    if let Some(budgets) = &patch.budgets {
-        updated_config.budgets = budgets.clone();
-    }
-    if let Some(auth_patch) = &patch.auth {
-        updated_config.auth.api_keys = auth_patch.api_keys.clone();
-    }
-    if let Some(routing) = &patch.routing {
-        updated_config.routing = routing.clone();
-    }
-    if let Some(tools) = &patch.tools {
-        updated_config.tools = tools.clone();
+    // Validate any incoming custom evaluators before persisting (non-empty ids, no
+    // dupes). Category/target/impl are serde-closed enums, so an invalid one fails
+    // deserialization before reaching here.
+    if let Some(custom) = &patch.custom_evaluators {
+        crate::evaluators::validate_custom_evaluators(custom)
+            .map_err(GatewayError::BadRequest)?;
     }
 
-    // Persist first: if the write fails, we leave live config unchanged.
-    updated_config
-        .save()
-        .map_err(|e| GatewayError::Internal(anyhow::anyhow!("Failed to persist config: {e}")))?;
+    // Normalize any incoming org/agent overlays up front (FIX 2): strip the
+    // node-only `wrap_untrusted_tool_results` value + lock so it is never stored,
+    // persisted, or resolved. Under full-replacement semantics the resulting store
+    // equals this normalized `next` map, so it is also exactly what we persist.
+    let org_next = patch.firewall_org_overlays.map(normalize_overlay_map);
+    let agent_next = patch.firewall_agent_overlays.map(normalize_overlay_map);
+
+    let has_config_field = patch.firewall.is_some()
+        || patch.budgets.is_some()
+        || patch.auth.is_some()
+        || patch.routing.is_some()
+        || patch.tools.is_some()
+        || patch.custom_evaluators.is_some();
+    let has_overlay_field = org_next.is_some() || agent_next.is_some();
+    // Persist when a config-backed field changed (always — `save()` errors if no
+    // path, as before), OR when overlays changed AND a writable config path exists
+    // (FIX 4: overlays now round-trip through `gateway.toml`). An overlay-only
+    // patch on a node with no config path still applies live but skips disk, so
+    // authoring a standalone overlay never hard-errors.
+    let config_path_exists = GatewayConfig::config_path().is_some();
+    let needs_persist = has_config_field || (has_overlay_field && config_path_exists);
+
+    if needs_persist {
+        // Build the updated persisted config by cloning the current one and
+        // applying the patch fields. We do NOT touch provider keys or master_key.
+        let mut updated_config: GatewayConfig = state.config.clone();
+        if let Some(fw) = &patch.firewall {
+            updated_config.firewall = fw.clone();
+        }
+        if let Some(budgets) = &patch.budgets {
+            updated_config.budgets = budgets.clone();
+        }
+        if let Some(auth_patch) = &patch.auth {
+            updated_config.auth.api_keys = auth_patch.api_keys.clone();
+        }
+        if let Some(routing) = &patch.routing {
+            updated_config.routing = routing.clone();
+        }
+        if let Some(tools) = &patch.tools {
+            updated_config.tools = tools.clone();
+        }
+        // Custom evaluators (full replacement). Snapshot-only, like routing/tools:
+        // persisted here, read from the startup config on the request path, so it
+        // takes effect on the next gateway restart (the desktop save flow must
+        // trigger a restart — see the handler doc). CLOBBER GUARD: `state.config`
+        // is the STARTUP snapshot and is never hot-swapped, so on a patch that
+        // OMITS the field we must preserve the LAST-PERSISTED set from disk rather
+        // than the stale snapshot — otherwise an unrelated later PUT (e.g.
+        // firewall-only) would clone `custom_evaluators = []` and wipe
+        // hand-authored evaluators. Mirrors the overlay stores' `unwrap_or_else(live)`
+        // intent; if the disk read fails we fall back to the snapshot clone.
+        if let Some(custom) = &patch.custom_evaluators {
+            updated_config.custom_evaluators = custom.clone();
+        } else if let Ok(on_disk) = GatewayConfig::load() {
+            updated_config.custom_evaluators = on_disk.custom_evaluators;
+        }
+        // Overlay stores (FIX 4): the resulting full-replacement store equals the
+        // normalized `next` map when the patch carries it, else the resolver's
+        // current live store (so a config-only patch preserves existing overlays
+        // rather than wiping them from disk).
+        updated_config.firewall_org_overlays = org_next
+            .clone()
+            .unwrap_or_else(|| state.resolver.org_overlays());
+        updated_config.firewall_agent_overlays = agent_next
+            .clone()
+            .unwrap_or_else(|| state.resolver.agent_overlays());
+
+        // Persist first: if the write fails, we leave live config unchanged.
+        updated_config.save().map_err(|e| {
+            GatewayError::Internal(anyhow::anyhow!("Failed to persist config: {e}"))
+        })?;
+    }
 
     // Now apply live hot-swappable changes (firewall, budgets, auth).
     // Routing is not live-swappable (the ModelRouter holds a snapshot of
     // RoutingConfig at startup); it takes effect on the next gateway restart.
+    // `update_firewall_config` also updates the resolver's node base and
+    // invalidates its scanner cache.
     if let Some(fw) = patch.firewall {
         state.update_firewall_config(fw);
     }
@@ -389,6 +557,27 @@ pub async fn put_config(
     }
     if let Some(auth_patch) = patch.auth {
         state.update_auth_config(auth_patch.api_keys);
+    }
+
+    // Apply the standalone overlay-store replacements (§6) live, using the
+    // normalized maps. Each resolver write invalidates the scanner cache, so the
+    // next request re-resolves the node→org→agent cascade against the new
+    // overlays.
+    if let Some(next) = org_next {
+        replace_overlay_store(
+            state.resolver.org_overlays().into_keys().collect(),
+            next,
+            |id| state.resolver.remove_org_overlay(id),
+            |id, ov| state.resolver.set_org_overlay(id, ov),
+        );
+    }
+    if let Some(next) = agent_next {
+        replace_overlay_store(
+            state.resolver.agent_overlays().into_keys().collect(),
+            next,
+            |id| state.resolver.remove_agent_overlay(id),
+            |id, ov| state.resolver.set_agent_overlay(id, ov),
+        );
     }
 
     Ok(Json(json!({ "ok": true })))
@@ -429,5 +618,371 @@ mod tests {
     #[test]
     fn require_auth_forces_master_key() {
         assert!(!admin_loopback_allowed(true, true, false, false));
+    }
+
+    // ── §6 gateway-local firewall overlay stores (org/agent scopes) ───────────
+    //
+    // These cover the two things THIS leaf changes on top of the resolver (which
+    // resolve.rs already unit-tests): the loosened empty-patch guard + the JSON
+    // shape of the overlay fields, and end-to-end that authoring an overlay via
+    // the same replace helper the PUT handler uses changes the resolved scanner
+    // for a request carrying that org/agent, while other scopes stay on the base.
+
+    use std::collections::HashMap;
+
+    use super::{patch_is_empty, replace_overlay_store, ConfigPatch};
+    use crate::{
+        audit::AuditLogger,
+        config::{
+            AuditConfig, CustomPattern, CustomPatternKind, EvalsConfig, FirewallOverlay,
+            FirewallPolicy, GatewayConfig,
+        },
+        evals::EvalsRunner,
+        pipeline::RequestContext,
+        state::AppState,
+    };
+
+    /// A minimal, disk-free `AppState` (audit disabled, default config).
+    fn test_state() -> AppState {
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = EvalsRunner::new(EvalsConfig::default());
+        AppState::new_for_test(GatewayConfig::default(), audit, evals)
+    }
+
+    /// A minimal `RequestContext` carrying only an org/agent id, on the standalone
+    /// path (`resolved_policy: None` ⇒ empty control-plane bundle ⇒ the resolver
+    /// consults its gateway-local overlay stores).
+    fn ctx_for(org: Option<&str>, agent: Option<&str>) -> RequestContext {
+        RequestContext {
+            request_id: "t".into(),
+            api_key: "k".into(),
+            is_master_key: false,
+            org_id: org.map(str::to_string),
+            team_id: None,
+            project_id: None,
+            user_name: None,
+            user_id: None,
+            agent_id: agent.map(str::to_string),
+            key_config: None,
+            skill_ids: None,
+            tool_actions: None,
+            tools_header_present: false,
+            slot_provider: None,
+            slot_model: None,
+            session_id: None,
+            feature: None,
+            companion_source: false,
+            tool_search_requested: false,
+            priority: crate::concurrency::Priority::Interactive,
+            tool_profile: None,
+            raw_tools: false,
+            managed_inference: false,
+            remaining_budget_micro_usd: None,
+            resolved_policy: None,
+        }
+    }
+
+    /// Author (full-replacement) the resolver's local org overlay store, exactly
+    /// as `put_config` does.
+    fn put_org_overlays(state: &AppState, next: HashMap<String, FirewallOverlay>) {
+        replace_overlay_store(
+            state.resolver.org_overlays().into_keys().collect(),
+            next,
+            |id| state.resolver.remove_org_overlay(id),
+            |id, ov| state.resolver.set_org_overlay(id, ov),
+        );
+    }
+
+    fn put_agent_overlays(state: &AppState, next: HashMap<String, FirewallOverlay>) {
+        replace_overlay_store(
+            state.resolver.agent_overlays().into_keys().collect(),
+            next,
+            |id| state.resolver.remove_agent_overlay(id),
+            |id, ov| state.resolver.set_agent_overlay(id, ov),
+        );
+    }
+
+    #[test]
+    fn patch_is_empty_true_only_when_every_field_absent() {
+        // The all-none case is the only rejection.
+        assert!(patch_is_empty(
+            false, false, false, false, false, false, false, false
+        ));
+        // Regression guard for the loosened check: an OVERLAY-ONLY patch (the
+        // standalone-desktop authoring case) must NOT be rejected as empty.
+        assert!(!patch_is_empty(
+            false, false, false, false, false, true, false, false
+        ));
+        assert!(!patch_is_empty(
+            false, false, false, false, false, false, true, false
+        ));
+        // A custom-evaluators-only patch is also non-empty.
+        assert!(!patch_is_empty(
+            false, false, false, false, false, false, false, true
+        ));
+        // A classic config-field patch is still non-empty.
+        assert!(!patch_is_empty(
+            true, false, false, false, false, false, false, false
+        ));
+    }
+
+    #[test]
+    fn config_patch_deserializes_overlay_fields() {
+        // Confirms the wire shape the desktop read-modify-writes: snake_case
+        // overlay keys under two top-level maps keyed by org/agent id.
+        let json = serde_json::json!({
+            "firewall_org_overlays": {
+                "o1": { "policy": "block", "redact_pii": false, "custom_patterns": [] }
+            },
+            "firewall_agent_overlays": {
+                "a1": { "enabled": false }
+            }
+        });
+        let patch: ConfigPatch = serde_json::from_value(json).expect("deserialize overlay patch");
+
+        let org = patch.firewall_org_overlays.expect("org overlays present");
+        assert_eq!(org["o1"].policy, Some(FirewallPolicy::Block));
+        assert_eq!(org["o1"].redact_pii, Some(false));
+        let agent = patch.firewall_agent_overlays.expect("agent overlays present");
+        assert_eq!(agent["a1"].enabled, Some(false));
+    }
+
+    #[test]
+    fn replace_overlay_store_removes_absent_ids_and_updates_present() {
+        let state = test_state();
+        state
+            .resolver
+            .set_org_overlay("keep".into(), FirewallOverlay::default());
+        state
+            .resolver
+            .set_org_overlay("drop".into(), FirewallOverlay::default());
+
+        // A full-replacement PUT that lists only `keep` (with a change) drops
+        // `drop` and updates `keep`.
+        let mut next = HashMap::new();
+        next.insert(
+            "keep".to_string(),
+            FirewallOverlay {
+                policy: Some(FirewallPolicy::Block),
+                ..Default::default()
+            },
+        );
+        put_org_overlays(&state, next);
+
+        let store = state.resolver.org_overlays();
+        assert!(store.contains_key("keep"), "listed id retained");
+        assert!(!store.contains_key("drop"), "absent id removed");
+        assert_eq!(
+            store["keep"].policy,
+            Some(FirewallPolicy::Block),
+            "listed id updated"
+        );
+    }
+
+    #[test]
+    fn authored_overlays_change_resolved_scanner_per_scope() {
+        let state = test_state();
+        let ctx = ctx_for(Some("o1"), Some("a1"));
+        // `WIDGET-\d+` is matched by no built-in PII pattern, so the node base
+        // lets it through.
+        assert!(
+            state
+                .resolved_scanner(&ctx)
+                .scan_inbound("ship WIDGET-123 now")
+                .is_none(),
+            "node base does not know WIDGET ids"
+        );
+
+        // Author an org overlay adding a PII custom pattern.
+        let mut org = HashMap::new();
+        org.insert(
+            "o1".to_string(),
+            FirewallOverlay {
+                custom_patterns: vec![CustomPattern {
+                    name: "widget".into(),
+                    regex: r"WIDGET-\d+".into(),
+                    kind: CustomPatternKind::Pii,
+                }],
+                ..Default::default()
+            },
+        );
+        put_org_overlays(&state, org);
+
+        // A request for org o1 now trips the org's custom pattern.
+        assert!(
+            state
+                .resolved_scanner(&ctx)
+                .scan_inbound("ship WIDGET-123 now")
+                .is_some(),
+            "org overlay pattern enforced for its org"
+        );
+        // A request for a DIFFERENT org is unaffected — empty overlay ⇒ node base.
+        let other = ctx_for(Some("o2"), None);
+        assert!(
+            state
+                .resolved_scanner(&other)
+                .scan_inbound("ship WIDGET-123 now")
+                .is_none(),
+            "other org still on the node base"
+        );
+
+        // Author an agent overlay tightening the policy; the leaf wins.
+        let mut agent = HashMap::new();
+        agent.insert(
+            "a1".to_string(),
+            FirewallOverlay {
+                policy: Some(FirewallPolicy::Block),
+                ..Default::default()
+            },
+        );
+        put_agent_overlays(&state, agent);
+
+        let resolved = state.resolved_scanner(&ctx);
+        assert_eq!(
+            resolved.config().policy,
+            FirewallPolicy::Block,
+            "agent leaf overlay applied"
+        );
+        // The org pattern still applies alongside the agent policy (union).
+        assert!(resolved.scan_inbound("ship WIDGET-123 now").is_some());
+    }
+
+    #[test]
+    fn empty_overlays_resolve_to_node_base() {
+        // The preserved-behaviour invariant: with no overlays authored, a request
+        // carrying org/agent ids resolves byte-for-byte to the node base.
+        let state = test_state();
+        let ctx = ctx_for(Some("o1"), Some("a1"));
+        let resolved = state.resolved_scanner(&ctx).config().clone();
+        let base = state.resolver.node_base();
+        assert_eq!(resolved.enabled, base.enabled);
+        assert_eq!(resolved.scan_inbound, base.scan_inbound);
+        assert_eq!(resolved.policy, base.policy);
+        assert_eq!(resolved.redact_pii, base.redact_pii);
+        assert!(resolved.custom_patterns.is_empty());
+        assert!(resolved.locked_fields.is_empty());
+    }
+
+    #[test]
+    fn custom_evaluators_round_trip_through_gateway_config_and_merge() {
+        use crate::evaluators::{
+            Capabilities, Evaluator, EvaluatorCategory, EvaluatorImpl, EvaluatorRegistry,
+            EvaluatorTarget, OfflineConfig,
+        };
+
+        // A default (no custom evaluators) config must NOT emit the key, so an
+        // existing gateway.toml stays byte-identical (skip_serializing_if =
+        // Vec::is_empty) — back-compat: no field == today.
+        let empty = toml::to_string(&GatewayConfig::default()).expect("serialize default");
+        assert!(
+            !empty.contains("custom_evaluators"),
+            "empty custom-evaluator set is omitted from gateway.toml"
+        );
+
+        // Author one custom offline Regex evaluator with a NEW id + one that
+        // OVERRIDES a builtin, then round-trip through TOML (the on-disk format).
+        let mk = |id: &str| Evaluator {
+            id: id.to_string(),
+            name: format!("Custom {id}"),
+            description: "round-trip".to_string(),
+            category: EvaluatorCategory::Custom,
+            target: EvaluatorTarget::Output,
+            capabilities: Capabilities {
+                inline: false,
+                offline: true,
+            },
+            impl_: EvaluatorImpl::Regex {
+                patterns: vec!["forbidden".to_string()],
+            },
+            inline: None,
+            offline: Some(OfflineConfig {
+                threshold: 0.5,
+                judge_model: None,
+            }),
+            builtin: false,
+            enforced: false,
+            higher_is_better: true,
+        };
+        let mut config = GatewayConfig::default();
+        config.custom_evaluators = vec![mk("my_custom_eval"), mk("toxicity")];
+
+        // This is the exact serializer save() uses; it exercises the TOML
+        // ValueAfterTable hazard for the Evaluator struct (scalars after tables).
+        let toml_str = toml::to_string_pretty(&config).expect("serialize custom evaluators");
+        let reloaded: GatewayConfig = toml::from_str(&toml_str).expect("deserialize (load path)");
+        assert_eq!(
+            reloaded.custom_evaluators.len(),
+            2,
+            "custom evaluators survive the config round-trip"
+        );
+        assert_eq!(reloaded.custom_evaluators[0].id, "my_custom_eval");
+
+        // The merged registry from the reloaded config exposes the new id AND the
+        // override (in-place, builtin forced false).
+        let reg = EvaluatorRegistry::from_config(&reloaded);
+        let new = reg.get("my_custom_eval").expect("new custom id present");
+        assert!(!new.builtin);
+        assert!(new.capabilities.offline);
+        let ovr = reg.get("toxicity").expect("builtin override present");
+        assert!(!ovr.builtin, "override reports as custom (builtin=false)");
+        assert_eq!(ovr.category.as_str(), "custom");
+    }
+
+    #[test]
+    fn overlays_round_trip_through_gateway_config_and_reseed_resolver() {
+        // FIX 4: overlays authored into GatewayConfig serialize + deserialize and
+        // are reseeded into the resolver when AppState is built from the reloaded
+        // config, so a standalone overlay survives a gateway restart.
+        let mut config = GatewayConfig::default();
+        let mut org = HashMap::new();
+        org.insert(
+            "o1".to_string(),
+            FirewallOverlay {
+                policy: Some(FirewallPolicy::Block),
+                ..Default::default()
+            },
+        );
+        config.firewall_org_overlays = org;
+
+        // A default (no-overlay) config must NOT emit the keys, so an existing
+        // gateway.toml stays byte-identical (skip_serializing_if = HashMap::is_empty).
+        let empty = toml::to_string(&GatewayConfig::default()).expect("serialize default");
+        assert!(
+            !empty.contains("firewall_org_overlays"),
+            "empty overlay stores are omitted from gateway.toml"
+        );
+
+        // Round-trip through TOML (the on-disk format save()/load() use).
+        let toml_str = toml::to_string(&config).expect("serialize");
+        let reloaded: GatewayConfig = toml::from_str(&toml_str).expect("deserialize");
+        assert_eq!(
+            reloaded.firewall_org_overlays["o1"].policy,
+            Some(FirewallPolicy::Block),
+            "org overlay survives the config round-trip"
+        );
+
+        // Build state from the reloaded config; the resolver reseeds at startup.
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = EvalsRunner::new(EvalsConfig::default());
+        let state = AppState::new_for_test(reloaded, audit, evals);
+        assert_eq!(
+            state.resolver.org_overlays()["o1"].policy,
+            Some(FirewallPolicy::Block),
+            "resolver reseeded from persisted config"
+        );
+        // And it drives resolution for a request carrying that org.
+        let ctx = ctx_for(Some("o1"), None);
+        assert_eq!(
+            state.resolved_scanner(&ctx).config().policy,
+            FirewallPolicy::Block,
+        );
     }
 }

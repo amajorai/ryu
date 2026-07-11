@@ -1,0 +1,7 @@
+{
+  "id": "agentbrowser",
+  "name": "Agent Browser",
+  "version": "1.0.0",
+  "runnables": [],
+  "permission_grants": ["mcp:agentbrowser"]
+}

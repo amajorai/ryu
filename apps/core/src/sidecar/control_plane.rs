@@ -164,6 +164,161 @@ pub async fn resolve_scope(client: &reqwest::Client) -> Result<Option<ResolvedSc
     Ok(Some(ResolvedScope { tools: body.tools }))
 }
 
+// ── Notify-target resolution (member roster for NotifyUser workflow node) ─────
+
+/// One resolved notification recipient (a member of the node's bound org).
+#[derive(Debug, Clone, Deserialize)]
+pub struct NotifyTargetUser {
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NotifyTargetsResponse {
+    #[serde(default)]
+    users: Vec<NotifyTargetUser>,
+}
+
+/// Resolve the members a `NotifyUser` workflow node should ping.
+///
+/// The org is derived server-side from the gateway key (same credential the
+/// `/gateway/resolve` handshake uses), so Core only needs the key. `team_id`, when
+/// set, narrows the roster to that team's members. Returns `Err` when no gateway
+/// key is configured (an org/team ping is meaningless on an unmanaged local node)
+/// or the request fails, so the node can surface a clear error.
+pub async fn resolve_notify_targets(
+    client: &reqwest::Client,
+    team_id: Option<&str>,
+) -> Result<Vec<NotifyTargetUser>> {
+    let Some(key) = gateway_key() else {
+        return Err(anyhow!(
+            "this node is not bound to an organization (no gateway key); \
+             an org/team notification target cannot be resolved"
+        ));
+    };
+
+    let url = format!(
+        "{}/api/control-plane/gateway/notify-targets",
+        control_plane_url().trim_end_matches('/')
+    );
+    let mut req = client
+        .get(&url)
+        .header("x-gateway-key", key)
+        .timeout(Duration::from_secs(10));
+    if let Some(team) = team_id.filter(|t| !t.is_empty()) {
+        req = req.query(&[("team", team)]);
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| anyhow!("notify-targets request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("notify-targets returned {}", resp.status()));
+    }
+    let body: NotifyTargetsResponse = resp
+        .json()
+        .await
+        .map_err(|e| anyhow!("notify-targets decode failed: {e}"))?;
+    Ok(body.users)
+}
+
+// ── Effective-permission resolution (org/team RBAC) ──────────────────────────
+
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
+
+/// How long a resolved permission set is trusted before Core re-asks the control
+/// plane. Short so a role/grant change propagates promptly; only SUCCESSFUL
+/// lookups are cached (a transient failure must not deny a user for the window).
+const PERMISSIONS_TTL: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Deserialize)]
+struct PermissionsResponse {
+    #[serde(default)]
+    permissions: Vec<String>,
+}
+
+/// Process-wide TTL cache of effective permissions keyed by user id. Only positive
+/// results land here (see [`resolve_permissions`]).
+fn permissions_cache() -> &'static Mutex<HashMap<String, (Instant, HashSet<String>)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, HashSet<String>)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Resolve a user's effective permissions (built-in role tier UNION every custom
+/// role granted to them) in this node's gateway-key-bound org.
+///
+/// Mirrors [`resolve_notify_targets`]'s auth exactly: the org is derived
+/// server-side from the `x-gateway-key` credential, so Core only sends the key and
+/// the `userId`. This is the custom-role slice Core cannot compute locally.
+///
+/// FAIL-CLOSED CONTRACT: on ANY failure (no gateway key, network error, non-2xx,
+/// decode error) this returns an EMPTY set — never an error and never a wide set.
+/// Callers UNION this with the role tier from `permissions_for_role`, so an empty
+/// result simply falls back to the built-in tier (never full access). Successful
+/// lookups are cached for [`PERMISSIONS_TTL`]; failures are not cached.
+pub async fn resolve_permissions(client: &reqwest::Client, user_id: &str) -> HashSet<String> {
+    // Fast path: a fresh cached positive result.
+    if let Ok(guard) = permissions_cache().lock() {
+        if let Some((at, perms)) = guard.get(user_id) {
+            if at.elapsed() < PERMISSIONS_TTL {
+                return perms.clone();
+            }
+        }
+    }
+
+    let Some(key) = gateway_key() else {
+        // Unmanaged/local node: no control plane to consult. Fall back to role tier.
+        return HashSet::new();
+    };
+
+    let url = format!(
+        "{}/api/control-plane/gateway/permissions",
+        control_plane_url().trim_end_matches('/')
+    );
+    let resp = match client
+        .get(&url)
+        .header("x-gateway-key", key)
+        .query(&[("userId", user_id)])
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::debug!("resolve_permissions request failed (falling back to role tier): {e}");
+            return HashSet::new();
+        }
+    };
+    if !resp.status().is_success() {
+        tracing::debug!(
+            "resolve_permissions returned {} (falling back to role tier)",
+            resp.status()
+        );
+        return HashSet::new();
+    }
+    let body: PermissionsResponse = match resp.json().await {
+        Ok(body) => body,
+        Err(e) => {
+            tracing::debug!("resolve_permissions decode failed (falling back to role tier): {e}");
+            return HashSet::new();
+        }
+    };
+
+    let perms: HashSet<String> = body.permissions.into_iter().collect();
+    // Cache only this positive result.
+    if let Ok(mut guard) = permissions_cache().lock() {
+        guard.insert(user_id.to_owned(), (Instant::now(), perms.clone()));
+    }
+    perms
+}
+
 // ── Managed-node registration (A4 / #501) ────────────────────────────────────
 //
 // On a node flagged managed (`RYU_MANAGED_NODE`) Core self-registers to the

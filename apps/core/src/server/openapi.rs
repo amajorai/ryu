@@ -217,6 +217,7 @@ use utoipa::OpenApi;
         super::worktree_apply_handler,
         super::gateway_get_config,
         super::gateway_put_config,
+        super::gateway_get_evaluators,
         super::gateway_status,
         super::gateway_set_provider,
         super::gateway_run_evals,

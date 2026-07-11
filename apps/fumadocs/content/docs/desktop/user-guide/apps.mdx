@@ -1,0 +1,95 @@
+---
+title: "Ryu Apps"
+description: "Inline interactive widgets that render live inside a chat reply, driven by a tool result"
+---
+
+A Ryu App is a small interactive widget that renders directly in the message list, inside the
+reply that produced it. Instead of a wall of text, the agent hands you a checklist you can tick, a
+data grid you can sort, or a budget dial you can turn - a live surface, not a screenshot. Ryu Apps
+are OpenAI-Apps-SDK-compatible, so a widget authored for that ecosystem runs here unchanged.
+
+<TryInRyu page="chat" />
+
+<Callout type="warn">
+  Ryu Apps are gated behind the plugin-runtime flag (`PLUGIN_RUNTIME_FLAG`) and the end-to-end
+  path (a running node whose model calls a widget-bearing tool, rendered in the live desktop) is
+  not yet fully live-verified. The eight built-ins, the sandbox, and the governance gate are all
+  built; treat this as an early surface.
+</Callout>
+
+## The default built-ins
+
+Eight apps ship default-on. They are an in-process Rust MCP provider
+(`apps/core/src/sidecar/mcp/apps/`), with the React sources in `packages/ryu-apps/`
+(`src/apps/`), so they work on install with no download.
+
+| App | What it renders |
+|---|---|
+| **checklist** | A tickable task list |
+| **smart-intake-form** | A structured form the agent asks you to fill |
+| **data-grid-explorer** | A sortable, filterable data grid |
+| **chart-studio** | An interactive chart |
+| **decision-wizard** | A guided multi-step decision or quiz |
+| **quest-board** | Your quests, wired to the live quest store |
+| **worktree-diff-review** | A per-run diff you can review inline |
+| **gateway-budget-dial** | A budget control wired to the Gateway rule API |
+
+Some of these are backed by real Core state, not just display. quest-board reads the live quest
+store, worktree-diff-review reads the run's worktree diffs, and gateway-budget-dial writes through
+to the Gateway budget rules.
+
+## How a tool result becomes a widget
+
+A tool can carry a widget binding in its MCP metadata (an `outputTemplate` pointing at a
+`ui://widget/<slug>.html` resource). When such a tool runs, Core serves that HTML as an MCP
+resource and the desktop renders it inline:
+
+<Steps>
+<Step>The agent calls a widget-bearing tool during a turn.</Step>
+<Step>Core emits the widget as a stream part, and the desktop renders it as a standalone block in
+the message list (`packages/blocks/src/desktop/agent-elements/`), not attached to a tool row.</Step>
+<Step>The widget loads inside a null-origin sandboxed iframe. It talks to the host over a
+`postMessage` port through a `window.ryu` bridge (aliased as `window.openai` for
+Apps-SDK compatibility).</Step>
+</Steps>
+
+The iframe is deliberately powerless. It never holds your Core token and never calls Core directly.
+When a widget wants to do something privileged, the host bridges the request to a small set of
+services (`widget-host-context.tsx`):
+
+| Widget action | Host route |
+|---|---|
+| Call a tool | `POST /api/widgets/tools/call` |
+| Inject a follow-up user turn | `POST /api/widgets/follow-up` |
+| Persist widget state | keyed by tool-call id, best-effort |
+
+## Provenance and Gateway gating
+
+Because the iframe is untrusted, every privileged call is governed server-side. A widget tool call
+goes to the host, which holds the node token, then through Core's provenance gate
+(`apps/core/src/server/widgets.rs`), and finally to the Gateway's `POST /v1/exec/tool`, where it is
+scanned, budget-checked, forwarded, and audited like any other tool execution. The `serverId` and
+`instanceId` are pinned by the host, never supplied by the frame, so a widget cannot spoof which
+tool it is allowed to call. For how that execution path works, see
+[Tools](/docs/desktop/user-guide/tools-and-connections).
+
+## Which agents can emit widgets
+
+A widget only appears if the agent that serves the turn can route its tool calls through Core's
+governed tool loop. That covers the batteries-included local engine (Gemma), OpenAI-compatible
+registry agents, and bridged ACP agents (Claude Code, Codex, Gemini, or a BYO agent) when Gateway
+routing is on for them.
+
+<Callout type="warn">
+  The flagship default `ryu` agent (Pi) cannot emit widgets from its own tool calls. Pi exposes no
+  base-URL or MCP hook to intercept its in-subprocess calls, so this is inherent to that engine,
+  not a missing feature. The zero-config local Gemma default does emit widgets; literal Pi does not.
+</Callout>
+
+## Next steps
+
+<Cards>
+  <DocCard href="/docs/desktop/user-guide/chat" />
+  <DocCard href="/docs/desktop/user-guide/tools-and-connections" />
+  <DocCard href="/docs/develop/extensions/ryu-apps" title="Author a Ryu App" description="Build your own inline widget with the Ryu SDK" />
+</Cards>

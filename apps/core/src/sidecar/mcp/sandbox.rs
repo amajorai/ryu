@@ -147,23 +147,100 @@ fn sandbox_exec_schema() -> Value {
     })
 }
 
+// ── Persistent (Daytona-only) lifecycle tool schemas ──────────────────────────
+
+fn sandbox_create_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "budget_micro_usd": {
+                "type": "integer",
+                "description": "Per-run cap in micro-USD; omit for the node default."
+            }
+        }
+    })
+}
+
+fn sandbox_run_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "run_id": { "type": "string" },
+            "command": { "type": "string" },
+            "args": { "type": "array", "items": { "type": "string" } },
+            "timeout_secs": { "type": "integer" }
+        },
+        "required": ["run_id", "command"]
+    })
+}
+
+fn sandbox_destroy_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "run_id": { "type": "string" }
+        },
+        "required": ["run_id"]
+    })
+}
+
 /// The set of sandbox tools exposed through the registry.
 pub fn tools() -> Vec<RegistryTool> {
-    vec![RegistryTool {
-        id: format!("{SERVER_NAME}__sandbox_exec"),
-        server: SERVER_NAME.to_owned(),
-        name: "sandbox_exec".to_owned(),
-        description: Some(
-            "Execute code in an isolated, swappable sandbox backend (default-deny). \
-             `backend` selects the runtime: 'wasmtime' (default) runs a base-64 WASM module \
-             (`wasm_b64`); 'docker', 'microsandbox', or 'opensandbox' run a `command` in a \
-             container/microVM. No FS or network access unless explicitly granted \
-             (`network`/`read_paths`/`write_paths`). Returns stdout, stderr, and exit code."
-                .to_owned(),
-        ),
-        input_schema: Some(sandbox_exec_schema()),
-        ..Default::default()
-    }]
+    vec![
+        RegistryTool {
+            id: format!("{SERVER_NAME}__sandbox_exec"),
+            server: SERVER_NAME.to_owned(),
+            name: "sandbox_exec".to_owned(),
+            description: Some(
+                "Execute code in an isolated, swappable sandbox backend (default-deny). \
+                 `backend` selects the runtime: 'wasmtime' (default) runs a base-64 WASM module \
+                 (`wasm_b64`); 'docker', 'microsandbox', or 'opensandbox' run a `command` in a \
+                 container/microVM. No FS or network access unless explicitly granted \
+                 (`network`/`read_paths`/`write_paths`). Returns stdout, stderr, and exit code."
+                    .to_owned(),
+            ),
+            input_schema: Some(sandbox_exec_schema()),
+            ..Default::default()
+        },
+        RegistryTool {
+            id: format!("{SERVER_NAME}__sandbox_create"),
+            server: SERVER_NAME.to_owned(),
+            name: "sandbox_create".to_owned(),
+            description: Some(
+                "Create a long-lived Daytona sandbox workspace (persistent lifecycle). \
+                 Metered per-second until destroyed with `sandbox_destroy`; run commands \
+                 against it with `sandbox_run`. Daytona-only. Returns `run_id` and \
+                 `workspace_id`."
+                    .to_owned(),
+            ),
+            input_schema: Some(sandbox_create_schema()),
+            ..Default::default()
+        },
+        RegistryTool {
+            id: format!("{SERVER_NAME}__sandbox_run"),
+            server: SERVER_NAME.to_owned(),
+            name: "sandbox_run".to_owned(),
+            description: Some(
+                "Run a command in an existing persistent Daytona sandbox created with \
+                 `sandbox_create`. Returns stdout, stderr, and exit code."
+                    .to_owned(),
+            ),
+            input_schema: Some(sandbox_run_schema()),
+            ..Default::default()
+        },
+        RegistryTool {
+            id: format!("{SERVER_NAME}__sandbox_destroy"),
+            server: SERVER_NAME.to_owned(),
+            name: "sandbox_destroy".to_owned(),
+            description: Some(
+                "Destroy a persistent Daytona sandbox created with `sandbox_create`, \
+                 stopping metering. Idempotent — destroying an already-gone sandbox succeeds."
+                    .to_owned(),
+            ),
+            input_schema: Some(sandbox_destroy_schema()),
+            ..Default::default()
+        },
+    ]
 }
 
 /// Dispatch a sandbox tool call. `tool` is the bare name (stripped of the
@@ -171,8 +248,75 @@ pub fn tools() -> Vec<RegistryTool> {
 pub async fn dispatch(tool: &str, arguments: Value) -> Result<Value> {
     match tool {
         "sandbox_exec" => run_sandbox_exec(arguments).await,
+        "sandbox_create" => run_sandbox_create(arguments).await,
+        "sandbox_run" => run_sandbox_run(arguments).await,
+        "sandbox_destroy" => run_sandbox_destroy(arguments).await,
         other => Err(anyhow::anyhow!("unknown sandbox tool '{other}'")),
     }
+}
+
+// ── Persistent (Daytona-only) lifecycle tool handlers ─────────────────────────
+//
+// These are thin wrappers over the persistent workspace manager in
+// `sidecar::sandbox::session`, which is hardwired to the Daytona backend. Unlike
+// `sandbox_exec` (one-shot create+run+destroy), these keep the workspace alive:
+// `sandbox_create` provisions + registers it for per-second metering,
+// `sandbox_run` execs against it, and `sandbox_destroy` tears it down + debits
+// the residual tail. Persistent tools ignore any `backend` arg by design.
+
+/// Create a persistent Daytona sandbox. No spec is taken from the tool call, so
+/// the billed/provisioned shape is the node's configured Daytona spec.
+async fn run_sandbox_create(arguments: Value) -> Result<Value> {
+    use crate::sidecar::sandbox::session;
+
+    let budget = arguments.get("budget_micro_usd").and_then(Value::as_u64);
+    let created = session::create_sandbox(None, budget).await?;
+    Ok(json!({
+        "run_id": created.run_id,
+        "workspace_id": created.workspace_id,
+    }))
+}
+
+/// Run a command in an existing persistent Daytona sandbox.
+async fn run_sandbox_run(arguments: Value) -> Result<Value> {
+    use crate::sidecar::sandbox::session;
+
+    let run_id = arguments
+        .get("run_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required argument 'run_id'"))?
+        .to_owned();
+    let command = arguments
+        .get("command")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required argument 'command'"))?
+        .to_owned();
+    let args = parse_str_array(&arguments, "args");
+    let timeout_secs = arguments.get("timeout_secs").and_then(Value::as_u64);
+
+    let result = session::exec_in_sandbox(&run_id, command, args, timeout_secs).await?;
+    Ok(json!({
+        "exit_code": result.exit_code,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }))
+}
+
+/// Destroy a persistent Daytona sandbox (idempotent).
+async fn run_sandbox_destroy(arguments: Value) -> Result<Value> {
+    use crate::sidecar::sandbox::session;
+
+    let run_id = arguments
+        .get("run_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required argument 'run_id'"))?
+        .to_owned();
+
+    session::destroy_sandbox(&run_id).await?;
+    Ok(json!({ "ok": true }))
 }
 
 /// Run the `sandbox_exec` tool, gated through the Gateway exec budget (M6 / #192).
@@ -480,10 +624,21 @@ async fn run_process_exec(backend: SandboxBackend, arguments: Value) -> Result<V
         timeout_secs,
     };
 
+    // ── Metering (Daytona only): register the run for the heartbeat ticker ────
+    // Only Daytona is the remote, billed backend; the local backends (docker /
+    // microsandbox / opensandbox) are free, so they never register. Fully
+    // fail-open — a metering hiccup must never fail the user's exec.
+    let daytona_run = register_daytona_metering(&backend_label).await;
+
     // ── Step 2: run the backend ──────────────────────────────────────────────
     let start = std::time::Instant::now();
     let result = sandbox.exec(spec).await;
     let duration_ms = start.elapsed().as_millis() as u64;
+
+    // ── Metering (Daytona only): deregister + final residual debit ────────────
+    // One-shot runs usually finish inside a single tick, so the periodic ticker
+    // may have billed nothing; charge the un-ticked tail here (fail-open).
+    finalize_daytona_metering(daytona_run, duration_ms).await;
 
     // ── Step 3: post-run audit report (best-effort) ──────────────────────────
     match &result {
@@ -526,6 +681,105 @@ async fn run_process_exec(backend: SandboxBackend, arguments: Value) -> Result<V
     }
 }
 
+// ── Daytona metering (register on launch, debit on completion) ─────────────────
+
+/// A registered Daytona metering run, carried from [`register_daytona_metering`]
+/// to [`finalize_daytona_metering`]. `None` for every non-Daytona backend.
+struct DaytonaMetering {
+    run_id: String,
+    /// Owning/bill-to org, or `None` when Core cannot resolve one.
+    org_id: Option<String>,
+    /// The billed *resource* shape (distinct from the exec command spec).
+    spec: crate::sidecar::sandbox::spec::SandboxSpec,
+    /// Per-run execution cap in micro-USD; `0` = no cap.
+    budget_micro_usd: u64,
+}
+
+/// Register a Daytona one-shot exec for metering. A no-op (returns `None`) for
+/// any other backend — the local backends are free, so only the remote, billed
+/// Daytona backend meters.
+///
+/// Fail-open: this only mutates an in-memory registry and reads env/cached org
+/// state, so it cannot fail the exec; a missing org just means "register for
+/// visibility, skip the debit" (never bill a wrong org).
+async fn register_daytona_metering(backend_label: &str) -> Option<DaytonaMetering> {
+    if backend_label != "daytona" {
+        return None;
+    }
+    use crate::sidecar::sandbox::{daytona, heartbeat, WorkspaceId};
+
+    // The node's owning org is the billing unit. A managed node binds to exactly
+    // one org via the control-plane handshake (`control_plane::registered_org`);
+    // an unmanaged/local node resolves to `None`, so we register for visibility
+    // but skip the debit rather than bill a wrong/empty org.
+    let org_id = crate::sidecar::control_plane::registered_org().map(|o| o.id);
+    let run_id = uuid::Uuid::new_v4().to_string();
+    // Billing spec is about *resources* (vCPU/mem/gpu/os), resolved from the
+    // Daytona env knobs — distinct from the exec `ExecSpec` (the command).
+    let spec = daytona::configured_spec();
+    let budget_micro_usd = heartbeat::default_run_budget_micro_usd().await;
+
+    // The one-shot `exec` path creates + destroys its sandbox *internally*, so
+    // there is no stable workspace id to hand the kill hook. A placeholder is
+    // acceptable: a sub-tick run is unlikely to receive a kill verdict, and
+    // daytona's destroy treats a missing/empty id as success (idempotent).
+    heartbeat::register(
+        run_id.clone(),
+        org_id.clone(),
+        "daytona",
+        WorkspaceId(String::new()),
+        spec.clone(),
+        budget_micro_usd,
+    );
+    tracing::debug!(run_id = %run_id, org_id = ?org_id, "daytona sandbox metering: run registered");
+    Some(DaytonaMetering {
+        run_id,
+        org_id,
+        spec,
+        budget_micro_usd,
+    })
+}
+
+/// Deregister a Daytona run and debit its un-ticked tail. A no-op when `metering`
+/// is `None` (non-Daytona backend). Fully fail-open — every failure is swallowed
+/// inside [`heartbeat::debit_final`], so it can never fail the user's exec.
+async fn finalize_daytona_metering(metering: Option<DaytonaMetering>, duration_ms: u64) {
+    let Some(m) = metering else {
+        return;
+    };
+    use crate::sidecar::sandbox::heartbeat;
+
+    // Removing the run stops any further ticks, so the debit below cannot race
+    // the ticker. `None` ⇒ the run was already removed (e.g. a budget-kill
+    // verdict already charged it) — nothing left to debit.
+    let Some(residual) = heartbeat::deregister_for_final_debit(&m.run_id) else {
+        return;
+    };
+
+    // No owning org ⇒ registered for visibility only; never bill a wrong org.
+    if m.org_id.is_none() {
+        tracing::debug!(
+            run_id = %m.run_id,
+            "daytona sandbox metering: no owning org, skipping final debit (visibility only)"
+        );
+        return;
+    }
+
+    // Charge the measured duration (rounded up, min 1s) minus whatever the
+    // periodic ticker already sent, so the ticker and this debit never double-bill.
+    let measured_secs = duration_ms.div_ceil(1000).max(1);
+    let remainder = measured_secs.saturating_sub(residual.ticked_seconds);
+    heartbeat::debit_final(
+        m.run_id,
+        m.org_id,
+        m.spec,
+        remainder,
+        m.budget_micro_usd,
+        residual.next_tick_index,
+    )
+    .await;
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -535,12 +789,22 @@ mod tests {
     #[test]
     fn lists_one_tool_with_qualified_id() {
         let tools = tools();
-        assert_eq!(tools.len(), 1);
+        assert_eq!(tools.len(), 4);
         let tool = &tools[0];
         assert_eq!(tool.id, "sandbox__sandbox_exec");
         assert_eq!(tool.server, SERVER_NAME);
         assert!(tool.input_schema.is_some());
         assert!(tool.description.is_some());
+        // Persistent (Daytona-only) lifecycle tools live alongside the one-shot exec.
+        let ids: Vec<&str> = tools.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains(&"sandbox__sandbox_create"));
+        assert!(ids.contains(&"sandbox__sandbox_run"));
+        assert!(ids.contains(&"sandbox__sandbox_destroy"));
+        for t in &tools {
+            assert_eq!(t.server, SERVER_NAME);
+            assert!(t.input_schema.is_some());
+            assert!(t.description.is_some());
+        }
     }
 
     #[tokio::test]

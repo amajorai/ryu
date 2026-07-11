@@ -1,0 +1,7 @@
+{
+	"root": false,
+	"$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+	"files": {
+		"includes": ["**", "!dist", "!**/*.gen.rs"]
+	}
+}

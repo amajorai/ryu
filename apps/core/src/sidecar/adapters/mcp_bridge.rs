@@ -884,6 +884,8 @@ mod tests {
                     env: BTreeMap::new(),
                     description: Some("mock".to_owned()),
                     enabled: true,
+                    version: None,
+                    catalog_id: None,
                 },
             );
             m

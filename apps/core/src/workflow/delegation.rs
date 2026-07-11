@@ -480,6 +480,11 @@ pub async fn run_fanout_with_checkpoint(
 
             let result = run_one(&spec, &caps).await;
 
+            // SubagentStop hooks (Claude parity): fire detached when a delegated
+            // sub-agent finishes, observation-only. Fires for every delegation
+            // path (workflow steps, teams, host.runAgent) since all funnel here.
+            fire_subagent_stop_hooks(&spec, &result);
+
             // Persist the result before emitting the Finished event so a
             // restart between the save and the event still recovers correctly.
             if let Some(ref key) = checkpoint_key {
@@ -508,6 +513,30 @@ pub async fn run_fanout_with_checkpoint(
         }
     }
     Ok(results)
+}
+
+/// Fire `subagent_stop` hooks (Claude's SubagentStop) DETACHED when a delegate
+/// finishes. Observation-only; never blocks the delegation. `ctx.output` carries
+/// the sub-agent's final text, `ctx.event` its id/agent/error. Directives ignored.
+/// The global dispatcher's own DB-free fast path skips instantly when no
+/// `subagent_stop` plugin is loaded.
+fn fire_subagent_stop_hooks(spec: &DelegateSpec, result: &DelegateResult) {
+    let ctx = crate::plugin_host::HookContext {
+        conversation_id: result.child_conversation_id.clone(),
+        agent_id: spec.agent_id.clone(),
+        output: result.output.clone(),
+        event: Some(serde_json::json!({
+            "id": result.id,
+            "agent_id": spec.agent_id,
+            "error": result.error,
+            "ok": result.error.is_none(),
+        })),
+        ..Default::default()
+    };
+    tokio::spawn(async move {
+        let _ =
+            crate::plugin_host::dispatch_global(crate::plugin_host::ON_SUBAGENT_STOP, ctx).await;
+    });
 }
 
 /// Execute a single delegate with a clean context under its wall-time cap.

@@ -340,6 +340,10 @@ async fn send_exec_tool(
 
     match req.send().await {
         Ok(resp) if resp.status().is_success() => {
+            // The gateway stamps budget/firewall policy alerts onto the tool-exec
+            // response head too; read + fire-and-forget deliver before the body is
+            // consumed (lenient no-op when absent).
+            crate::policy_alerts::dispatch_from_headers(resp.headers());
             let body: Value = resp
                 .json()
                 .await
@@ -359,6 +363,9 @@ async fn send_exec_tool(
             }
         }
         Ok(resp) => {
+            // A denied/402 exec response also carries the policy-alert stamp; read
+            // it off the head before consuming the error body.
+            crate::policy_alerts::dispatch_from_headers(resp.headers());
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             Err((

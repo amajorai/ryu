@@ -129,9 +129,52 @@ They are serde-skipped when absent, so adopt-mode, serverless, and in-process en
 report no usage rather than zeros. The desktop joins this with the engine catalog to render the
 node-selector breakdown.
 
+## Crash reporting
+
+Core reports Rust **panics** (only panics) to Sentry (`apps/core/src/crash.rs`). It deliberately does
+not forward `tracing` or log events, because those can carry prompt or agent content and `~/.ryu`
+paths - the only integrations are panic, backtrace, and contexts. A `before_send` hook scrubs the
+user's home-dir prefix out of the panic message and every stack frame's path, `send_default_pii` is
+forced off, and `server_name` is `None`, so the machine hostname never leaves the box.
+
+This is a consent tier separate from product analytics. Two gates must both hold or the module is a
+true no-op: the `crash-reports-enabled` preference (resolved via `crate::privacy::crash_reports_enabled`),
+and a configured DSN (`SENTRY_DSN` or `RYU_SENTRY_DSN`). The resolved consent is mirrored into a
+process-global that the gateway sidecar spawn-env reads, so Core forwards the same consent to the
+gateway tier under `RYU_SENTRY_DSN`.
+
+<Callout type="warn">
+  The `crash-reports-enabled` pref is default-on (opt-out), but the whole module is a hard no-op until
+  a DSN is configured, so a stock local install reports nothing. The Rust side reads the pref once at
+  boot, so flipping the desktop toggle off takes effect on the next Core restart.
+</Callout>
+
+## Community-savings telemetry
+
+Core runs an anonymous savings beacon (`apps/core/src/stats_beacon.rs`). Every five minutes
+(`BEACON_INTERVAL`) an enabled tick reads the Gateway's public savings counters at
+`GET /v1/savings` (the aggregate compression and cache metrics the Gateway measures, for example
+`provider_cached_input_tokens` and `compression_tokens_saved`) and POSTs a snapshot to the control
+plane at `/api/community/ingest`. Per the Core vs Gateway rule, Core owns consent and the phone-home
+but never computes the measurement inline - it forwards what the Gateway already measured.
+
+The row is keyed by a locally-minted random install id (`community-stats-install-id`, a uuid v4) plus
+a per-process session id. No hostname, gateway key, org id, or any identity value is ever sent. Every
+step is fail-open: a gateway-down, network, or parse error logs and skips the tick, and the beacon
+never panics or blocks chat.
+
+<Callout type="warn">
+  The beacon is default-on (opt-out) and, unlike crash reporting, has no DSN gate, so a stock install
+  phones anonymous aggregates home once the gateway is healthy. Turn it off with the
+  `community-stats-enabled` preference (or `RYU_COMMUNITY_STATS_ENABLED`); the pref is re-read every
+  tick, so an in-session opt-out stops egress at once. The public community page that surfaces these
+  aggregates is out of scope here.
+</Callout>
+
 <Callout type="info">
-  This page covers traces, sync, preferences, and resource sampling. For the connected-client presence
-  panel ("who is on this node") and the node selector that surfaces these resource numbers, see
+  This page covers traces, sync, preferences, resource sampling, crash reporting, and the
+  community-savings beacon. For the connected-client presence panel ("who is on this node") and the
+  node selector that surfaces these resource numbers, see
   [Node selection & presence](/docs/core/node-and-presence). For the Gateway audit log where token and
   cost measurement live, see [Evals & audit](/docs/gateway/evals-audit).
 </Callout>

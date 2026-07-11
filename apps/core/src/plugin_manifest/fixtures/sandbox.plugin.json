@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.sandbox",
+  "id": "sandbox",
   "name": "Ephemeral Sandbox",
   "version": "1.0.0",
   "engines": {

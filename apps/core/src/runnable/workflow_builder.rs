@@ -65,7 +65,19 @@ Node object shape: { \"id\": \"unique_id\", \"type\": \"<kind>\", ...fields }. K
 - awakeable { prompt?: string }  (human-in-the-loop pause; resumes via the resume endpoint)\n\
 - recipe { recipe: string, params?: object }  (replays a recorded ghost desktop automation)\n\
 - ghost_action { action: string, target?: object, params?: object }  (one recorded desktop action: click/type/scroll/...)\n\
+- agent { agent_id: string, task?: string }  (runs one installed agent on a task; task defaults to {{input}})\n\
+- skill { skill: string, agent_id?: string, task?: string }  (applies an installed Agent Skill; agent_id null = default LLM)\n\
+- mcp { server: string, tool: string, args?: object }  (calls a tool on an MCP server, e.g. server \"spider\" tool \"crawl\"; args leaves are templates)\n\
+- plugin { plugin_id: string, runnable_id: string, args?: object }  (runs a runnable an installed plugin/app bundles; args leaves are templates)\n\
+- notify_user { target: object, title?: string, body?: string, ack_mode?: object, ack_timeout_ms?: number }  \
+(pings org/team/members; target = { kind: \"org\" } | { kind: \"team\", team_id } | { kind: \"members\", user_ids: string[] }; \
+ack_mode = { mode: \"none\" } (default, fire-and-forget) | { mode: \"first\" } | { mode: \"all\" } | { mode: \"quorum\", n }; title/body are templates)\n\
 Edge object shape: { \"from\": \"node_id\", \"to\": \"node_id\", \"branch\": null|\"true\"|\"false\" }.\n\
+Trigger object shape (the `triggers` array; omit for manual-only). One of:\n\
+- { \"type\": \"manual\" }  (runs only on explicit Run / the run endpoint)\n\
+- { \"type\": \"schedule\", \"cron\"?: string, \"every\"?: string, \"require_approval\"?: bool }  (cron wins if both set; every like \"5m\"/\"1h\"/\"1d\")\n\
+- { \"type\": \"webhook\", \"secret\"?: string }  (fires on an inbound POST to the workflow's ingress URL; secret = the HMAC signing key)\n\
+- { \"type\": \"composio\", \"toolkit\": string, \"trigger_slug\": string, \"connected_account_id\"?: string }  (fires on a Composio event)\n\
 Template tokens usable in string fields: {{input}} (incoming value), {{nodes.<id>}} (an upstream node's output), \
 {{state.<key>}} (run state), {{trigger.<path>}} (trigger payload field).\n\
 A workflow must be an acyclic graph (DAG): no cycles, every edge endpoint must name an existing node, node ids unique.";
@@ -169,7 +181,7 @@ fn create_workflow_schema() -> Value {
             "description": { "type": "string", "description": "Short one-line description." },
             "nodes": node_array_schema(),
             "edges": edge_array_schema(),
-            "triggers": { "type": "array", "items": { "type": "object" }, "description": "Trigger objects (omit for manual-only)." }
+            "triggers": { "type": "array", "items": { "type": "object" }, "description": "Trigger objects (see the trigger shapes in the description; omit for manual-only)." }
         },
         "required": ["name"]
     })
@@ -188,7 +200,7 @@ fn configure_workflow_schema() -> Value {
             "edges_add": edge_array_schema(),
             "edges_remove": edge_array_schema(),
             "edges_set": edge_array_schema(),
-            "triggers_set": { "type": "array", "items": { "type": "object" }, "description": "Replace the trigger list entirely." }
+            "triggers_set": { "type": "array", "items": { "type": "object" }, "description": "Replace the trigger list entirely (see the trigger shapes in the description)." }
         },
         "required": ["workflow_id"]
     })

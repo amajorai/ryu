@@ -33,35 +33,15 @@ impl SemanticCache {
         }
     }
 
-    /// Fetch an embedding vector for `text` via the OpenAI embeddings endpoint.
+    /// Fetch an embedding vector for `text` via the OpenAI embeddings endpoint,
+    /// using this cache's configured embedding model.
     pub async fn get_embedding(
         &self,
         text: &str,
         http: &Client,
         openai: &OpenAiProviderConfig,
     ) -> anyhow::Result<Vec<f32>> {
-        let url = format!("{}/embeddings", openai.base_url);
-        let resp = http
-            .post(&url)
-            .bearer_auth(&openai.api_key)
-            .json(&json!({
-                "model": self.config.embedding_model,
-                "input": text,
-            }))
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<Value>()
-            .await?;
-
-        let embedding = resp["data"][0]["embedding"]
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("missing embedding in response"))?
-            .iter()
-            .filter_map(|v| v.as_f64().map(|f| f as f32))
-            .collect();
-
-        Ok(embedding)
+        embed_text(text, http, openai, &self.config.embedding_model).await
     }
 
     /// Look up a cached response whose embedding is within the similarity threshold.
@@ -143,7 +123,40 @@ impl SemanticCache {
     }
 }
 
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+/// Fetch an embedding vector for `text` via an OpenAI-compatible `/embeddings`
+/// endpoint with the given model. Shared by the semantic cache and the
+/// `Embedding` routing strategy so both hit the same (local by default) embedder.
+pub(crate) async fn embed_text(
+    text: &str,
+    http: &Client,
+    openai: &OpenAiProviderConfig,
+    model: &str,
+) -> anyhow::Result<Vec<f32>> {
+    let url = format!("{}/embeddings", openai.base_url);
+    let resp = http
+        .post(&url)
+        .bearer_auth(&openai.api_key)
+        .json(&json!({
+            "model": model,
+            "input": text,
+        }))
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<Value>()
+        .await?;
+
+    let embedding = resp["data"][0]["embedding"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("missing embedding in response"))?
+        .iter()
+        .filter_map(|v| v.as_f64().map(|f| f as f32))
+        .collect();
+
+    Ok(embedding)
+}
+
+pub(crate) fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return -1.0;
     }

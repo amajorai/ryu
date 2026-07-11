@@ -36,6 +36,8 @@ pub const DIAGNOSTICS_OTLP_ENDPOINT_PREF_KEY: &str = "diagnostics-otlp-endpoint"
 pub const SUPPORT_ACCESS_LOCAL_ENABLED_PREF_KEY: &str = "support-access-local-enabled";
 /// Hard expiry (unix ms) for the local support channel; 0 = none. (§6)
 pub const SUPPORT_ACCESS_LOCAL_EXPIRY_PREF_KEY: &str = "support-access-local-expiry";
+/// Anonymous community-savings beacon (aggregate compression stats). Opt-in: OFF.
+pub const COMMUNITY_STATS_ENABLED_PREF_KEY: &str = "community-stats-enabled";
 
 // ── Env-var mirrors (so an operator can set them without the desktop) ───────────
 
@@ -46,6 +48,7 @@ const DIAGNOSTICS_EXPORT_ENABLED_ENV: &str = "RYU_DIAGNOSTICS_EXPORT_ENABLED";
 /// Collector/Axiom needs no Ryu-specific knowledge.
 const DIAGNOSTICS_OTLP_ENDPOINT_ENV: &str = "OTEL_EXPORTER_OTLP_ENDPOINT";
 const SUPPORT_ACCESS_LOCAL_ENABLED_ENV: &str = "RYU_SUPPORT_ACCESS_LOCAL_ENABLED";
+const COMMUNITY_STATS_ENABLED_ENV: &str = "RYU_COMMUNITY_STATS_ENABLED";
 
 // ── Defaults (the §6 table, in one place) ───────────────────────────────────────
 
@@ -57,6 +60,8 @@ pub const DEFAULT_CRASH_REPORTS_ENABLED: bool = true;
 pub const DEFAULT_DIAGNOSTICS_EXPORT_ENABLED: bool = false;
 /// Local support access: user-granted, so OFF by default.
 pub const DEFAULT_SUPPORT_ACCESS_LOCAL_ENABLED: bool = false;
+/// Community-savings beacon: opt-out (phones anonymous aggregate stats home), so ON by default.
+pub const DEFAULT_COMMUNITY_STATS_ENABLED: bool = true;
 
 /// Parse a boolean preference/env value, treating only explicit truthy/falsey
 /// forms as decisive and falling back to `default` for anything else (unset,
@@ -114,6 +119,20 @@ pub async fn diagnostics_export_enabled(prefs: &PreferencesStore) -> bool {
         DIAGNOSTICS_EXPORT_ENABLED_PREF_KEY,
         DIAGNOSTICS_EXPORT_ENABLED_ENV,
         DEFAULT_DIAGNOSTICS_EXPORT_ENABLED,
+    )
+    .await
+}
+
+/// Whether the anonymous community-savings beacon is enabled (default ON,
+/// opt-out). When on, Core periodically snapshots the local gateway's aggregate
+/// compression counters and phones them home under an anonymous install id — no
+/// hostname, key, or identity value ever leaves the machine.
+pub async fn community_stats_enabled(prefs: &PreferencesStore) -> bool {
+    resolve_bool(
+        prefs,
+        COMMUNITY_STATS_ENABLED_PREF_KEY,
+        COMMUNITY_STATS_ENABLED_ENV,
+        DEFAULT_COMMUNITY_STATS_ENABLED,
     )
     .await
 }
@@ -208,6 +227,13 @@ mod tests {
         let support = support_access_local(&store).await;
         assert!(!support.enabled);
         assert_eq!(support.expiry_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn community_stats_defaults_on_when_unset() {
+        let store = temp_store();
+        // Opt-out beacon: anonymous aggregates phone home until the user turns it off.
+        assert!(community_stats_enabled(&store).await);
     }
 
     #[tokio::test]

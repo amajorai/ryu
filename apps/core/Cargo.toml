@@ -21,6 +21,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 toml = "0.8"
 reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+# BYOK SMTP sink for self-host alerts + agent-inbox send. `tokio1-native-tls`
+# reuses the tree's existing native-tls stack (see the sentry dep) — no second
+# TLS stack. No `pool` feature: the sink builds a fresh transport per send.
+lettre = { version = "0.11", default-features = false, features = ["tokio1-native-tls", "smtp-transport", "builder"] }
+# Pure-Rust MIME parser for self-host inbound agent mail (Stage 3 inboxes).
+mail-parser = "0.9"
 dirs = "5"
 anyhow = "1"
 notify = "6"

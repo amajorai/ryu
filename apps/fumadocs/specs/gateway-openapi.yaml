@@ -269,6 +269,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EvalRunResponse"
+  /v1/evaluators:
+    get:
+      tags: [Evals]
+      summary: Get the shared evaluator catalog
+      description: >-
+        Returns the full unified evaluator catalog — the one taxonomy that powers
+        both inline guardrails and offline evals. Each entry carries a
+        `capabilities` gate ({ inline, offline }) selecting which surface may offer
+        it and an `enforced` honesty flag (true only when wired to real execution).
+        The built-in seed table is merged with any user-authored `custom_evaluators`
+        from config (a custom entry overrides a built-in by `id` and reports
+        `builtin: false`). Read-only; not behind the admin gate.
+      operationId: getEvaluators
+      security: []
+      responses:
+        "200":
+          description: The shared evaluator catalog.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  evaluators:
+                    type: array
+                    items: { $ref: "#/components/schemas/Evaluator" }
   /v1/grants/validate:
     post:
       tags: [Governance]
@@ -658,15 +683,77 @@ components:
       properties:
         model: { type: string, default: gpt-4o-mini }
         agent_id: { type: string }
+        evaluators:
+          type: array
+          description: >-
+            Optional run-level registry evaluator ids (from GET /v1/evaluators) to
+            score every case against, in addition to any per-case `evaluators`.
+            Empty/omitted preserves the assertion-only behavior.
+          items: { type: string }
         dataset:
           type: array
           items:
             type: object
             properties:
               prompt: { type: string }
-              expected_output: { type: string }
-              expected_substring: { type: string }
+              expected: { type: string }
+              evaluators:
+                type: array
+                description: Per-case registry evaluator ids, unioned with the run-level set.
+                items: { type: string }
             required: [prompt]
+    Evaluator:
+      type: object
+      description: >-
+        One entry in the shared evaluator catalog. Struct fields serialize
+        camelCase; the `impl` union is tagged on `kind`; category/target are
+        snake_case enums.
+      properties:
+        id: { type: string, description: Stable snake_case id, e.g. "pii_leakage". }
+        name: { type: string }
+        description: { type: string }
+        category:
+          type: string
+          enum: [security, safety, quality, conversation, trajectory, image, voice, custom]
+        target:
+          type: string
+          enum: [input, output, conversation, trajectory, image, audio]
+        capabilities:
+          type: object
+          description: First-class gate selecting which surfaces may offer this evaluator.
+          properties:
+            inline: { type: boolean }
+            offline: { type: boolean }
+        impl:
+          type: object
+          description: How the judgment is computed (internally tagged on `kind`).
+          properties:
+            kind:
+              type: string
+              enum: [regex, heuristic, llm_judge, code, builtin]
+        inline:
+          type: object
+          nullable: true
+          description: Inline-guardrail config; present only when capabilities.inline.
+          properties:
+            action:
+              type: string
+              enum: [block, warn_and_continue, sanitize]
+        offline:
+          type: object
+          nullable: true
+          description: Offline-eval config; present only when capabilities.offline.
+          properties:
+            threshold: { type: number, format: float, minimum: 0, maximum: 1 }
+            judgeModel: { type: string, nullable: true }
+        builtin: { type: boolean, description: false for user-authored evaluators. }
+        enforced:
+          type: boolean
+          description: Honesty flag; true only when wired to real execution.
+        higherIsBetter:
+          type: boolean
+          description: Score polarity; false ⇒ a higher score is worse (negative-signal judge).
+      required: [id, name, category, target, capabilities, impl, builtin, enforced]
     EvalRunResponse:
       type: object
       properties:

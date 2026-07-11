@@ -19,8 +19,11 @@ mod crypto;
 mod dashboard;
 mod data_path;
 mod downloads;
+mod email;
 mod entitlement;
+mod eval_code;
 mod events;
+mod exec_approval;
 mod experience;
 mod fal_auth;
 mod finetune;
@@ -34,6 +37,7 @@ mod learning;
 mod mcp_catalog;
 mod meetings;
 mod mesh;
+mod mail;
 mod model_catalog;
 mod model_format;
 mod monitors;
@@ -44,7 +48,10 @@ mod paths;
 mod pi_config;
 mod plugin_host;
 mod plugin_manifest;
+mod rtk_config;
 mod plugin_storage;
+mod policy_alerts;
+mod smtp_auth;
 mod plugins;
 mod predict;
 mod privacy;
@@ -60,6 +67,7 @@ mod server;
 mod sidecar;
 mod skills;
 mod skills_catalog;
+mod stats_beacon;
 mod support_access;
 mod system_info;
 mod teams;
@@ -413,6 +421,25 @@ async fn main() {
         Ok(store) => store,
         Err(e) => panic!("failed to open spaces store: {e:#}"),
     };
+    // Ensure the default, undeletable "Artifacts" system space exists — where chat
+    // artifacts and agent-generated files (pptx/xlsx/csv/pdf/html/png) are filed.
+    if let Err(e) = spaces
+        .ensure_system_space("Artifacts", Some("Files created by Ryu and agents"))
+        .await
+    {
+        tracing::warn!("failed to ensure Artifacts system space: {e:#}");
+    }
+    // Ensure the default, undeletable "Clips" system space exists — where finished
+    // screen recordings/clips are auto-filed (mp4 blob + markdown summary).
+    if let Err(e) = spaces
+        .ensure_system_space(
+            server::clips::CLIPS_SPACE_NAME,
+            Some(server::clips::CLIPS_SPACE_DESC),
+        )
+        .await
+    {
+        tracing::warn!("failed to ensure Clips system space: {e:#}");
+    }
     let retrieval = match server::retrieval::RetrievalStore::open_default() {
         Ok(store) => store,
         Err(e) => panic!("failed to open retrieval store: {e:#}"),
@@ -447,6 +474,15 @@ async fn main() {
     // gated model search + downloads authenticate without an env var or restart.
     if let Ok(Some(token)) = preferences.get(hf_auth::HF_TOKEN_PREF_KEY).await {
         hf_auth::set_token(&token);
+    }
+    // Load the BYO SMTP transport (non-secret host/port/username/from/starttls)
+    // and password into the in-process email sink so self-host alert/inbox email
+    // works without an env var or restart. Both are prefs-first, env-fallback.
+    if let Ok(Some(json)) = preferences.get(email::SMTP_TRANSPORT_PREF_KEY).await {
+        email::apply_transport_prefs_json(&json);
+    }
+    if let Ok(Some(password)) = preferences.get(smtp_auth::SMTP_PASSWORD_PREF_KEY).await {
+        smtp_auth::set_password(&password);
     }
     // Same for the Composio API key: load it into the in-process resolver so the
     // gateway (spawned below) inherits `COMPOSIO_API_KEY` and enables its tool
@@ -511,6 +547,22 @@ async fn main() {
     {
         claude_config::set_enabled(&value);
     }
+    // RTK per-agent auto-wrap (rtk plugin, Phase 2): seed each agent's wrap flag and
+    // reconcile its RTK PreToolUse hook (install when on, uninstall when off). A
+    // no-op when rtk is not on PATH; best-effort so a slow/failed `rtk init` never
+    // blocks the rest of boot.
+    rtk_config::seed_and_apply(&preferences).await;
+    // Command-approval gate: seed `RYU_EXEC_APPROVAL_MODE` from the pref so every
+    // ACP agent's native tool calls (Claude/Codex `Bash`/`Write`/`Edit`) are
+    // scanned at the `request_permission` seam. Off by default; seeded once here
+    // (before request threads) so there is no concurrent env race — restart to
+    // apply, like the crash/OTLP prefs.
+    if let Ok(Some(value)) = preferences
+        .get(exec_approval::EXEC_APPROVAL_MODE_PREF_KEY)
+        .await
+    {
+        exec_approval::seed_from_pref(&value);
+    }
     // Untrusted-content wrapping toggle: external/tool RESULTS re-entering the
     // model are boundary-wrapped + chat-template-token-stripped. Default-ON (safe:
     // only untrusted tool output, never user text); seed only to honour an
@@ -540,6 +592,23 @@ async fn main() {
         .await
     {
         agent_routing::set_from_json(&value);
+    }
+    // Per-agent Plane A model-routing overrides (spec §1). One pref holds a JSON
+    // map of agent id → SmartRoutingConfig; seed the in-process map so the (async)
+    // chat-forward path can inject `ryu_smart_route` for agents that have one.
+    if let Ok(Some(value)) = preferences
+        .get(agent_routing::AGENT_SMART_ROUTE_PREF_KEY)
+        .await
+    {
+        agent_routing::set_smart_routes_from_json(&value);
+    }
+    // Plane B agent-auto routing config (spec §2). Seed the in-process snapshot so
+    // resolving the "auto" sentinel to a concrete agent needs no pref-store handle.
+    if let Ok(Some(value)) = preferences
+        .get(agent_routing::AGENT_AUTO_ROUTING_PREF_KEY)
+        .await
+    {
+        agent_routing::set_auto_config_from_json(&value);
     }
     // Apply the user's saved default embedding model (if any) to the Spaces store,
     // re-indexing in the background when it differs from what the store opened with.
@@ -613,6 +682,57 @@ async fn main() {
     {
         crate::sidecar::gateway_policy::set_routing_enabled(rec.enabled);
     }
+    // Seed system-wide predictive typing from the Predict plugin's persisted
+    // enabled state (opt-in, Core-tier): installing/enabling the plugin is the
+    // single on/off switch, so a restart must preserve it before
+    // `/api/predict/complete` first reads `predict::is_enabled()`. No record
+    // (never installed) ⇒ stays off (the AtomicBool default).
+    if let Ok(Some(rec)) = app_store.get(crate::predict::PREDICT_PLUGIN_ID).await {
+        crate::predict::set_enabled(rec.enabled);
+    }
+    // Whiteboard app (default-on companion) — DEDICATED seed, run BEFORE the generic
+    // CORE_DEFAULT_ON loop. The generic loop enables with an EMPTY grant slice and
+    // never sets `ui_code`; this companion needs its Gateway-approved grants
+    // (`spaces:docs` + `hook:side-model`, so its sandboxed frame can own Space
+    // documents + AI-generate) AND its prebuilt `ui_code` HTML bundle. Seeding here
+    // first establishes the record, so the generic loop below then skips it (a
+    // record present — enabled or disabled — always wins, honouring a user who later
+    // disables it). One-time: only acts when there is NO prior record.
+    match app_store
+        .get(crate::plugin_manifest::WHITEBOARD_PLUGIN_ID)
+        .await
+    {
+        Ok(Some(_)) => {} // record exists — user choice wins, do not re-seed.
+        Ok(None) => {
+            let version = {
+                let manifests = app_manifests.read().await;
+                manifests
+                    .iter()
+                    .find(|m| m.id == crate::plugin_manifest::WHITEBOARD_PLUGIN_ID)
+                    .map(|m| m.version.clone())
+            };
+            if let Some(version) = version {
+                let id = crate::plugin_manifest::WHITEBOARD_PLUGIN_ID;
+                let grants = [
+                    "spaces:docs".to_owned(),
+                    "hook:side-model".to_owned(),
+                ];
+                if let Err(e) = app_store.insert(id, &version).await {
+                    tracing::warn!("whiteboard seed: insert failed: {e}");
+                } else if let Err(e) = app_store
+                    .set_ui_code(id, Some(crate::plugin_manifest::WHITEBOARD_UI_HTML))
+                    .await
+                {
+                    tracing::warn!("whiteboard seed: set_ui_code failed: {e}");
+                } else if let Err(e) = app_store.set_enabled(id, &grants).await {
+                    tracing::warn!("whiteboard seed: enable failed: {e}");
+                } else {
+                    tracing::info!("whiteboard seed: enabled default-on companion '{id}'");
+                }
+            }
+        }
+        Err(e) => tracing::warn!("whiteboard seed: lookup failed: {e}"),
+    }
     // Two-tier registry default-on seeding (#444): Core-tier plugins flagged
     // default-on (`CORE_DEFAULT_ON`, e.g. the local engines plugin) are seeded
     // INSTALLED + ENABLED on a fresh install. The seed is one-time and respects a
@@ -682,7 +802,10 @@ async fn main() {
             .with_preferences(preferences.clone())
             // Wire the per-run worktree diff store so the in-process `ryu.worktree`
             // app can resolve a run's diff and apply/discard it (widget callTool).
-            .with_worktree_diffs(Arc::clone(&worktree_diffs)),
+            .with_worktree_diffs(Arc::clone(&worktree_diffs))
+            // Wire the Spaces store so the built-in `artifact__create` tool can save
+            // agent-generated files into a Space (default: the Artifacts space).
+            .with_spaces(spaces.clone()),
     );
 
     // Website-monitoring engine (#456 monitoring feature). Opens its own SQLite
@@ -699,6 +822,14 @@ async fn main() {
         reqwest::Client::new(),
     );
     crate::monitors::set_global_engine(monitor_engine.clone());
+
+    // Self-host Agent Inboxes store (`~/.ryu/mail.db`). Opens its own SQLite DB;
+    // the send path reuses the shared email sink, inbound arrives over HMAC-authed
+    // webhook. Best-effort open: a failure disables inboxes, never blocks startup.
+    let mail_store = match crate::mail::MailStore::open_default() {
+        Ok(store) => store,
+        Err(e) => panic!("failed to open mail store: {e:#}"),
+    };
 
     // Meeting-notes engine (Granola/Notion-AI style). Opens its own SQLite store
     // and reuses a shared HTTP client for transcription proxy, gateway note-gen,
@@ -879,6 +1010,9 @@ async fn main() {
     // for the opt-in cross-device sync loop before they move into ServerState.
     let sync_conversations = conversations.clone();
     let sync_preferences = preferences.clone();
+    // Clone the preferences handle for the opt-in anonymous community-savings
+    // beacon (OFF by default) before `preferences` moves into ServerState below.
+    let stats_preferences = preferences.clone();
 
     // Auto-rename (ChatGPT/Claude-style): the store sends each conversation that
     // gets its first user message on this channel; the consumer (spawned below,
@@ -948,6 +1082,7 @@ async fn main() {
         catalog_sources: Arc::new(crate::catalog_source::CatalogSourceRegistry::new()),
         downloads: download_center.clone(),
         monitors: monitor_engine,
+        mail: mail_store,
         meetings: meeting_engine,
         quests: quest_engine,
         dashboards: dashboard_engine,
@@ -973,6 +1108,10 @@ async fn main() {
     // Publish the state for the scheduler's continual-learning job (it has no
     // `State` extractor), mirroring the monitor/quest/identity-health engines.
     crate::learning::set_global_state(server_state.clone());
+    // Install the process-global plugin-hook dispatcher so off-chat-path phases
+    // (pre/post tool use, subagent stop, session end, notification) can fire hooks
+    // from code that has no `ServerState` in scope. Mirrors plugin_storage::global.
+    crate::server::install_global_hook_dispatcher(server_state.clone());
     // Self-healing loop: watch the run-status bus and diagnose/propose fixes for
     // failed runs (auto-apply or queue to the approvals inbox, per `healing.*`).
     crate::healing::HealEngine::new(server_state.clone()).spawn();
@@ -989,6 +1128,19 @@ async fn main() {
         let startup_state = server_state.clone();
         tokio::spawn(async move {
             crate::server::fire_activation_event(&startup_state, "onStartup").await;
+        });
+    }
+
+    // Reconcile manifest-declared managed sidecars (the app ⇄ sidecar bridge):
+    // re-register + start every enabled plugin's declared sidecar. These are not in
+    // the SidecarManager's `startup_order`, so nothing else restarts them after a
+    // Core restart — without this an enabled plugin's process stays dead while the
+    // plugin still reads as enabled. Spawned (not awaited) so slow binary downloads
+    // never delay the listener bind; idempotent with the enable path.
+    {
+        let sidecar_state = server_state.clone();
+        tokio::spawn(async move {
+            crate::server::reconcile_plugin_sidecars(&sidecar_state).await;
         });
     }
 
@@ -1108,6 +1260,12 @@ async fn main() {
     // `cloud-sync-enabled` pref). OFF by default per the local-first rule, so
     // this never alters default behaviour or blocks startup.
     server::sync::spawn_sync_loop(sync_conversations, sync_preferences);
+
+    // Start the opt-in anonymous community-savings beacon. A no-op every tick
+    // until the user opts in (`community-stats-enabled` pref or
+    // `RYU_COMMUNITY_STATS_ENABLED`). OFF by default and fail-open, so this never
+    // alters default behaviour, sends identity data, or blocks startup.
+    stats_beacon::spawn_stats_beacon(stats_preferences);
 
     // Resolve the hierarchy-scoped tool set from the control plane (U30) when a
     // gateway key is configured. This narrows the local config-driven MCP

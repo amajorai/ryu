@@ -2,7 +2,7 @@
   "version": "1",
   "entries": [
     {
-      "id": "io.ryu.ghost",
+      "id": "ghost",
       "name": "Ghost",
       "version": "1.0.0",
       "description": "Desktop automation: 29 screen perception and input control tools. Windows-first.",
@@ -13,7 +13,7 @@
       "tags": ["automation", "desktop"]
     },
     {
-      "id": "io.ryu.shadow",
+      "id": "shadow",
       "name": "Shadow",
       "version": "1.0.0",
       "description": "Screen and audio capture, OCR, proactive engine, semantic memory and search.",
@@ -24,7 +24,7 @@
       "tags": ["capture", "memory"]
     },
     {
-      "id": "io.ryu.spider",
+      "id": "spider",
       "name": "Spider",
       "version": "1.0.0",
       "description": "High-performance web crawler and scraper.",
@@ -35,7 +35,7 @@
       "tags": ["web", "scraping"]
     },
     {
-      "id": "io.ryu.exa",
+      "id": "exa",
       "name": "Exa",
       "version": "1.0.0",
       "description": "Neural search: find any content on the web. Requires EXA_API_KEY.",
@@ -46,7 +46,7 @@
       "tags": ["search", "web"]
     },
     {
-      "id": "io.ryu.headroom",
+      "id": "headroom",
       "name": "Headroom",
       "version": "1.0.0",
       "description": "Context compression (chopratejas/headroom): compress tool outputs, logs, files, and RAG chunks. 60-95% fewer tokens, reversible retrieval. Requires headroom-ai[mcp].",
@@ -57,7 +57,7 @@
       "tags": ["context", "compression"]
     },
     {
-      "id": "io.ryu.checklist",
+      "id": "checklist",
       "name": "Checklist",
       "version": "1.0.0",
       "description": "Interactive checklist widget: tick off, edit inline, and approve items in chat.",
@@ -68,7 +68,7 @@
       "tags": ["app", "widget", "productivity"]
     },
     {
-      "id": "io.ryu.smart-intake-form",
+      "id": "smart-intake-form",
       "name": "Smart Intake Form",
       "version": "1.0.0",
       "description": "Pre-filled intake form widget with native pickers and validation.",
@@ -79,7 +79,7 @@
       "tags": ["app", "widget", "forms"]
     },
     {
-      "id": "io.ryu.data-grid-explorer",
+      "id": "data-grid-explorer",
       "name": "Data Grid Explorer",
       "version": "1.0.0",
       "description": "Sortable, filterable, virtualized data grid widget; full rows stay out of model context.",
@@ -90,7 +90,7 @@
       "tags": ["app", "widget", "data"]
     },
     {
-      "id": "io.ryu.chart-studio",
+      "id": "chart-studio",
       "name": "Chart Studio",
       "version": "1.0.0",
       "description": "Interactive chart widget (line/bar/area/scatter) with legend toggles and brush select.",
@@ -101,7 +101,7 @@
       "tags": ["app", "widget", "charts"]
     },
     {
-      "id": "io.ryu.decision-wizard",
+      "id": "decision-wizard",
       "name": "Decision Wizard",
       "version": "1.0.0",
       "description": "Step-by-step decision flow widget (quiz/weighted/compare) with a running tally.",
@@ -112,7 +112,7 @@
       "tags": ["app", "widget", "decisions"]
     },
     {
-      "id": "io.ryu.quest-board",
+      "id": "quest-board",
       "name": "Quest Board",
       "version": "1.0.0",
       "description": "Kanban quest board widget backed by the quests subsystem.",
@@ -123,7 +123,7 @@
       "tags": ["app", "widget", "quests"]
     },
     {
-      "id": "io.ryu.worktree-diff-review",
+      "id": "worktree-diff-review",
       "name": "Worktree Diff Review",
       "version": "1.0.0",
       "description": "Per-file, per-hunk diff review widget backed by Core's git-native worktree/diff/apply.",
@@ -134,7 +134,7 @@
       "tags": ["app", "widget", "git"]
     },
     {
-      "id": "io.ryu.gateway-budget-dial",
+      "id": "gateway-budget-dial",
       "name": "Gateway Budget Dial",
       "version": "1.0.0",
       "description": "Radial spent-vs-limit budget meter widget; the literal Gateway moat surface.",

@@ -1,5 +1,7 @@
 use std::sync::{Arc, RwLock};
 
+use dashmap::DashMap;
+
 use crate::{
     audit::AuditLogger,
     budget::{BudgetEnforcer, ExecBudgetEnforcer, SharedBudgetState, WalletState},
@@ -9,8 +11,12 @@ use crate::{
     concurrency::ConcurrencyLimiter,
     config::{ApiKeyConfig, AuthConfig, BudgetConfig, FirewallConfig, GatewayConfig},
     evals::EvalsRunner,
-    firewall::FirewallScanner,
+    firewall::{
+        resolve::{FirewallResolver, PolicyBundle},
+        FirewallScanner,
+    },
     jobs::MediaJobStore,
+    pipeline::RequestContext,
     metrics::Metrics,
     policy::{EffectivePolicy, ResolveCache},
     providers::ProviderRegistry,
@@ -30,8 +36,26 @@ pub struct AppState {
     /// unless `config.routing.smart_routing` is active; holds a per-session
     /// decision cache. Like `router`, it is a startup snapshot of the config.
     pub smart_router: SmartRouter,
+    /// Per-agent smart-routing override cache (the "both" config scope: global
+    /// `smart_router` is the default, an agent may override it). Keyed by a stable
+    /// hash of the override [`SmartRoutingConfig`] JSON that Core injects as the
+    /// private `ryu_smart_route` request-body field; each distinct config gets one
+    /// ephemeral [`SmartRouter`] so its rule-embedding + session caches are reused
+    /// across that agent's turns. Empty until an override is first seen.
+    pub per_agent_routers: DashMap<u64, Arc<SmartRouter>>,
     /// `RwLock` so `PUT /v1/config` can hot-swap the scanner without a restart.
+    /// This is the **node-level** scanner: it still serves the outbound-scan,
+    /// error-redaction, and multimodal paths, and it alone owns the process-global
+    /// untrusted-wrapping flag. The per-request *resolved* (node→org→agent)
+    /// scanner used by the chat inbound/locked/companion paths comes from
+    /// [`Self::resolver`] instead.
     pub firewall: RwLock<FirewallScanner>,
+    /// Hierarchical firewall resolver (node → org → agent cascade, #hierarchical
+    /// policy). Holds the standalone-local org/agent overlay stores and a
+    /// compiled-scanner cache; hands per-request scanners to
+    /// [`Self::with_resolved_firewall`]. Its own internal `RwLock`s carry the
+    /// poison-recovery discipline, so it is stored directly (not wrapped).
+    pub resolver: FirewallResolver,
     pub rate_limiter: RateLimiter,
     pub cache: Cache,
     pub circuit_breaker: CircuitBreakers,
@@ -94,6 +118,13 @@ impl AppState {
         let router = ModelRouter::new(config.routing.clone());
         let smart_router = SmartRouter::new(config.routing.smart_routing.clone());
         let firewall = FirewallScanner::new(config.firewall.clone());
+        let resolver = FirewallResolver::new(config.firewall.clone());
+        // Reload standalone org/agent overlays persisted to gateway.toml (FIX 4)
+        // so they survive a gateway restart instead of resetting to empty.
+        resolver.seed_overlays(
+            &config.firewall_org_overlays,
+            &config.firewall_agent_overlays,
+        );
         let rate_limiter = RateLimiter::new(config.rate_limit.clone());
         let cache = Cache::new(config.cache.clone());
         let circuit_breaker = CircuitBreakers::new(config.circuit_breaker.clone());
@@ -142,7 +173,9 @@ impl AppState {
             providers,
             router,
             smart_router,
+            per_agent_routers: DashMap::new(),
             firewall: RwLock::new(firewall),
+            resolver,
             rate_limiter,
             cache,
             circuit_breaker,
@@ -182,11 +215,64 @@ impl AppState {
 
     /// Hot-swap the firewall scanner with a new config. Called by PUT /v1/config.
     /// The existing scanner is replaced atomically; in-flight requests that already
-    /// acquired a read guard finish with the old config.
+    /// acquired a read guard finish with the old config. Also updates the
+    /// resolver's node base and invalidates its scanner cache so every resolved
+    /// (node→org→agent) scanner picks up the new baseline.
     pub fn update_firewall_config(&self, cfg: FirewallConfig) {
         if let Ok(mut guard) = self.firewall.write() {
-            *guard = FirewallScanner::new(cfg);
+            *guard = FirewallScanner::new(cfg.clone());
         }
+        self.resolver.set_node_base(cfg);
+    }
+
+    /// Build the per-request control-plane [`PolicyBundle`] from the request's
+    /// resolved policy (the dynamic `rgw_`-token tenant path) or the global
+    /// startup policy, mirroring the pipeline's `resolved_policy || snapshot`
+    /// fallback. Returns `None` when neither carries any firewall overlay, so the
+    /// resolver falls back to its standalone-local overlay store.
+    fn request_bundle(&self, ctx: &RequestContext) -> Option<PolicyBundle> {
+        let policy = ctx
+            .resolved_policy
+            .clone()
+            .unwrap_or_else(|| self.policy_snapshot());
+        let bundle = PolicyBundle {
+            firewall: policy.firewall.clone(),
+            agent_overlays: policy.agent_overlays.clone(),
+        };
+        if bundle.is_empty() {
+            None
+        } else {
+            Some(bundle)
+        }
+    }
+
+    /// Resolve the per-request firewall scanner for `ctx` (node → org → agent),
+    /// returning a shared, cached [`FirewallScanner`]. The returned `Arc` holds
+    /// no lock, so it is safe to keep across an `.await` (the inspector needs to).
+    pub fn resolved_scanner(&self, ctx: &RequestContext) -> Arc<FirewallScanner> {
+        let bundle = self.request_bundle(ctx);
+        self.resolver.scanner_for(
+            ctx.org_id.as_deref(),
+            ctx.agent_id.as_deref(),
+            bundle.as_ref(),
+        )
+    }
+
+    /// Borrow the per-request *resolved* firewall scanner for the duration of a
+    /// closure. The per-agent analogue of [`Self::with_firewall`]: it resolves
+    /// the node→org→agent cascade from `ctx` and hands a cached scanner to `f`.
+    ///
+    /// The chat inbound/locked/companion paths call [`Self::resolved_scanner`]
+    /// directly to share ONE resolution (and its `Arc`) across the regex scan,
+    /// the inspector's `.await`, the locked-guardrail scan, and companion
+    /// redaction; this closure form is provided for single-shot call sites.
+    #[allow(dead_code)]
+    pub fn with_resolved_firewall<F, T>(&self, ctx: &RequestContext, f: F) -> T
+    where
+        F: FnOnce(&FirewallScanner) -> T,
+    {
+        let scanner = self.resolved_scanner(ctx);
+        f(&scanner)
     }
 
     /// Hot-swap the budget enforcer with a new config. Called by PUT /v1/config.
@@ -250,6 +336,13 @@ impl AppState {
         let router = ModelRouter::new(config.routing.clone());
         let smart_router = SmartRouter::new(config.routing.smart_routing.clone());
         let firewall = FirewallScanner::new(config.firewall.clone());
+        let resolver = FirewallResolver::new(config.firewall.clone());
+        // Reload standalone org/agent overlays persisted to gateway.toml (FIX 4)
+        // so they survive a gateway restart instead of resetting to empty.
+        resolver.seed_overlays(
+            &config.firewall_org_overlays,
+            &config.firewall_agent_overlays,
+        );
         let rate_limiter = RateLimiter::new(config.rate_limit.clone());
         let cache = Cache::new(config.cache.clone());
         let circuit_breaker = CircuitBreakers::new(config.circuit_breaker.clone());
@@ -267,7 +360,9 @@ impl AppState {
             providers,
             router,
             smart_router,
+            per_agent_routers: DashMap::new(),
             firewall: RwLock::new(firewall),
+            resolver,
             rate_limiter,
             cache,
             circuit_breaker,

@@ -157,11 +157,15 @@ pub async fn complete(
     State(state): State<ServerState>,
     Json(body): Json<CompleteBody>,
 ) -> axum::response::Response {
-    let config = load_config(&state).await;
-
-    if !config.enabled {
-        return refused("predictive typing is disabled").into_response();
+    // The built-in Predict plugin's enabled state is the single on/off switch
+    // (Core seeds it at boot and flips it live from the plugin enable/disable
+    // path). Cheap flag check before touching prefs; there is no separate config
+    // toggle any more.
+    if !predict::is_enabled() {
+        return refused("predictive typing plugin is disabled").into_response();
     }
+
+    let config = load_config(&state).await;
 
     // Privacy floor: never read context or suggest in a password/secure field.
     if let Some(control) = body.control.as_deref() {

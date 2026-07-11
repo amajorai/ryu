@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use super::sources::{
     HfSource, IntegrationsShSource, MarketplaceSource, ModelIndexSource, OfficialMcpSource,
     OkfBundleSource, RyuHostedMcpSource, RyuMarketplaceSource, SkillsShSource, SmitherySource,
-    Source, StubSource,
+    Source, SourceAuth, StubSource,
 };
 use super::CatalogKind;
 use crate::server::preferences::PreferencesStore;
@@ -34,6 +34,11 @@ pub struct CustomSourceSpec {
     /// kinds; full custom fetch for non-model kinds lands in later units.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// Optional auth for a PRIVATE git/HTTP marketplace (Phase 5c, Skill/Plugin
+    /// kinds). Values may be `${ENV_VAR}` templates resolved at fetch time; the
+    /// `SourceAuth` `Debug` redacts every value so a literal token never leaks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<SourceAuth>,
 }
 
 /// The flat listing metadata returned by the `GET` route per source.
@@ -44,6 +49,11 @@ pub struct SourceMeta {
     pub builtin: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// Redacted flag: true when this source carries private-marketplace auth
+    /// (Phase 5c). The token/header VALUE is never exposed — only this boolean, so
+    /// the UI can show a lock without leaking the secret.
+    #[serde(default)]
+    pub has_auth: bool,
 }
 
 /// Env override for the custom-sources file path ("nothing hardcoded").
@@ -93,15 +103,34 @@ fn source_from_spec(spec: CustomSourceSpec) -> Source {
             // marketplace.json`. With no base_url there is nothing to point at, so
             // it degrades to a labelled stub.
             match spec.base_url.filter(|u| !u.trim().is_empty()) {
-                Some(repo_url) => Source::Marketplace(MarketplaceSource {
-                    id: spec.id,
-                    display_name: spec.display_name,
-                    repo_url,
-                }),
+                Some(repo_url) => Source::Marketplace(
+                    MarketplaceSource::new(spec.id, spec.display_name, repo_url, CatalogKind::Skill)
+                        .with_auth(spec.auth),
+                ),
                 None => Source::Stub(StubSource {
                     id: spec.id,
                     display_name: spec.display_name,
                     kind: CatalogKind::Skill,
+                }),
+            }
+        }
+        CatalogKind::Plugin => {
+            // A custom Plugin source with a base_url is a git plugin marketplace
+            // (the same `.claude-plugin/marketplace.json` standard as the Skill
+            // arm), surfaced through the existing plugin browse route: each
+            // manifest plugin becomes one installable item. With no base_url there
+            // is nothing to point at, so it degrades to a labelled stub. The
+            // built-in primary (`RyuMarketplaceSource`) is registered in
+            // [`builtin_sources`], not here.
+            match spec.base_url.filter(|u| !u.trim().is_empty()) {
+                Some(repo_url) => Source::Marketplace(
+                    MarketplaceSource::new(spec.id, spec.display_name, repo_url, CatalogKind::Plugin)
+                        .with_auth(spec.auth),
+                ),
+                None => Source::Stub(StubSource {
+                    id: spec.id,
+                    display_name: spec.display_name,
+                    kind: CatalogKind::Plugin,
                 }),
             }
         }
@@ -221,6 +250,7 @@ impl CatalogSourceRegistry {
                 display_name: s.display_name().to_string(),
                 builtin: true,
                 base_url: s.base_url().map(str::to_string),
+                has_auth: s.auth().is_some(),
             })
             .collect();
         if let Ok(custom) = self.custom.read() {
@@ -231,6 +261,7 @@ impl CatalogSourceRegistry {
                         display_name: s.display_name().to_string(),
                         builtin: false,
                         base_url: s.base_url().map(str::to_string),
+                        has_auth: s.auth().is_some(),
                     });
                 }
             }
@@ -371,6 +402,7 @@ impl CatalogSourceRegistry {
                         id: s.id().to_string(),
                         display_name: s.display_name().to_string(),
                         base_url: s.base_url().map(str::to_string),
+                        auth: s.auth().cloned(),
                     });
                 }
             }
@@ -426,8 +458,24 @@ fn builtin_sources() -> HashMap<CatalogKind, Vec<Source>> {
         CatalogKind::Plugin,
         vec![
             // Primary (default active): the Ryu Marketplace federated source
-            // (#467) — the real plugin/app catalog.
+            // (#467) — the real (Mongo) plugin/app catalog.
             Source::RyuMarketplace(RyuMarketplaceSource::builtin(CatalogKind::Plugin)),
+            // The first-party OPEN catalog: the git `amajorai/ryu-marketplace`
+            // repo, read via the generalized git `MarketplaceSource` (Phase 2).
+            // Repo override via `RYU_MARKETPLACE_REPO` ("nothing hardcoded" beyond
+            // the default). Registered AFTER the Mongo primary so the default
+            // active source is unchanged; `merged_plugin_catalog_entries` folds its
+            // items into the browse list.
+            Source::Marketplace(MarketplaceSource::new(
+                "ryu-catalog",
+                "Ryu Catalog",
+                std::env::var("RYU_MARKETPLACE_REPO")
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "amajorai/ryu-marketplace".to_string()),
+                CatalogKind::Plugin,
+            )),
             // Browse every publicly documented integration surface
             // (MCP/OpenAPI/GraphQL/CLI) as descriptor-only marketplace entries.
             Source::IntegrationsSh(IntegrationsShSource::builtin()),
@@ -531,6 +579,7 @@ mod tests {
             id: "my-mirror".to_string(),
             display_name: "My Mirror".to_string(),
             base_url: Some("https://mirror.example/api".to_string()),
+            auth: None,
         })
         .unwrap();
 
@@ -608,6 +657,7 @@ mod tests {
             id: "mirror".to_string(),
             display_name: "Private Mirror".to_string(),
             base_url: Some("https://hf.mirror.example/api".to_string()),
+            auth: None,
         })
         .unwrap();
         reg.set_active(CatalogKind::Model, "mirror", &prefs)
@@ -639,6 +689,7 @@ mod tests {
             id: "team-kb".to_string(),
             display_name: "Team KB".to_string(),
             base_url: Some("https://github.com/acme/kb".to_string()),
+            auth: None,
         })
         .unwrap();
         let bundle = reg
@@ -658,10 +709,67 @@ mod tests {
             id: "empty-kb".to_string(),
             display_name: "Empty KB".to_string(),
             base_url: None,
+            auth: None,
         })
         .unwrap();
         assert!(matches!(
             reg.find(CatalogKind::Knowledge, "empty-kb"),
+            Some(Source::Stub(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn plugin_custom_source_is_git_marketplace_or_stub() {
+        let file = temp_path("plugin-custom");
+        let reg = CatalogSourceRegistry::with_file(file.clone());
+        let prefs = temp_prefs();
+        // The Plugin kind ships a built-in primary (the Ryu marketplace).
+        assert!(!reg.sources_for(CatalogKind::Plugin).is_empty());
+
+        // A custom Plugin source WITH a base_url becomes a git MarketplaceSource
+        // pointing at the repo hosting `.claude-plugin/marketplace.json`, serving
+        // the Plugin kind so its cards land under the `{ items }` envelope.
+        reg.add_custom(CustomSourceSpec {
+            kind: CatalogKind::Plugin,
+            id: "team-plugins".to_string(),
+            display_name: "Team Plugins".to_string(),
+            base_url: Some("https://github.com/acme/plugins".to_string()),
+            auth: None,
+        })
+        .unwrap();
+        match reg.find(CatalogKind::Plugin, "team-plugins") {
+            Some(Source::Marketplace(s)) => {
+                assert_eq!(s.repo_url, "https://github.com/acme/plugins");
+                assert_eq!(s.kind, CatalogKind::Plugin);
+            }
+            _ => panic!("expected a git Marketplace plugin source"),
+        }
+
+        // It is listed by `sources_for(Plugin)` and selectable via `set_active`.
+        assert!(reg
+            .sources_for(CatalogKind::Plugin)
+            .iter()
+            .any(|s| s.id == "team-plugins"));
+        reg.set_active(CatalogKind::Plugin, "team-plugins", &prefs)
+            .await
+            .unwrap();
+        assert_eq!(
+            reg.active_id(CatalogKind::Plugin, &prefs).await.as_deref(),
+            Some("team-plugins")
+        );
+
+        // A custom Plugin source with an EMPTY base_url degrades to a stub
+        // (exercises the `.filter(|u| !u.trim().is_empty())` trim path).
+        reg.add_custom(CustomSourceSpec {
+            kind: CatalogKind::Plugin,
+            id: "empty-plugins".to_string(),
+            display_name: "Empty Plugins".to_string(),
+            base_url: Some(String::new()),
+            auth: None,
+        })
+        .unwrap();
+        assert!(matches!(
+            reg.find(CatalogKind::Plugin, "empty-plugins"),
             Some(Source::Stub(_))
         ));
     }

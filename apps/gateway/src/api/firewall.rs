@@ -56,8 +56,15 @@ fn map_checks(checks: &[String]) -> Vec<String> {
             "jailbreak" | "injection" | "prompt_injection" => {
                 mapped.push("prompt_injection".to_string());
             }
-            // `moderation` (and any unknown name) has no firewall pattern set; it
-            // is intentionally not enforced rather than faked.
+            // `moderation`/`toxicity` now map to the real Toxicity detector so a
+            // Core workflow Guardrails node gets a genuine (lexical) check instead
+            // of a silent no-op. The authoritative judgment remains the toxicity
+            // evaluator's LLM-judge path on the chat pipeline.
+            "moderation" | "toxicity" => mapped.push("toxicity".to_string()),
+            "bias" | "bias_fairness" => mapped.push("bias".to_string()),
+            "code_injection" => mapped.push("code_injection".to_string()),
+            // Any unknown name has no backing pattern set; not enforced rather
+            // than faked.
             _ => {}
         }
     }
@@ -83,11 +90,7 @@ pub async fn firewall_check(
 
     match hit {
         Some(m) => {
-            let kind = match m.kind {
-                crate::firewall::DetectionKind::Pii => "pii",
-                crate::firewall::DetectionKind::Secret => "secret",
-                crate::firewall::DetectionKind::PromptInjection => "prompt_injection",
-            };
+            let kind = m.kind.as_str();
             tracing::info!(
                 kind = %kind,
                 pattern = %m.pattern_name,
@@ -127,8 +130,19 @@ mod tests {
     }
 
     #[test]
-    fn moderation_and_unknown_map_to_nothing() {
-        assert!(map_checks(&["moderation".to_string()]).is_empty());
+    fn moderation_and_toxicity_map_to_toxicity() {
+        assert_eq!(
+            map_checks(&["moderation".to_string()]),
+            vec!["toxicity".to_string()]
+        );
+        assert_eq!(
+            map_checks(&["toxicity".to_string()]),
+            vec!["toxicity".to_string()]
+        );
+    }
+
+    #[test]
+    fn unknown_maps_to_nothing() {
         assert!(map_checks(&["bogus".to_string()]).is_empty());
     }
 }

@@ -1,0 +1,103 @@
+---
+title: RyuBench
+description: Measure how well any model or harness can actually operate Ryu — execution-verified, cost-normalized, hard to game.
+---
+
+RyuBench answers one question: **how well can a given model — or a given harness — actually
+operate Ryu?** Not "can it write code," but can it build a working workflow, configure an agent
+card, use the tool registry, set a Gateway policy, run RAG over a Space, wire a monitor, and
+drive a chat to a real stateful outcome.
+
+It lives in [`apps/benchmark`](https://github.com/) and ships as a Bun CLI (`ryubench`). The
+full design rationale with citations is in `docs/ryubench-spec.md`.
+
+<Callout type="info">
+  RyuBench scores by **asserting persisted state through the public API after the agent
+  acts** — never by judging the transcript. A task passes only if the thing it asked for
+  actually exists on the node afterward. This is the tau-bench pattern, and it is what makes
+  the number hard to fake.
+</Callout>
+
+## Why it is hard to game
+
+The 2026 discourse that "benchmarks are fake" is mostly right: contamination, cherry-picked
+scaffolds, LLM-judge slop, and non-reproducibility sink most leaderboards. RyuBench is built
+against each of those:
+
+- **Execution-based.** Hidden assertions check real state. No LLM in the scoring path.
+- **Model vs harness kept separate.** Two tracks that never mix (see below).
+- **Cost-normalized.** Reports `$/task` and `tokens/task` beside pass rate, metered through
+  the Gateway.
+- **Reproducible.** Every score is a pinned tuple written into the scorecard.
+- **pass^k.** Each task runs `k` times; `pass^k` is the fraction of tasks that passed *every*
+  time — it exposes lucky single-shot passes.
+
+## The three layers (do not collapse them)
+
+"Model vs harness" is really three things, and Ryu's swappable agent card makes the split
+native:
+
+| Layer | In Ryu terms | On the model track |
+|---|---|---|
+| **Model** | the LLM in the `chat_model` slot | **varies** — this is what you rank |
+| **Scaffold** | the agent card: prompt, tool allowlist, the loop | fixed to ONE reference |
+| **Platform** | Core + Gateway | pinned version |
+
+This yields two leaderboards:
+
+1. **Model track** (governed, apples-to-apples). One fixed scaffold — the `direct-tool` driver
+   gives the model exactly one tool, a `ryu_request` HTTP proxy (mini-swe-agent's single-tool
+   philosophy) — and you swap only the model.
+2. **Harness track** (open, self-reported). Vary the whole scaffold, or compare Ryu against
+   other stacks. Kept physically separate so scaffold gains never touch the model number.
+
+## Two doc conditions
+
+Run the identical suite twice (the Convex with/without-guidelines pattern):
+
+- `--docs no-guidelines` — the model on its priors plus a short route cheatsheet.
+- `--docs with-guidelines` — inject the reusable **Ryu AI rules** (`guidelines/ryu-ai-rules.md`).
+
+The gap is both a model-capability signal and a Ryu-docs-quality signal: if a model needs the
+rules to operate Ryu, that is a UX finding.
+
+## Verifiability tiers
+
+- **Tier A** (the scored core): workflow, agent, tool, gateway, spaces, plugin, monitor, chat —
+  deterministic API-state.
+- **Tier B** (reported separately): computer-use (Ghost / Shadow). Non-deterministic, needs a
+  sandbox VM, so it never enters the Tier-A headline.
+
+## Quickstart
+
+RyuBench drives a **running** node (Core on `:7980`, Gateway on `:7981`).
+
+```bash
+# list the 40 tasks
+bun run apps/benchmark list
+
+# run the Tier-A model track, 3 reps per task, against a local node
+bun run apps/benchmark run --model claude-opus-4-8 --k 3
+
+# the with-docs condition, only two categories
+bun run apps/benchmark run --docs with-guidelines --category workflow --category agent
+
+# re-render a saved results file to Markdown
+bun run apps/benchmark score ./.ryubench/scorecard-<id>.json
+```
+
+Node/Gateway targets and auth come from flags or env (`RYU_NODE_URL`, `RYU_NODE_TOKEN`,
+`RYU_GATEWAY_URL`, `RYU_GATEWAY_KEY`, `RYUBENCH_MODEL`, …). Scorecards (JSON + Markdown) land in
+`--out` (default `./.ryubench`).
+
+<Callout type="warn">
+  RyuBench mutates node state (it creates workflows, agents, spaces, monitors). Point it at a
+  scratch/dev node, not a node you care about. Tasks namespace everything they create by run id
+  and best-effort tear it down, but treat the target node as disposable.
+</Callout>
+
+## Next
+
+- [Tasks](/docs/benchmark/tasks) — the nine categories and how each is verified.
+- [Scoring &amp; governance](/docs/benchmark/scoring) — pass^k, cost, and the anti-gaming rules.
+- [Local models](/docs/benchmark/local-models) — running the benchmark against llama.cpp.

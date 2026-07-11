@@ -32,7 +32,7 @@
 //! ## Security
 //!
 //! `rtk__run` executes a shell command (the thing RTK wraps). It is opt-in (the
-//! `io.ryu.rtk` plugin) and every tool call is subject to Ryu's approval gate and
+//! `rtk` plugin) and every tool call is subject to Ryu's approval gate and
 //! the agent's allowlist, the same governance every other tool call gets. When
 //! `rtk` is absent the command is **not** run at all (no raw fallback).
 

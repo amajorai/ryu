@@ -106,7 +106,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 /// Compute HMAC-SHA256(key, message) and return it lowercase-hex encoded. Uses
 /// the standard HMAC construction over `sha2::Sha256` (already a Core dep) so no
 /// new crate is pulled in.
-fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
+pub(crate) fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
     use sha2::{Digest, Sha256};
 
     const BLOCK_SIZE: usize = 64;
@@ -153,6 +153,32 @@ pub fn verify_webhook_signature(raw_body: &[u8], signature_header: Option<&str>)
     };
     let expected_hex = hmac_sha256_hex(secret.as_bytes(), raw_body);
     // Each header token may be `v1,<sig>`, `sha256=<sig>`, or a bare `<sig>`.
+    header.split_whitespace().any(|token| {
+        let candidate = token
+            .rsplit(',')
+            .next()
+            .unwrap_or(token)
+            .trim_start_matches("sha256=");
+        constant_time_eq(candidate.as_bytes(), expected_hex.as_bytes())
+    })
+}
+
+/// Verify an inbound **per-workflow** webhook POST against a trigger-specific
+/// secret (`WorkflowTrigger::Webhook.secret`), independent of the global Composio
+/// webhook secret. Same header spellings and fail-closed semantics as
+/// [`verify_webhook_signature`]: the header may carry `v1,<sig>`, `sha256=<hex>`,
+/// or a bare hex digest; an absent/empty header or a mismatch is rejected. The
+/// caller is responsible for refusing to fire when the trigger has no secret at
+/// all — this reuses the same constant-time HMAC-SHA256 check over the raw bytes.
+pub fn verify_workflow_webhook_signature(
+    secret: &str,
+    raw_body: &[u8],
+    signature_header: Option<&str>,
+) -> bool {
+    let Some(header) = signature_header.map(str::trim).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let expected_hex = hmac_sha256_hex(secret.as_bytes(), raw_body);
     header.split_whitespace().any(|token| {
         let candidate = token
             .rsplit(',')
@@ -680,5 +706,32 @@ mod tests {
             Some(v) => std::env::set_var(WEBHOOK_SECRET_ENV, v),
             None => std::env::remove_var(WEBHOOK_SECRET_ENV),
         }
+    }
+
+    #[test]
+    fn workflow_webhook_verify_uses_per_trigger_secret() {
+        let body = br#"{"event":"deploy"}"#;
+        let sig = hmac_sha256_hex(b"per-wf-secret", body);
+        // Correct per-trigger secret + any accepted spelling verifies.
+        assert!(verify_workflow_webhook_signature(
+            "per-wf-secret",
+            body,
+            Some(&sig)
+        ));
+        assert!(verify_workflow_webhook_signature(
+            "per-wf-secret",
+            body,
+            Some(&format!("sha256={sig}"))
+        ));
+        // A different secret, a wrong signature, an absent header, and a mutated
+        // body all reject (fail-closed, independent of the global Composio secret).
+        assert!(!verify_workflow_webhook_signature("other", body, Some(&sig)));
+        assert!(!verify_workflow_webhook_signature("per-wf-secret", body, Some("00")));
+        assert!(!verify_workflow_webhook_signature("per-wf-secret", body, None));
+        assert!(!verify_workflow_webhook_signature(
+            "per-wf-secret",
+            br#"{"event":"other"}"#,
+            Some(&sig)
+        ));
     }
 }

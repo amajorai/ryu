@@ -26,6 +26,7 @@
 pub mod delegation;
 pub mod durable;
 pub mod executor;
+pub mod notify_user;
 pub mod store;
 pub mod template;
 pub mod templates;
@@ -327,6 +328,66 @@ pub enum NodeKind {
         #[serde(default)]
         params: serde_json::Value,
     },
+    /// Ping one or more org/workspace members (and teams) across their devices —
+    /// the app inbox, the desktop OS toast, and mobile push. `target` resolves to
+    /// a set of member user ids via the control plane (the node's bound org).
+    ///
+    /// `ack_mode` decides the node's shape:
+    /// - `None` (default) → **fire-and-forget**: deliver, emit a JSON receipt as
+    ///   the node output, and continue downstream.
+    /// - `First | All | Quorum` → **HITL gate**: deliver, then suspend the run
+    ///   (`AwaitingInput`) until the ack policy is met; each acking member's inbox
+    ///   Ack resumes the run once the threshold is reached.
+    ///
+    /// `title`/`body` are templates (`{{input}}`, `{{nodes.<id>}}`,
+    /// `{{state.<key>}}`, `{{trigger.*}}`) resolved before delivery. Core decides
+    /// *what runs* (who to ping, whether to wait) → Core; the control plane owns
+    /// *who is a member* → resolved over the gateway key.
+    NotifyUser {
+        /// Who to ping (org roster / a team / explicit members).
+        target: NotifyTargetSpec,
+        /// Notification title (template-resolved).
+        #[serde(default)]
+        title: String,
+        /// Notification body (template-resolved).
+        #[serde(default)]
+        body: String,
+        /// Acknowledgement policy. Absent/`none` = fire-and-forget.
+        #[serde(default)]
+        ack_mode: AckMode,
+        /// Optional auto-fail timeout for the ack gate (ms). Unused when
+        /// `ack_mode` is `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ack_timeout_ms: Option<u64>,
+    },
+}
+
+/// Who a [`NodeKind::NotifyUser`] node pings. Resolved to member user ids against
+/// the node's bound organization via the control plane.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum NotifyTargetSpec {
+    /// Every member of the node's bound organization.
+    Org,
+    /// Every member of a specific team within the org.
+    Team { team_id: String },
+    /// A hand-picked set of member user ids (no roster lookup needed).
+    Members { user_ids: Vec<String> },
+}
+
+/// The acknowledgement policy of a [`NodeKind::NotifyUser`] HITL gate.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum AckMode {
+    /// Fire-and-forget: deliver and continue immediately (no gate).
+    #[default]
+    None,
+    /// Resume as soon as any one targeted member acknowledges.
+    First,
+    /// Resume only once every targeted member acknowledges.
+    All,
+    /// Resume once at least `n` members acknowledge.
+    Quorum { n: u32 },
 }
 
 fn default_webhook_method() -> String {
@@ -422,6 +483,26 @@ pub struct WorkflowEdge {
 ///
 /// Per the Core-vs-Gateway rule this is **Core**: it decides *when* a workflow
 /// runs. The trigger declaration carries no policy.
+///
+/// # Why there is no MCP / skill / plugin / app / integration *trigger* arm
+///
+/// Steps can already *invoke* all of those ([`NodeKind::Mcp`]/[`NodeKind::Tool`],
+/// [`NodeKind::Skill`], [`NodeKind::Plugin`], [`NodeKind::Agent`]). A *trigger*,
+/// though, needs a source that can **deliver an event to Core**, and only event
+/// sources qualify:
+/// - **Composio** delivers via a subscription webhook (`composio_triggers`).
+/// - A generic **[`WorkflowTrigger::Webhook`]** covers *any* other integration,
+///   app, or service that can POST — the universal "beyond Composio" path
+///   (`POST /api/workflows/:id/webhook`, HMAC-authenticated per-trigger secret).
+///
+/// The remaining candidates have no event source to hang a trigger on: skills are
+/// instruction text (they emit nothing), there is no plugin runtime yet
+/// (design-only, `AGENTS.md` §4), and the MCP servers in the registry are
+/// request/response with no push. Adding trigger arms for those would be dead UI
+/// wired to nothing. When one genuinely needs to poll, that is already expressible
+/// as `Schedule` + a `Tool`/`Mcp` step + a `Condition` (poll-and-diff) — no new
+/// trigger kind required. Revisit only when a real push source appears (e.g. MCP
+/// resource-subscriptions, or a plugin runtime that emits events).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WorkflowTrigger {

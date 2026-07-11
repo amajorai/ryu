@@ -11,6 +11,7 @@ pub mod gateway_policy;
 pub mod headroom;
 pub mod install_state;
 pub mod manager;
+pub mod manifest_sidecar;
 pub mod mcp;
 pub mod onboarding;
 pub mod path_manager;
@@ -41,7 +42,11 @@ pub enum HealthStatus {
 
 /// Trait implemented by each sidecar process.
 pub trait Sidecar: Send + Sync {
-    fn name(&self) -> &'static str;
+    /// Stable name, also the [`SidecarManager`] map key. Built-in sidecars return
+    /// a `&'static str` literal; a manifest-declared sidecar
+    /// ([`manifest_sidecar::ManifestSidecar`]) returns its owned, plugin-namespaced
+    /// name — hence `&str`, not `&'static str`.
+    fn name(&self) -> &str;
     fn is_required(&self) -> bool;
     fn start(&self) -> BoxFuture<anyhow::Result<()>>;
     fn stop(&self) -> BoxFuture<anyhow::Result<()>>;
@@ -57,6 +62,16 @@ pub trait Sidecar: Send + Sync {
     /// run in-process (parakeet), or *adopted* an external server they did not
     /// spawn (whisper/sdcpp pointed at an already-running port).
     fn pid(&self) -> Option<u32> {
+        None
+    }
+
+    /// The fixed TCP port this sidecar's server binds to, when it has one. The
+    /// [`SidecarManager`]'s port registry uses it to reject a manifest sidecar
+    /// whose declared port would collide with a built-in (already bound) or another
+    /// plugin. Default `None` — built-in sidecars derive their port internally and
+    /// opt out of the registry; only manifest-declared sidecars
+    /// ([`manifest_sidecar::ManifestSidecar`]) return `Some`.
+    fn port(&self) -> Option<u16> {
         None
     }
 

@@ -128,6 +128,44 @@ manifests keep activating on enable.
   the SDK type for those.
 </Callout>
 
+## Declare a managed sidecar
+
+Optionally, a manifest can declare `sidecars[]` - long-running child processes Core downloads or
+provisions, spawns, and health-checks. Reach for this when your app wraps a binary or a Python
+service (a TTS engine, a capture daemon) rather than a stdio MCP server. The field is `SidecarSpec` in
+`apps/core/src/plugin_manifest/schema.rs`.
+
+```json
+{
+  "sidecars": [
+    {
+      "name": "engine",
+      "process": {
+        "kind": "binary",
+        "url": "https://example.com/dl/my-engine",
+        "sha256": "…",
+        "version": "1.2.3",
+        "args": ["--port", "9099"]
+      },
+      "port": 9099,
+      "health_path": "/health"
+    }
+  ],
+  "permission_grants": ["sidecar:process"]
+}
+```
+
+`process.kind` is `binary` (a downloaded, checksum-verified executable or archive) or `python` (a
+provisioned venv running `python -m <entry>`). A Community-tier plugin must declare the
+`sidecar:process` grant, which the Gateway must approve on enable before Core will download or spawn
+anything (a Core-tier plugin is auto-allowed). The `port` is bind-probed to reject a collision before
+the process starts.
+
+The download, checksum, port-claim, and boot-reconcile behaviour - and the `may_run_sidecar` gate -
+are documented once in
+[App Manifest & Lifecycle](/docs/core/app-manifest-lifecycle#manifest-declared-managed-sidecars).
+This page only declares the field.
+
 ## 5. Install and enable
 
 Host the `plugin.json` at a URL, then install it by URL and enable it.

@@ -6,6 +6,7 @@
   "pages": [
     "index",
     "getting-started",
+    "tui",
     "parity"
   ]
 }

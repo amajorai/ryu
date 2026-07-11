@@ -5,8 +5,10 @@
   "icon": "Monitor",
   "pages": [
     "index",
+    "---User Guide---",
     "user-guide/index",
     "user-guide/chat",
+    "user-guide/apps",
     "user-guide/agents",
     "user-guide/teams",
     "user-guide/tools-and-connections",
@@ -17,9 +19,11 @@
     "user-guide/deep-links",
     "user-guide/git-workspace",
     "user-guide/data-and-storage",
+    "---Surfaces & Identity---",
     "surfaces",
     "identities",
     "transparency",
+    "---Engines & Models---",
     "engines/index",
     "engines/chat-engines",
     "engines/agent-runtimes",
@@ -29,9 +33,11 @@
     "engines/infrastructure",
     "models/index",
     "skills/index",
+    "---Productivity---",
     "productivity/index",
     "productivity/meetings",
     "productivity/monitors",
+    "productivity/predictive-typing",
     "productivity/recipes"
   ]
 }

@@ -31,9 +31,67 @@
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
+pub mod auto;
+pub use auto::{
+    resolve_auto_agent, set_auto_config_from_json, AGENT_AUTO_ROUTING_PREF_KEY, AUTO_AGENT_ID,
+};
+
 /// Preferences key the desktop writes; Core loads it on startup and on change.
 /// The value is a JSON object mapping agent id → enabled boolean.
 pub const AGENT_GATEWAY_ROUTING_PREF_KEY: &str = "agent-gateway-routing";
+
+/// Preferences key holding per-agent Plane A model-routing overrides (the
+/// "both" config scope, spec §1). The value is a JSON object mapping agent id →
+/// a full `SmartRoutingConfig` JSON (opaque to Core — only the gateway parses it).
+/// When Core forwards an OpenAI-compat chat request for an agent that HAS an
+/// override, it injects that config into the request body as `ryu_smart_route`;
+/// the gateway reads and strips the field, building an ephemeral per-agent smart
+/// router for that request. Agents without an override keep the global path.
+pub const AGENT_SMART_ROUTE_PREF_KEY: &str = "agent-smart-route";
+
+/// In-process map of agent id → its opaque `SmartRoutingConfig` JSON, populated
+/// from [`AGENT_SMART_ROUTE_PREF_KEY`]. A missing entry means "no override".
+fn smart_route_map() -> &'static RwLock<HashMap<String, serde_json::Value>> {
+    static MAP: OnceLock<RwLock<HashMap<String, serde_json::Value>>> = OnceLock::new();
+    MAP.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// Replace the in-process per-agent smart-route map from the persisted preference
+/// value (a JSON object of agent id → SmartRoutingConfig JSON). A blank or
+/// unparseable value clears the map (every agent reverts to the global router)
+/// rather than erroring — the forward path must never panic. Object/empty values
+/// are ignored per-agent so a `{}` or `null` entry does not shadow the global.
+pub fn set_smart_routes_from_json(value: &str) {
+    let mut next: HashMap<String, serde_json::Value> = HashMap::new();
+    let trimmed = value.trim();
+    if !trimmed.is_empty() {
+        if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(trimmed)
+        {
+            for (id, cfg) in obj {
+                // Only store a non-empty object override; a null/empty entry means
+                // "no override for this agent" (keep the global router).
+                if let serde_json::Value::Object(map) = &cfg {
+                    if !map.is_empty() {
+                        next.insert(id, cfg);
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(mut guard) = smart_route_map().write() {
+        *guard = next;
+    }
+}
+
+/// The per-agent Plane A `SmartRoutingConfig` override for `agent_id`, if any.
+/// Returned as an opaque JSON value to inject verbatim into the outbound
+/// OpenAI-compat body as `ryu_smart_route`. `None` for agents without an override.
+pub fn smart_route_override(agent_id: &str) -> Option<serde_json::Value> {
+    smart_route_map()
+        .read()
+        .ok()
+        .and_then(|m| m.get(agent_id).cloned())
+}
 
 /// In-process map of agent id → gateway-routing enabled, populated from the
 /// preference. A missing entry means OFF (opt-in), matching the claude/codex
@@ -118,5 +176,26 @@ mod tests {
         assert!(!is_gateway_routing("x"));
         set_from_json("not json at all");
         assert!(!is_gateway_routing("x"));
+    }
+
+    #[test]
+    fn smart_route_override_stores_per_agent_config() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_smart_routes_from_json(
+            r#"{"agent-a": {"enabled": true, "rules": [{"description": "x", "model": "m"}]},
+                "agent-b": {},
+                "agent-c": null}"#,
+        );
+        // agent-a has a non-empty override → returned verbatim for injection.
+        let cfg = smart_route_override("agent-a").expect("override present");
+        assert_eq!(cfg["enabled"], serde_json::json!(true));
+        // Empty object / null entries are treated as "no override" (global path).
+        assert!(smart_route_override("agent-b").is_none());
+        assert!(smart_route_override("agent-c").is_none());
+        // Unknown agents have no override.
+        assert!(smart_route_override("never-seen").is_none());
+        // Blank clears everything.
+        set_smart_routes_from_json("");
+        assert!(smart_route_override("agent-a").is_none());
     }
 }

@@ -15,6 +15,12 @@ pub struct Metrics {
     pub firewall_blocked: AtomicU64,
     pub total_input_tokens: AtomicU64,
     pub total_output_tokens: AtomicU64,
+    /// Aggregated input tokens the *upstream* provider served from its own
+    /// prompt cache (e.g. OpenRouter/OpenAI `prompt_tokens_details.cached_tokens`
+    /// or Anthropic `cache_read_input_tokens`). Distinct from `cache_hits`,
+    /// which counts the gateway's own exact/semantic response cache: this
+    /// measures provider-side prompt caching, the OpenRouter cache path.
+    pub provider_cached_input_tokens: AtomicU64,
     /// Aggregated tokens saved by context compression (egress transform).
     pub compression_tokens_saved: AtomicU64,
     pub budget_exceeded: AtomicU64,
@@ -82,6 +88,14 @@ impl Metrics {
         self.total_input_tokens.fetch_add(input, Ordering::Relaxed);
         self.total_output_tokens
             .fetch_add(output, Ordering::Relaxed);
+    }
+    /// Add to the aggregated provider-side prompt-cache read counter (tokens the
+    /// upstream served from its own prompt cache). Fed from the response
+    /// `usage.prompt_tokens_details.cached_tokens`; a no-op when the provider
+    /// reports no cached tokens.
+    pub fn add_cached_tokens(&self, n: u64) {
+        self.provider_cached_input_tokens
+            .fetch_add(n, Ordering::Relaxed);
     }
     /// Add to the aggregated context-compression tokens-saved counter.
     pub fn add_compression_saved(&self, n: u64) {
@@ -189,6 +203,7 @@ impl Metrics {
             "tokens": {
                 "input":  self.total_input_tokens.load(Ordering::Relaxed),
                 "output": self.total_output_tokens.load(Ordering::Relaxed),
+                "cached_input": self.provider_cached_input_tokens.load(Ordering::Relaxed),
             },
             "composio": {
                 "calls": self.composio_calls.load(Ordering::Relaxed),
@@ -221,6 +236,23 @@ mod tests {
                 .expect("providers is object")
                 .is_empty(),
             "providers must be empty when evals not supplied"
+        );
+    }
+
+    #[test]
+    fn snapshot_reports_provider_cached_input_tokens() {
+        let metrics = Metrics::default();
+        metrics.add_tokens(1_000, 200);
+        // Two provider prompt-cache reads (OpenRouter cache path).
+        metrics.add_cached_tokens(600);
+        metrics.add_cached_tokens(300);
+
+        let snap = metrics.snapshot();
+        assert_eq!(snap["tokens"]["input"], 1_000);
+        assert_eq!(snap["tokens"]["output"], 200);
+        assert_eq!(
+            snap["tokens"]["cached_input"], 900,
+            "cached_input aggregates provider-side prompt-cache reads"
         );
     }
 

@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.routing",
+  "id": "routing",
   "name": "Smart Model Routing",
   "version": "1.0.0",
   "engines": {

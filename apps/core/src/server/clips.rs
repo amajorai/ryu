@@ -34,6 +34,12 @@ fn shadow_base() -> String {
 /// ffmpeg on the Shadow side, so this is more generous than a plain query.
 const SHADOW_TIMEOUT_SECS: u64 = 15;
 
+/// The default, undeletable system Space that finished clips are auto-filed into.
+/// Seeded eagerly in `main.rs` (same pattern as "Artifacts") and re-resolved
+/// idempotently at file-time via `ensure_system_space`.
+pub const CLIPS_SPACE_NAME: &str = "Clips";
+pub const CLIPS_SPACE_DESC: &str = "Screen recordings and clips captured by Ryu";
+
 /// Build the fail-soft body returned when Shadow can't be reached.
 fn unavailable(reason: impl Into<String>) -> Value {
     json!({ "available": false, "reason": reason.into() })
@@ -248,6 +254,11 @@ pub async fn ingest(
                     if let Some(id) = b.get("id").and_then(Value::as_str).map(String::from) {
                         rewrite_frames_endpoint(&mut b, &id);
                     }
+                    // A finished ingest (2xx) is auto-filed into the "Clips" space,
+                    // fire-and-forget so it never delays or alters this response.
+                    if status.is_success() {
+                        tokio::spawn(file_clip_into_space(state.clone(), b.clone()));
+                    }
                     (status, Json(b))
                 }
                 Err(e) => (
@@ -332,6 +343,11 @@ pub async fn stop_clip(
             match r.json::<Value>().await {
                 Ok(mut body) => {
                     rewrite_frames_endpoint(&mut body, &id);
+                    // A finalized clip (2xx) is auto-filed into the "Clips" space,
+                    // fire-and-forget so it never delays or alters this response.
+                    if status.is_success() {
+                        tokio::spawn(file_clip_into_space(state.clone(), body.clone()));
+                    }
                     (status, Json(body))
                 }
                 Err(e) => (
@@ -513,6 +529,139 @@ pub async fn post_diagnostics(
             Json(unavailable(format!("Shadow is not reachable: {e}"))),
         ),
     }
+}
+
+/// Query for GET /api/clips/recent-activity.
+#[derive(Debug, Deserialize)]
+pub struct RecentActivityQuery {
+    #[serde(default)]
+    pub minutes: Option<u32>,
+}
+
+/// GET /api/clips/recent-activity?minutes=<n> — proxy Shadow's ephemeral
+/// "last N minutes" keyframe bundle straight through (nothing persisted). Core
+/// only clamps `minutes` to 1..=15 (default 3) and passes the JSON unchanged.
+/// Fail-soft like the other clips proxies.
+pub async fn recent_activity(
+    State(state): State<ServerState>,
+    Query(q): Query<RecentActivityQuery>,
+) -> (StatusCode, Json<Value>) {
+    let minutes = q.minutes.unwrap_or(3).clamp(1, 15);
+    let url = format!("{}/activity/recent?minutes={minutes}", shadow_base());
+    let resp = state
+        .client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(SHADOW_TIMEOUT_SECS))
+        .send()
+        .await;
+    match resp {
+        Ok(r) if r.status().is_success() => match r.json::<Value>().await {
+            Ok(body) => (StatusCode::OK, Json(body)),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                Json(unavailable(format!("Shadow returned an invalid response: {e}"))),
+            ),
+        },
+        Ok(r) => (
+            StatusCode::from_u16(r.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
+            Json(unavailable(format!("Shadow returned HTTP {}", r.status()))),
+        ),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(unavailable(format!("Shadow is not reachable: {e}"))),
+        ),
+    }
+}
+
+/// Best-effort: file a just-finished clip into the "Clips" system Space. Fetches
+/// the muxed mp4 from Shadow and stores it via `create_file`, plus a short
+/// markdown summary via `ingest_document`. Every step is fail-soft (log +
+/// continue); this NEVER affects the clip HTTP response. Spawn it, don't await it.
+async fn file_clip_into_space(state: ServerState, bundle: Value) {
+    let Some(id) = bundle.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    let id = id.to_string();
+    let title = bundle
+        .get("title")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("Clip")
+        .to_string();
+    let duration_ms = bundle.get("durationMs").and_then(Value::as_u64).unwrap_or(0);
+
+    // Resolve the Clips space at call time (idempotent get-or-create).
+    let space_id = match state
+        .spaces
+        .ensure_system_space(CLIPS_SPACE_NAME, Some(CLIPS_SPACE_DESC))
+        .await
+    {
+        Ok(sid) => sid,
+        Err(e) => {
+            tracing::warn!("clips auto-file: ensure Clips space failed: {e:#}");
+            return;
+        }
+    };
+
+    // 1) the mp4 blob — bytes come from Shadow over HTTP (the manifest `video` is
+    //    a Shadow-internal relative path, so Core cannot read it off disk).
+    let file_url = format!("{}/clips/{id}/file", shadow_base());
+    match state
+        .client
+        .get(&file_url)
+        .timeout(std::time::Duration::from_secs(SHADOW_TIMEOUT_SECS))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => match r.bytes().await {
+            Ok(bytes) => {
+                let fname = format!("{title}.mp4");
+                if let Err(e) = state
+                    .spaces
+                    .create_file(&space_id, &fname, &bytes, "video/mp4")
+                    .await
+                {
+                    tracing::warn!("clips auto-file: create_file failed: {e:#}");
+                }
+            }
+            Err(e) => tracing::warn!("clips auto-file: reading mp4 bytes failed: {e}"),
+        },
+        Ok(r) => tracing::warn!("clips auto-file: Shadow /file returned HTTP {}", r.status()),
+        Err(e) => tracing::warn!("clips auto-file: Shadow /file unreachable: {e}"),
+    }
+
+    // 2) the markdown summary doc (diagnostics + duration; raw transcript text is
+    //    not proxied by Shadow, so we summarize the manifest we already have).
+    let summary = build_clip_summary_md(&title, duration_ms, &bundle);
+    if let Err(e) = state
+        .spaces
+        .ingest_document(&space_id, &title, &summary)
+        .await
+    {
+        tracing::warn!("clips auto-file: ingest_document failed: {e:#}");
+    }
+}
+
+/// Render a compact markdown summary from a finalized clip manifest.
+fn build_clip_summary_md(title: &str, duration_ms: u64, bundle: &Value) -> String {
+    let secs = duration_ms / 1000;
+    let mm = secs / 60;
+    let ss = secs % 60;
+    let mut md = format!("# {title}\n\n- Duration: {mm:02}:{ss:02}\n");
+    if let Some(w) = bundle.get("scanWarning").and_then(Value::as_str) {
+        md.push_str(&format!("- Coverage: {w}\n"));
+    }
+    if let Some(moments) = bundle.get("recommendedMoments").and_then(Value::as_array) {
+        if !moments.is_empty() {
+            md.push_str("\n## Highlights\n");
+            for m in moments {
+                let at = m.get("atMs").and_then(Value::as_u64).unwrap_or(0) / 1000;
+                let reason = m.get("reason").and_then(Value::as_str).unwrap_or("");
+                md.push_str(&format!("- {at:02}s: {reason}\n"));
+            }
+        }
+    }
+    md
 }
 
 /// Stream a binary body from Shadow, forwarding its Content-Type (falling back to

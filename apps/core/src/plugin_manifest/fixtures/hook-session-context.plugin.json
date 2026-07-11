@@ -1,0 +1,17 @@
+{
+  "id": "com.ryuhq.session-context",
+  "name": "Session Context",
+  "version": "1.0.0",
+  "runnables": [],
+  "permission_grants": [],
+  "activation_events": ["*"],
+  "contributes": {
+    "turn_hooks": [
+      {
+        "id": "session-context.start",
+        "on": "session_start",
+        "code": "const now = new Date().toISOString(); return { kind: 'inject', text: 'Session context (auto-added): the current date and time is ' + now + '. Use it whenever the user refers to \"today\", recency, or deadlines.' };"
+      }
+    ]
+  }
+}

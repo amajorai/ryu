@@ -17,14 +17,16 @@
 //!   ([`crate::workflow::delegation`]): with a live agent runner the sub-agent runs
 //!   the real chat path (its own engine, tools, MCP, Gateway routing), so it can
 //!   gather actual evidence instead of judging from the transcript. This is the
-//!   "proof of work" primitive that the `io.ryu.proof` plugin builds on.
+//!   "proof of work" primitive that the `proof` plugin builds on.
 //! - `host.storage.{get,set,delete,keys}(key, value?)` → the plugin's own
 //!   namespaced KV ([`crate::plugin_storage`]), grant `storage:kv`.
 //! - `host.log(...)` → captured logs.
 //!
 //! The hook returns a **directive** the chat path applies:
 //! `{kind:"none"}` | `{kind:"note", text}` (surface to the user, not in history)
-//! | `{kind:"continue", text}` (inject a follow-up user turn and loop).
+//! | `{kind:"continue", text}` (inject a follow-up user turn and loop) |
+//! `{kind:"replace", text}` (a `pre_user_turn` hook rewrites the outgoing user
+//! message before it reaches the model — the auto-expand prompt-improver).
 //!
 //! Placement (Core vs Gateway): a turn hook decides *what runs next* → Core. Any
 //! model call it makes still routes through the Gateway. The sandbox grants
@@ -71,6 +73,31 @@ pub struct HookContext {
     /// whether to act this turn.
     #[serde(default)]
     pub flags: std::collections::HashMap<String, bool>,
+    /// The pending outgoing user message, set only for a `pre_user_turn` hook (it
+    /// has not been sent to the model or persisted yet). A pre-turn hook reads
+    /// `ctx.input` and may return a [`HookDirective::Replace`] to rewrite it (e.g.
+    /// the auto-expand prompt-improver). `None` for `post_assistant_turn` hooks,
+    /// which read the already-persisted `transcript` instead.
+    #[serde(default)]
+    pub input: Option<String>,
+    /// The tool being called — set for `pre_tool_use` / `post_tool_use` hooks.
+    /// `tool_name` is the fully-qualified tool id, `tool_input` its arguments, and
+    /// `tool_output` the result (only on `post_tool_use`). A tool hook reads these
+    /// to decide whether to allow ([`HookDirective::None`]) or block
+    /// ([`HookDirective::Deny`]) the call, or to annotate the result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_input: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_output: Option<serde_json::Value>,
+    /// The final text output of a finished sub-agent — set for `subagent_stop`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    /// A free-form event payload for observation phases (`notification`,
+    /// `session_end`, `subagent_stop`) — e.g. the alert being fanned out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<serde_json::Value>,
 }
 
 /// What a hook asks the chat path to do after the assistant turn.
@@ -84,6 +111,20 @@ pub enum HookDirective {
     /// Inject `text` as a follow-up user turn and run another assistant turn
     /// (the goal-loop primitive). Capped server-side by the chat path.
     Continue { text: String },
+    /// Replace the pending outgoing user message with `text` **before** it reaches
+    /// the model (a `pre_user_turn` directive; ignored on the post-turn path). The
+    /// rewritten text is what gets sent and persisted — the auto-expand plugin uses
+    /// this to swap a raw prompt for its improved form.
+    Replace { text: String },
+    /// Inject `text` as **additional context** into the current turn (additive, not
+    /// a replacement) — appended to the outgoing user message so the model sees it.
+    /// Emitted by `session_start` (setup context) and `pre_user_turn` (per-message
+    /// context), mirroring Claude Code's `UserPromptSubmit`/`SessionStart` context.
+    Inject { text: String },
+    /// Block the pending tool call (a `pre_tool_use` directive). `reason` is
+    /// returned to the model as the tool's error result, so it can adapt instead of
+    /// treating the call as done — this is the plugin-authored tool firewall.
+    Deny { reason: String },
 }
 
 impl Default for HookDirective {
@@ -99,7 +140,8 @@ pub struct HookPlugin {
     pub plugin_id: String,
     /// Hook contribution id (for logging).
     pub hook_id: String,
-    /// The turn boundary this fires on (today `"post_assistant_turn"`).
+    /// The turn boundary this fires on (`"post_assistant_turn"` or
+    /// `"pre_user_turn"`).
     pub on: String,
     /// The JS hook body.
     pub code: String,
@@ -112,6 +154,54 @@ pub struct HookPlugin {
 
 /// The turn boundary string for the post-assistant-turn hook.
 pub const ON_POST_ASSISTANT_TURN: &str = "post_assistant_turn";
+
+/// The turn boundary string for the pre-user-turn hook: fires **before** the user
+/// message is sent to the model, so a hook can rewrite the outgoing prompt (via
+/// [`HookDirective::Replace`]). This is the prompt-transform phase the auto-expand
+/// plugin uses.
+pub const ON_PRE_USER_TURN: &str = "pre_user_turn";
+
+// ── Claude-Code-style hook phases (the extended set) ─────────────────────────
+//
+// Each maps to a Claude Code hook event. On-chat-path phases (session_start,
+// stop) fire inside `server::run_chat_with_hooks`; off-path phases (pre/post
+// tool use, subagent_stop, session_end, notification) fire at their own sites
+// through the process-global dispatcher ([`global`]).
+
+/// Fires on the FIRST turn of a conversation (Claude's `SessionStart`). A hook
+/// can [`HookDirective::Inject`] setup context or [`HookDirective::Note`].
+pub const ON_SESSION_START: &str = "session_start";
+
+/// Alias for [`ON_POST_ASSISTANT_TURN`] (Claude's `Stop`) — accepted so a plugin
+/// authored against Claude's naming works unchanged. Normalised by
+/// [`phase_matches`].
+pub const ON_STOP: &str = "stop";
+
+/// Fires **before** a tool call executes (Claude's `PreToolUse`), at the shared
+/// tool-dispatch core. Awaited: a [`HookDirective::Deny`] blocks the call.
+pub const ON_PRE_TOOL_USE: &str = "pre_tool_use";
+
+/// Fires **after** a tool call returns (Claude's `PostToolUse`). Observation-only
+/// (detached, fail-open) — directives are not applied to the result in v1.
+pub const ON_POST_TOOL_USE: &str = "post_tool_use";
+
+/// Fires when a delegated sub-agent finishes (Claude's `SubagentStop`).
+/// Observation-only (detached).
+pub const ON_SUBAGENT_STOP: &str = "subagent_stop";
+
+/// Fires when a conversation is deleted (Claude's `SessionEnd`). Observation-only
+/// (runs before the delete so the transcript is still readable).
+pub const ON_SESSION_END: &str = "session_end";
+
+/// Fires when a notification is fanned out (Claude's `Notification`).
+/// Observation-only (detached). Node-level: no chat context.
+pub const ON_NOTIFICATION: &str = "notification";
+
+/// Whether a hook declared for `hook_on` should run in `phase`. Exact match,
+/// except [`ON_STOP`] is treated as an alias of [`ON_POST_ASSISTANT_TURN`].
+pub fn phase_matches(hook_on: &str, phase: &str) -> bool {
+    hook_on == phase || (phase == ON_POST_ASSISTANT_TURN && hook_on == ON_STOP)
+}
 
 /// A hard cap on how many `continue` directives a single chat request may apply
 /// (the server-side analog of the old client `MAX_GOAL_TURNS`). The chat path
@@ -174,19 +264,80 @@ pub async fn dispatch_turn_hooks(state: &ServerState, ctx: &HookContext) -> Vec<
         return Vec::new();
     }
     let hooks = collect_enabled_hooks(state).await;
-    run_hooks(state, ctx, &hooks).await
+    run_hooks(state, ctx, &hooks, ON_POST_ASSISTANT_TURN).await
 }
 
-/// Run a pre-collected set of hooks against `ctx`. Lets the chat-path wrapper
-/// collect hooks once (cheap gate) and reuse the set across a continue loop.
+/// Does any **loaded** manifest declare a hook for `phase`? Cheap and DB-free
+/// (reads only the in-memory manifest set). The off-path dispatchers call this to
+/// return instantly when no plugin could possibly handle a phase — so e.g. a tool
+/// call pays nothing on the hot path unless a tool-hook plugin is actually loaded.
+pub async fn any_manifest_declares(state: &ServerState, phase: &str) -> bool {
+    let manifests = state.app_manifests.read().await;
+    manifests.iter().any(|m| {
+        m.contributes
+            .as_ref()
+            .is_some_and(|c| c.turn_hooks.iter().any(|h| phase_matches(&h.on, phase)))
+    })
+}
+
+/// Collect enabled hooks and run those for `phase`. The one entry point the
+/// process-global dispatcher uses. Fail-open + DB-free fast path: returns empty
+/// without touching the plugin store when no loaded manifest declares `phase`.
+pub async fn dispatch_phase(state: &ServerState, phase: &str, ctx: &HookContext) -> Vec<HookDirective> {
+    if !tool_exec::is_available() {
+        return Vec::new();
+    }
+    if !any_manifest_declares(state, phase).await {
+        return Vec::new();
+    }
+    let hooks = collect_enabled_hooks(state).await;
+    run_hooks(state, ctx, &hooks, phase).await
+}
+
+/// Process-global hook dispatcher. Installed once at boot (`main.rs`) so code
+/// paths that have no [`ServerState`] in scope — the shared tool-dispatch core,
+/// the delegation engine, the notification fan-out — can still fire hooks.
+/// Mirrors [`crate::plugin_storage::global`].
+pub trait HookDispatch: Send + Sync {
+    fn dispatch<'a>(
+        &'a self,
+        phase: &'a str,
+        ctx: HookContext,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<HookDirective>> + Send + 'a>>;
+}
+
+static GLOBAL: std::sync::OnceLock<Arc<dyn HookDispatch>> = std::sync::OnceLock::new();
+
+/// Install the global dispatcher (idempotent; first writer wins).
+pub fn set_global(dispatcher: Arc<dyn HookDispatch>) {
+    let _ = GLOBAL.set(dispatcher);
+}
+
+/// Fire the hooks for `phase` through the global dispatcher. Returns an empty vec
+/// when no dispatcher is installed (e.g. unit tests) so callers stay fail-open.
+/// Awaited callers (`pre_tool_use`) act on the returned directives; detached
+/// callers ignore them.
+pub async fn dispatch_global(phase: &str, ctx: HookContext) -> Vec<HookDirective> {
+    match GLOBAL.get() {
+        Some(d) => d.dispatch(phase, ctx).await,
+        None => Vec::new(),
+    }
+}
+
+/// Run a pre-collected set of hooks for one phase against `ctx`. Lets the
+/// chat-path wrapper collect hooks once (cheap gate) and reuse the set across the
+/// pre-turn transform and the post-turn continue loop. `phase` is one of
+/// [`ON_PRE_USER_TURN`] / [`ON_POST_ASSISTANT_TURN`]; hooks on other boundaries
+/// are skipped.
 pub async fn run_hooks(
     state: &ServerState,
     ctx: &HookContext,
     hooks: &[HookPlugin],
+    phase: &str,
 ) -> Vec<HookDirective> {
     let mut directives = Vec::new();
     for hook in hooks {
-        if hook.on != ON_POST_ASSISTANT_TURN {
+        if !phase_matches(&hook.on, phase) {
             continue;
         }
         // Cheap pre-gate: skip the sandbox spawn when the hook provably can't act
@@ -265,6 +416,15 @@ fn gate_without_storage(m: &crate::plugin_manifest::HookMatch, ctx: &HookContext
         }
     }
 
+    if !m.tools.is_empty() {
+        declared = true;
+        if let Some(name) = ctx.tool_name.as_deref() {
+            if m.tools.iter().any(|pat| glob_match(pat, name)) {
+                return GateVerdict::Run;
+            }
+        }
+    }
+
     if m.stateful {
         return GateVerdict::CheckStateful;
     }
@@ -274,6 +434,24 @@ fn gate_without_storage(m: &crate::plugin_manifest::HookMatch, ctx: &HookContext
         GateVerdict::Skip
     } else {
         GateVerdict::Run
+    }
+}
+
+/// A minimal glob for tool-name gates: supports a single leading and/or trailing
+/// `*`. `"*"` matches everything, `"bash*"` a prefix, `"*write"` a suffix,
+/// `"*edit*"` a substring, anything else an exact match. Deliberately tiny — this
+/// is a spawn-avoidance gate, not a full matcher.
+fn glob_match(pattern: &str, name: &str) -> bool {
+    match (pattern.strip_prefix('*'), pattern.strip_suffix('*')) {
+        _ if pattern == "*" => true,
+        (Some(rest), Some(_)) => {
+            // both ends starred: substring (rest still has trailing '*')
+            let inner = rest.strip_suffix('*').unwrap_or(rest);
+            name.contains(inner)
+        }
+        (Some(suffix), None) => name.ends_with(suffix),
+        (None, Some(prefix)) => name.starts_with(prefix),
+        (None, None) => pattern == name,
     }
 }
 
@@ -462,6 +640,56 @@ mod tests {
     }
 
     #[test]
+    fn glob_match_supports_wildcards() {
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("bash", "bash"));
+        assert!(!glob_match("bash", "bashx"));
+        assert!(glob_match("bash*", "bash__run"));
+        assert!(!glob_match("bash*", "sh"));
+        assert!(glob_match("*write", "fs__write"));
+        assert!(glob_match("*edit*", "editor__do_edit"));
+        assert!(!glob_match("*edit*", "read_only"));
+    }
+
+    #[test]
+    fn gate_tools_matches_tool_name() {
+        let m = HookMatch {
+            tools: vec!["bash*".into(), "*delete*".into()],
+            ..Default::default()
+        };
+        let ctx = |name: &str| HookContext {
+            tool_name: Some(name.into()),
+            ..Default::default()
+        };
+        assert_eq!(gate_without_storage(&m, &ctx("bash__run")), GateVerdict::Run);
+        assert_eq!(
+            gate_without_storage(&m, &ctx("fs__delete_file")),
+            GateVerdict::Run
+        );
+        // A tool the firewall doesn't watch → skip (no sandbox spawn).
+        assert_eq!(
+            gate_without_storage(&m, &ctx("web_fetch")),
+            GateVerdict::Skip
+        );
+        // No tool name in context (a non-tool phase) → skip.
+        assert_eq!(
+            gate_without_storage(&m, &HookContext::default()),
+            GateVerdict::Skip
+        );
+    }
+
+    #[test]
+    fn phase_matches_treats_stop_as_post_assistant_turn() {
+        assert!(phase_matches(ON_STOP, ON_POST_ASSISTANT_TURN));
+        assert!(phase_matches(
+            ON_POST_ASSISTANT_TURN,
+            ON_POST_ASSISTANT_TURN
+        ));
+        assert!(!phase_matches(ON_STOP, ON_PRE_USER_TURN));
+        assert!(!phase_matches(ON_PRE_TOOL_USE, ON_POST_TOOL_USE));
+    }
+
+    #[test]
     fn gate_command_prefix_matches_last_user_turn() {
         let m = HookMatch {
             commands: vec!["/goal".into()],
@@ -587,13 +815,32 @@ mod tests {
             .clone()
     }
 
-    async fn run_fixture(
-        plugin_id: &str,
+    /// Read a specific hook's JS from a fixture file WITHOUT going through
+    /// `BUILTIN_MANIFESTS`. Lets a fixture be tested while staying UN-registered as
+    /// a builtin (so e.g. the tool-firewall never makes the hot tool-dispatch path
+    /// pay a lookup on installs that didn't opt in). Picks the hook by `hook_id`.
+    fn fixture_hook_from_file(file: &str, hook_id: &str) -> String {
+        let path = format!("src/plugin_manifest/fixtures/{file}");
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let manifest: crate::plugin_manifest::PluginManifest =
+            serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse {path}: {e}"));
+        manifest
+            .contributes
+            .expect("contributes")
+            .turn_hooks
+            .into_iter()
+            .find(|h| h.id == hook_id)
+            .unwrap_or_else(|| panic!("hook {hook_id} in {file}"))
+            .code
+    }
+
+    /// Run raw hook `code` in the real sandbox with the canned [`TestBridge`].
+    async fn run_code(
+        code: &str,
         ctx: HookContext,
         side_value: serde_json::Value,
     ) -> HookDirective {
-        let code = fixture_hook(plugin_id);
-        let program = build_hook_program(&ctx, &code);
+        let program = build_hook_program(&ctx, code);
         let bridge = std::sync::Arc::new(TestBridge {
             side_value,
             store: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -611,6 +858,14 @@ mod tests {
             }
             ExecOutcome::Paused { .. } => panic!("unexpected pause"),
         }
+    }
+
+    async fn run_fixture(
+        plugin_id: &str,
+        ctx: HookContext,
+        side_value: serde_json::Value,
+    ) -> HookDirective {
+        run_code(&fixture_hook(plugin_id), ctx, side_value).await
     }
 
     #[tokio::test]
@@ -633,12 +888,9 @@ mod tests {
                 },
             ],
             flags: std::iter::once(("io.ryu.double-check".to_string(), true)).collect(),
+            ..Default::default()
         };
-        let directive = run_fixture(
-            "io.ryu.double-check",
-            ctx,
-            serde_json::json!("Wrong: 2+2 is 4."),
-        )
+        let directive = run_fixture("double-check", ctx, serde_json::json!("Wrong: 2+2 is 4."))
         .await;
         assert_eq!(
             directive,
@@ -662,7 +914,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let directive = run_fixture("io.ryu.double-check", ctx, serde_json::json!("unused")).await;
+        let directive = run_fixture("double-check", ctx, serde_json::json!("unused")).await;
         assert_eq!(directive, HookDirective::None);
     }
 
@@ -680,7 +932,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let directive = run_fixture("io.ryu.goal", ctx, serde_json::Value::Null).await;
+        let directive = run_fixture("goal", ctx, serde_json::Value::Null).await;
         assert_eq!(
             directive,
             HookDirective::Continue {
@@ -705,7 +957,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let directive = run_fixture("io.ryu.proof", ctx, serde_json::Value::Null).await;
+        let directive = run_fixture("proof", ctx, serde_json::Value::Null).await;
         assert_eq!(
             directive,
             HookDirective::Continue {
@@ -728,7 +980,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let directive = run_fixture("io.ryu.proof", ctx, serde_json::Value::Null).await;
+        let directive = run_fixture("proof", ctx, serde_json::Value::Null).await;
         assert_eq!(
             directive,
             HookDirective::Note {
@@ -758,6 +1010,7 @@ mod tests {
                 },
             ],
             flags: std::iter::once(("com.ryuhq.advisor".to_string(), true)).collect(),
+            ..Default::default()
         };
         let directive = run_fixture(
             "com.ryuhq.advisor",
@@ -796,9 +1049,10 @@ mod tests {
                 },
             ],
             flags: std::iter::once(("io.ryu.security-guidance".to_string(), true)).collect(),
+            ..Default::default()
         };
         let directive = run_fixture(
-            "io.ryu.security-guidance",
+            "security-guidance",
             ctx,
             serde_json::json!("Use yaml.safe_load; yaml.load allows arbitrary code execution."),
         )
@@ -827,7 +1081,7 @@ mod tests {
             ..Default::default()
         };
         let directive =
-            run_fixture("io.ryu.security-guidance", ctx, serde_json::json!("unused")).await;
+            run_fixture("security-guidance", ctx, serde_json::json!("unused")).await;
         assert_eq!(directive, HookDirective::None);
     }
 
@@ -879,5 +1133,181 @@ mod tests {
                     .into()
             }
         );
+    }
+
+    #[tokio::test]
+    async fn live_auto_expand_toggle_replaces_input() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // Toggle on → the pending user message is rewritten via the side model and
+        // returned as a `replace` directive (the improved prompt is sent instead).
+        let ctx = HookContext {
+            conversation_id: Some("c1".into()),
+            input: Some("fix login".into()),
+            flags: std::iter::once(("com.ryuhq.auto-expand".to_string(), true)).collect(),
+            ..Default::default()
+        };
+        let directive = run_fixture(
+            "com.ryuhq.auto-expand",
+            ctx,
+            serde_json::json!("Investigate and fix the login bug: ..."),
+        )
+        .await;
+        assert_eq!(
+            directive,
+            HookDirective::Replace {
+                text: "Investigate and fix the login bug: ...".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn live_auto_expand_off_is_none() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // Toggle off and no `/expand` command → no rewrite (the gate would also
+        // skip the spawn in production; here we prove the hook self-guards too).
+        let ctx = HookContext {
+            conversation_id: Some("c1".into()),
+            input: Some("just a normal message".into()),
+            ..Default::default()
+        };
+        let directive = run_fixture("com.ryuhq.auto-expand", ctx, serde_json::json!("unused")).await;
+        assert_eq!(directive, HookDirective::None);
+    }
+
+    #[tokio::test]
+    async fn live_auto_expand_slash_command_replaces_stripped_prompt() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // `/expand <prompt>` expands just `<prompt>` (the command prefix stripped),
+        // even with the toggle off — the all-surfaces on-demand path.
+        let ctx = HookContext {
+            conversation_id: Some("c1".into()),
+            input: Some("/expand write tests".into()),
+            ..Default::default()
+        };
+        let directive = run_fixture(
+            "com.ryuhq.auto-expand",
+            ctx,
+            serde_json::json!("Write a comprehensive unit test suite for ..."),
+        )
+        .await;
+        assert_eq!(
+            directive,
+            HookDirective::Replace {
+                text: "Write a comprehensive unit test suite for ...".into()
+            }
+        );
+    }
+
+    // ── Extended Claude-Code-style phases ────────────────────────────────────
+
+    #[tokio::test]
+    async fn live_session_start_injects_context() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // SessionStart reference: injects the current date/time as additive context.
+        let ctx = HookContext {
+            conversation_id: Some("c1".into()),
+            input: Some("what day is it?".into()),
+            ..Default::default()
+        };
+        let directive = run_fixture("com.ryuhq.session-context", ctx, serde_json::json!("")).await;
+        match directive {
+            HookDirective::Inject { text } => {
+                assert!(text.contains("Session context"), "inject: {text}");
+                assert!(text.contains("current date"), "inject: {text}");
+            }
+            other => panic!("expected an Inject directive, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn live_tool_firewall_denies_destructive() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // PreToolUse: a destructive command in the tool args → Deny.
+        let code = fixture_hook_from_file("tool-firewall.plugin.json", "tool-firewall.pre");
+        let ctx = HookContext {
+            tool_name: Some("bash".into()),
+            tool_input: Some(serde_json::json!({ "command": "rm -rf /" })),
+            ..Default::default()
+        };
+        let directive = run_code(&code, ctx, serde_json::json!("unused")).await;
+        match directive {
+            HookDirective::Deny { reason } => assert!(reason.contains("destructive"), "{reason}"),
+            other => panic!("expected Deny, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn live_tool_firewall_allows_safe() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // PreToolUse: a safe command → None (allow).
+        let code = fixture_hook_from_file("tool-firewall.plugin.json", "tool-firewall.pre");
+        let ctx = HookContext {
+            tool_name: Some("bash".into()),
+            tool_input: Some(serde_json::json!({ "command": "ls -la" })),
+            ..Default::default()
+        };
+        let directive = run_code(&code, ctx, serde_json::json!("unused")).await;
+        assert_eq!(directive, HookDirective::None);
+    }
+
+    #[tokio::test]
+    async fn live_tool_firewall_post_observes_output() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // PostToolUse: reads tool_output (observation).
+        let code = fixture_hook_from_file("tool-firewall.plugin.json", "tool-firewall.post");
+        let ctx = HookContext {
+            tool_name: Some("web_fetch".into()),
+            tool_output: Some(serde_json::json!({ "status": 200 })),
+            ..Default::default()
+        };
+        let directive = run_code(&code, ctx, serde_json::json!("unused")).await;
+        match directive {
+            HookDirective::Note { text } => assert!(text.contains("web_fetch"), "{text}"),
+            other => panic!("expected Note, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn live_observer_hooks_read_their_context() {
+        if !tool_exec::is_available() {
+            return;
+        }
+        // subagent_stop reads ctx.output + ctx.event.
+        let code = fixture_hook_from_file("hook-observers.plugin.json", "observers.subagent-stop");
+        let ctx = HookContext {
+            output: Some("did the thing".into()),
+            event: Some(serde_json::json!({ "id": "task-7" })),
+            ..Default::default()
+        };
+        match run_code(&code, ctx, serde_json::json!("x")).await {
+            HookDirective::Note { text } => {
+                assert!(text.contains("task-7") && text.contains("did the thing"), "{text}");
+            }
+            other => panic!("expected Note, got {other:?}"),
+        }
+        // notification reads ctx.event.title.
+        let code = fixture_hook_from_file("hook-observers.plugin.json", "observers.notification");
+        let ctx = HookContext {
+            event: Some(serde_json::json!({ "title": "Price dropped" })),
+            ..Default::default()
+        };
+        match run_code(&code, ctx, serde_json::json!("x")).await {
+            HookDirective::Note { text } => assert!(text.contains("Price dropped"), "{text}"),
+            other => panic!("expected Note, got {other:?}"),
+        }
     }
 }

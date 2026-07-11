@@ -47,16 +47,35 @@ pub struct SystemPlugin {
 /// Order is stable and determines display order in the App-store.
 pub const SYSTEM_PLUGINS: &[SystemPlugin] = &[
     SystemPlugin {
-        manifest_id: "io.ryu.ghost",
+        manifest_id: "ghost",
         sidecar_name: "ghost",
         windows_first: true,
         local_only: true,
     },
     SystemPlugin {
-        manifest_id: "io.ryu.shadow",
+        manifest_id: "shadow",
         sidecar_name: "shadow",
         windows_first: true,
         local_only: true,
+    },
+    // Spider is the default web-crawl tool: a cross-platform Rust sidecar
+    // (`spider-rs/spider`), so not Windows-first. Local-only (runs the crawler
+    // process on the node).
+    SystemPlugin {
+        manifest_id: "spider",
+        sidecar_name: "spider",
+        windows_first: false,
+        local_only: true,
+    },
+    // Agent Browser is the default web-browsing tool: an npx-launched MCP server
+    // (npm `agentbrowser`), registered in `sidecar/mcp/mod.rs::builtin_servers`.
+    // Cross-platform (Node) and reaches the web, so neither Windows-first nor
+    // local-only.
+    SystemPlugin {
+        manifest_id: "agentbrowser",
+        sidecar_name: "agentbrowser",
+        windows_first: false,
+        local_only: false,
     },
 ];
 
@@ -76,8 +95,13 @@ pub const SYSTEM_PLUGINS: &[SystemPlugin] = &[
 /// - `durable` (the in-process durable workflow engine) ships enabled — it runs
 ///   on every platform with no extra sidecar, so it is a zero-setup default-on
 ///   dogfood (#448) declared as an `engine` runnable.
-/// - `ghost`/`shadow` are sidecar-managed (their own lifecycle), Core-tier so
-///   the store groups them with the first-party set.
+/// - `ghost`/`shadow`/`spider`/`agentbrowser` are the sidecar-backed default
+///   tool apps. They are Core-tier AND default-on: on a fresh install their app
+///   record is auto-seeded enabled (so they appear installed exactly like the
+///   auto-downloaded default models), while the tool process still runs through
+///   its own sidecar/MCP lifecycle. Their fixtures declare no runnables (the
+///   tools come from the dedicated MCP provider); the record is the governance
+///   shell (see `crate::plugin_manifest` `BUILTIN_MANIFESTS` doc).
 /// - `firewall`/`routing`/`sandbox` are Core-tier but **opt-in** (they change
 ///   gateway/sandbox behaviour), so they are NOT in [`CORE_DEFAULT_ON`].
 /// - `headroom` (egress compression) is deliberately **Community-tier**: the
@@ -86,27 +110,41 @@ pub const SYSTEM_PLUGINS: &[SystemPlugin] = &[
 ///   third-party compression plugin would be. The bundled fixture is our
 ///   reference; nothing about the service is hardcoded.
 pub const CORE_PLUGINS: &[&str] = &[
-    "io.ryu.ghost",
-    "io.ryu.shadow",
-    "io.ryu.firewall",
-    "io.ryu.routing",
-    "io.ryu.sandbox",
-    "io.ryu.engines",
-    "io.ryu.durable",
-    "io.ryu.goal",
-    "io.ryu.proof",
-    "io.ryu.double-check",
+    "ghost",
+    "shadow",
+    "spider",
+    "agentbrowser",
+    "firewall",
+    "routing",
+    "sandbox",
+    // System-wide predictive typing. Core-tier but opt-in (NOT in CORE_DEFAULT_ON):
+    // enabling it is the single on/off switch for the /api/predict/* brain, and it
+    // sends text from arbitrary apps to a model, so it ships disabled.
+    "predict",
+    "engines",
+    "durable",
+    "goal",
+    "proof",
+    "double-check",
+    // Pre-turn prompt-improver: rewrites the outgoing message via a configurable
+    // model before it is sent. Reverse-DNS id (matches its manifest + composer flag).
+    "com.ryuhq.auto-expand",
     // Ryu Apps (widget-rendering in-process apps). All ship default-on so their
     // widgets render on install; widget-initiated writes are call-time
     // Gateway-gated (governed round-trip), so default-on is safe.
-    "io.ryu.checklist",
-    "io.ryu.smart-intake-form",
-    "io.ryu.data-grid-explorer",
-    "io.ryu.chart-studio",
-    "io.ryu.decision-wizard",
-    "io.ryu.quest-board",
-    "io.ryu.worktree-diff-review",
-    "io.ryu.gateway-budget-dial",
+    "checklist",
+    "smart-intake-form",
+    "data-grid-explorer",
+    "chart-studio",
+    "decision-wizard",
+    "quest-board",
+    "worktree-diff-review",
+    "gateway-budget-dial",
+    // The Whiteboard app — a full-page Companion (`ui_format:"html"`) that owns its
+    // Space documents via `spaces:docs`. Default-on with a dedicated seed block in
+    // main.rs (it needs approved grants + a `ui_code` HTML blob the generic seed
+    // loop does not set). Replaces the built-in whiteboard editor.
+    "com.ryu.whiteboard",
 ];
 
 /// The subset of [`CORE_PLUGINS`] that should be **enabled by default** on a
@@ -123,20 +161,37 @@ pub const CORE_PLUGINS: &[&str] = &[
 /// real, swappable plugins — a user can disable any of them, and the fixture is
 /// the reference a third party can fork.
 pub const CORE_DEFAULT_ON: &[&str] = &[
-    "io.ryu.engines",
-    "io.ryu.durable",
-    "io.ryu.goal",
-    "io.ryu.proof",
-    "io.ryu.double-check",
+    "engines",
+    "durable",
+    "goal",
+    "proof",
+    "double-check",
+    // The default tool apps — auto-installed (record seeded enabled) on a fresh
+    // install so they show up like the auto-downloaded default models. The actual
+    // process runs through its own sidecar/MCP lifecycle; enabling the record just
+    // makes it a first-class, governed, disable-able App. Their fixtures declare no
+    // runnables, so seeding never double-lists their tools.
+    "ghost",
+    "shadow",
+    "spider",
+    "agentbrowser",
+    // Auto-expand ships default-on so its composer toggle + `/expand` command are
+    // available with zero setup; the flag/command `match` gate makes it free when
+    // the toggle is off and no `/expand` is used (no sandbox spawn on idle turns).
+    "com.ryuhq.auto-expand",
     // Ryu Apps — default-on so widgets render on install (see CORE_PLUGINS).
-    "io.ryu.checklist",
-    "io.ryu.smart-intake-form",
-    "io.ryu.data-grid-explorer",
-    "io.ryu.chart-studio",
-    "io.ryu.decision-wizard",
-    "io.ryu.quest-board",
-    "io.ryu.worktree-diff-review",
-    "io.ryu.gateway-budget-dial",
+    "checklist",
+    "smart-intake-form",
+    "data-grid-explorer",
+    "chart-studio",
+    "decision-wizard",
+    "quest-board",
+    "worktree-diff-review",
+    "gateway-budget-dial",
+    // Whiteboard — default-on so opening a whiteboard Space document just works. Its
+    // record is established with grants + `ui_code` by the dedicated seed block in
+    // main.rs BEFORE the generic loop, which then skips it (record present wins).
+    "com.ryu.whiteboard",
 ];
 
 /// The [`crate::plugin_manifest::PluginTier`] of a plugin, derived from
@@ -169,50 +224,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn system_apps_contains_ghost_and_shadow() {
-        assert!(
-            SYSTEM_PLUGINS
-                .iter()
-                .any(|s| s.manifest_id == "io.ryu.ghost"),
-            "ghost must be in SYSTEM_PLUGINS"
-        );
-        assert!(
-            SYSTEM_PLUGINS
-                .iter()
-                .any(|s| s.manifest_id == "io.ryu.shadow"),
-            "shadow must be in SYSTEM_PLUGINS"
-        );
+    fn system_apps_contains_default_tool_apps() {
+        for id in ["ghost", "shadow", "spider", "agentbrowser"] {
+            assert!(
+                SYSTEM_PLUGINS.iter().any(|s| s.manifest_id == id),
+                "{id} must be in SYSTEM_PLUGINS"
+            );
+        }
     }
 
     #[test]
     fn is_builtin_returns_true_for_known_ids() {
-        assert!(is_builtin("io.ryu.ghost"));
-        assert!(is_builtin("io.ryu.shadow"));
+        assert!(is_builtin("ghost"));
+        assert!(is_builtin("shadow"));
+        assert!(is_builtin("spider"));
+        assert!(is_builtin("agentbrowser"));
     }
 
     #[test]
     fn is_builtin_returns_false_for_unknown_ids() {
-        assert!(!is_builtin("io.ryu.spider"));
         assert!(!is_builtin("com.example.research-assistant"));
         assert!(!is_builtin("does.not.exist"));
     }
 
     #[test]
     fn find_system_plugin_returns_correct_metadata() {
-        let ghost = find_system_plugin("io.ryu.ghost").expect("ghost must be found");
+        let ghost = find_system_plugin("ghost").expect("ghost must be found");
         assert_eq!(ghost.sidecar_name, "ghost");
         assert!(ghost.windows_first);
         assert!(ghost.local_only);
 
-        let shadow = find_system_plugin("io.ryu.shadow").expect("shadow must be found");
+        let shadow = find_system_plugin("shadow").expect("shadow must be found");
         assert_eq!(shadow.sidecar_name, "shadow");
         assert!(shadow.windows_first);
         assert!(shadow.local_only);
     }
 
     #[test]
+    fn find_system_plugin_returns_metadata_for_default_tool_apps() {
+        let spider = find_system_plugin("spider").expect("spider must be found");
+        assert_eq!(spider.sidecar_name, "spider");
+        assert!(!spider.windows_first, "spider is cross-platform");
+
+        let ab = find_system_plugin("agentbrowser").expect("agentbrowser must be found");
+        assert_eq!(ab.sidecar_name, "agentbrowser");
+        assert!(!ab.windows_first, "agentbrowser is cross-platform");
+        assert!(!ab.local_only, "agentbrowser reaches the web");
+    }
+
+    #[test]
     fn find_system_plugin_returns_none_for_unknown_id() {
-        assert!(find_system_plugin("io.ryu.spider").is_none());
         assert!(find_system_plugin("does.not.exist").is_none());
     }
 
@@ -221,13 +282,28 @@ mod tests {
     #[test]
     fn tier_for_core_plugins_is_core() {
         use crate::plugin_manifest::PluginTier;
-        assert_eq!(tier_for("io.ryu.engines"), PluginTier::Core);
-        assert_eq!(tier_for("io.ryu.ghost"), PluginTier::Core);
-        assert_eq!(tier_for("io.ryu.firewall"), PluginTier::Core);
-        assert_eq!(tier_for("io.ryu.sandbox"), PluginTier::Core);
+        assert_eq!(tier_for("engines"), PluginTier::Core);
+        assert_eq!(tier_for("ghost"), PluginTier::Core);
+        assert_eq!(tier_for("firewall"), PluginTier::Core);
+        assert_eq!(tier_for("sandbox"), PluginTier::Core);
         // #448 dogfood: the durable workflow engine plugin is Core-tier.
-        assert_eq!(tier_for("io.ryu.durable"), PluginTier::Core);
-        assert!(is_default_on("io.ryu.durable"));
+        assert_eq!(tier_for("durable"), PluginTier::Core);
+        assert!(is_default_on("durable"));
+    }
+
+    /// The four sidecar-backed default tool apps are Core-tier AND default-on, so
+    /// a fresh install auto-seeds their app record enabled (parity with the
+    /// auto-downloaded default models). They are also system plugins (sidecar
+    /// lifecycle) — the two facts coexist: the record is the governance shell, the
+    /// sidecar/MCP provider is the run path.
+    #[test]
+    fn default_tool_apps_are_core_and_default_on_and_system() {
+        use crate::plugin_manifest::PluginTier;
+        for id in ["ghost", "shadow", "spider", "agentbrowser"] {
+            assert_eq!(tier_for(id), PluginTier::Core, "{id} must be Core-tier");
+            assert!(is_default_on(id), "{id} must be default-on (auto-seeded)");
+            assert!(is_builtin(id), "{id} must be a system plugin");
+        }
     }
 
     #[test]
@@ -237,7 +313,6 @@ mod tests {
             tier_for("com.example.research-assistant"),
             PluginTier::Community
         );
-        assert_eq!(tier_for("io.ryu.spider"), PluginTier::Community);
         assert_eq!(tier_for("does.not.exist"), PluginTier::Community);
     }
 
@@ -273,9 +348,12 @@ mod tests {
         }
         // Gateway/sandbox policy plugins are Core-tier but NOT default-on
         // (they change gateway/sandbox behaviour, so they stay opt-in).
-        assert!(!is_default_on("io.ryu.firewall"));
-        assert!(!is_default_on("io.ryu.routing"));
-        assert!(!is_default_on("io.ryu.sandbox"));
-        assert!(!is_default_on("io.ryu.headroom"));
+        assert!(!is_default_on("firewall"));
+        assert!(!is_default_on("routing"));
+        assert!(!is_default_on("sandbox"));
+        assert!(!is_default_on("headroom"));
+        // Predictive typing is Core-tier but opt-in (sends text to a model).
+        assert!(CORE_PLUGINS.contains(&"predict"));
+        assert!(!is_default_on("predict"));
     }
 }

@@ -1,0 +1,27 @@
+{
+  "id": "com.ryuhq.hook-observers",
+  "name": "Hook Observers",
+  "version": "1.0.0",
+  "runnables": [],
+  "permission_grants": [],
+  "activation_events": ["*"],
+  "contributes": {
+    "turn_hooks": [
+      {
+        "id": "observers.subagent-stop",
+        "on": "subagent_stop",
+        "code": "return { kind: 'note', text: 'subagent ' + ((ctx.event && ctx.event.id) || '?') + ' finished: ' + (ctx.output || '').slice(0, 60) };"
+      },
+      {
+        "id": "observers.session-end",
+        "on": "session_end",
+        "code": "const n = ctx.transcript ? ctx.transcript.length : 0; return { kind: 'note', text: 'session ' + (ctx.conversation_id || '?') + ' ended with ' + n + ' messages' };"
+      },
+      {
+        "id": "observers.notification",
+        "on": "notification",
+        "code": "return { kind: 'note', text: 'notification: ' + ((ctx.event && ctx.event.title) || '?') };"
+      }
+    ]
+  }
+}

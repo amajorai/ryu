@@ -116,6 +116,38 @@ function resolveUiEntry(manifest: LoadedManifest): string | null {
 	return null;
 }
 
+// Resolve a companion's `ui_format` discriminator. `"html"` (Path B) means the
+// `ui_entry` file is ALREADY a self-contained HTML document (a
+// vite-plugin-singlefile build for a heavy app like the whiteboard) and must be
+// shipped VERBATIM as `ui_code` — NOT run through `Bun.build`, which would try to
+// bundle an HTML file as an ESM entry and fail. Anything else (absent / `"js"`) is
+// the default: `ui_entry` is an ESM module `Bun.build` bundles into `ui_code`.
+function resolveUiFormat(manifest: LoadedManifest): "html" | "js" {
+	for (const runnable of manifest.runnables) {
+		if (runnable.kind !== "companion") {
+			continue;
+		}
+		const fmt = (runnable.config as Record<string, unknown> | undefined)
+			?.ui_format;
+		if (typeof fmt === "string" && fmt.trim().toLowerCase() === "html") {
+			return "html";
+		}
+	}
+	return "js";
+}
+
+// Read a Path B (`ui_format:"html"`) companion's prebuilt HTML entry verbatim. The
+// file is the finished, self-contained document (CSS/JS/fonts already inlined by
+// the singlefile bundler); `ryu pack` ships it as `ui_code` untouched so its
+// sha256 matches byte-for-byte on install.
+function readUiEntryHtml(dir: string, uiEntry: string): string {
+	const entryPath = resolve(dir, uiEntry);
+	if (!existsSync(entryPath)) {
+		exitError(`companion ui_entry (html) not found: ${entryPath}`);
+	}
+	return readFileSync(entryPath, "utf8");
+}
+
 // Bundle the plugin's UI entry into ONE self-contained browser ESM module string.
 // No external imports are emitted: the `RyuPlugin` API is INJECTED at runtime by
 // the host bootstrap (the plugin calls `activate(context)`), not imported, so the
@@ -148,9 +180,14 @@ async function commandPack(rawDir: string): Promise<void> {
 	const manifest = loadManifest(dir);
 
 	// Bundle the companion UI entry, if any. Manifest-only plugins skip this and
-	// emit exactly the previous shape (no `ui_code`).
+	// emit exactly the previous shape (no `ui_code`). A `ui_format:"html"` companion
+	// (Path B) ships its prebuilt HTML verbatim; otherwise the ESM entry is bundled.
 	const uiEntry = resolveUiEntry(manifest);
-	const uiCode = uiEntry ? await bundleUiEntry(dir, uiEntry) : null;
+	const uiCode = uiEntry
+		? resolveUiFormat(manifest) === "html"
+			? readUiEntryHtml(dir, uiEntry)
+			: await bundleUiEntry(dir, uiEntry)
+		: null;
 
 	// Bind the bundled code to the manifest by its sha256. The hash goes INTO the
 	// manifest (the surface Core signs on publish, and the corruption self-check on
@@ -218,10 +255,56 @@ async function commandPublish(rawDir: string): Promise<void> {
 	// the Gateway signs a manifest that already binds the code; the `ui_code` blob
 	// is sent as a sibling (unsigned payload, integrity via the signed hash).
 	const uiEntry = resolveUiEntry(manifest);
-	const uiCode = uiEntry ? await bundleUiEntry(dir, uiEntry) : null;
+	const uiCode = uiEntry
+		? resolveUiFormat(manifest) === "html"
+			? readUiEntryHtml(dir, uiEntry)
+			: await bundleUiEntry(dir, uiEntry)
+		: null;
 	const manifestWithHash = uiCode
 		? { ...manifest, ui_code_sha256: uiCodeSha256(uiCode) }
 		: manifest;
+
+	// Phase 1.5 rich listing metadata forwarded FLAT into the publish body (not
+	// inside the signed manifest blob) so the control plane stores + serves it on
+	// detail. Each field is only sent when the author declared it. `developer`
+	// resolves the Claude-style `author` (string or `{name}`); `website` maps from
+	// the Claude `homepage`; the DISPLAY `runnables` array is derived from the
+	// manifest's authored runnables (id/name/kind) with a default enabled state.
+	const developer =
+		typeof manifest.author === "string"
+			? manifest.author
+			: manifest.author?.name;
+	const runnablesForDisplay = manifest.runnables.map((r) => ({
+		id: r.id,
+		kind: r.kind,
+		name: r.name,
+		enabled: true,
+	}));
+	const listingMetadata = {
+		...(manifest.description ? { description: manifest.description } : {}),
+		...(manifest.tagline ? { tagline: manifest.tagline } : {}),
+		...(developer ? { developer } : {}),
+		...(manifest.category ? { category: manifest.category } : {}),
+		...(manifest.iconUrl ? { iconUrl: manifest.iconUrl } : {}),
+		...(manifest.screenshots?.length
+			? { screenshots: manifest.screenshots }
+			: {}),
+		...(manifest.homepage ? { website: manifest.homepage } : {}),
+		...(manifest.privacyPolicyUrl
+			? { privacyPolicyUrl: manifest.privacyPolicyUrl }
+			: {}),
+		...(manifest.termsOfServiceUrl
+			? { termsOfServiceUrl: manifest.termsOfServiceUrl }
+			: {}),
+		...(manifest.capabilities?.length
+			? { capabilities: manifest.capabilities }
+			: {}),
+		...(manifest.examplePrompts?.length
+			? { examplePrompts: manifest.examplePrompts }
+			: {}),
+		...(manifest.setup ? { setup: manifest.setup } : {}),
+		...(runnablesForDisplay.length ? { runnables: runnablesForDisplay } : {}),
+	};
 
 	const url = `${publishBaseUrl()}/api/marketplace/publish`;
 	const body = {
@@ -234,6 +317,8 @@ async function commandPublish(rawDir: string): Promise<void> {
 		// it on install. Grants are read from the manifest server-side too.
 		descriptor: manifestWithHash,
 		grants: manifest.permission_grants ?? [],
+		// Rich listing metadata (Phase 1.5) forwarded flat; see above.
+		...listingMetadata,
 		// Per-item affiliate terms (optional): the commission a referrer earns when
 		// a referred user buys this paid item. The server re-validates the rule and
 		// stores it as the item's override (else the seller default applies).

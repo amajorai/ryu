@@ -86,6 +86,32 @@ permission, resolves an Expo push token, and POSTs it to Core's `/api/monitors/p
 node). Push only works on a physical device with a dev or EAS build, not Expo Go on SDK 53+, and a
 denied permission or missing build simply leaves push off (best-effort).
 
+## Native OS integrations
+
+Beyond push, the app leans into platform surfaces, all driven by chat-run status. A single
+controller (`apps/native/lib/agent-activity.ts`) maps a run's lifecycle
+(`running` / `waiting` / `review` / `done` / `error`) onto the right OS surface and degrades to a
+no-op where that surface is unavailable, so callers never branch on platform.
+
+| Surface | Platform | Status |
+|---|---|---|
+| Liquid Glass chrome | iOS 26+ | Verified |
+| Ongoing-run notification | Android | Verified |
+| Live Activity / Dynamic Island | iOS 16.2+ | Scaffolded (needs a Mac build) |
+
+**Liquid Glass** wraps floating chrome (the chat composer, the drawer footer) in Apple's iOS 26
+material through `GlassSurface` (`apps/native/components/glass-surface.tsx`), gated on
+`isLiquidGlassAvailable() && isGlassEffectAPIAvailable()` and falling back to a styled `View`
+everywhere else. **Android** shows a sticky, silent low-importance notification for the run's
+duration and an alerting one when it finishes (`notifyRunFinished`).
+
+<Callout type="warn">
+  The iOS **Live Activity / Dynamic Island** path is scaffolded, not yet built: the native module
+  (`apps/native/modules/ryu-live-activity/`) is present but needs a Mac to `expo prebuild` and run on
+  a device. JS uses `requireOptionalNativeModule`, so it no-ops safely until that build exists.
+  Remote updates while the app is killed (Core to APNs) are also not built yet.
+</Callout>
+
 ## The leverage: packages/core-client
 
 The shared client layer lives in the workspace package **`packages/core-client`**: a

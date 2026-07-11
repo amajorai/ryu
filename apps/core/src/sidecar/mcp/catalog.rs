@@ -49,6 +49,7 @@ const BUILTIN_SERVERS: &[&str] = &[
     super::exa::SERVER_NAME,
     super::sandbox::SERVER_NAME,
     super::notify_tool::SERVER_NAME,
+    super::artifact_tool::SERVER_NAME,
     super::channel_tool::SERVER_NAME,
     super::search_conversations::SERVER_NAME,
     super::threads::SERVER_NAME,

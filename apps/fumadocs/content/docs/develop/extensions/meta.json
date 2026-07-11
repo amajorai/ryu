@@ -7,6 +7,7 @@
     "plugin-json-manifest",
     "plugin-runtime",
     "agent-skills",
+    "ryu-apps",
     "desktop-companion",
     "channel-bot",
     "author-workflows",

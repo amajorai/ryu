@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
 use serde_json::json;
 
 use super::spec::SandboxSpec;
@@ -56,10 +57,21 @@ struct ActiveRun {
     workspace: WorkspaceId,
     /// Per-run execution cap in micro-USD; `0` = no cap.
     per_run_budget_micro_usd: u64,
+    /// Wall-clock at registration, for the run's total elapsed in a snapshot.
+    started_at: Instant,
     /// Wall-clock of the previous tick (or registration, for the first tick).
     last_tick_at: Instant,
     /// Monotonic tick counter, starting at 0. The Gateway dedups replays on it.
     tick_index: u64,
+    /// Seconds already metered to the Gateway by the periodic ticker. A final
+    /// one-shot debit charges only `measured - ticked_seconds` so the ticker and
+    /// the final debit never double-bill. Advanced optimistically each tick
+    /// (matching `last_tick_at`), regardless of send success.
+    ticked_seconds: u64,
+    /// Cumulative billed micro-USD last reported by the Gateway (0 until the
+    /// first tick returns). Surfaced in [`SandboxRunSnapshot`] for billing
+    /// visibility; never used to make a cost decision (the Gateway prices).
+    last_accrued_micro_usd: u64,
 }
 
 /// Why a run left the registry, for observability + a future run-lifecycle join.
@@ -135,8 +147,11 @@ pub fn register(
             backend: backend.into(),
             workspace,
             per_run_budget_micro_usd,
+            started_at: now,
             last_tick_at: now,
             tick_index: 0,
+            ticked_seconds: 0,
+            last_accrued_micro_usd: 0,
         },
     );
     // A previous kill record for a reused run id is stale once it re-registers.
@@ -167,6 +182,150 @@ pub fn unregister(run_id: &str) {
 /// Whether a run was stopped by a budget/balance verdict (and why).
 pub fn kill_record(run_id: &str) -> Option<KillRecord> {
     lock_kills().get(run_id).cloned()
+}
+
+/// A serializable point-in-time view of one live, metered sandbox run, exposed
+/// to the node selector via `GET /api/sandboxes` so a client can see which
+/// remote (billable) sandboxes a node is currently running.
+#[derive(Debug, Clone, Serialize)]
+pub struct SandboxRunSnapshot {
+    /// The run's unique id (the uuid minted at register time).
+    pub run_id: String,
+    /// Owning/bill-to org, or `null` when Core could not resolve one.
+    pub org_id: Option<String>,
+    /// Sandbox backend the run belongs to (e.g. `"daytona"`).
+    pub backend: String,
+    /// The billed resource shape reported to the Gateway each tick.
+    pub spec: SandboxSpec,
+    /// Wall-clock seconds since the run registered.
+    pub elapsed_seconds: u64,
+    /// Seconds already metered to the Gateway by the periodic ticker.
+    pub ticked_seconds: u64,
+    /// Monotonic tick counter (number of ticks issued so far).
+    pub tick_index: u64,
+    /// Cumulative billed micro-USD last reported by the Gateway (`0` until the
+    /// first tick returns).
+    pub accrued_micro_usd: u64,
+    /// Per-run execution cap in micro-USD; `0` = no cap.
+    pub per_run_budget_micro_usd: u64,
+}
+
+/// Snapshot every live, metered sandbox run for the node selector surface.
+///
+/// Read-only: takes the registry lock, copies each run into a serializable
+/// [`SandboxRunSnapshot`], and releases the lock. Never blocks on I/O.
+pub fn list_active_runs() -> Vec<SandboxRunSnapshot> {
+    let now = Instant::now();
+    lock_runs()
+        .iter()
+        .map(|(run_id, run)| SandboxRunSnapshot {
+            run_id: run_id.clone(),
+            org_id: run.org_id.clone(),
+            backend: run.backend.clone(),
+            spec: run.spec.clone(),
+            elapsed_seconds: now.saturating_duration_since(run.started_at).as_secs(),
+            ticked_seconds: run.ticked_seconds,
+            tick_index: run.tick_index,
+            accrued_micro_usd: run.last_accrued_micro_usd,
+            per_run_budget_micro_usd: run.per_run_budget_micro_usd,
+        })
+        .collect()
+}
+
+/// Residual metering state captured as a run deregisters, so a caller can issue
+/// a single final debit for the tail the periodic ticker never charged.
+#[derive(Debug, Clone, Copy)]
+pub struct RunResidual {
+    /// Seconds already metered by the ticker; subtract from the measured total.
+    pub ticked_seconds: u64,
+    /// The next unused, monotonic tick index — dedup-safe for the final debit
+    /// (the ticker never sent this index).
+    pub next_tick_index: u64,
+}
+
+/// Deregister a run and return its residual metering state for a final debit.
+///
+/// Returns `None` when the run is not live (already deregistered, or stopped by
+/// a budget/balance kill verdict — the Gateway already charged/killed it, so
+/// there is no residual tail to bill). Removing the entry also stops any further
+/// periodic ticks for the run, so the caller may safely debit afterward without
+/// racing the ticker.
+pub fn deregister_for_final_debit(run_id: &str) -> Option<RunResidual> {
+    lock_runs().remove(run_id).map(|run| RunResidual {
+        ticked_seconds: run.ticked_seconds,
+        next_tick_index: run.tick_index,
+    })
+}
+
+/// Issue a single final metering debit for a completed one-shot run's un-ticked
+/// tail (rounded-up seconds). Call it after [`deregister_for_final_debit`] so
+/// the periodic ticker can no longer fire for the run — this charges the
+/// remainder the ticker missed (typically a sub-[`TICK_INTERVAL`] run the ticker
+/// never saw).
+///
+/// Fully fail-open: a gateway/auth/transport error is logged and swallowed so it
+/// can never fail the user's sandbox exec. `seconds == 0` is a no-op. This is a
+/// standalone POST (not routed through the ticker's `send_tick`) because the run
+/// has already completed — there is nothing left to kill, so no verdict is
+/// enforced, only logged.
+pub async fn debit_final(
+    run_id: String,
+    org_id: Option<String>,
+    spec: SandboxSpec,
+    seconds: u64,
+    per_run_budget_micro_usd: u64,
+    tick_index: u64,
+) {
+    if seconds == 0 {
+        return;
+    }
+    let bearer = match gateway_bearer() {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(run_id = %run_id, error = %e, "sandbox final debit: no gateway bearer, tail not billed (fail-open)");
+            return;
+        }
+    };
+    let endpoint = format!("{}/sandbox/tick", gateway_url().trim_end_matches('/'));
+    let body = json!({
+        "run_id": run_id,
+        "org_id": org_id,
+        "spec": spec,
+        "elapsed_seconds_delta": seconds,
+        "tick_index": tick_index,
+        "per_run_budget_micro_usd": per_run_budget_micro_usd,
+    });
+
+    let resp = reqwest::Client::new()
+        .post(&endpoint)
+        .timeout(Duration::from_secs(5))
+        .bearer_auth(bearer)
+        .json(&body)
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let accrued = r
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v.get("accrued_micro_usd").and_then(serde_json::Value::as_u64))
+                .unwrap_or(0);
+            tracing::info!(
+                run_id = %run_id,
+                seconds,
+                accrued_micro_usd = accrued,
+                "sandbox final debit: un-ticked tail reported to gateway"
+            );
+        }
+        Ok(r) => {
+            tracing::warn!(run_id = %run_id, status = %r.status(), "sandbox final debit: gateway non-2xx, tail not billed (fail-open)");
+        }
+        Err(e) => {
+            tracing::warn!(run_id = %run_id, error = %e, "sandbox final debit: gateway unreachable, tail not billed (fail-open)");
+        }
+    }
 }
 
 /// Snapshot of the fields needed to send one tick, taken under the registry lock
@@ -235,6 +394,11 @@ async fn run_tick_cycle() {
             let tick_index = run.tick_index;
             run.last_tick_at = now;
             run.tick_index = run.tick_index.saturating_add(1);
+            // Optimistic, matching `last_tick_at`: count the elapsed seconds as
+            // metered even if the send below fails (a lost delta, same as the
+            // ticker already drops on a failed post). Keeps the final-debit
+            // remainder consistent with the ticker's own accounting.
+            run.ticked_seconds = run.ticked_seconds.saturating_add(elapsed);
             jobs.push(TickJob {
                 run_id: run_id.clone(),
                 org_id: run.org_id.clone(),
@@ -311,6 +475,12 @@ async fn send_tick(job: TickJob) {
         .get("accrued_micro_usd")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0);
+
+    // Record the latest accrued figure for the billing-visibility snapshot. Only
+    // if the run is still live (a kill verdict removes it just below).
+    if let Some(run) = lock_runs().get_mut(&job.run_id) {
+        run.last_accrued_micro_usd = accrued;
+    }
 
     match verdict {
         Verdict::Continue => {}

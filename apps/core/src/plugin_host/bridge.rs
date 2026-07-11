@@ -22,6 +22,8 @@ const GRANT_SIDE_MODEL: &str = "hook:side-model";
 const GRANT_STORAGE: &str = "storage:kv";
 /// Grant required to call `host.runAgent` (spawn a full tool-using sub-agent).
 const GRANT_RUN_AGENT: &str = "hook:run-agent";
+/// Grant required to call `host.spaces_*` (own Space documents).
+const GRANT_SPACES: &str = "spaces:docs";
 
 /// Bridges sandbox `host.*` calls for one plugin hook run.
 pub struct PluginHookBridge {
@@ -48,6 +50,11 @@ impl PluginHookBridge {
             "storage_get" | "storage_set" | "storage_delete" | "storage_keys" => {
                 self.storage(method, args).await
             }
+            "spaces_create_doc"
+            | "spaces_get_doc"
+            | "spaces_update_doc"
+            | "spaces_list_docs"
+            | "spaces_delete_doc" => self.spaces(method, args).await,
             other => err(format!("unknown host capability '{other}'")),
         }
     }
@@ -196,6 +203,108 @@ impl PluginHookBridge {
         }
     }
 
+    /// `host.spaces_*` — a full-page Companion app OWNS Space documents: created in
+    /// the `documents` table, search-embedded, `[[backlinked]]`, versioned, and
+    /// Space-routed, exactly like a built-in page/database/whiteboard. Every doc an
+    /// app touches carries `kind = "app:<plugin_id>"`, and the store enforces that
+    /// isolation on every read/update/delete, so one app can never reach another's
+    /// docs or a built-in doc. `plugin_id` is the bridge's path-bound owner id, so
+    /// it cannot be spoofed by the frame.
+    async fn spaces(&self, method: &str, args: Value) -> InvokeOutcome {
+        if !self.grants.contains(GRANT_SPACES) {
+            return err(format!(
+                "capability '{GRANT_SPACES}' not granted to plugin '{}'",
+                self.plugin_id
+            ));
+        }
+        let store = &self.state.spaces;
+        let space_id = args
+            .get("space_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        let doc_id = args
+            .get("doc_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+
+        match method {
+            "spaces_create_doc" => {
+                if space_id.is_empty() {
+                    return err("host.spaces.createDoc requires a non-empty 'space_id'".to_string());
+                }
+                let title = args
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("Untitled");
+                match store.app_create_doc(&self.plugin_id, space_id, title).await {
+                    Ok(id) => ok(json!(id)),
+                    Err(e) => err(e.to_string()),
+                }
+            }
+            "spaces_get_doc" => {
+                if doc_id.is_empty() {
+                    return err("host.spaces.getDoc requires a non-empty 'doc_id'".to_string());
+                }
+                match store.app_get_doc(&self.plugin_id, doc_id).await {
+                    Ok(Some(doc)) => match serde_json::to_value(doc) {
+                        Ok(v) => ok(v),
+                        Err(e) => err(e.to_string()),
+                    },
+                    Ok(None) => ok(Value::Null),
+                    Err(e) => err(e.to_string()),
+                }
+            }
+            "spaces_update_doc" => {
+                if doc_id.is_empty() {
+                    return err("host.spaces.updateDoc requires a non-empty 'doc_id'".to_string());
+                }
+                let title = args
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                let source = args
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                match store
+                    .app_update_doc(&self.plugin_id, doc_id, title.as_deref(), source)
+                    .await
+                {
+                    Ok(()) => ok(json!(true)),
+                    Err(e) => err(e.to_string()),
+                }
+            }
+            "spaces_list_docs" => {
+                if space_id.is_empty() {
+                    return err("host.spaces.listDocs requires a non-empty 'space_id'".to_string());
+                }
+                match store.app_list_docs(&self.plugin_id, space_id).await {
+                    Ok(docs) => match serde_json::to_value(docs) {
+                        Ok(v) => ok(v),
+                        Err(e) => err(e.to_string()),
+                    },
+                    Err(e) => err(e.to_string()),
+                }
+            }
+            "spaces_delete_doc" => {
+                if doc_id.is_empty() {
+                    return err("host.spaces.deleteDoc requires a non-empty 'doc_id'".to_string());
+                }
+                match store.app_delete_doc(&self.plugin_id, doc_id).await {
+                    Ok(()) => ok(json!(true)),
+                    Err(e) => err(e.to_string()),
+                }
+            }
+            _ => err(format!("unknown spaces method '{method}'")),
+        }
+    }
+
     /// Resolve the side-model id, swappable and never hardcoded to a remote
     /// provider: explicit `model` → preference `model_pref_key` → env
     /// `RYU_DEFAULT_LLM_MODEL` → the bundled local default.
@@ -279,6 +388,7 @@ mod tests {
         assert_eq!(GRANT_SIDE_MODEL, "hook:side-model");
         assert_eq!(GRANT_STORAGE, "storage:kv");
         assert_eq!(GRANT_RUN_AGENT, "hook:run-agent");
+        assert_eq!(GRANT_SPACES, "spaces:docs");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.worktree-diff-review",
+  "id": "worktree-diff-review",
   "name": "Worktree Diff Review",
   "version": "1.0.0",
   "runnables": [

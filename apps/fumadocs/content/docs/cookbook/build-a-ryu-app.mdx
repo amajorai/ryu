@@ -1,0 +1,165 @@
+---
+title: "Build a Ryu App that renders in chat"
+description: "Author an interactive widget with defineApp, bundle it into a plugin manifest, and have an agent emit it inline in chat."
+---
+
+A Ryu App is a tool whose result renders an interactive widget inline in chat (the ChatGPT-Apps-style
+surface), not just text. This recipe authors a minimal widget with `defineApp`, bundles its UI into a
+plugin manifest with `ryu pack`, and has an agent emit it so the widget mounts in the chat stream. It
+is for developers who want a clickable surface in chat instead of a wall of tool output.
+
+## What you'll use
+
+- [Ryu Apps](/docs/develop/extensions/ryu-apps): the widget contract, the `window.openai` bridge, and the render-vs-companion split.
+- [Apps in the desktop](/docs/desktop/user-guide/apps): what a rendered widget looks like and where it appears.
+- [The SDK](/docs/develop/sdk): the `defineApp` factory and `ryu pack`.
+
+## Prerequisites
+
+- **Bun** on your PATH. Ryu uses [Bun](https://bun.sh) across the monorepo.
+- **A running Ryu Core** with a model the gateway can route.
+
+## Steps
+
+<Steps>
+
+<Step>
+
+### Scaffold the project skeleton
+
+Start from `create-ryu-app` for the skeleton (a `package.json` with the `@ryuhq/sdk` dependency and a
+`pack` script, plus a valid `plugin.json`):
+
+```bash
+bunx create-ryu-app my-first-app
+cd my-first-app
+bun install
+```
+
+`create-ryu-app` scaffolds an **agent** starter (`src/agent.ts`), not a widget app. You keep the
+skeleton and its `pack` script, then author the app manifest yourself in the next step.
+
+</Step>
+
+<Step>
+
+### Author the app manifest with `defineApp`
+
+`defineApp` (`packages/sdk/src/runnable/app.ts`) assembles a `plugin.json` from a declarative
+description. A **render** tool (`accessible` unset) produces the widget; a **companion** tool
+(`accessible: true`) is a call target a mounted widget may invoke. Write a small build script that
+calls `defineApp` and writes the manifest to disk:
+
+```ts
+import { writeFileSync } from "node:fs";
+import { defineApp } from "@ryuhq/sdk";
+
+const manifest = defineApp({
+  id: "com.example.checklist",
+  title: "Checklist",
+  version: "1.0.0",
+  slug: "checklist",
+  uiEntry: "src/widget.tsx",
+  tools: [
+    { name: "render", description: "Render a checklist", invoking: "Building…", invoked: "Ready" },
+    { name: "toggle", description: "Toggle an item", accessible: true },
+  ],
+});
+
+writeFileSync("plugin.json", JSON.stringify(manifest, null, 2));
+```
+
+The render tool gets a `contributes.widgets[]` entry binding it to `ui://widget/checklist.html`;
+`defineApp` validates the whole manifest against `PluginManifestSchema` and throws with the failing
+field if anything is off.
+
+<Callout type="warn">
+`defineApp` is **declarative pass-through only** - there is no `run` handler. The widget renders from
+`window.openai.toolInput` / `toolOutput` (Core echoes the validated arguments as `structuredContent`);
+third-party tool code execution needs the plugin runtime, which is out of scope here.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Write the widget UI
+
+Author `src/widget.tsx` as the `uiEntry`. It reads its data from the `window.openai` bridge and, for a
+companion tool, calls back through it:
+
+```tsx
+function Checklist() {
+  const items = (window.openai?.toolOutput?.items ?? []) as string[];
+  return (
+    <ul>
+      {items.map((label) => (
+        <li key={label}>
+          <button type="button" onClick={() => window.openai?.callTool("toggle", { label })}>
+            {label}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+The widget must bundle to **self-contained** HTML with no external chunk. It renders inside a
+null-origin sandboxed iframe under a `default-src 'none'` CSP, so an external `./chunk.js` reference
+would leave it blank (this is exactly why the internal `packages/ryu-apps/scripts/build-all.ts` builds
+one app per Vite invocation). You do not run that internal script - the next step handles bundling.
+
+</Step>
+
+<Step>
+
+### Bundle it with `ryu pack`
+
+`ryu pack` validates the manifest and inlines the `uiEntry` source into the manifest's `ui_code` so
+Core can serve the widget HTML as an MCP resource:
+
+```bash
+bun run pack
+```
+
+This runs `bunx ryu pack .`, whose `bundleUiEntry` step (`packages/sdk/src/cli.ts`) bundles
+`src/widget.tsx` into a single self-contained blob and writes `dist/plugin.bundle.json`. An invalid
+manifest exits non-zero and names the failing field.
+
+</Step>
+
+<Step>
+
+### Emit it in chat
+
+Install the packed app, then ask an agent to call the render tool. When the tool result carries the
+widget binding, Core emits it and the desktop mounts the widget standalone in the chat stream (served
+from its `ui://widget/checklist.html` resource) instead of showing a plain tool row.
+
+<Callout type="warn">
+Not every agent can emit a widget. The flagship `ryu` agent (Pi) cannot - it has no base-URL or MCP
+hook to inject the app tools through. Use the batteries-included local Gemma engine or an
+OpenAI-compat agent, which route through Core's governed tool loop. The plugin runtime is also gated
+behind `PLUGIN_RUNTIME_FLAG`, and the live end-to-end render in the real desktop is built but not yet
+proven end to end, so treat this last step as the current frontier.
+</Callout>
+
+</Step>
+
+</Steps>
+
+## Check your work
+
+- `bun run pack` exits `0` and writes `dist/plugin.bundle.json` with a `ui_code` blob. A broken
+  manifest exits non-zero and names the failing field, so a bad app never reaches the store.
+- The bundled widget HTML has no external `./chunk.js` reference; it is self-contained, or it renders
+  blank under the sandbox CSP.
+- With a widget-capable agent (local Gemma or an OpenAI-compat agent), calling the render tool mounts
+  the widget in chat. With Pi, the same call returns a plain tool result and no widget.
+
+## Going further
+
+- Give a plain agent a callable tool first, then graduate it to a widget: [A tool the model can call](/docs/cookbook/a-tool-the-model-can-call).
+- Write your first gateway-governed agent in code: [Build your first agent in code](/docs/cookbook/first-sdk-agent).
+- Expose the same tools to any MCP host: [Expose an MCP server](/docs/cookbook/expose-an-mcp-server).

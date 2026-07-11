@@ -209,6 +209,27 @@ export const ContributesSchema = z.object({
 
 export type Contributes = z.infer<typeof ContributesSchema>;
 
+// ── SetupStep (listing companion/config card) ────────────────────────────────
+
+/**
+ * One optional post-install setup/companion card step surfaced on the
+ * marketplace detail dialog (Phase 1.5 Ryu extension). All fields optional so a
+ * card can be a bare call-to-action or a labelled instruction. `ryu publish`
+ * forwards this into the publish body's `setup` field.
+ */
+export const SetupStepSchema = z.object({
+	/** Card heading (e.g. the companion app name). */
+	title: z.string().optional(),
+	/** Instruction body shown under the title. */
+	description: z.string().optional(),
+	/** Label for the optional action button. */
+	actionLabel: z.string().optional(),
+	/** URL the action button opens (validated server-side on publish). */
+	actionUrl: z.string().optional(),
+});
+
+export type SetupStep = z.infer<typeof SetupStepSchema>;
+
 // ── PluginManifest ───────────────────────────────────────────────────────────
 
 /**
@@ -300,6 +321,65 @@ export const PluginManifestSchema = z.object({
 				})
 				.optional(),
 		})
+		.optional(),
+
+	// ── Rich listing metadata (Phase 1.5) ──────────────────────────────────────
+	// Optional store-listing fields a plugin author declares so the marketplace
+	// detail dialog renders a richer App-Store-style preview. Field names align
+	// with the Claude `.claude-plugin/marketplace.json` plugin-entry standard where
+	// one exists (`author`, `homepage`, `keywords`, `category`, `license`); the
+	// rest are Ryu extensions. `ryu publish` forwards these FLAT into the publish
+	// body (not inside the signed manifest blob) so the control plane stores them.
+	// All optional + additive: a manifest omitting them still validates.
+
+	/** Longer plain/markdown description shown in the detail dialog. */
+	description: z.string().optional(),
+	/** Short one-line pitch shown under the name (Ryu extension). */
+	tagline: z.string().optional(),
+	/**
+	 * Publisher identity. A bare string OR a Claude-style object; `ryu publish`
+	 * resolves it to the display `developer` (`author.name` when an object).
+	 */
+	author: z
+		.union([
+			z.string(),
+			z.object({
+				name: z.string(),
+				email: z.string().optional(),
+				url: z.string().optional(),
+			}),
+		])
+		.optional(),
+	/** Project/marketing homepage — maps to the listing `website` (Claude field). */
+	homepage: z.string().optional(),
+	/** Free-text search keywords (Claude field). */
+	keywords: z.array(z.string()).optional(),
+	/** Taxonomy category beyond the runnable kinds (Claude field). */
+	category: z.string().optional(),
+	/** SPDX-ish license identifier (Claude field). */
+	license: z.string().optional(),
+	/** Square logo/icon URL for the listing card + detail header. */
+	iconUrl: z.string().optional(),
+	/** Ordered App-Store-style screenshot gallery URLs (Ryu extension). */
+	screenshots: z.array(z.string()).optional(),
+	/** Privacy policy URL surfaced on detail (Ryu extension). */
+	privacyPolicyUrl: z.string().optional(),
+	/** Terms-of-service URL surfaced on detail (Ryu extension). */
+	termsOfServiceUrl: z.string().optional(),
+	/**
+	 * Human-readable capability strings (Ryu extension). When omitted the control
+	 * plane derives a default from `permission_grants`, so declaring this is only
+	 * needed to override the derived labels.
+	 */
+	capabilities: z.array(z.string()).optional(),
+	/** Example prompt chips shown on detail (Ryu extension). */
+	examplePrompts: z.array(z.string()).optional(),
+	/**
+	 * Optional companion/config card (Ryu extension): a single setup step or an
+	 * array of steps guiding the user through post-install configuration.
+	 */
+	setup: z
+		.union([SetupStepSchema, z.array(SetupStepSchema)])
 		.optional(),
 });
 

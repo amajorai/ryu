@@ -1,0 +1,215 @@
+/*
+ * Local styles for the Smart Intake Form widget. Layered on top of the shared
+ * `tokens.css`; every color/space value resolves from a `--ryu-*` token so the
+ * form inherits the host's light/dark theme for free.
+ */
+
+.intake {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ryu-space-4);
+	max-width: 560px;
+}
+
+.intake-header {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ryu-space-1);
+}
+
+.intake-title {
+	margin: 0;
+	font-size: var(--ryu-text-lg);
+	font-weight: 600;
+	color: var(--ryu-text);
+}
+
+.intake-subtitle {
+	margin: 0;
+	font-size: var(--ryu-text-sm);
+	color: var(--ryu-text-muted);
+}
+
+.intake-fields {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ryu-space-3);
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.intake-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ryu-space-1);
+}
+
+.intake-label {
+	display: flex;
+	align-items: center;
+	gap: var(--ryu-space-1);
+	font-size: var(--ryu-text-sm);
+	font-weight: 500;
+	color: var(--ryu-text);
+}
+
+.intake-required {
+	color: var(--ryu-danger);
+}
+
+.intake-edited {
+	font-size: var(--ryu-text-xs);
+	font-weight: 500;
+	color: var(--ryu-primary);
+}
+
+.intake-input,
+.intake-select {
+	width: 100%;
+	box-sizing: border-box;
+	padding: var(--ryu-space-2) var(--ryu-space-3);
+	font-family: inherit;
+	font-size: var(--ryu-text-base);
+	color: var(--ryu-text);
+	background: var(--ryu-bg);
+	border: 1px solid var(--ryu-border);
+	border-radius: var(--ryu-radius-sm);
+	transition: border-color 120ms ease;
+}
+
+.intake-input:hover,
+.intake-select:hover {
+	border-color: var(--ryu-text-muted);
+}
+
+.intake-input[aria-invalid="true"],
+.intake-select[aria-invalid="true"] {
+	border-color: var(--ryu-danger);
+}
+
+.intake-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--ryu-space-2);
+	cursor: pointer;
+	user-select: none;
+	font-size: var(--ryu-text-base);
+	color: var(--ryu-text);
+}
+
+.intake-toggle input {
+	width: 16px;
+	height: 16px;
+	accent-color: var(--ryu-primary);
+	cursor: pointer;
+}
+
+.intake-error {
+	display: flex;
+	align-items: center;
+	gap: var(--ryu-space-1);
+	font-size: var(--ryu-text-xs);
+	color: var(--ryu-danger);
+}
+
+.intake-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--ryu-space-3);
+	flex-wrap: wrap;
+}
+
+.intake-button {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--ryu-space-2);
+	padding: var(--ryu-space-2) var(--ryu-space-4);
+	font-family: inherit;
+	font-size: var(--ryu-text-base);
+	font-weight: 500;
+	color: var(--ryu-primary-contrast);
+	background: var(--ryu-primary);
+	border: 1px solid transparent;
+	border-radius: var(--ryu-radius-sm);
+	cursor: pointer;
+	transition: opacity 120ms ease;
+}
+
+.intake-button:hover:not(:disabled) {
+	opacity: 0.9;
+}
+
+.intake-button:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.intake-button-secondary {
+	color: var(--ryu-text);
+	background: var(--ryu-surface);
+	border-color: var(--ryu-border);
+}
+
+.intake-button-secondary:hover:not(:disabled) {
+	background: var(--ryu-surface-hover);
+	opacity: 1;
+}
+
+.intake-status {
+	display: flex;
+	align-items: center;
+	gap: var(--ryu-space-2);
+	padding: var(--ryu-space-3);
+	font-size: var(--ryu-text-sm);
+	border-radius: var(--ryu-radius);
+	background: var(--ryu-surface);
+	border: 1px solid var(--ryu-border);
+}
+
+.intake-status-confirmed {
+	color: var(--ryu-success);
+}
+
+.intake-status-error {
+	color: var(--ryu-danger);
+}
+
+.intake-icon {
+	flex: 0 0 auto;
+	width: 16px;
+	height: 16px;
+}
+
+.intake-empty,
+.intake-loading {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ryu-space-2);
+	padding: var(--ryu-space-6) var(--ryu-space-4);
+	text-align: center;
+	color: var(--ryu-text-muted);
+	font-size: var(--ryu-text-sm);
+}
+
+.intake-skeleton {
+	height: 40px;
+	border-radius: var(--ryu-radius-sm);
+	background: linear-gradient(
+		90deg,
+		var(--ryu-surface) 25%,
+		var(--ryu-surface-hover) 50%,
+		var(--ryu-surface) 75%
+	);
+	background-size: 200% 100%;
+	animation: intake-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes intake-shimmer {
+	0% {
+		background-position: 200% 0;
+	}
+	100% {
+		background-position: -200% 0;
+	}
+}

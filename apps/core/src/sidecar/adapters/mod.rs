@@ -1390,26 +1390,72 @@ fn last_user_message(messages: &[UiMessage]) -> String {
         .iter()
         .rev()
         .find(|m| m.role == "user")
-        .map(|m| {
-            let from_content = m.content.as_text();
-            if !from_content.is_empty() {
-                return from_content;
-            }
-            // AI SDK v6: text lives in top-level parts array
-            m.parts
-                .iter()
-                .filter_map(|p| {
-                    let t = p.get("type")?.as_str()?;
-                    if t == "text" {
-                        p.get("text")?.as_str().map(str::to_owned)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("")
-        })
+        .map(ui_message_text)
         .unwrap_or_default()
+}
+
+/// Extract the plain-text of a single UI message, handling both the legacy
+/// `content` shape and the AI SDK v6 top-level `parts` array. Shared so the
+/// plugin pre-turn hook (which rewrites the outgoing user message) reads text the
+/// same way the chat path does.
+pub(crate) fn ui_message_text(m: &UiMessage) -> String {
+    let from_content = m.content.as_text();
+    if !from_content.is_empty() {
+        return from_content;
+    }
+    // AI SDK v6: text lives in top-level parts array.
+    m.parts
+        .iter()
+        .filter_map(|p| {
+            let t = p.get("type")?.as_str()?;
+            if t == "text" {
+                p.get("text")?.as_str().map(str::to_owned)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// Replace the text of the most recent `user` message in place with `text`,
+/// preserving any non-text parts (e.g. image `file` parts stay attached). Used by
+/// the plugin pre-turn hook to swap the outgoing prompt for its expanded form
+/// before the turn is streamed and persisted. Returns `true` if a user message
+/// was found and rewritten.
+pub(crate) fn set_last_user_text(messages: &mut [UiMessage], text: String) -> bool {
+    if let Some(m) = messages.iter_mut().rev().find(|m| m.role == "user") {
+        m.content = UiContent::Text(text);
+        // Drop v6 text parts so the rewritten `content` is authoritative; keep
+        // non-text parts (images/files) so multimodal input survives the rewrite.
+        m.parts
+            .retain(|p| p.get("type").and_then(|t| t.as_str()) != Some("text"));
+        true
+    } else {
+        false
+    }
+}
+
+/// Append `extra` as additional context to the most recent `user` message
+/// (additive, not a replacement — the user's own text is kept). Used by the
+/// plugin `Inject` directive (`session_start` / `pre_user_turn`) to fold
+/// plugin-supplied context into the outgoing turn. Returns `true` if a user
+/// message was found.
+pub(crate) fn append_last_user_text(messages: &mut [UiMessage], extra: &str) -> bool {
+    if let Some(m) = messages.iter_mut().rev().find(|m| m.role == "user") {
+        let base = ui_message_text(m);
+        let joined = if base.is_empty() {
+            extra.to_string()
+        } else {
+            format!("{base}\n\n{extra}")
+        };
+        m.content = UiContent::Text(joined);
+        m.parts
+            .retain(|p| p.get("type").and_then(|t| t.as_str()) != Some("text"));
+        true
+    } else {
+        false
+    }
 }
 
 /// Image `file` parts of a single message (AI SDK v6 `file` parts with an image
@@ -2401,6 +2447,75 @@ pub(crate) async fn run_text_turn_in(
     drain_text_reply(response).await
 }
 
+/// Streaming sibling of [`run_text_turn_in`]: runs the SAME full agent turn (its
+/// own engine, tools, MCP, Gateway routing via `route_chat_stream`) but returns the
+/// LIVE SSE [`Response`] instead of draining it to a final string. The caller
+/// forwards a (filtered) view of the stream to its client.
+///
+/// Used by the app host-bridge streaming endpoint so a full-page Companion app can
+/// render an agent's reply token-by-token. `background: true` keeps it yielding to a
+/// directly-typing user on the shared local engine, exactly like the drained path.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_text_turn_stream(
+    conversation_id: String,
+    agent_id: Option<String>,
+    text: String,
+    persist: bool,
+    registry: Arc<AcpAgentRegistry>,
+    conversations: ConversationStore,
+    agent_store: AgentStore,
+    manager: Arc<SidecarManager>,
+    memory: MemoryStore,
+    worktree_diffs: crate::server::WorktreeDiffStore,
+    mcp: Arc<McpRegistry>,
+    skills: SkillRegistry,
+    traces: TraceStore,
+) -> Response {
+    let req = ChatStreamRequest {
+        messages: vec![UiMessage {
+            role: "user".to_owned(),
+            content: UiContent::Text(text),
+            parts: vec![],
+        }],
+        agent_id,
+        conversation_id: Some(conversation_id),
+        enable_long_term: false,
+        cwd: None,
+        worktree_isolation: false,
+        branch: None,
+        worktree_path: None,
+        worktree_branch: None,
+        companion_source: false,
+        target_agent_id: None,
+        team_id: None,
+        persist,
+        skip_user_append: false,
+        inference: None,
+        acp_mode: None,
+        acp_config: None,
+        acp_model: None,
+        background: true,
+        plugin_flags: std::collections::HashMap::new(),
+        author_user_id: None,
+        author_name: None,
+    };
+    route_chat_stream(
+        req,
+        registry,
+        conversations,
+        agent_store,
+        manager,
+        memory,
+        worktree_diffs,
+        mcp,
+        skills,
+        traces,
+        None,
+        None,
+    )
+    .await
+}
+
 /// Drain an AI SDK v6 UI-message-stream [`Response`] to its final assistant text.
 ///
 /// Concatenates every `text-delta` payload, stops at the `[DONE]` sentinel, and
@@ -2961,6 +3076,31 @@ pub async fn route_chat_stream(
         req.agent_id.clone()
     };
 
+    // Plane B agent-auto routing (spec §2): when the selected agent is the "auto"
+    // sentinel, resolve a concrete agent id for this turn FIRST, then continue
+    // exactly as if the user had picked it — the binding, memory scope, route,
+    // session keying, and persistence below all read this resolved id. Runs before
+    // `resolve_binding` so the resolved agent's engine/model binding is loaded.
+    // Always yields a concrete id (fails open to `default_agent_id`, else "ryu").
+    let effective_agent_id = if effective_agent_id.as_deref()
+        == Some(crate::agent_routing::AUTO_AGENT_ID)
+    {
+        let resolved =
+            crate::agent_routing::resolve_auto_agent(&user_text, req.conversation_id.as_deref())
+                .await;
+        tracing::info!(resolved_agent = %resolved, "agent-auto: resolved 'auto' to concrete agent");
+        // Register the resolved agent as a participant so the conversation reflects
+        // which agent actually handled the turn (mirrors the target_agent_id path).
+        if let Some(ref conv_id) = req.conversation_id {
+            if let Err(e) = conversations.add_participant(conv_id, &resolved).await {
+                tracing::warn!("agent-auto: failed to add resolved participant {resolved}: {e:#}");
+            }
+        }
+        Some(resolved)
+    } else {
+        effective_agent_id
+    };
+
     // Resolve the agent's engine binding from the store (U6), then map it to a
     // concrete route. The binding lets a custom agent target a local engine or a
     // registry transport; unknown agents fall back to the default plain-LLM agent.
@@ -3345,6 +3485,13 @@ pub async fn route_chat_stream(
                         .as_deref()
                         .is_some_and(|id| registry.find_by_prefix(id).is_some());
                     let chat_tools_enabled = apps_chat_tools_enabled() && agent_registered;
+                    // Per-agent Plane A override (spec §1): only for an agent that
+                    // has a stored `SmartRoutingConfig`; injected into the outbound
+                    // body as `ryu_smart_route` for the gateway to read and strip.
+                    // Absent → the global smart router (if any) applies as before.
+                    let smart_route_override = effective_agent_id
+                        .as_deref()
+                        .and_then(crate::agent_routing::smart_route_override);
                     return route_openai_stream(
                         req,
                         gateway_base,
@@ -3363,6 +3510,7 @@ pub async fn route_chat_stream(
                         Arc::clone(&mcp),
                         chat_tools_enabled,
                         tool_allowlist,
+                        smart_route_override,
                     )
                     .await;
                 }
@@ -3418,6 +3566,9 @@ pub async fn route_chat_stream(
                 Arc::clone(&mcp),
                 false,
                 None,
+                // Direct-to-provider (no gateway hop) → never inject the
+                // gateway-only `ryu_smart_route` field.
+                None,
             )
             .await
         }
@@ -3456,6 +3607,8 @@ pub async fn route_chat_stream(
                 sampling_engine,
                 Arc::clone(&mcp),
                 false,
+                None,
+                // Local engine goes direct (no gateway hop) → no `ryu_smart_route`.
                 None,
             )
             .await
@@ -3554,6 +3707,9 @@ pub async fn route_chat_stream(
                 sampling_engine,
                 Arc::clone(&mcp),
                 false,
+                None,
+                // SDK app owns its own provider routing (injected OPENAI_BASE_URL);
+                // no gateway on this hop → no `ryu_smart_route`.
                 None,
             )
             .await
@@ -3682,6 +3838,12 @@ async fn connect_openai(
     // set so the gateway passes `tools`/`tool_calls` through untouched (Core owns
     // the loop; the gateway still governs each dispatch via `/v1/exec/tool`).
     tools: &[Value],
+    // Per-agent Plane A model-routing override (spec §1). When `Some`, Core injects
+    // it into the body as `ryu_smart_route`; the gateway reads and strips it,
+    // building an ephemeral per-agent smart router for this request. Only ever set
+    // on the gateway-forward path — the raw provider on the fallback leg never sees
+    // it (an unknown body field can 400 a strict OpenAI endpoint).
+    smart_route_override: Option<&Value>,
 ) -> Result<reqwest::Response, String> {
     let mut payload_map = serde_json::Map::new();
     payload_map.insert("model".to_owned(), Value::String(model.to_owned()));
@@ -3701,6 +3863,13 @@ async fn connect_openai(
     // chat body is byte-for-byte unchanged.
     if !tools.is_empty() {
         payload_map.insert("tools".to_owned(), Value::Array(tools.to_vec()));
+    }
+    // Per-agent Plane A override (spec §1): inject the agent's private
+    // `SmartRoutingConfig` so the gateway routes THIS request with the agent's own
+    // rules instead of the global smart router. Opaque to Core; the gateway strips
+    // it before the provider call. Only present on the gateway-forward path.
+    if let Some(cfg) = smart_route_override {
+        payload_map.insert("ryu_smart_route".to_owned(), cfg.clone());
     }
     // Merge advanced sampling (temperature/top_p/top_k/penalties/…). No-op when the
     // agent set nothing, so the body stays identical to the pre-feature shape.
@@ -3849,6 +4018,11 @@ async fn connect_with_fallback(
     sampling_engine: crate::inference::Engine,
     // Governed chat tool-loop `tools` array (R1). Empty on the no-tool path.
     tools: &[Value],
+    // Per-agent Plane A `ryu_smart_route` override (spec §1), forwarded ONLY on the
+    // primary gateway-forward attempt. The fallback leg targets a raw provider, so
+    // it is deliberately omitted there (the gateway strips the field; a provider
+    // may 400 on it).
+    smart_route_override: Option<&Value>,
 ) -> Result<reqwest::Response, String> {
     match connect_openai(
         messages,
@@ -3866,6 +4040,7 @@ async fn connect_with_fallback(
         sampling,
         sampling_engine,
         tools,
+        smart_route_override,
     )
     .await
     {
@@ -3902,6 +4077,9 @@ async fn connect_with_fallback(
                 sampling,
                 sampling_engine,
                 tools,
+                // The fallback provider is a raw endpoint, not the gateway; never
+                // send the gateway-only `ryu_smart_route` field to it.
+                None,
             )
             .await
             {
@@ -3972,6 +4150,10 @@ async fn route_openai_stream<F, Fut>(
     // The effective agent's tool allowlist, narrowing which app render tools are
     // offered. `None` = every render tool (the default-agent case).
     tool_allowlist: Option<Vec<String>>,
+    // Per-agent Plane A model-routing override (spec §1). `Some` only on the
+    // gateway-forward path for an agent that has a stored override; injected into
+    // the outbound body as `ryu_smart_route` for the gateway to read and strip.
+    smart_route_override: Option<Value>,
 ) -> Response
 where
     F: FnOnce(String, &'static str) -> Fut + Send + 'static,
@@ -4106,6 +4288,7 @@ where
                 &sampling,
                 sampling_engine,
                 request_tools,
+                smart_route_override.as_ref(),
             )
             .await
             {
@@ -4120,6 +4303,16 @@ where
                     return;
                 }
             };
+
+            // Read the gateway policy-alert stamp off the response HEAD before the
+            // branch below consumes the body. This single read covers BOTH the
+            // success path AND the error/402 path (the latter early-returns after
+            // reading `.text()`, discarding the head) — the highest-value budget
+            // `Stop` (402) and firewall `block` alerts ride the error head, so
+            // reading here (above that return) is the only place both are caught.
+            // Lenient + fire-and-forget: a missing/bad header is a no-op and
+            // delivery is spawned so it never blocks the stream.
+            crate::policy_alerts::dispatch_from_headers(upstream.headers());
 
             if !upstream.status().is_success() {
                 let status = upstream.status();
@@ -6281,7 +6474,8 @@ mod tests {
             false, // not background fan-out
             &crate::inference::SamplingConfig::default(),
             crate::inference::Engine::Other,
-            &[], // no tools
+            &[],  // no tools
+            None, // no per-agent smart-route override
         )
         .await;
         // Both primary and fallback should fail; the error message must mention
@@ -6318,7 +6512,8 @@ mod tests {
             false, // not background fan-out
             &crate::inference::SamplingConfig::default(),
             crate::inference::Engine::Other,
-            &[], // no tools
+            &[],  // no tools
+            None, // no per-agent smart-route override
         )
         .await;
         let err = result.expect_err("unreachable primary");

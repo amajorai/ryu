@@ -15,6 +15,34 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub firewall: FirewallConfig,
 
+    /// User-created ("create from scratch") evaluators that EXTEND the built-in
+    /// evaluator catalog (unified-evaluator system). Merged over
+    /// [`crate::evaluators::builtin_catalog`] by
+    /// [`crate::evaluators::EvaluatorRegistry::from_config`] — a custom entry
+    /// overrides a built-in with the same `id`, and every custom entry is forced
+    /// `builtin = false` at merge time. Authored via `PUT /v1/config`. Like
+    /// `routing`/`tools`, the request path reads this startup snapshot, so a newly
+    /// saved custom evaluator takes effect on the next gateway restart (the desktop
+    /// save flow triggers a restart, mirroring the BYOK provider vault).
+    /// `#[serde(default)]` + skip-when-empty keeps an existing `gateway.toml`
+    /// byte-identical when none is authored — back-compat: no field == today.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_evaluators: Vec<crate::evaluators::Evaluator>,
+
+    /// Persisted standalone-desktop org firewall overlays (node→org→agent
+    /// cascade, hierarchical-policy spec §6), keyed by org id. Authored via
+    /// `PUT /v1/config` and seeded back into the resolver at startup so they
+    /// survive a gateway restart. `#[serde(default)]` + skip-when-empty keeps
+    /// an existing `gateway.toml` byte-identical when no overlay is authored.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub firewall_org_overlays: HashMap<String, FirewallOverlay>,
+
+    /// Persisted standalone-desktop per-agent firewall overlays (spec §6), keyed
+    /// by agent id. Same round-trip + skip-when-empty semantics as
+    /// `firewall_org_overlays`.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub firewall_agent_overlays: HashMap<String, FirewallOverlay>,
+
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
 
@@ -148,6 +176,10 @@ pub struct CreditsConfig {
     /// downgrade safely degrades to a restrict (mirrors the token-budget rule).
     #[serde(default)]
     pub wallet_empty_downgrade_to: Option<String>,
+    /// Notification fan-out tier when the org wallet-empty rule matches
+    /// (orthogonal to `wallet_empty_action`). Old configs → `Silent`.
+    #[serde(default)]
+    pub wallet_empty_alert: AlertTier,
     /// Per-request timeout in milliseconds for the debit POST. Default: 3000.
     #[serde(default = "default_credits_timeout_ms")]
     pub timeout_ms: u64,
@@ -271,6 +303,7 @@ impl Default for CreditsConfig {
             cost_per_stt_micro_usd: 0,
             wallet_empty_action: WalletEmptyAction::default(),
             wallet_empty_downgrade_to: None,
+            wallet_empty_alert: AlertTier::default(),
             timeout_ms: default_credits_timeout_ms(),
             fail_closed: false,
             cost_per_sandbox_vcpu_second_nano_usd: 14_000,
@@ -962,23 +995,63 @@ pub struct RoutingConfig {
     pub smart_routing: SmartRoutingConfig,
 }
 
+/// How a routing decision is reached. Shared vocabulary across both routing
+/// planes (Gateway model routing here, and Core agent routing) so a route is
+/// always resolved by one of a small, swappable set of strategies — never a
+/// hardcoded classifier. Every strategy fails open (see [`SmartRoutingConfig`]).
+///
+/// - `Llm`: a cheap classifier model reads the message and picks a rule. Most
+///   capable, one extra LLM round-trip per (uncached) decision.
+/// - `Embedding` (RAG): embed each rule's description once and embed the query,
+///   then route to the nearest rule by cosine similarity above a threshold. No
+///   LLM call — cheap and local when the embedder is local.
+/// - `Keyword`: case-insensitive substring match of a rule's description terms
+///   against the message. Zero cost, zero network; the crude fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteStrategy {
+    #[default]
+    Llm,
+    Embedding,
+    Keyword,
+}
+
 /// Classifier-driven model routing ("custom routing instructions").
 ///
 /// The user writes plain-language rules — e.g. *"coding or debugging questions →
-/// claude-sonnet-4-5"*, *"simple chit-chat → a local model"* — and picks a cheap
-/// `classifier_model` to do the sorting. On each chat request the gateway asks
-/// the classifier which rule (if any) matches the user's latest message, then
-/// rewrites the request's model to that rule's target. The rewritten model then
-/// flows through the ordinary [`crate::router::ModelRouter`] so the target's
-/// provider is resolved exactly as a hand-picked model would be — nothing about
-/// providers is hardcoded here.
+/// claude-sonnet-4-5"*, *"simple chit-chat → a local model"* — and picks how the
+/// sorting happens via [`RouteStrategy`]: a cheap `classifier_model` (`Llm`), an
+/// embedding nearest-match (`Embedding`/RAG, reusing the semantic-cache
+/// embedder), or a keyword match (`Keyword`). On each chat request the gateway
+/// asks the chosen strategy which rule (if any) matches the user's latest
+/// message, then rewrites the request's model to that rule's target. The
+/// rewritten model then flows through the ordinary [`crate::router::ModelRouter`]
+/// so the target's provider is resolved exactly as a hand-picked model would be —
+/// nothing about providers is hardcoded here.
 ///
-/// Everything fails open: an empty `classifier_model`, no rules, a classifier
+/// Everything fails open: an empty classifier/embedder, no rules, a classifier
 /// error, or a timeout all leave the originally requested model untouched, so a
 /// misconfiguration can never break chat. This is a Gateway concern (it decides
 /// *what is allowed / where a call goes*), not Core.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SmartRoutingConfig {
+    /// How the matching rule is chosen. Default `Llm` preserves the original
+    /// classifier behaviour; `Embedding` and `Keyword` are opt-in and swappable.
+    #[serde(default)]
+    pub strategy: RouteStrategy,
+
+    /// Embedding model used by the `Embedding` (RAG) strategy, resolved through
+    /// the gateway's OpenAI-compatible embeddings endpoint (the local
+    /// `nomic-embed` sidecar by default). Empty ⇒ falls back to the semantic
+    /// cache's configured embedding model. Ignored by other strategies.
+    #[serde(default)]
+    pub embedding_model: String,
+
+    /// Minimum cosine similarity for the `Embedding` strategy to accept a rule as
+    /// a match. Below this, the request falls back to `default_model` (or keeps
+    /// its original model). Default 0.35. Ignored by other strategies.
+    #[serde(default = "default_route_similarity_threshold")]
+    pub similarity_threshold: f32,
     /// Master switch. Default: false (the classifier call adds a round-trip to
     /// every request, so it is strictly opt-in).
     #[serde(default)]
@@ -1017,9 +1090,16 @@ fn default_smart_routing_timeout_ms() -> u64 {
     4000
 }
 
+fn default_route_similarity_threshold() -> f32 {
+    0.35
+}
+
 impl Default for SmartRoutingConfig {
     fn default() -> Self {
         Self {
+            strategy: RouteStrategy::default(),
+            embedding_model: String::new(),
+            similarity_threshold: default_route_similarity_threshold(),
             enabled: false,
             classifier_model: String::new(),
             rules: Vec::new(),
@@ -1031,10 +1111,22 @@ impl Default for SmartRoutingConfig {
 }
 
 impl SmartRoutingConfig {
-    /// Whether smart routing should actually run: enabled, with a classifier
-    /// model and at least one rule. Anything short of this is a no-op (fail-open).
+    /// Whether smart routing should actually run: enabled, with at least one rule
+    /// and whatever the chosen strategy needs to reach a decision. Anything short
+    /// of this is a no-op (fail-open).
+    ///
+    /// - `Llm` needs a non-empty `classifier_model`.
+    /// - `Embedding` needs an embedder (its own `embedding_model` or the semantic
+    ///   cache's), validated at call time; here we only require rules.
+    /// - `Keyword` needs nothing beyond rules.
     pub fn is_active(&self) -> bool {
-        self.enabled && !self.classifier_model.trim().is_empty() && !self.rules.is_empty()
+        if !self.enabled || self.rules.is_empty() {
+            return false;
+        }
+        match self.strategy {
+            RouteStrategy::Llm => !self.classifier_model.trim().is_empty(),
+            RouteStrategy::Embedding | RouteStrategy::Keyword => true,
+        }
     }
 }
 
@@ -1151,7 +1243,7 @@ impl std::str::FromStr for ProviderKind {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct FirewallConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -1196,6 +1288,156 @@ pub struct FirewallConfig {
     /// keep the built-in-only behaviour.
     #[serde(default)]
     pub custom_patterns: Vec<CustomPattern>,
+
+    /// Notification fan-out tier when the firewall matches inbound content
+    /// (orthogonal to `policy`, which is the enforcement action). Old configs →
+    /// `Silent`, so a firewall with no `alert` set fires no policy alert.
+    #[serde(default)]
+    pub alert: AlertTier,
+
+    /// Optional cheap-LLM traffic inspector (a detection *method*, orthogonal to
+    /// `policy`, which is the *action*). Disabled by default, so existing configs
+    /// deserialize unchanged. Carried on the node base so the hierarchical
+    /// resolver (`firewall/resolve.rs`) has a uniform shape to merge overlays into.
+    #[serde(default)]
+    pub inspector: InspectorConfig,
+
+    /// Field names this scope freezes so a narrower scope (org → agent) can only
+    /// *tighten* them, never *loosen* them. On the node base this is the box
+    /// admin's baseline lock set; the resolver unions locks upward and, for a
+    /// locked field, keeps the stricter value. Canonical names are the serde
+    /// field names: `enabled`, `scan_inbound`, `scan_outbound`, `policy`,
+    /// `log_detections`, `redact_pii`, `redact_secrets`,
+    /// `wrap_untrusted_tool_results`, `inspector`. Empty by default.
+    #[serde(default)]
+    pub locked_fields: Vec<String>,
+
+    /// Per-agent evaluator enablement (the unified-evaluator P1 dial). Each entry
+    /// overrides one catalog evaluator; the hierarchical resolver merges them by
+    /// `id` node → org → agent with the same union + per-binding lock semantics
+    /// that govern the firewall dials (`firewall/resolve.rs::merge_evaluator_bindings`).
+    /// Empty by default so existing configs deserialize unchanged. Nothing here
+    /// executes yet (inline scanning is P3, offline scoring is P2); this phase is
+    /// config plumbing + cascade + persistence only.
+    #[serde(default)]
+    pub evaluators: Vec<crate::evaluators::EvaluatorBinding>,
+}
+
+/// A partial [`FirewallConfig`] applied over a broader scope in the node → org →
+/// agent cascade (`firewall/resolve.rs`). Every scalar is `Option`: `Some`
+/// overrides the inherited value, `None` inherits it. `custom_patterns` are
+/// *appended* (union, never replace); `locked_fields` freeze a field so a
+/// narrower scope can only tighten it.
+///
+/// Wire keys are **snake_case** even though this object nests inside the
+/// camelCase control-plane resolve response — serde applies `rename_all` per
+/// struct, so the TS mirror and the resolve-response emitter must use snake_case
+/// here. Empty overlays resolve to a byte-identical config to today's global
+/// firewall.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct FirewallOverlay {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub scan_inbound: Option<bool>,
+    #[serde(default)]
+    pub scan_outbound: Option<bool>,
+    #[serde(default)]
+    pub policy: Option<FirewallPolicy>,
+    #[serde(default)]
+    pub log_detections: Option<bool>,
+    #[serde(default)]
+    pub redact_pii: Option<bool>,
+    #[serde(default)]
+    pub redact_secrets: Option<bool>,
+    #[serde(default)]
+    pub wrap_untrusted_tool_results: Option<bool>,
+    #[serde(default)]
+    pub inspector: Option<InspectorConfig>,
+    /// Appended to the inherited pattern set (union), never replacing it.
+    #[serde(default)]
+    pub custom_patterns: Vec<CustomPattern>,
+    /// Field names this scope locks (see [`FirewallConfig::locked_fields`]).
+    #[serde(default)]
+    pub locked_fields: Vec<String>,
+    /// Evaluator bindings this scope contributes to the node → org → agent
+    /// cascade. `None` inherits the broader scope's set; `Some` merges by `id`
+    /// (union + per-binding lock) via
+    /// `firewall/resolve.rs::merge_evaluator_bindings`. Unlike
+    /// `wrap_untrusted_tool_results`, this is **not** node-only — org and agent
+    /// overlays may set it, so `normalize_overlay` leaves it untouched.
+    #[serde(default)]
+    pub evaluators: Option<Vec<crate::evaluators::EvaluatorBinding>>,
+}
+
+/// The swappable cheap-LLM traffic inspector — a detection *method* that runs
+/// alongside the regex scanner. It calls a model directly (never the tool loop,
+/// so it cannot recurse) and fails **open** everywhere: a timeout, provider
+/// error, or unparseable reply is treated as not-flagged (allow + warn). See
+/// `firewall/inspector.rs`.
+///
+/// Wire keys are **snake_case** (see [`FirewallOverlay`]).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub struct InspectorConfig {
+    /// Master switch. Default: false (opt-in — it adds a model round-trip).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Model id used for inspection, resolved through the normal
+    /// [`crate::router::ModelRouter`] so it stays swappable (local, hosted, or an
+    /// `openrouter/…` slug). Empty ⇒ the gateway's default model. Default: "".
+    #[serde(default)]
+    pub model: String,
+    /// What the inspector looks for. Default: [`InspectorMode::Both`].
+    #[serde(default)]
+    pub mode: InspectorMode,
+    /// Skip inspection for turns shorter than this many characters (trivial
+    /// prompts rarely carry an attack and every call costs a round-trip).
+    #[serde(default = "default_inspector_min_chars")]
+    pub min_chars: usize,
+    /// Per-inspection timeout in milliseconds; on timeout the request is allowed
+    /// (fail-open). Default: 1500.
+    #[serde(default = "default_inspector_timeout_ms")]
+    pub timeout_ms: u64,
+    /// The action taken when the inspector flags a turn, reusing the firewall's
+    /// [`FirewallPolicy`] (Block / Sanitize / WarnAndContinue). Default: warn.
+    #[serde(default)]
+    pub action: FirewallPolicy,
+}
+
+/// What the LLM inspector scans for. Shapes the inspection prompt.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InspectorMode {
+    /// Prompt-injection / jailbreak attempts only.
+    Injection,
+    /// PII / secret data-leak detection only.
+    Dlp,
+    /// Both injection and DLP. The default.
+    #[default]
+    Both,
+}
+
+fn default_inspector_min_chars() -> usize {
+    40
+}
+
+fn default_inspector_timeout_ms() -> u64 {
+    1500
+}
+
+impl Default for InspectorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: String::new(),
+            mode: InspectorMode::default(),
+            min_chars: default_inspector_min_chars(),
+            timeout_ms: default_inspector_timeout_ms(),
+            action: FirewallPolicy::default(),
+        }
+    }
 }
 
 /// The category a [`CustomPattern`] belongs to. Determines which built-in
@@ -1209,6 +1451,12 @@ pub enum CustomPatternKind {
     Pii,
     Secret,
     PromptInjection,
+    /// Merged into the `code_injection` evaluator's pattern set (Input scanning).
+    CodeInjection,
+    /// Merged into the `toxicity` evaluator's lexical pattern set (Output).
+    Toxicity,
+    /// Merged into the `bias_fairness` evaluator's lexical pattern set (Output).
+    Bias,
 }
 
 /// A single user-defined firewall pattern.
@@ -1238,6 +1486,10 @@ impl Default for FirewallConfig {
             redact_secrets: true,
             wrap_untrusted_tool_results: true,
             custom_patterns: Vec::new(),
+            alert: AlertTier::default(),
+            inspector: InspectorConfig::default(),
+            locked_fields: Vec::new(),
+            evaluators: Vec::new(),
         }
     }
 }
@@ -1407,6 +1659,30 @@ pub enum BudgetAction {
     Stop,
 }
 
+/// Alert tier: the notification fan-out a policy match triggers, ORTHOGONAL to
+/// [`BudgetAction`]/[`FirewallPolicy`] (the enforcement). Enforcement decides
+/// what happens to the request; the tier decides who gets told. Core takes the
+/// `max` tier across all matched rules, so the derive order (Silent < Warn <
+/// Fanout < Email) is load-bearing — keep the variants in ascending severity.
+///
+/// Named `Fanout` (never `Notify`) so it never collides with
+/// [`BudgetAction::Notify`], which is an enforcement action, not a tier.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, PartialOrd, Ord,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum AlertTier {
+    /// No alert. The default, so every pre-existing config parses to Silent.
+    #[default]
+    Silent,
+    /// Log/SSE only: surface a live warning to the desktop, no fan-out sinks.
+    Warn,
+    /// Fan out to Webhook/Telegram/ExpoPush (Core `notify_all`).
+    Fanout,
+    /// Fan out AND send email (Core SMTP sink / managed control-plane email).
+    Email,
+}
+
 /// A single budget rule: a token cap plus the action taken once it is reached.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BudgetRule {
@@ -1422,6 +1698,10 @@ pub struct BudgetRule {
     /// Cap applied to `max_tokens` when `action = restrict`. Defaults to 256.
     #[serde(default = "default_restrict_max_tokens")]
     pub restrict_max_tokens: u64,
+    /// Notification fan-out tier when this rule matches (orthogonal to `action`).
+    /// Missing in old configs → `Silent`.
+    #[serde(default)]
+    pub alert: AlertTier,
 }
 
 fn default_restrict_max_tokens() -> u64 {
@@ -1473,6 +1753,10 @@ pub struct SessionBudgetConfig {
     /// Cap applied to `max_tokens` when `action = restrict`. Defaults to 256.
     #[serde(default = "default_restrict_max_tokens")]
     pub restrict_max_tokens: u64,
+    /// Notification fan-out tier when the session cap matches. Old configs →
+    /// `Silent`.
+    #[serde(default)]
+    pub alert: AlertTier,
 }
 
 impl Default for SessionBudgetConfig {
@@ -1482,6 +1766,7 @@ impl Default for SessionBudgetConfig {
             action: BudgetAction::default(),
             downgrade_to: None,
             restrict_max_tokens: default_restrict_max_tokens(),
+            alert: AlertTier::default(),
         }
     }
 }
@@ -2724,6 +3009,9 @@ impl Default for GatewayConfig {
             providers: ProvidersConfig::default(),
             routing: RoutingConfig::default(),
             firewall: FirewallConfig::default(),
+            custom_evaluators: Vec::new(),
+            firewall_org_overlays: HashMap::new(),
+            firewall_agent_overlays: HashMap::new(),
             rate_limit: RateLimitConfig::default(),
             auth: AuthConfig::default(),
             cache: CacheConfig::default(),
@@ -2870,5 +3158,51 @@ mod credits_config_tests {
     #[test]
     fn wallet_empty_action_defaults_to_stop() {
         assert_eq!(WalletEmptyAction::default(), WalletEmptyAction::Stop);
+    }
+}
+
+#[cfg(test)]
+mod alert_tier_backcompat_tests {
+    use super::{AlertTier, BudgetRule, FirewallConfig, SessionBudgetConfig};
+
+    /// An old gateway.toml with no `alert` field must still parse, defaulting the
+    /// tier to `Silent` (so no policy alert fires until an operator opts in).
+    #[test]
+    fn budget_rule_without_alert_parses_to_silent() {
+        let rule: BudgetRule =
+            toml::from_str("limit = 1000\naction = \"stop\"\n").expect("legacy rule must parse");
+        assert_eq!(rule.alert, AlertTier::Silent);
+    }
+
+    #[test]
+    fn session_budget_without_alert_parses_to_silent() {
+        let cfg: SessionBudgetConfig =
+            toml::from_str("limit = 500\n").expect("legacy session budget must parse");
+        assert_eq!(cfg.alert, AlertTier::Silent);
+    }
+
+    #[test]
+    fn firewall_without_alert_parses_to_silent() {
+        let cfg: FirewallConfig =
+            toml::from_str("enabled = true\npolicy = \"block\"\n").expect("legacy firewall must parse");
+        assert_eq!(cfg.alert, AlertTier::Silent);
+    }
+
+    /// The tier ordering is load-bearing (Core takes the max), so pin it.
+    #[test]
+    fn alert_tier_orders_ascending() {
+        assert!(AlertTier::Silent < AlertTier::Warn);
+        assert!(AlertTier::Warn < AlertTier::Fanout);
+        assert!(AlertTier::Fanout < AlertTier::Email);
+    }
+
+    /// The tier serde renames to lowercase (the wire value on the debit payload
+    /// and the PolicyAlert JSON).
+    #[test]
+    fn alert_tier_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&AlertTier::Fanout).unwrap(),
+            "\"fanout\""
+        );
     }
 }

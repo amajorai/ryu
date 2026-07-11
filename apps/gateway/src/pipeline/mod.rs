@@ -6,16 +6,45 @@ use serde_json::{json, Value};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+mod inline_eval;
+use inline_eval::{
+    backstop_flag, image_detection_kind, inline_detection_kind, inline_outcome,
+    llm_judge_backstop_kind, InlineOutcome,
+};
+
 use crate::{
     audit::AuditRecord,
     budget::BudgetDecision,
     cache::Cache,
-    config::{ApiKeyConfig, BudgetAction, FirewallPolicy, Modality, ProviderKind},
+    config::{AlertTier, ApiKeyConfig, BudgetAction, FirewallPolicy, Modality, ProviderKind},
     error::GatewayError,
+    evaluators::{Evaluator, EvaluatorImpl, EvaluatorRegistry, EvaluatorTarget},
+    firewall::{inspector::InspectorClient, FirewallScanner},
+    policy_alert::PolicyAlert,
     router::RouteDecision,
     semantic_cache::SemanticCache,
     state::AppState,
 };
+
+/// Build the firewall [`PolicyAlert`] for an inbound/outbound firewall match, or
+/// `None` when the resolved firewall's `alert` tier is below `Warn` (so a
+/// firewall with no configured tier fires no alert). `enforcement` is `block`
+/// (Block) or `notify` (WarnAndContinue).
+fn firewall_policy_alert(
+    cfg: &crate::config::FirewallConfig,
+    ctx: &RequestContext,
+    enforcement: &str,
+) -> Option<PolicyAlert> {
+    if cfg.alert >= AlertTier::Warn {
+        Some(PolicyAlert::firewall(
+            enforcement,
+            cfg.alert,
+            ctx.org_id.as_deref().unwrap_or(""),
+        ))
+    } else {
+        None
+    }
+}
 
 /// Context resolved from the incoming request (auth, identity).
 #[derive(Debug, Clone)]
@@ -146,6 +175,10 @@ pub struct PipelineOutput {
     pub eval_score: Option<f32>,
     /// Set when the request was served in degraded mode (#218).
     pub degraded: Option<DegradedMode>,
+    /// Stamped policy alert (budget-cap or firewall warn) for the Ok path. The
+    /// handler inserts it into `response.extensions_mut()`; the router's
+    /// `map_response` layer writes it out as `x-ryu-policy-alert`.
+    pub policy_alert: Option<PolicyAlert>,
 }
 
 #[allow(dead_code)]
@@ -158,6 +191,9 @@ pub struct PipelineStreamOutput {
     pub budget: Option<BudgetDecision>,
     /// Set when the streaming request was served in degraded mode (#218).
     pub degraded: Option<DegradedMode>,
+    /// Stamped policy alert (budget-cap or firewall warn) for the Ok path (see
+    /// [`PipelineOutput::policy_alert`]).
+    pub policy_alert: Option<PolicyAlert>,
 }
 
 // ─── Authentication ───────────────────────────────────────────────────────────
@@ -439,21 +475,32 @@ pub async fn authenticate(
 /// when the classifier keeps the original model. It fails open in every error
 /// case — see [`crate::router::smart`].
 async fn apply_smart_routing(state: &AppState, ctx: &RequestContext, body: &mut Value) -> bool {
-    if !state.smart_router.is_active() {
-        return false;
-    }
     // A pinned per-agent chat slot is an explicit user choice — never override it.
     if ctx.slot_provider.is_some() || ctx.slot_model.is_some() {
         return false;
     }
 
-    let chosen = state
-        .smart_router
+    // Per-agent override (the "both" config scope): Core injects the agent's own
+    // `SmartRoutingConfig` as the private `ryu_smart_route` body field. When
+    // present it replaces the global router for this request; each distinct
+    // config gets one cached ephemeral `SmartRouter` (keyed by a hash of its JSON)
+    // so its rule-embedding + per-session caches persist across the agent's turns.
+    // The private field is always stripped before the body reaches the provider.
+    let router = per_request_smart_router(state, body);
+    let router = router.as_deref().unwrap_or(&state.smart_router);
+
+    if !router.is_active() {
+        return false;
+    }
+
+    let chosen = router
         .resolve(
             &body["messages"],
             ctx.session_id.as_deref(),
             &state.providers,
             &state.router,
+            &state.http,
+            state.config.providers.openai.as_ref(),
         )
         .await;
 
@@ -476,6 +523,34 @@ async fn apply_smart_routing(state: &AppState, ctx: &RequestContext, body: &mut 
     true
 }
 
+/// Extract and strip the private `ryu_smart_route` per-agent override from the
+/// request body, returning a cached ephemeral [`SmartRouter`] for it.
+///
+/// The field is ALWAYS removed from `body` (so it never reaches a provider), even
+/// when it fails to parse. A parse failure returns `None`, so the caller fails
+/// open to the global router. Distinct override configs are cached by a stable
+/// hash of their serialized JSON, so an agent reuses one router (and its
+/// rule-embedding + session caches) across turns.
+fn per_request_smart_router(
+    state: &AppState,
+    body: &mut Value,
+) -> Option<Arc<crate::router::smart::SmartRouter>> {
+    let raw = body.as_object_mut()?.remove("ryu_smart_route")?;
+    let cfg: crate::config::SmartRoutingConfig = serde_json::from_value(raw).ok()?;
+
+    let json = serde_json::to_string(&cfg).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&json, &mut hasher);
+    let key = std::hash::Hasher::finish(&hasher);
+
+    let router = state
+        .per_agent_routers
+        .entry(key)
+        .or_insert_with(|| Arc::new(crate::router::smart::SmartRouter::new(cfg)))
+        .clone();
+    Some(router)
+}
+
 // ─── Pre-process (shared by run + run_stream) ─────────────────────────────────
 
 /// Shared pre-processing: rate-limit + burst check + inbound-firewall + routing.
@@ -485,12 +560,16 @@ async fn apply_smart_routing(state: &AppState, ctx: &RequestContext, body: &mut 
 /// `body["model"]`; in that case eval-driven A/B routing is skipped so the
 /// classifier's choice is honored (otherwise `eval_route` would override the
 /// model's provider — see the no-slot branch below).
-fn pre_process(
+async fn pre_process(
     state: &AppState,
     ctx: &RequestContext,
     body: &mut Value,
     smart_routed: bool,
-) -> Result<(RouteDecision, String), GatewayError> {
+) -> Result<(RouteDecision, String, Option<PolicyAlert>), GatewayError> {
+    // Ok-path policy alert accumulated during pre-processing (currently a
+    // firewall warn-and-continue match). Merged with any budget alert by the
+    // caller and stamped onto the response header via the router's map_response.
+    let mut pending_alert: Option<PolicyAlert> = None;
     // 1. Request rate limit — honours per-key RBAC overrides
     if !state
         .rate_limiter
@@ -508,40 +587,113 @@ fn pre_process(
         return Err(GatewayError::RateLimited);
     }
 
-    // 3. Inbound firewall
+    // 3. Inbound firewall — per-request RESOLVED scanner (node → org → agent).
+    //
+    // `resolved_scanner` returns a cached `Arc<FirewallScanner>` (no lock held),
+    // so it is safe to reuse across the regex scan, the LLM inspector's `.await`,
+    // the locked-guardrail scan, and the companion redaction below — one
+    // resolution per request, shared by all four.
     let prompt_text = extract_text_for_scanning(body);
-    // Acquire read lock once; all firewall checks and optional sanitization
-    // happen inside this closure so the guard is released before any await.
-    let inbound_result: Result<(), GatewayError> = state.with_firewall(|fw| {
-        if let Some(violation) = fw.scan_inbound(&prompt_text) {
-            match fw.policy() {
-                FirewallPolicy::Block => {
-                    state.metrics.inc_firewall_blocked();
-                    return Err(GatewayError::FirewallBlocked(format!(
+    let scanner = state.resolved_scanner(ctx);
+    if let Some(violation) = scanner.scan_inbound(&prompt_text) {
+        match scanner.policy() {
+            FirewallPolicy::Block => {
+                state.metrics.inc_firewall_blocked();
+                return Err(GatewayError::FirewallBlocked(
+                    format!(
                         "Inbound content blocked: {} ({:?})",
                         violation.pattern_name, violation.kind
-                    )));
+                    ),
+                    firewall_policy_alert(scanner.config(), ctx, "block"),
+                ));
+            }
+            FirewallPolicy::Sanitize => {
+                warn!(
+                    request_id = %ctx.request_id,
+                    pattern = %violation.pattern_name,
+                    "firewall: sanitized inbound content"
+                );
+                sanitize_messages(body, scanner.as_ref());
+            }
+            FirewallPolicy::WarnAndContinue => {
+                warn!(
+                    request_id = %ctx.request_id,
+                    pattern = %violation.pattern_name,
+                    "firewall: inbound violation (warn-and-continue)"
+                );
+                // Ok-path stamp: a warn-tier firewall match propagates its alert
+                // to the response via `pre_process`'s pending-alert return.
+                pending_alert = merge_alert(
+                    pending_alert,
+                    firewall_policy_alert(scanner.config(), ctx, "notify"),
+                );
+            }
+        }
+    }
+
+    // 3a. LLM traffic inspector (opt-in, inbound-only). Runs AFTER the regex scan
+    // and BEFORE provider dispatch. It calls a cheap model directly (never the
+    // tool loop) and fails OPEN — a timeout / provider error / bad JSON is
+    // treated as not-flagged (allow + warn). Gated by `enabled` + `min_chars`
+    // inside `inspect`, so this branch is a cheap no-op when disabled.
+    let inspector_cfg = scanner.config().inspector.clone();
+    if inspector_cfg.enabled {
+        let verdict = crate::firewall::inspector::InspectorClient::inspect(
+            &prompt_text,
+            &inspector_cfg,
+            &state.providers,
+            &state.router,
+        )
+        .await;
+        if verdict.flagged {
+            match inspector_cfg.action {
+                FirewallPolicy::Block => {
+                    warn!(
+                        request_id = %ctx.request_id,
+                        categories = ?verdict.categories,
+                        reason = %verdict.reason,
+                        "inspector: blocked inbound content"
+                    );
+                    state.metrics.inc_firewall_blocked();
+                    audit_inspector_block(state, ctx, body, &verdict);
+                    return Err(GatewayError::FirewallBlocked(
+                        format!(
+                            "Inbound content blocked by inspector: {} [{}]",
+                            verdict.reason,
+                            verdict.categories.join(",")
+                        ),
+                        firewall_policy_alert(scanner.config(), ctx, "block"),
+                    ));
                 }
                 FirewallPolicy::Sanitize => {
                     warn!(
                         request_id = %ctx.request_id,
-                        pattern = %violation.pattern_name,
-                        "firewall: sanitized inbound content"
+                        categories = ?verdict.categories,
+                        "inspector: sanitizing flagged inbound content"
                     );
-                    sanitize_messages(body, fw);
+                    sanitize_messages(body, scanner.as_ref());
                 }
                 FirewallPolicy::WarnAndContinue => {
                     warn!(
                         request_id = %ctx.request_id,
-                        pattern = %violation.pattern_name,
-                        "firewall: inbound violation (warn-and-continue)"
+                        categories = ?verdict.categories,
+                        reason = %verdict.reason,
+                        "inspector: inbound flagged (warn-and-continue)"
                     );
                 }
             }
         }
-        Ok(())
-    });
-    inbound_result?;
+    }
+
+    // 3a-ii. Unified-evaluator inline guardrails — INPUT target (P3). Driven by
+    // the resolved per-agent policy's enabled evaluator bindings (node→org→agent),
+    // it reuses the SAME block/sanitize/warn machinery as the regex firewall and
+    // the inspector. A no-op (allocation-free) when no binding is enabled.
+    if let Some(alert) =
+        apply_inline_input_evaluators(state, ctx, body, scanner.as_ref(), &prompt_text).await?
+    {
+        pending_alert = merge_alert(pending_alert, Some(alert));
+    }
 
     // 3b. Control-plane policy (U28).
     //
@@ -572,11 +724,12 @@ fn pre_process(
         }
 
         // Locked guardrails: scan even if the local firewall config disabled
-        // them, so a lower level cannot bypass an admin-locked guardrail.
+        // them, so a lower level cannot bypass an admin-locked guardrail. Uses the
+        // same per-request resolved scanner (its custom patterns participate).
         if policy.requires_firewall() {
-            if let Some(violation) = state.with_firewall(|fw| {
-                fw.scan_locked_guardrails(&prompt_text, &policy.locked_guardrails)
-            }) {
+            if let Some(violation) =
+                scanner.scan_locked_guardrails(&prompt_text, &policy.locked_guardrails)
+            {
                 warn!(
                     request_id = %ctx.request_id,
                     pattern = %violation.pattern_name,
@@ -601,10 +754,9 @@ fn pre_process(
     // `redact_companion_egress()` which ignores `config.enabled`/`redact_pii`/
     // `redact_secrets`. Detections are recorded via the existing audit path (AC2).
     if ctx.companion_source {
-        let (_, redacted_categories) =
-            state.with_firewall(|fw| fw.redact_companion_egress(&prompt_text));
+        let (_, redacted_categories) = scanner.redact_companion_egress(&prompt_text);
         // Redact message bodies unconditionally (categories may be empty for clean text).
-        state.with_firewall(|fw| fw.companion_sanitize_messages(&mut body["messages"]));
+        scanner.companion_sanitize_messages(&mut body["messages"]);
         if !redacted_categories.is_empty() {
             warn!(
                 request_id = %ctx.request_id,
@@ -614,11 +766,7 @@ fn pre_process(
             // Emit an audit record so redaction events are observable (AC2).
             let category_names: Vec<&str> = redacted_categories
                 .iter()
-                .map(|c| match c {
-                    crate::firewall::DetectionKind::Pii => "pii",
-                    crate::firewall::DetectionKind::Secret => "secret",
-                    crate::firewall::DetectionKind::PromptInjection => "injection",
-                })
+                .map(|c| c.as_str())
                 .collect();
             state.metrics.inc_firewall_blocked();
             state.audit.log(crate::audit::AuditRecord {
@@ -680,7 +828,390 @@ fn pre_process(
     // Build exact-match cache key from the (possibly sanitized) body.
     let cache_key = Cache::make_key(ctx.org_id.as_deref(), &decision.model, &body["messages"]);
 
-    Ok((decision, cache_key))
+    Ok((decision, cache_key, pending_alert))
+}
+
+/// Merge two optional policy alerts, keeping the higher-tier one. On a tie the
+/// FIRST argument wins, so callers pass the firewall alert first to make it beat
+/// a same-tier budget alert deterministically (one response, one header).
+fn merge_alert(a: Option<PolicyAlert>, b: Option<PolicyAlert>) -> Option<PolicyAlert> {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            if b.alert_tier > a.alert_tier {
+                Some(b)
+            } else {
+                Some(a)
+            }
+        }
+        (Some(a), None) => Some(a),
+        (None, b) => b,
+    }
+}
+
+// ─── Unified-evaluator inline guardrails (P3) ────────────────────────────────
+//
+// Bridge the resolved per-agent policy's enabled `EvaluatorBinding`s into the
+// live pipeline as real guardrails. Input-target detectors (code_injection,
+// prompt_injection) run inbound in `pre_process`; Output-target detectors
+// (pii_leakage, toxicity, bias) run on the response (non-stream `run` +
+// `apply_outbound_firewall_stream`). Deterministic detectors run via the
+// `FirewallScanner`; LLM-judge detectors reuse the fail-open `InspectorClient`
+// with the evaluator's rubric. All of this REUSES the existing firewall
+// block/sanitize/warn machinery — no new enforcement path.
+
+/// The inline action for a binding: the binding's `inline_action` wins; otherwise
+/// the catalog evaluator's default `inline.action`; otherwise warn-and-continue.
+fn inline_action_for(binding: &crate::evaluators::EvaluatorBinding, ev: &Evaluator) -> FirewallPolicy {
+    binding
+        .inline_action
+        .clone()
+        .or_else(|| ev.inline.as_ref().map(|c| c.action.clone()))
+        .unwrap_or(FirewallPolicy::WarnAndContinue)
+}
+
+/// Evaluate ONE enabled inline binding against `text`. `Some((flagged, reason))`
+/// when it actually ran; `None` when the impl is not enforceable this phase (a
+/// `Code` evaluator — P4; a `Builtin`; or an empty-rubric Custom template) — an
+/// honest, logged no-op, never a faked verdict. Fail-open on the judge is handled
+/// inside [`InspectorClient::inspect_rubric`].
+async fn flag_inline_binding(
+    ev: &Evaluator,
+    scanner: &FirewallScanner,
+    text: &str,
+    state: &AppState,
+) -> Option<(bool, String)> {
+    match &ev.impl_ {
+        EvaluatorImpl::Regex { .. } | EvaluatorImpl::Heuristic => {
+            let kind = inline_detection_kind(&ev.id)?;
+            match scanner.scan_kind(text, kind) {
+                Some(m) => Some((true, format!("{}:{}", m.kind.as_str(), m.pattern_name))),
+                None => Some((false, String::new())),
+            }
+        }
+        EvaluatorImpl::LlmJudge { rubric } => {
+            if rubric.trim().is_empty() {
+                debug!(evaluator = %ev.id, "inline evaluator: empty rubric — no-op");
+                return None;
+            }
+            let ins = &scanner.config().inspector;
+            let timeout = if ins.timeout_ms == 0 { 1500 } else { ins.timeout_ms };
+            let verdict = InspectorClient::inspect_rubric(
+                text,
+                rubric,
+                &ins.model,
+                timeout,
+                &state.providers,
+                &state.router,
+            )
+            .await;
+            // Deterministic floor: when the judge did NOT answer (no provider /
+            // timeout / unparseable — the common local-only deploy), consult the
+            // lexical seed so obvious slurs/threats/blanket-generalizations are still
+            // caught instead of silently passing under an "enforced" detector. The
+            // seed runs on the FULL untruncated `text`, also covering the judge's
+            // 4000-char head-only truncation on the fail-open path. When the judge
+            // DID answer we trust its context (the `backstop_flag` seam discards the
+            // seed), avoiding the condemned/quoted-stereotype and casual-profanity
+            // false positives a bare seed would hard-flag.
+            let (seed_hit, seed_reason) = if verdict.available {
+                (false, String::new())
+            } else {
+                match llm_judge_backstop_kind(&ev.id).and_then(|k| scanner.scan_kind(text, k)) {
+                    Some(m) => (
+                        true,
+                        format!("seed-backstop {}:{}", m.kind.as_str(), m.pattern_name),
+                    ),
+                    None => (false, String::new()),
+                }
+            };
+            let flagged = backstop_flag(verdict.available, verdict.flagged, seed_hit);
+            let reason = if seed_hit { seed_reason } else { verdict.reason };
+            Some((flagged, reason))
+        }
+        EvaluatorImpl::Code { .. } => {
+            debug!(evaluator = %ev.id, "inline evaluator: code impl deferred to P4 — no-op");
+            None
+        }
+        EvaluatorImpl::Builtin { detector } => {
+            debug!(evaluator = %ev.id, %detector, "inline evaluator: builtin impl not wired — no-op");
+            None
+        }
+    }
+}
+
+/// Audit an inline-evaluator enforcement event (block/sanitize). Mirrors
+/// [`audit_inspector_block`] so evaluator guardrails are as observable as the
+/// inspector's, using the same audit fields.
+fn audit_inline_evaluator(
+    state: &AppState,
+    ctx: &RequestContext,
+    model: &str,
+    evaluator_id: &str,
+    enforcement: &str,
+    reason: &str,
+) {
+    if !state.audit.is_enabled() {
+        return;
+    }
+    state.audit.log(AuditRecord {
+        request_id: ctx.request_id.clone(),
+        api_key: ctx.api_key.clone(),
+        user_name: ctx.user_name.clone(),
+        org_id: ctx.org_id.clone(),
+        team_id: ctx.team_id.clone(),
+        project_id: ctx.project_id.clone(),
+        provider: "evaluator".to_string(),
+        model: model.to_string(),
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_hit: false,
+        latency_ms: 0,
+        eval_score: None,
+        error: Some(format!(
+            "inline evaluator '{evaluator_id}' {enforcement}: {reason}"
+        )),
+        skill_ids: ctx.skill_ids.clone(),
+        session_id: ctx.session_id.clone(),
+        user_id: ctx.user_id.clone(),
+        agent_id: ctx.agent_id.clone(),
+        feature: ctx.feature.clone(),
+        event_type: crate::audit::EventType::ModelCall,
+        backend: Some("inline-evaluator".to_string()),
+        command: None,
+        duration_ms: None,
+        exit_code: None,
+        widget_instance_id: None,
+    });
+}
+
+/// Run the resolved policy's **input-target** inline evaluators over the inbound
+/// prompt. Blocks (403) on a `Block` action, sanitizes the messages in place on
+/// `Sanitize`, and returns a warn-tier [`PolicyAlert`] on `WarnAndContinue`. The
+/// common empty-policy path allocates nothing (no registry build).
+async fn apply_inline_input_evaluators(
+    state: &AppState,
+    ctx: &RequestContext,
+    body: &mut Value,
+    scanner: &FirewallScanner,
+    prompt_text: &str,
+) -> Result<Option<PolicyAlert>, GatewayError> {
+    if !scanner.config().evaluators.iter().any(|b| b.enabled) {
+        return Ok(None);
+    }
+    let registry = EvaluatorRegistry::from_config(&state.config);
+    let bindings: Vec<crate::evaluators::EvaluatorBinding> = scanner
+        .config()
+        .evaluators
+        .iter()
+        .filter(|b| b.enabled)
+        .cloned()
+        .collect();
+    let mut pending: Option<PolicyAlert> = None;
+
+    for binding in &bindings {
+        let Some(ev) = registry.get(&binding.id) else {
+            continue;
+        };
+        if !ev.capabilities.inline || ev.target != EvaluatorTarget::Input {
+            continue;
+        }
+        let Some((flagged, reason)) = flag_inline_binding(ev, scanner, prompt_text, state).await
+        else {
+            continue;
+        };
+        let action = inline_action_for(binding, ev);
+        match inline_outcome(flagged, &action) {
+            InlineOutcome::Allow => {}
+            InlineOutcome::Block => {
+                let model = body["model"].as_str().unwrap_or("unknown");
+                state.metrics.inc_firewall_blocked();
+                audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
+                warn!(
+                    request_id = %ctx.request_id,
+                    evaluator = %ev.id,
+                    %reason,
+                    "inline evaluator: blocked inbound content"
+                );
+                return Err(GatewayError::FirewallBlocked(
+                    format!("Inbound content blocked by evaluator '{}': {}", ev.id, reason),
+                    firewall_policy_alert(scanner.config(), ctx, "block"),
+                ));
+            }
+            InlineOutcome::Sanitize => {
+                let model = body["model"].as_str().unwrap_or("unknown").to_string();
+                warn!(
+                    request_id = %ctx.request_id,
+                    evaluator = %ev.id,
+                    "inline evaluator: sanitizing inbound content"
+                );
+                audit_inline_evaluator(state, ctx, &model, &ev.id, "sanitized", &reason);
+                sanitize_messages(body, scanner);
+            }
+            InlineOutcome::Warn => {
+                warn!(
+                    request_id = %ctx.request_id,
+                    evaluator = %ev.id,
+                    %reason,
+                    "inline evaluator: inbound flagged (warn-and-continue)"
+                );
+                pending = merge_alert(
+                    pending,
+                    firewall_policy_alert(scanner.config(), ctx, "notify"),
+                );
+            }
+        }
+    }
+    Ok(pending)
+}
+
+/// Run the resolved policy's **output-target** inline evaluators over the
+/// (non-streaming) response. Blocks on `Block`, redacts in place on `Sanitize`,
+/// logs on `WarnAndContinue`. Resolves the per-agent scanner from `ctx` (cached),
+/// so it needs no state threaded from `pre_process`. No-op (allocation-free) when
+/// no binding is enabled.
+async fn apply_inline_output_evaluators(
+    state: &AppState,
+    ctx: &RequestContext,
+    response: &mut Value,
+) -> Result<(), GatewayError> {
+    let scanner = state.resolved_scanner(ctx);
+    if !scanner.config().evaluators.iter().any(|b| b.enabled) {
+        return Ok(());
+    }
+    let registry = EvaluatorRegistry::from_config(&state.config);
+    let bindings: Vec<crate::evaluators::EvaluatorBinding> = scanner
+        .config()
+        .evaluators
+        .iter()
+        .filter(|b| b.enabled)
+        .cloned()
+        .collect();
+    let response_text = response_to_text(response);
+
+    for binding in &bindings {
+        let Some(ev) = registry.get(&binding.id) else {
+            continue;
+        };
+        if !ev.capabilities.inline || ev.target != EvaluatorTarget::Output {
+            continue;
+        }
+        let Some((flagged, reason)) =
+            flag_inline_binding(ev, scanner.as_ref(), &response_text, state).await
+        else {
+            continue;
+        };
+        let action = inline_action_for(binding, ev);
+        match inline_outcome(flagged, &action) {
+            InlineOutcome::Allow | InlineOutcome::Warn => {
+                if flagged {
+                    warn!(
+                        request_id = %ctx.request_id,
+                        evaluator = %ev.id,
+                        %reason,
+                        "inline evaluator: outbound flagged (warn-and-continue)"
+                    );
+                }
+            }
+            InlineOutcome::Block => {
+                let model = response["model"].as_str().unwrap_or("unknown");
+                state.metrics.inc_firewall_blocked();
+                audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
+                warn!(
+                    request_id = %ctx.request_id,
+                    evaluator = %ev.id,
+                    %reason,
+                    "inline evaluator: blocked outbound response"
+                );
+                return Err(GatewayError::FirewallBlocked(
+                    format!("Outbound response blocked by evaluator '{}': {}", ev.id, reason),
+                    firewall_policy_alert(scanner.config(), ctx, "block"),
+                ));
+            }
+            InlineOutcome::Sanitize => {
+                let model = response["model"].as_str().unwrap_or("unknown").to_string();
+                warn!(
+                    request_id = %ctx.request_id,
+                    evaluator = %ev.id,
+                    "inline evaluator: sanitizing outbound response"
+                );
+                audit_inline_evaluator(state, ctx, &model, &ev.id, "sanitized", &reason);
+                sanitize_response(response, scanner.as_ref());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether any enabled OUTPUT-target inline binding would BLOCK or SANITIZE — the
+/// streaming firewall must buffer the whole response in that case, even when the
+/// node firewall policy is warn/off (otherwise a blocking output evaluator would
+/// never fire on the default streaming chat path).
+fn output_inline_wants_transform(scanner: &FirewallScanner, registry: &EvaluatorRegistry) -> bool {
+    scanner.config().evaluators.iter().any(|b| {
+        if !b.enabled {
+            return false;
+        }
+        let Some(ev) = registry.get(&b.id) else {
+            return false;
+        };
+        if !ev.capabilities.inline || ev.target != EvaluatorTarget::Output {
+            return false;
+        }
+        matches!(
+            inline_action_for(b, ev),
+            FirewallPolicy::Block | FirewallPolicy::Sanitize
+        )
+    })
+}
+
+/// Evaluate the resolved OUTPUT-target inline evaluators against assembled
+/// streamed text, returning the STRICTEST outcome (Block > Sanitize > Warn >
+/// Allow) plus a reason, so the streaming firewall can emit the right frame.
+async fn evaluate_output_inline_stream(
+    state: &AppState,
+    ctx: &RequestContext,
+    scanner: &FirewallScanner,
+    assembled: &str,
+) -> (InlineOutcome, String) {
+    let registry = EvaluatorRegistry::from_config(&state.config);
+    let bindings: Vec<crate::evaluators::EvaluatorBinding> = scanner
+        .config()
+        .evaluators
+        .iter()
+        .filter(|b| b.enabled)
+        .cloned()
+        .collect();
+
+    let mut strictest = InlineOutcome::Allow;
+    let mut reason = String::new();
+    for binding in &bindings {
+        let Some(ev) = registry.get(&binding.id) else {
+            continue;
+        };
+        if !ev.capabilities.inline || ev.target != EvaluatorTarget::Output {
+            continue;
+        }
+        let Some((flagged, r)) = flag_inline_binding(ev, scanner, assembled, state).await else {
+            continue;
+        };
+        let outcome = inline_outcome(flagged, &inline_action_for(binding, ev));
+        if inline_outcome_rank(outcome) > inline_outcome_rank(strictest) {
+            strictest = outcome;
+            reason = format!("{}: {}", ev.id, r);
+        }
+    }
+    let _ = ctx;
+    (strictest, reason)
+}
+
+/// Strictness rank for picking the winning streamed-output outcome.
+fn inline_outcome_rank(o: InlineOutcome) -> u8 {
+    match o {
+        InlineOutcome::Allow => 0,
+        InlineOutcome::Warn => 1,
+        InlineOutcome::Sanitize => 2,
+        InlineOutcome::Block => 3,
+    }
 }
 
 // ─── Non-streaming pipeline ───────────────────────────────────────────────────
@@ -698,8 +1229,8 @@ pub async fn run(
     // model so the rest of the pipeline routes to the classifier's choice.
     let smart_routed = apply_smart_routing(&state, &ctx, &mut body).await;
     let requested_model = body["model"].as_str().unwrap_or("unknown").to_string();
-    let (mut decision, cache_key) =
-        pre_process(&state, &ctx, &mut body, smart_routed).map_err(|e| {
+    let (mut decision, cache_key, pre_alert) =
+        pre_process(&state, &ctx, &mut body, smart_routed).await.map_err(|e| {
             state.metrics.inc_errors();
             audit_failure(&state, &ctx, &requested_model, &e, start);
             e
@@ -709,6 +1240,14 @@ pub async fn run(
     if let Some(cached) = state.cache.get(&cache_key) {
         debug!(request_id = %ctx.request_id, "exact cache hit");
         state.metrics.inc_cache_hit();
+        // Output-target inline evaluators must run on cache hits too: the exact
+        // cache key is (org, model, messages) — NOT scoped by agent — so an agent
+        // with `toxicity: Block` / `pii_leakage: Sanitize` could otherwise be
+        // served a sibling agent's cached toxic/PII response with the guardrail
+        // silently bypassed. No-op (allocation-free) when the agent has no
+        // output evaluators, so a plain cache hit stays fast.
+        let mut cached = cached;
+        apply_inline_output_evaluators(&state, &ctx, &mut cached).await?;
         audit_cache_hit(&state, &ctx, "cache", &decision.model, &cached, start);
         return Ok(PipelineOutput {
             response: cached,
@@ -719,6 +1258,7 @@ pub async fn run(
             budget: None,
             eval_score: None,
             degraded: None,
+            policy_alert: pre_alert.clone(),
         });
     }
 
@@ -734,6 +1274,11 @@ pub async fn run(
                 debug!(request_id = %ctx.request_id, "semantic cache hit");
                 state.metrics.inc_semantic_cache_hit();
                 state.metrics.inc_cache_hit();
+                // Same per-agent bypass concern as the exact cache above: the
+                // semantic cache is org-scoped, not agent-scoped, so run the
+                // output-target inline evaluators before serving a cached hit.
+                let mut cached = cached;
+                apply_inline_output_evaluators(&state, &ctx, &mut cached).await?;
                 audit_cache_hit(
                     &state,
                     &ctx,
@@ -751,6 +1296,7 @@ pub async fn run(
                     budget: None,
                     eval_score: None,
                     degraded: None,
+                    policy_alert: pre_alert.clone(),
                 });
             }
             semantic_embedding = Some(emb);
@@ -770,7 +1316,7 @@ pub async fn run(
         warn!(key = %ctx.api_key, "shared budget exceeded (coordinator verdict)");
         state.metrics.inc_budget_exceeded();
         state.metrics.inc_errors();
-        return Err(GatewayError::BudgetExceeded);
+        return Err(GatewayError::BudgetExceeded(None));
     }
 
     // 6b. Lifetime token budget — check before calling provider and optionally downgrade
@@ -793,7 +1339,7 @@ pub async fn run(
                         warn!(key = %ctx.api_key, used, budget, "token budget exceeded");
                         state.metrics.inc_budget_exceeded();
                         state.metrics.inc_errors();
-                        return Err(GatewayError::BudgetExceeded);
+                        return Err(GatewayError::BudgetExceeded(None));
                     }
                 }
             }
@@ -802,7 +1348,10 @@ pub async fn run(
 
     // 6c. Per-user / per-agent budgets with local counters (U21). Stop aborts;
     // downgrade/restrict mutate the body+route in place; notify is observable.
-    let budget = enforce_budget(&state, &ctx, &mut body, &mut decision)?;
+    let (budget, budget_alert) = enforce_budget(&state, &ctx, &mut body, &mut decision)?;
+    // One response, one header: firewall (Ok-path) alert first so it wins a tie
+    // against a same-tier budget alert (deterministic).
+    let policy_alert = merge_alert(pre_alert, budget_alert);
 
     // 6d. Context compression (egress transform). When enabled, send the
     // messages to the compression service and swap in the result before any
@@ -982,7 +1531,11 @@ pub async fn run(
 
                 let input_tokens = response["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
                 let output_tokens = response["usage"]["completion_tokens"].as_u64().unwrap_or(0);
+                let cached_tokens = provider_cached_tokens(&response);
                 state.metrics.add_tokens(input_tokens, output_tokens);
+                if cached_tokens > 0 {
+                    state.metrics.add_cached_tokens(cached_tokens);
+                }
 
                 // 9. Outbound firewall
                 let response_text = response_to_text(&response);
@@ -992,10 +1545,13 @@ pub async fn run(
                             FirewallPolicy::Block => {
                                 warn!(request_id = %ctx.request_id, "firewall: blocked outbound response");
                                 state.metrics.inc_firewall_blocked();
-                                return Err(GatewayError::FirewallBlocked(format!(
-                                    "Outbound response blocked: {} ({:?})",
-                                    violation.pattern_name, violation.kind
-                                )));
+                                return Err(GatewayError::FirewallBlocked(
+                                    format!(
+                                        "Outbound response blocked: {} ({:?})",
+                                        violation.pattern_name, violation.kind
+                                    ),
+                                    firewall_policy_alert(fw.config(), &ctx, "block"),
+                                ));
                             }
                             FirewallPolicy::Sanitize => {
                                 warn!(request_id = %ctx.request_id, "firewall: sanitized outbound response");
@@ -1015,6 +1571,13 @@ pub async fn run(
                     }
                 });
                 let policy_pass = outbound_result?;
+
+                // 9b. Unified-evaluator inline guardrails — OUTPUT target (P3).
+                // Runs the resolved per-agent policy's enabled output evaluators
+                // (pii_leakage regex, toxicity/bias LLM-judge) over the response,
+                // reusing the firewall block/sanitize machinery. No-op when no
+                // binding is enabled.
+                apply_inline_output_evaluators(&state, &ctx, &mut response).await?;
 
                 // 10. Per-minute token rate limit (sliding window, honours RBAC overrides)
                 let total_tokens = input_tokens + output_tokens;
@@ -1115,6 +1678,7 @@ pub async fn run(
                     model = %decision.model,
                     input_tokens,
                     output_tokens,
+                    cached_tokens,
                     latency_ms,
                     eval_score = ?eval_score,
                     degraded = ?degraded,
@@ -1140,6 +1704,14 @@ pub async fn run(
                         let request_id = ctx.request_id.clone();
                         let fail_closed_sticky =
                             state.config.credits.fail_closed && ctx.managed_inference;
+                        // Managed policy-alert (item 4): stamp the matched
+                        // budget-cap tier. `limit > 0` excludes the wallet-empty
+                        // decision (invariant: decide() only returns limit==0 for
+                        // the synthetic wallet rule); only tiers >= Warn ride.
+                        let debit_alert_tier = budget
+                            .as_ref()
+                            .filter(|b| b.limit > 0 && b.alert >= AlertTier::Warn)
+                            .map(|b| b.alert);
                         tokio::spawn(debit_wallet_for_request(
                             state2,
                             org_id,
@@ -1147,6 +1719,7 @@ pub async fn run(
                             "gateway_usage",
                             cost,
                             fail_closed_sticky,
+                            debit_alert_tier,
                         ));
                     }
                 }
@@ -1170,6 +1743,7 @@ pub async fn run(
                     budget,
                     eval_score,
                     degraded,
+                    policy_alert,
                 });
             }
             Err(e) => {
@@ -1305,6 +1879,50 @@ fn audit_failure(
     });
 }
 
+/// Emit an audit record when the LLM inspector blocks an inbound request,
+/// mirroring the regex firewall's audit shape (provider tag `"inspector"`).
+fn audit_inspector_block(
+    state: &AppState,
+    ctx: &RequestContext,
+    body: &Value,
+    verdict: &crate::firewall::inspector::InspectorVerdict,
+) {
+    if !state.audit.is_enabled() {
+        return;
+    }
+    state.audit.log(AuditRecord {
+        request_id: ctx.request_id.clone(),
+        api_key: ctx.api_key.clone(),
+        user_name: ctx.user_name.clone(),
+        org_id: ctx.org_id.clone(),
+        team_id: ctx.team_id.clone(),
+        project_id: ctx.project_id.clone(),
+        provider: "inspector".to_string(),
+        model: body["model"].as_str().unwrap_or("unknown").to_string(),
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_hit: false,
+        latency_ms: 0,
+        eval_score: None,
+        error: Some(format!(
+            "inspector blocked: {} [{}]",
+            verdict.reason,
+            verdict.categories.join(",")
+        )),
+        skill_ids: ctx.skill_ids.clone(),
+        session_id: ctx.session_id.clone(),
+        user_id: ctx.user_id.clone(),
+        agent_id: ctx.agent_id.clone(),
+        feature: ctx.feature.clone(),
+        event_type: crate::audit::EventType::ModelCall,
+        backend: Some("inspector".to_string()),
+        command: None,
+        duration_ms: None,
+        exit_code: None,
+        widget_instance_id: None,
+    });
+}
+
 // ─── Streaming pipeline ───────────────────────────────────────────────────────
 
 pub async fn run_stream(
@@ -1320,8 +1938,8 @@ pub async fn run_stream(
     // model so the rest of the pipeline routes to the classifier's choice.
     let smart_routed = apply_smart_routing(&state, &ctx, &mut body).await;
     let requested_model = body["model"].as_str().unwrap_or("unknown").to_string();
-    let (mut decision, _cache_key) =
-        pre_process(&state, &ctx, &mut body, smart_routed).map_err(|e| {
+    let (mut decision, _cache_key, pre_alert) =
+        pre_process(&state, &ctx, &mut body, smart_routed).await.map_err(|e| {
             state.metrics.inc_errors();
             audit_failure(&state, &ctx, &requested_model, &e, start);
             e
@@ -1335,7 +1953,9 @@ pub async fn run_stream(
     // Per-user / per-agent budgets (U21). Enforcement must run on the streaming
     // path too: Core's chat forwards `stream: true`, so without this the budget
     // would never fire for the gateway's primary caller.
-    let budget = enforce_budget(&state, &ctx, &mut body, &mut decision)?;
+    let (budget, budget_alert) = enforce_budget(&state, &ctx, &mut body, &mut decision)?;
+    // Firewall (Ok-path) alert first so it wins a same-tier tie deterministically.
+    let policy_alert = merge_alert(pre_alert, budget_alert);
 
     // When configured, ask the provider to emit a terminal usage frame so the
     // stream observer can parse real token counts at stream end. Falls back to
@@ -1506,7 +2126,7 @@ pub async fn run_stream(
                 let firewall_body = apply_outbound_firewall_stream(
                     stream_body,
                     Arc::clone(&state),
-                    ctx.request_id.clone(),
+                    ctx.clone(),
                 )
                 .await;
 
@@ -1526,6 +2146,13 @@ pub async fn run_stream(
                     decision.model.clone(),
                     estimated_tokens,
                     start,
+                    // Managed policy-alert (item 4): stamp the matched budget-cap
+                    // tier onto the stream-end debit. `limit > 0` excludes the
+                    // wallet-empty decision; only tiers >= Warn ride.
+                    budget
+                        .as_ref()
+                        .filter(|b| b.limit > 0 && b.alert >= AlertTier::Warn)
+                        .map(|b| b.alert),
                 );
 
                 // Hold the admission slot for the *whole* stream: move the permit
@@ -1542,6 +2169,7 @@ pub async fn run_stream(
                     model_used: decision.model,
                     budget,
                     degraded,
+                    policy_alert,
                 });
             }
             Err(e) => {
@@ -1624,10 +2252,13 @@ pub async fn run_multimodal(
             match fw.policy() {
                 FirewallPolicy::Block => {
                     state.metrics.inc_firewall_blocked();
-                    return Err(GatewayError::FirewallBlocked(format!(
-                        "Inbound content blocked: {} ({:?})",
-                        violation.pattern_name, violation.kind
-                    )));
+                    return Err(GatewayError::FirewallBlocked(
+                        format!(
+                            "Inbound content blocked: {} ({:?})",
+                            violation.pattern_name, violation.kind
+                        ),
+                        firewall_policy_alert(fw.config(), &ctx, "block"),
+                    ));
                 }
                 FirewallPolicy::Sanitize | FirewallPolicy::WarnAndContinue => {
                     warn!(
@@ -1646,6 +2277,29 @@ pub async fn run_multimodal(
         audit_failure(&state, &ctx, &requested_model, &e, start);
         e
     })?;
+
+    // Image-target inline evaluators (explicit_content / sensitive_imagery) are
+    // NOT enforced this phase: judging an image needs a vision-capable judge that
+    // is not wired here. If an agent enabled one, log it honestly rather than
+    // silently implying enforcement — their catalog `enforced` flag stays false.
+    if matches!(modality, Modality::Image) {
+        let scanner = state.resolved_scanner(&ctx);
+        let enabled_image: Vec<&'static str> = scanner
+            .config()
+            .evaluators
+            .iter()
+            .filter(|b| b.enabled)
+            .filter_map(|b| image_detection_kind(&b.id))
+            .map(|k| k.as_str())
+            .collect();
+        if !enabled_image.is_empty() {
+            warn!(
+                request_id = %ctx.request_id,
+                evaluators = ?enabled_image,
+                "inline image evaluators enabled but NOT enforced this phase (no vision judge wired; enforced=false)"
+            );
+        }
+    }
 
     // Rate limit + burst check.
     if !state
@@ -1679,11 +2333,12 @@ pub async fn run_multimodal(
 
     // Budget enforcement (reuse the chat path's enforcer).
     let mut decision = decision;
-    let budget = enforce_budget(&state, &ctx, &mut body, &mut decision).map_err(|e| {
-        state.metrics.inc_errors();
-        audit_failure(&state, &ctx, &requested_model, &e, start);
-        e
-    })?;
+    let (budget, policy_alert) =
+        enforce_budget(&state, &ctx, &mut body, &mut decision).map_err(|e| {
+            state.metrics.inc_errors();
+            audit_failure(&state, &ctx, &requested_model, &e, start);
+            e
+        })?;
 
     let fallback_chain = state.router.fallback_chain(&decision.provider);
     let mut last_err: Option<GatewayError> = None;
@@ -1805,6 +2460,9 @@ pub async fn run_multimodal(
                             "media",
                             cost,
                             fail_closed_sticky,
+                            // Media debits carry no budget-cap tier (item 4 is
+                            // scoped to token budgets).
+                            None,
                         ));
                     }
                 }
@@ -1818,6 +2476,7 @@ pub async fn run_multimodal(
                     budget,
                     eval_score: None,
                     degraded,
+                    policy_alert,
                 });
             }
             Err(e) => {
@@ -1882,10 +2541,13 @@ pub async fn submit_video_job(
         if let Some(violation) = fw.scan_inbound(&prompt_text) {
             if *fw.policy() == FirewallPolicy::Block {
                 state.metrics.inc_firewall_blocked();
-                return Err(GatewayError::FirewallBlocked(format!(
-                    "Inbound content blocked: {} ({:?})",
-                    violation.pattern_name, violation.kind
-                )));
+                return Err(GatewayError::FirewallBlocked(
+                    format!(
+                        "Inbound content blocked: {} ({:?})",
+                        violation.pattern_name, violation.kind
+                    ),
+                    firewall_policy_alert(fw.config(), &ctx, "block"),
+                ));
             }
             warn!(
                 request_id = %ctx.request_id,
@@ -1921,9 +2583,12 @@ pub async fn submit_video_job(
         ctx.slot_model.as_deref(),
     );
     let mut decision = decision;
+    // Video is job-based; the budget decision (and any alert) is not surfaced on
+    // the submit response, so the tuple is discarded wholesale.
     let _budget = enforce_budget(&state, &ctx, &mut body, &mut decision).map_err(|e| {
         state.metrics.inc_errors();
         audit_failure(&state, &ctx, &requested_model, &e, start);
+
         e
     })?;
 
@@ -1993,6 +2658,7 @@ pub async fn submit_video_job(
                     "media",
                     cost,
                     fail_closed_sticky,
+                    None,
                 ));
             }
         }
@@ -2066,6 +2732,7 @@ pub async fn poll_video_job(
                     "media",
                     cost,
                     fail_closed_sticky,
+                    None,
                 ));
             }
         }
@@ -2245,9 +2912,9 @@ fn enforce_budget(
     ctx: &RequestContext,
     body: &mut Value,
     decision: &mut RouteDecision,
-) -> Result<Option<BudgetDecision>, GatewayError> {
+) -> Result<(Option<BudgetDecision>, Option<PolicyAlert>), GatewayError> {
     if ctx.is_master_key {
-        return Ok(None);
+        return Ok((None, None));
     }
     // Pre-flight credit gate (multi-tenant data plane): a managed-inference tenant
     // whose control-plane-resolved wallet is already exhausted is rejected BEFORE
@@ -2277,11 +2944,38 @@ fn enforce_budget(
     // decision flows through the existing Notify/Downgrade/Restrict/Stop arms.
     let session_decision = state.with_budget(|b| b.evaluate_session(ctx.session_id.as_deref()));
 
+    // The propagated alert tier is the MAX across every matched decision (not
+    // just the most-severe-enforcement one), so a low-enforcement rule with a
+    // high alert tier still fans out. Computed before `most_severe` consumes the
+    // decisions.
+    let max_tier = [
+        token_decision.as_ref(),
+        wallet_decision.as_ref(),
+        session_decision.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|d| d.alert)
+    .max()
+    .unwrap_or(AlertTier::Silent);
+
     let Some(budget) = most_severe(
         most_severe(token_decision, wallet_decision),
         session_decision,
     ) else {
-        return Ok(None);
+        return Ok((None, None));
+    };
+
+    // Build the Ok/Err-path PolicyAlert once (source/scope inferred from the
+    // winning decision), only when a matched rule asked for a real alert.
+    let alert = if max_tier >= AlertTier::Warn {
+        Some(PolicyAlert::from_budget_decision(
+            &budget,
+            max_tier,
+            ctx.org_id.as_deref().unwrap_or(""),
+        ))
+    } else {
+        None
     };
 
     match budget.action {
@@ -2334,11 +3028,11 @@ fn enforce_budget(
                 limit = budget.limit,
                 "budget exceeded (stop)"
             );
-            return Err(GatewayError::BudgetExceeded);
+            return Err(GatewayError::BudgetExceeded(alert));
         }
     }
 
-    Ok(Some(budget))
+    Ok((Some(budget), alert))
 }
 
 // ─── Credit-wallet debit hook (#486) ──────────────────────────────────────────
@@ -2398,6 +3092,10 @@ fn wallet_empty_decision(state: &AppState, ctx: &RequestContext) -> Option<Budge
         limit: 0,
         downgrade_to: credits.wallet_empty_downgrade_to.clone(),
         restrict_max_tokens: 256,
+        // The wallet-empty rule's own alert tier (folded into the max in
+        // `enforce_budget`). `limit == 0` keeps the wallet-empty invariant that
+        // `PolicyAlert::from_budget_decision` routes to `wallet_empty`.
+        alert: credits.wallet_empty_alert,
     })
 }
 
@@ -2522,6 +3220,12 @@ async fn debit_wallet_for_request(
     reason: &'static str,
     cost_micro_usd: u64,
     fail_closed_sticky: bool,
+    // Managed policy-alert hook (item 4): the stamped budget-cap tier for THIS
+    // request, present only when a budget rule with tier >= Warn matched. Carried
+    // on the existing debit payload (the one place the gateway and control-plane
+    // already touch) so `credits.ts /debit` can email managed owners. Additive:
+    // `None` omits the field entirely, leaving the legacy debit body unchanged.
+    budget_alert_tier: Option<AlertTier>,
 ) {
     let credits = &state.config.credits;
     if !credits.is_active() {
@@ -2536,12 +3240,22 @@ async fn debit_wallet_for_request(
     };
 
     let url = format!("{}/credits/debit", credits.base_url.trim_end_matches('/'));
-    let body = json!({
+    let mut body = json!({
         "orgId": org_id,
         "amountMicroUsd": amount,
         "reason": reason,
         "refId": ref_id,
     });
+    // Additive: only stamp `alertTier` when a budget cap actually asked for an
+    // alert, so existing debit consumers see a byte-identical body otherwise.
+    if let Some(tier) = budget_alert_tier {
+        if let Some(obj) = body.as_object_mut() {
+            // Reuse the AlertTier serde (lowercase) as the wire value.
+            if let Ok(v) = serde_json::to_value(tier) {
+                obj.insert("alertTier".to_string(), v);
+            }
+        }
+    }
 
     let resp = state
         .http
@@ -2663,6 +3377,7 @@ fn spawn_tool_call_debit(
         "composio",
         cost,
         fail_closed_sticky,
+        None,
     ));
 }
 
@@ -2754,6 +3469,43 @@ fn sse_parse_usage(raw: &str) -> (u64, u64) {
     best
 }
 
+/// Read the provider-side prompt-cache read count from a chat-completions
+/// response `usage` block. Covers OpenRouter/OpenAI
+/// (`prompt_tokens_details.cached_tokens`) and Anthropic-shaped
+/// (`cache_read_input_tokens`) usage. Returns 0 when the provider reports no
+/// prompt caching (the common case, so this stays a cheap no-op).
+fn provider_cached_tokens(response: &Value) -> u64 {
+    let usage = &response["usage"];
+    usage["prompt_tokens_details"]["cached_tokens"]
+        .as_u64()
+        .or_else(|| usage["cache_read_input_tokens"].as_u64())
+        .unwrap_or(0)
+}
+
+/// Streaming counterpart of [`provider_cached_tokens`]: scan an assembled SSE
+/// transcript for the terminal usage frame's cached-token count. Mirrors
+/// [`sse_parse_usage`]; returns 0 when absent.
+fn sse_parse_cached_tokens(raw: &str) -> u64 {
+    let mut best = 0u64;
+    for line in raw.lines() {
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim();
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        let Ok(json) = serde_json::from_str::<Value>(data) else {
+            continue;
+        };
+        let cached = provider_cached_tokens(&json);
+        if cached > 0 {
+            best = cached;
+        }
+    }
+    best
+}
+
 /// State threaded through the stream observer unfold loop.
 struct StreamObserverState {
     inner: axum::body::BodyDataStream,
@@ -2766,6 +3518,10 @@ struct StreamObserverState {
     start: Instant,
     accumulated: String,
     done: bool,
+    /// Managed policy-alert tier (item 4) carried to the stream-end debit so the
+    /// control plane can email owners. `None` unless a budget cap with tier >=
+    /// Warn matched this (streaming) request.
+    budget_alert_tier: Option<AlertTier>,
 }
 
 /// Wrap `body` with a stream observer that fires at stream end to:
@@ -2786,6 +3542,7 @@ fn attach_stream_observer(
     model: String,
     estimated_input_tokens: u64,
     start: Instant,
+    budget_alert_tier: Option<AlertTier>,
 ) -> Body {
     use futures_util::StreamExt;
 
@@ -2799,6 +3556,7 @@ fn attach_stream_observer(
         start,
         accumulated: String::new(),
         done: false,
+        budget_alert_tier,
     };
 
     let stream = futures_util::stream::unfold(init, |mut s| async move {
@@ -2827,6 +3585,11 @@ fn attach_stream_observer(
                     // Update audit token totals (in-memory, for budget enforcement).
                     s.state.audit.add_tokens(&s.ctx.api_key, total_tokens);
                     s.state.metrics.add_tokens(input_tokens, output_tokens);
+                    // Provider-side prompt-cache reads (OpenRouter cache path).
+                    let cached_tokens = sse_parse_cached_tokens(&s.accumulated);
+                    if cached_tokens > 0 {
+                        s.state.metrics.add_cached_tokens(cached_tokens);
+                    }
 
                     // Eval scoring at stream end: synthesise a minimal usage
                     // response so the scorer can compute token_efficiency.
@@ -2926,6 +3689,11 @@ fn attach_stream_observer(
                                 "gateway_usage",
                                 cost,
                                 fail_closed_sticky,
+                                // Managed policy-alert (item 4): the matched
+                                // budget-cap tier, threaded through the stream
+                                // state so streaming managed chat (the common
+                                // case) emails owners too.
+                                s.budget_alert_tier,
                             )
                             .await;
                         }
@@ -3001,13 +3769,41 @@ fn extract_text_for_scanning(body: &Value) -> String {
     parts.join("\n")
 }
 
+/// Extract the assistant text an Output-target inline evaluator should judge.
+///
+/// Concatenates the text of EVERY choice (not just `choices[0]`) and handles both
+/// the string and array-of-parts (`[{ "type": "text", "text": … }]`) content
+/// shapes, so toxic/PII/biased text placed in a second choice (`n>1`) or in a
+/// content part does not bypass the non-stream + cache-hit judge. (`tool_call`
+/// arguments are still not concatenated — moderating tool-call payloads is a
+/// distinct design question deferred past P3.)
 fn response_to_text(response: &Value) -> String {
-    response["choices"]
-        .as_array()
-        .and_then(|a| a.first())
-        .and_then(|c| c["message"]["content"].as_str())
-        .unwrap_or_default()
-        .to_string()
+    let Some(choices) = response["choices"].as_array() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    let mut push = |s: &str| {
+        if !s.is_empty() {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(s);
+        }
+    };
+    for choice in choices {
+        match &choice["message"]["content"] {
+            Value::String(s) => push(s),
+            Value::Array(parts) => {
+                for part in parts {
+                    if let Some(t) = part["text"].as_str() {
+                        push(t);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn sanitize_messages(body: &mut Value, scanner: &crate::firewall::FirewallScanner) {
@@ -3039,22 +3835,34 @@ fn sanitize_response(response: &mut Value, scanner: &crate::firewall::FirewallSc
 async fn apply_outbound_firewall_stream(
     stream_body: Body,
     state: Arc<AppState>,
-    request_id: String,
+    ctx: RequestContext,
 ) -> Body {
-    // When outbound scanning is disabled, or the (default) policy is
-    // warn-and-continue, we never need to hold bytes back. Pass the upstream
-    // body straight through; for warn-and-continue we still observe it via a
-    // best-effort, non-blocking scan so detections are logged.
+    let request_id = ctx.request_id.clone();
+    // Node-level outbound firewall gate (unchanged): does the node config buffer?
     let (outbound_enabled, policy) =
         state.with_firewall(|fw| (fw.outbound_enabled(), fw.policy().clone()));
-    if !outbound_enabled || matches!(policy, FirewallPolicy::WarnAndContinue) {
+    let node_needs_buffer = outbound_enabled && !matches!(policy, FirewallPolicy::WarnAndContinue);
+
+    // Resolved per-agent OUTPUT-target inline evaluators (P3). A blocking/redacting
+    // output evaluator must force buffering even when the node policy is warn/off —
+    // otherwise it would never fire on the DEFAULT streaming chat path.
+    let resolved = state.resolved_scanner(&ctx);
+    let has_output_eval = resolved.config().evaluators.iter().any(|b| b.enabled);
+    let eval_needs_buffer = has_output_eval && {
+        let registry = EvaluatorRegistry::from_config(&state.config);
+        output_inline_wants_transform(&resolved, &registry)
+    };
+
+    // When nothing needs to hold bytes back, pass through. For node warn-and-continue
+    // we still observe the stream to log node detections (unchanged contract).
+    if !node_needs_buffer && !eval_needs_buffer {
         if outbound_enabled {
             return scan_and_log_passthrough(stream_body, state, request_id);
         }
         return stream_body;
     }
 
-    // Block / Sanitize: buffer the whole upstream stream, then decide.
+    // Buffer the whole upstream stream, then decide (node scan first, then evals).
     let collected = match axum::body::to_bytes(stream_body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -3069,38 +3877,74 @@ async fn apply_outbound_firewall_stream(
     let raw = String::from_utf8_lossy(&collected).into_owned();
     let assembled = sse_extract_text(&raw);
 
-    let scan_result = state.with_firewall(|fw| {
-        fw.scan_outbound(&assembled)
-            .map(|v| (v, fw.sanitize(&assembled)))
-    });
+    // ── Node outbound firewall (existing behavior) ──
+    if node_needs_buffer {
+        let scan_result = state.with_firewall(|fw| {
+            fw.scan_outbound(&assembled)
+                .map(|v| (v, fw.sanitize(&assembled)))
+        });
+        if let Some((violation, sanitized)) = scan_result {
+            match policy {
+                FirewallPolicy::Block => {
+                    warn!(
+                        request_id = %request_id,
+                        pattern = %violation.pattern_name,
+                        "firewall: blocked outbound response (streaming)"
+                    );
+                    state.metrics.inc_firewall_blocked();
+                    return Body::from(sse_content_frames(&format!(
+                        "[Ryu firewall] Response blocked by policy: {} ({:?}).",
+                        violation.pattern_name, violation.kind
+                    )));
+                }
+                FirewallPolicy::Sanitize => {
+                    warn!(
+                        request_id = %request_id,
+                        pattern = %violation.pattern_name,
+                        "firewall: sanitized outbound response (streaming)"
+                    );
+                    return Body::from(sse_content_frames(&sanitized));
+                }
+                FirewallPolicy::WarnAndContinue => {}
+            }
+        }
+    }
 
-    match scan_result {
-        Some((violation, sanitized)) => match policy {
-            FirewallPolicy::Block => {
+    // ── Unified-evaluator OUTPUT inline guardrails (P3) ──
+    if has_output_eval {
+        let (outcome, reason) =
+            evaluate_output_inline_stream(&state, &ctx, resolved.as_ref(), &assembled).await;
+        match outcome {
+            InlineOutcome::Block => {
                 warn!(
                     request_id = %request_id,
-                    pattern = %violation.pattern_name,
-                    "firewall: blocked outbound response (streaming)"
+                    %reason,
+                    "inline evaluator: blocked outbound response (streaming)"
                 );
                 state.metrics.inc_firewall_blocked();
-                Body::from(sse_content_frames(&format!(
-                    "[Ryu firewall] Response blocked by policy: {} ({:?}).",
-                    violation.pattern_name, violation.kind
-                )))
+                let model = ctx
+                    .agent_id
+                    .as_deref()
+                    .unwrap_or("unknown");
+                audit_inline_evaluator(&state, &ctx, model, "output", "blocked", &reason);
+                return Body::from(sse_content_frames(&format!(
+                    "[Ryu firewall] Response blocked by evaluator: {reason}."
+                )));
             }
-            FirewallPolicy::Sanitize => {
+            InlineOutcome::Sanitize => {
                 warn!(
                     request_id = %request_id,
-                    pattern = %violation.pattern_name,
-                    "firewall: sanitized outbound response (streaming)"
+                    %reason,
+                    "inline evaluator: sanitized outbound response (streaming)"
                 );
-                Body::from(sse_content_frames(&sanitized))
+                return Body::from(sse_content_frames(&resolved.sanitize(&assembled)));
             }
-            FirewallPolicy::WarnAndContinue => Body::from(collected),
-        },
-        // Clean: replay the original buffered bytes untouched.
-        None => Body::from(collected),
+            InlineOutcome::Warn | InlineOutcome::Allow => {}
+        }
     }
+
+    // Clean: replay the original buffered bytes untouched.
+    Body::from(collected)
 }
 
 /// Per-stream state threaded through the warn-and-continue passthrough so that
@@ -4174,6 +5018,7 @@ mod tests {
             "gpt-4o".to_string(),
             5, // estimated (should be overridden by the real frame)
             Instant::now(),
+            None,
         );
 
         // Drain the observed body to trigger the stream end hook.
@@ -4367,5 +5212,152 @@ mod tests {
             "degraded must be Some(Fallback) when the primary was skipped"
         );
         assert_eq!(degraded.unwrap().header_value(), "fallback:anthropic");
+    }
+
+    // ── Unified-evaluator inline bridge gating (P3) ───────────────────────────
+
+    use crate::evaluators::EvaluatorBinding;
+
+    fn scanner_with_bindings(bindings: Vec<EvaluatorBinding>) -> FirewallScanner {
+        FirewallScanner::new(FirewallConfig {
+            evaluators: bindings,
+            ..FirewallConfig::default()
+        })
+    }
+
+    fn binding(id: &str, enabled: bool, action: Option<FirewallPolicy>) -> EvaluatorBinding {
+        EvaluatorBinding {
+            id: id.into(),
+            enabled,
+            inline_action: action,
+            offline: None,
+            locked: false,
+        }
+    }
+
+    /// A blocking/redacting enabled OUTPUT evaluator forces the streaming firewall
+    /// to buffer (so it can actually fire on the default warn/off streaming path).
+    #[test]
+    fn output_inline_wants_transform_true_for_blocking_binding() {
+        let reg = EvaluatorRegistry::new();
+        let block = scanner_with_bindings(vec![binding(
+            "toxicity",
+            true,
+            Some(FirewallPolicy::Block),
+        )]);
+        assert!(output_inline_wants_transform(&block, &reg));
+
+        let sanitize = scanner_with_bindings(vec![binding(
+            "pii_leakage",
+            true,
+            Some(FirewallPolicy::Sanitize),
+        )]);
+        assert!(output_inline_wants_transform(&sanitize, &reg));
+    }
+
+    /// A disabled binding is a no-op; a warn-action binding does not force buffering;
+    /// an INPUT-target binding never affects the output buffer decision.
+    #[test]
+    fn output_inline_wants_transform_false_cases() {
+        let reg = EvaluatorRegistry::new();
+        // disabled
+        assert!(!output_inline_wants_transform(
+            &scanner_with_bindings(vec![binding("toxicity", false, Some(FirewallPolicy::Block))]),
+            &reg
+        ));
+        // warn action → no buffering
+        assert!(!output_inline_wants_transform(
+            &scanner_with_bindings(vec![binding(
+                "toxicity",
+                true,
+                Some(FirewallPolicy::WarnAndContinue)
+            )]),
+            &reg
+        ));
+        // input-target evaluator (code_injection) is not an output transform
+        assert!(!output_inline_wants_transform(
+            &scanner_with_bindings(vec![binding(
+                "code_injection",
+                true,
+                Some(FirewallPolicy::Block)
+            )]),
+            &reg
+        ));
+        // no bindings at all
+        assert!(!output_inline_wants_transform(
+            &scanner_with_bindings(vec![]),
+            &reg
+        ));
+    }
+
+    /// An enabled toxicity binding routes to the LLM-judge (inspector) path, and a
+    /// flagged verdict + its Block action drives the SAME block outcome the regex
+    /// firewall uses (mock verdict tested at the pure-decision seam — the inspector
+    /// itself is fail-open-tested in `firewall::inspector`).
+    #[test]
+    fn toxicity_binding_routes_to_judge_and_blocks() {
+        let reg = EvaluatorRegistry::new();
+        let tox = reg.get("toxicity").expect("toxicity seeded");
+        assert!(tox.capabilities.inline, "toxicity is inline-capable");
+        assert_eq!(tox.target, EvaluatorTarget::Output);
+        assert!(
+            matches!(tox.impl_, EvaluatorImpl::LlmJudge { .. }),
+            "toxicity dispatches to the inspect_rubric judge path"
+        );
+        let action = inline_action_for(&binding("toxicity", true, None), tox);
+        // Mock verdict = flagged ⇒ Block; clean ⇒ Allow.
+        assert_eq!(inline_outcome(true, &action), InlineOutcome::Block);
+        assert_eq!(inline_outcome(false, &action), InlineOutcome::Allow);
+    }
+
+    /// The inline action resolves binding-first, then the catalog default.
+    #[test]
+    fn inline_action_resolution_precedence() {
+        let reg = EvaluatorRegistry::new();
+        let tox = reg.get("toxicity").expect("toxicity seeded");
+        // Binding override wins.
+        assert_eq!(
+            inline_action_for(
+                &binding("toxicity", true, Some(FirewallPolicy::Sanitize)),
+                tox
+            ),
+            FirewallPolicy::Sanitize
+        );
+        // No binding action ⇒ the catalog default (toxicity defaults to Block).
+        assert_eq!(
+            inline_action_for(&binding("toxicity", true, None), tox),
+            FirewallPolicy::Block
+        );
+    }
+
+    /// response_to_text concatenates text across ALL choices AND array-of-parts
+    /// content, so toxic/PII text hidden in a second choice (`n>1`) or in a content
+    /// part no longer bypasses the non-stream / cache-hit Output judge.
+    #[test]
+    fn response_to_text_extracts_all_choices_and_parts() {
+        // Plain choices[0] string still works.
+        let simple = serde_json::json!({
+            "choices": [{ "message": { "content": "hello world" } }]
+        });
+        assert_eq!(response_to_text(&simple), "hello world");
+
+        // Array-of-parts content is extracted.
+        let parts = serde_json::json!({
+            "choices": [{ "message": { "content": [
+                { "type": "text", "text": "kill yourself you worthless trash" }
+            ] } }]
+        });
+        assert!(response_to_text(&parts).contains("kill yourself"));
+
+        // A toxic SECOND choice (n>1) is no longer invisible.
+        let multi = serde_json::json!({
+            "choices": [
+                { "message": { "content": "benign first choice" } },
+                { "message": { "content": "you are a piece of shit" } }
+            ]
+        });
+        let text = response_to_text(&multi);
+        assert!(text.contains("benign first choice"));
+        assert!(text.contains("piece of shit"), "second choice must be extracted");
     }
 }

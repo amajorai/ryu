@@ -1,0 +1,304 @@
+/*
+ * Checklist widget local styles. Everything resolves against the shared design
+ * tokens (`var(--ryu-*)` from `tokens.css`) so light/dark is inherited from the
+ * host theme with no per-widget theme logic. No external URLs (CSP `default-src
+ * 'none'`); icons are inline SVG in the component.
+ */
+
+.checklist {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ryu-space-3);
+	max-width: 640px;
+}
+
+.checklist__header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--ryu-space-3);
+}
+
+.checklist__title {
+	margin: 0;
+	font-size: var(--ryu-text-lg);
+	font-weight: 650;
+	color: var(--ryu-text);
+	word-break: break-word;
+}
+
+.checklist__count {
+	flex: none;
+	font-size: var(--ryu-text-xs);
+	color: var(--ryu-text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.checklist__error {
+	display: flex;
+	align-items: center;
+	gap: var(--ryu-space-2);
+	padding: var(--ryu-space-2) var(--ryu-space-3);
+	border-radius: var(--ryu-radius-sm);
+	background: color-mix(in srgb, var(--ryu-danger) 14%, transparent);
+	color: var(--ryu-danger);
+	font-size: var(--ryu-text-sm);
+}
+
+.checklist__error-dismiss {
+	margin-left: auto;
+	border: none;
+	background: none;
+	color: inherit;
+	cursor: pointer;
+	padding: 2px;
+	border-radius: var(--ryu-radius-sm);
+	display: inline-flex;
+}
+
+.checklist__items {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.checklist__item {
+	display: flex;
+	align-items: center;
+	gap: var(--ryu-space-3);
+	padding: var(--ryu-space-2);
+	border-radius: var(--ryu-radius-sm);
+	transition: background 0.12s ease;
+}
+
+.checklist__item:hover {
+	background: var(--ryu-surface);
+}
+
+.checklist__item[data-pending="true"] {
+	opacity: 0.55;
+}
+
+.checklist__check {
+	flex: none;
+	display: inline-flex;
+	cursor: pointer;
+	position: relative;
+}
+
+/* Visually hidden but focusable native checkbox (accessible control). */
+.checklist__check-input {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	opacity: 0;
+	cursor: pointer;
+}
+
+.checklist__check-box {
+	width: 20px;
+	height: 20px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 1.5px solid var(--ryu-border);
+	border-radius: 6px;
+	background: var(--ryu-bg);
+	color: var(--ryu-primary-contrast);
+	transition:
+		background 0.12s ease,
+		border-color 0.12s ease;
+}
+
+.checklist__check-input:checked + .checklist__check-box {
+	background: var(--ryu-primary);
+	border-color: var(--ryu-primary);
+}
+
+.checklist__check-input:focus-visible + .checklist__check-box {
+	outline: 2px solid var(--ryu-focus-ring);
+	outline-offset: 2px;
+}
+
+.checklist__check-input:disabled + .checklist__check-box {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.checklist__check-box > svg {
+	opacity: 0;
+	transform: scale(0.6);
+	transition:
+		opacity 0.12s ease,
+		transform 0.12s ease;
+}
+
+.checklist__check-input:checked + .checklist__check-box > svg {
+	opacity: 1;
+	transform: scale(1);
+}
+
+.checklist__text {
+	flex: 1;
+	min-width: 0;
+	font-size: var(--ryu-text-base);
+	color: var(--ryu-text);
+	background: none;
+	border: none;
+	padding: var(--ryu-space-1) 0;
+	text-align: left;
+	cursor: text;
+	word-break: break-word;
+}
+
+.checklist__text[data-done="true"] {
+	color: var(--ryu-text-muted);
+	text-decoration: line-through;
+}
+
+.checklist__edit-input {
+	flex: 1;
+	min-width: 0;
+	font: inherit;
+	font-size: var(--ryu-text-base);
+	color: var(--ryu-text);
+	background: var(--ryu-bg);
+	border: 1px solid var(--ryu-primary);
+	border-radius: var(--ryu-radius-sm);
+	padding: var(--ryu-space-1) var(--ryu-space-2);
+}
+
+.checklist__remove {
+	flex: none;
+	border: none;
+	background: none;
+	color: var(--ryu-text-muted);
+	cursor: pointer;
+	padding: var(--ryu-space-1);
+	border-radius: var(--ryu-radius-sm);
+	display: inline-flex;
+	opacity: 0;
+	transition:
+		opacity 0.12s ease,
+		color 0.12s ease,
+		background 0.12s ease;
+}
+
+.checklist__item:hover .checklist__remove,
+.checklist__remove:focus-visible {
+	opacity: 1;
+}
+
+.checklist__remove:hover {
+	color: var(--ryu-danger);
+	background: color-mix(in srgb, var(--ryu-danger) 12%, transparent);
+}
+
+.checklist__add {
+	display: flex;
+	align-items: center;
+	gap: var(--ryu-space-2);
+	padding: var(--ryu-space-2);
+	border-radius: var(--ryu-radius-sm);
+	border: 1px dashed var(--ryu-border);
+}
+
+.checklist__add-input {
+	flex: 1;
+	min-width: 0;
+	font: inherit;
+	font-size: var(--ryu-text-base);
+	color: var(--ryu-text);
+	background: none;
+	border: none;
+	padding: var(--ryu-space-1) 0;
+}
+
+.checklist__add-input::placeholder {
+	color: var(--ryu-text-muted);
+}
+
+.checklist__footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--ryu-space-3);
+	padding-top: var(--ryu-space-1);
+}
+
+.checklist__hint {
+	font-size: var(--ryu-text-xs);
+	color: var(--ryu-text-muted);
+}
+
+.checklist__approve {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--ryu-space-2);
+	font: inherit;
+	font-size: var(--ryu-text-sm);
+	font-weight: 600;
+	color: var(--ryu-primary-contrast);
+	background: var(--ryu-primary);
+	border: none;
+	border-radius: var(--ryu-radius);
+	padding: var(--ryu-space-2) var(--ryu-space-4);
+	cursor: pointer;
+	transition:
+		filter 0.12s ease,
+		opacity 0.12s ease;
+}
+
+.checklist__approve:hover:not(:disabled) {
+	filter: brightness(1.08);
+}
+
+.checklist__approve:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+.checklist__empty {
+	color: var(--ryu-text-muted);
+	font-size: var(--ryu-text-sm);
+	padding: var(--ryu-space-2) 0;
+}
+
+/* Loading skeleton */
+.checklist__skeleton {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ryu-space-3);
+}
+
+.checklist__skeleton-row {
+	height: 16px;
+	border-radius: var(--ryu-radius-sm);
+	background: linear-gradient(
+		90deg,
+		var(--ryu-surface) 25%,
+		var(--ryu-surface-hover) 50%,
+		var(--ryu-surface) 75%
+	);
+	background-size: 200% 100%;
+	animation: checklist-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes checklist-shimmer {
+	0% {
+		background-position: 200% 0;
+	}
+	100% {
+		background-position: -200% 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.checklist__skeleton-row {
+		animation: none;
+	}
+}

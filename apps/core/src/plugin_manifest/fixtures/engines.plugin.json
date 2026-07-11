@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.engines",
+  "id": "engines",
   "name": "Local Engines",
   "version": "1.0.0",
   "engines": {

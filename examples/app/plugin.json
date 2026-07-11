@@ -1,0 +1,21 @@
+{
+  "id": "com.ryu.reference-app",
+  "name": "Reference App",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "reference-app-companion",
+      "name": "Reference App",
+      "kind": "companion",
+      "config": {
+        "label": "Reference App",
+        "ui_entry": "./ui.js"
+      }
+    }
+  ],
+  "permission_grants": ["hook:side-model", "hook:run-agent", "storage:kv"],
+  "companion": {
+    "label": "Reference App",
+    "icon": "puzzle"
+  }
+}

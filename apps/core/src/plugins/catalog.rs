@@ -171,7 +171,7 @@ mod tests {
             "version": "1",
             "entries": [
                 {
-                    "id": "io.ryu.ghost",
+                    "id": "ghost",
                     "name": "Ghost",
                     "version": "1.0.0",
                     "description": "Desktop automation.",
@@ -185,7 +185,7 @@ mod tests {
         }"#;
         let parsed: RegistryResponse = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.entries.len(), 1);
-        assert_eq!(parsed.entries[0].id, "io.ryu.ghost");
+        assert_eq!(parsed.entries[0].id, "ghost");
         assert!(parsed.entries[0].built_in);
     }
 
@@ -193,7 +193,7 @@ mod tests {
     fn entry_defaults_optional_fields() {
         // permission_grants, built_in, and tags are all optional.
         let json = r#"{
-            "id": "io.ryu.minimal",
+            "id": "minimal",
             "name": "Minimal",
             "version": "0.1.0",
             "description": "x",

@@ -247,6 +247,74 @@ impl MonitorEngine {
         Self { store, mcp, http }
     }
 
+    /// Deliver a user-targeted notification across all three surfaces: the app
+    /// inbox (persisted row), the desktop OS toast (user-scoped SSE event), and
+    /// the member's mobile devices (Expo push). Returns the inbox row id.
+    ///
+    /// `ack_required` marks a HITL notification whose acknowledgement resumes a
+    /// suspended workflow run (`workflow_run_id` + `node_id` identify the gate).
+    /// Every channel is best-effort: a push failure never blocks the inbox write.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn deliver_user_notification(
+        &self,
+        user_id: &str,
+        title: &str,
+        body: &str,
+        level: &str,
+        workflow_run_id: Option<&str>,
+        node_id: Option<&str>,
+        ack_required: bool,
+    ) -> Result<String, String> {
+        let id = format!("ntf_{}", uuid::Uuid::new_v4().simple());
+        let row = store::NotificationRow {
+            id: id.clone(),
+            user_id: Some(user_id.to_owned()),
+            title: title.to_owned(),
+            body: (!body.is_empty()).then(|| body.to_owned()),
+            level: level.to_owned(),
+            workflow_run_id: workflow_run_id.map(|s| s.to_owned()),
+            node_id: node_id.map(|s| s.to_owned()),
+            ack_required,
+            acked: false,
+            read_at: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        // 1. App inbox (persisted — the one channel that must succeed).
+        self.store
+            .insert_notification(&row)
+            .await
+            .map_err(|e| format!("failed to persist notification: {e}"))?;
+
+        // 2. Desktop OS toast, scoped to the target member.
+        crate::events::publish(crate::events::DesktopNotification {
+            title: title.to_owned(),
+            body: (!body.is_empty()).then(|| body.to_owned()),
+            level: level.to_owned(),
+            target_user_id: Some(user_id.to_owned()),
+            notification_id: Some(id.clone()),
+        });
+
+        // 3. Mobile push to the member's registered devices.
+        match self.store.push_tokens_for_user(user_id).await {
+            Ok(tokens) => {
+                notify::push_expo_message(
+                    &self.http,
+                    &tokens,
+                    title,
+                    body,
+                    serde_json::json!({
+                        "notification_id": id,
+                        "workflow_run_id": workflow_run_id,
+                        "ack_required": ack_required,
+                    }),
+                )
+                .await;
+            }
+            Err(e) => tracing::warn!("notify: failed to read push tokens for {user_id}: {e}"),
+        }
+        Ok(id)
+    }
+
     /// Run one check for `monitor_id`: fetch, evaluate against the latest
     /// snapshot, persist a new snapshot, update the rollup, and fire any alert.
     /// Returns the resulting status.
@@ -299,7 +367,18 @@ impl MonitorEngine {
             };
             match self.store.insert_alert(&alert).await {
                 Ok(stored) => {
-                    notify::notify_all(&self.http, &self.store, &monitor.notify, &stored).await;
+                    // Resolve the shared BYO SMTP transport once per check so an
+                    // email notify target (if any) can send; `None` = email
+                    // disabled, in which case an email target is skipped.
+                    let email_cfg = crate::email::resolve_transport();
+                    notify::notify_all(
+                        &self.http,
+                        &self.store,
+                        &monitor.notify,
+                        &stored,
+                        email_cfg.as_ref(),
+                    )
+                    .await;
                 }
                 Err(e) => tracing::warn!("monitors: failed to store alert for {monitor_id}: {e}"),
             }

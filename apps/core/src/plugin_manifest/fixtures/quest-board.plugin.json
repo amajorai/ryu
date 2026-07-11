@@ -1,5 +1,5 @@
 {
-  "id": "io.ryu.quest-board",
+  "id": "quest-board",
   "name": "Quest Board",
   "version": "1.0.0",
   "runnables": [

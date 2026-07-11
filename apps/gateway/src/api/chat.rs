@@ -186,6 +186,12 @@ pub async fn chat_completions(
                 response.headers_mut().insert("x-degraded", v);
             }
         }
+        // Ok-path policy-alert stamp: stash on the RESPONSE extensions so the
+        // router's `map_response` layer writes `x-ryu-policy-alert`. Inserting on
+        // the response (not the request) is the F1 correctness fix.
+        if let Some(alert) = output.policy_alert {
+            response.extensions_mut().insert(alert);
+        }
 
         Ok(response)
     } else {
@@ -193,6 +199,7 @@ pub async fn chat_completions(
 
         let budget = output.budget.clone();
         let degraded = output.degraded.clone();
+        let policy_alert = output.policy_alert.clone();
         let mut response = Json(output.response).into_response();
         let hdrs = response.headers_mut();
         if let Ok(v) = HeaderValue::from_str(&output.context.request_id) {
@@ -220,6 +227,11 @@ pub async fn chat_completions(
             if let Ok(v) = HeaderValue::from_str(&d.header_value()) {
                 hdrs.insert("x-degraded", v);
             }
+        }
+        // Ok-path policy-alert stamp (see the streaming branch): stash on the
+        // response extensions for the router's `map_response` layer.
+        if let Some(alert) = policy_alert {
+            response.extensions_mut().insert(alert);
         }
 
         Ok(response)
