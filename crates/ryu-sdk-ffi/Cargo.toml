@@ -12,6 +12,6 @@ name = "ryu_sdk_ffi"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-ryu-sdk = { path = "../ryu-sdk", version = "0.0.1" }
+ryu-sdk = { path = "../ryu-sdk", version = "0.0.2" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
