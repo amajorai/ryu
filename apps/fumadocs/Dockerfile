@@ -1,6 +1,6 @@
 # Docs site (Fumadocs / Next.js, :3002). Bun + Turborepo monorepo.
 # Built by Dokploy (buildType=dockerfile, build context = repo root).
-FROM oven/bun:1.3.5 AS builder
+FROM oven/bun:1.3.14 AS builder
 WORKDIR /app
 ENV SKIP_ENV_VALIDATION=1
 ENV NEXT_TELEMETRY_DISABLED=1

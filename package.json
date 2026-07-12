@@ -90,7 +90,7 @@
       "bun x ultracite fix"
     ]
   },
-  "packageManager": "bun@1.3.5",
+  "packageManager": "bun@1.3.14",
   "trustedDependencies": [
     "electron",
     "@takumi-rs/core",
