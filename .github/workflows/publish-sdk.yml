@@ -34,7 +34,10 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
       - if: env.HAS_NPM == 'true'
-        run: bun install --frozen-lockfile
+        # NOT --frozen-lockfile: the public repo is a workspace SUBSET of the
+        # monorepo, so the mirrored bun.lock never matches the subset and a frozen
+        # install fails ("lockfile had changes"). Let bun resolve the public tree.
+        run: bun install
       - name: Publish packages
         if: env.HAS_NPM == 'true'
         env:
