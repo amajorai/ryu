@@ -92,7 +92,9 @@
   },
   "packageManager": "bun@1.3.5",
   "trustedDependencies": [
-    "electron"
+    "electron",
+    "@takumi-rs/core",
+    "takumi-js"
   ],
   "patchedDependencies": {
     "@expo/cli@55.0.16": "patches/@expo%2Fcli@55.0.16.patch"
