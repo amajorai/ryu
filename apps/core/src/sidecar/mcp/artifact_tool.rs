@@ -136,8 +136,17 @@ pub async fn dispatch(tool: &str, arguments: Value, spaces: Option<&SpaceStore>)
             };
 
             let byte_size = bytes.len();
+            // No HTTP caller on the tool path — attribute to the local owner on a
+            // bound node (the artifact lands in the shared "Artifacts" system space,
+            // but the document itself is owned so it is not exposed to every member).
             let doc_id = store
-                .create_file(&space_id, title, &bytes, mime)
+                .create_file(
+                    &space_id,
+                    title,
+                    &bytes,
+                    mime,
+                    &crate::server::spaces::background_tenancy(),
+                )
                 .await
                 .map_err(|e| anyhow::anyhow!("saving artifact: {e}"))?;
 
@@ -221,7 +230,10 @@ mod tests {
         assert_eq!(mime, "text/csv");
         assert_eq!(bytes, b"a,b\n1,2");
         // Landed in a system Artifacts space.
-        let spaces = store.list_spaces().await.unwrap();
+        let spaces = store
+            .list_spaces(crate::server::spaces::DocFilter::unrestricted())
+            .await
+            .unwrap();
         assert!(spaces.iter().any(|s| s.name == ARTIFACTS_SPACE_NAME));
     }
 

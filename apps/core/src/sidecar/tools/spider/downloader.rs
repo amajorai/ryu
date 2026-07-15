@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use crate::sidecar::download_manager::{ryu_dir, ProgressCallback, ProgressEvent, VersionStore};
+use crate::win_process::NoWindow;
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ impl SpiderDownloader {
         // Check if cargo is available
         let cargo_check = std::process::Command::new("cargo")
             .arg("--version")
+            .no_window()
             .output()
             .context("cargo not found in PATH — is Rust installed?")?;
 
@@ -71,6 +73,7 @@ impl SpiderDownloader {
         let status = tokio::task::spawn_blocking(move || {
             std::process::Command::new("cargo")
                 .args(["install", "spider_cli"])
+                .no_window()
                 .status()
         })
         .await
@@ -124,6 +127,7 @@ impl SpiderDownloader {
         // Record version — query the installed binary for the real version string.
         let version = tokio::process::Command::new(&dest)
             .arg("--version")
+            .no_window()
             .output()
             .await
             .ok()

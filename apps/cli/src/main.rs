@@ -1,6 +1,7 @@
 mod api;
 mod app;
 mod auth;
+mod bootstrap;
 mod chat;
 mod config;
 mod nodes;
@@ -223,6 +224,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let node = nodes::active_node();
+    // Bring a local node online if none is answering (no-op if Core is already up
+    // or the active node is remote). Lets `ryu-cli` alone start everything.
+    bootstrap::ensure_core(&node.url, node.token.as_deref()).await;
     // Non-blocking update notice on launch (skipped if Core is unreachable).
     if let Some(notice) = api::fetch_update_check(&node.url, node.token.as_deref()).await {
         if notice.available {
@@ -249,6 +253,15 @@ async fn main() -> anyhow::Result<()> {
 /// Run a headless subcommand and exit — no TUI launched.
 async fn run_command(args: Vec<String>) -> anyhow::Result<()> {
     let (api_url, token) = resolve_node(&args);
+    // Commands that talk to Core auto-start a local node if none is running. Purely
+    // local commands (version/help/auth/init) skip it so they stay instant offline.
+    let needs_core = !matches!(
+        args[0].as_str(),
+        "version" | "--version" | "-V" | "help" | "--help" | "-h" | "init" | "login" | "logout"
+    );
+    if needs_core {
+        bootstrap::ensure_core(&api_url, token.as_deref()).await;
+    }
     match args[0].as_str() {
         "version" | "--version" | "-V" => {
             println!("ryu-cli v{}", env!("CARGO_PKG_VERSION"));
@@ -1448,6 +1461,7 @@ fn switch_tab(app: &mut App, tab: SidebarTab) {
         SidebarTab::Services => Screen::Dashboard,
         SidebarTab::Agents => Screen::Agents,
         SidebarTab::Apps
+        | SidebarTab::Plugins
         | SidebarTab::Gateway
         | SidebarTab::Workflows
         | SidebarTab::Spaces
@@ -2406,6 +2420,132 @@ async fn refresh_catalog(app: &mut App) {
     }
 }
 
+// ── Plugins tab (GET/POST /api/plugins) ──────────────────────────────────────
+
+async fn refresh_plugins(app: &mut App) {
+    let token = nodes::active_node().token;
+    if let Ok(plugins) = api::fetch_plugins(&app.api_url, token.as_deref()).await {
+        app.plugins_list = plugins;
+        if app.plugins_tab_index >= app.plugins_list.len() {
+            app.plugins_tab_index = app.plugins_list.len().saturating_sub(1);
+        }
+    }
+}
+
+fn plugins_nav(app: &mut App, delta: isize) {
+    let len = app.plugins_list.len();
+    if len == 0 {
+        return;
+    }
+    let cur = app.plugins_tab_index as isize;
+    let next = (cur + delta).clamp(0, len as isize - 1);
+    app.plugins_tab_index = next as usize;
+}
+
+/// Enable the highlighted plugin (no-op unless it is installed and disabled).
+async fn do_enable_plugin(app: &mut App) {
+    let Some(plugin) = app.plugins_list.get(app.plugins_tab_index) else {
+        return;
+    };
+    if !plugin.installed {
+        app.plugins_status = Some("install the plugin before enabling it".into());
+        return;
+    }
+    if plugin.enabled {
+        app.plugins_status = Some(format!("{} is already enabled", plugin_label(plugin)));
+        return;
+    }
+    let (id, label) = (plugin.id.clone(), plugin_label(plugin));
+    let token = nodes::active_node().token;
+    match api::enable_plugin(&app.api_url, token.as_deref(), &id).await {
+        Ok(notice) => {
+            app.plugins_status = Some(match notice {
+                Some(n) => format!("enabled {label} — {n}"),
+                None => format!("enabled {label}"),
+            });
+        }
+        Err(e) => app.plugins_status = Some(e.to_string()),
+    }
+    refresh_plugins(app).await;
+}
+
+/// Disable the highlighted plugin. `cascade` disables its dependent chain too.
+async fn do_disable_plugin(app: &mut App, cascade: bool) {
+    let Some(plugin) = app.plugins_list.get(app.plugins_tab_index) else {
+        return;
+    };
+    if !plugin.enabled {
+        app.plugins_status = Some(format!("{} is not enabled", plugin_label(plugin)));
+        return;
+    }
+    let (id, label) = (plugin.id.clone(), plugin_label(plugin));
+    let token = nodes::active_node().token;
+    match api::disable_plugin(&app.api_url, token.as_deref(), &id, cascade).await {
+        Ok(notice) => {
+            app.plugins_status = Some(match notice {
+                Some(n) => format!("disabled {label} — {n}"),
+                None => format!("disabled {label}"),
+            });
+        }
+        Err(e) => app.plugins_status = Some(e.to_string()),
+    }
+    refresh_plugins(app).await;
+}
+
+/// Uninstall the highlighted plugin. `cascade` disables enabled dependents
+/// first instead of refusing with a typed 409.
+async fn do_uninstall_plugin(app: &mut App, cascade: bool) {
+    let Some(plugin) = app.plugins_list.get(app.plugins_tab_index) else {
+        return;
+    };
+    if !plugin.installed {
+        app.plugins_status = Some(format!("{} is not installed", plugin_label(plugin)));
+        return;
+    }
+    let (id, label) = (plugin.id.clone(), plugin_label(plugin));
+    let token = nodes::active_node().token;
+    match api::uninstall_plugin(&app.api_url, token.as_deref(), &id, cascade).await {
+        Ok(outcome) => {
+            let mut msg = format!("uninstalled {label}");
+            if !outcome.disabled.is_empty() {
+                msg.push_str(&format!(" (disabled: {})", outcome.disabled.join(", ")));
+            }
+            if let Some(n) = outcome.notice {
+                msg.push_str(&format!(" — {n}"));
+            }
+            app.plugins_status = Some(msg);
+        }
+        Err(e) => app.plugins_status = Some(e.to_string()),
+    }
+    refresh_plugins(app).await;
+}
+
+/// Install the highlighted available (not-installed) plugin.
+async fn do_install_plugin(app: &mut App) {
+    let Some(plugin) = app.plugins_list.get(app.plugins_tab_index) else {
+        return;
+    };
+    if plugin.installed {
+        app.plugins_status = Some(format!("{} is already installed", plugin_label(plugin)));
+        return;
+    }
+    let (id, label) = (plugin.id.clone(), plugin_label(plugin));
+    let token = nodes::active_node().token;
+    match api::install_plugin(&app.api_url, token.as_deref(), &id).await {
+        Ok(()) => app.plugins_status = Some(format!("installed {label} (enable it with e)")),
+        Err(e) => app.plugins_status = Some(e.to_string()),
+    }
+    refresh_plugins(app).await;
+}
+
+fn plugin_label(plugin: &crate::app::PluginRecord) -> String {
+    if plugin.name.is_empty() {
+        plugin.id.clone()
+    } else {
+        plugin.name.clone()
+    }
+}
+
 fn do_login(
     app: &mut App,
     login_rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<auth::LoginEvent>>,
@@ -2596,6 +2736,7 @@ async fn dispatch_hint_action(
             SidebarTab::Services => list_up(app, SIDECAR_ORDER.len()),
             SidebarTab::Chat => chat_scroll_up(app),
             SidebarTab::Apps => apps_list_up(app),
+            SidebarTab::Plugins => plugins_nav(app, -1),
             SidebarTab::Engines => {
                 if app.engines_tab_index > 0 {
                     app.engines_tab_index -= 1;
@@ -2613,6 +2754,7 @@ async fn dispatch_hint_action(
             SidebarTab::Services => list_down(app, SIDECAR_ORDER.len()),
             SidebarTab::Chat => chat_scroll_down(app),
             SidebarTab::Apps => apps_list_down(app),
+            SidebarTab::Plugins => plugins_nav(app, 1),
             SidebarTab::Engines => {
                 let len = app.engines_list.len();
                 if len > 0 && app.engines_tab_index < len - 1 {
@@ -2660,6 +2802,9 @@ async fn dispatch_hint_action(
                 refresh_feature_tab(app, tab).await;
             } else if app.active_tab == SidebarTab::Apps {
                 refresh_catalog(app).await;
+            } else if app.active_tab == SidebarTab::Plugins {
+                app.plugins_status = None;
+                refresh_plugins(app).await;
             } else if app.active_tab == SidebarTab::Spaces {
                 refresh_spaces_data(app).await;
             } else if app.active_tab == SidebarTab::Engines {
@@ -2871,6 +3016,11 @@ async fn run_app<B: ratatui::backend::Backend>(
                     }
                     if app.active_tab == SidebarTab::Apps {
                         refresh_catalog(&mut app).await;
+                    }
+                    // Lazily load plugins the first time the Plugins tab is
+                    // viewed; explicit actions/refresh reload it afterward.
+                    if app.active_tab == SidebarTab::Plugins && app.plugins_list.is_empty() {
+                        refresh_plugins(&mut app).await;
                     }
                     // Refresh gateway status in the background so the Gateway tab
                     // shows up-to-date data without a dedicated screen state.
@@ -3338,6 +3488,36 @@ async fn run_app<B: ratatui::backend::Backend>(
                             }
                             (KeyModifiers::NONE, KeyCode::Char('r')) => {
                                 refresh_catalog(&mut app).await;
+                            }
+                            _ => {}
+                        },
+                        SidebarTab::Plugins => match (key.modifiers, key.code) {
+                            (KeyModifiers::NONE, KeyCode::Char('q')) => return Ok(()),
+                            (KeyModifiers::NONE, KeyCode::Up | KeyCode::Char('k')) => {
+                                plugins_nav(&mut app, -1);
+                            }
+                            (KeyModifiers::NONE, KeyCode::Down | KeyCode::Char('j')) => {
+                                plugins_nav(&mut app, 1);
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('e')) => {
+                                do_enable_plugin(&mut app).await;
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('d')) => {
+                                do_disable_plugin(&mut app, false).await;
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('i')) => {
+                                do_install_plugin(&mut app).await;
+                            }
+                            (KeyModifiers::SHIFT, KeyCode::Char('D') | KeyCode::Char('d')) => {
+                                do_uninstall_plugin(&mut app, false).await;
+                            }
+                            // Cascade uninstall (disable dependents first).
+                            (KeyModifiers::SHIFT, KeyCode::Char('C') | KeyCode::Char('c')) => {
+                                do_uninstall_plugin(&mut app, true).await;
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('r')) => {
+                                app.plugins_status = None;
+                                refresh_plugins(&mut app).await;
                             }
                             _ => {}
                         },

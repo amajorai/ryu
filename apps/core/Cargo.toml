@@ -1,6 +1,6 @@
 [package]
 name = "ryu-core"
-version = "0.0.2"
+version = "0.0.4"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -165,9 +165,6 @@ sentry = { version = "0.34", default-features = false, features = ["backtrace", 
 transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "d97ae65debaa9bacd5d56aa7d308d13df43c97ec", default-features = false, features = ["onnx"], optional = true }
 once_cell = { version = "1", optional = true }
 
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["signal"] }
-
 # Optional: wasmtime sandbox backend (feature sandbox-wasmtime). Cross-platform
 # (macOS/Windows/Linux), so it MUST live in the main [dependencies] table — not
 # under a per-OS [target...] block, or `dep:wasmtime` resolves to nothing off
@@ -175,6 +172,9 @@ nix = { version = "0.29", features = ["signal"] }
 # measured in docs/spikes/0188-wasmtime-wasi-ceiling.md
 wasmtime = { version = "45", optional = true }
 wasmtime-wasi = { version = "45", features = ["p1", "p2"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal"] }
 
 # OS keychain for the at-rest master key (see src/crypto/mod.rs). Per-platform
 # native backend so the key lives outside ~/.ryu: Windows Credential Manager,
@@ -232,3 +232,8 @@ voice-vad = ["dep:transcribe-rs", "transcribe-rs/vad-silero"]
 
 [dev-dependencies]
 tempfile = "3"
+# `tower::ServiceExt::oneshot`, to drive a Router in-process from a test (the App
+# route-gate tests in `server/mod.rs`). Test-only on purpose: the production build
+# uses tower for layers and does not need the `util` feature, so this stays a
+# dev-dependency rather than widening the shipped feature set.
+tower = { version = "0.4", features = ["util"] }

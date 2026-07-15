@@ -89,6 +89,7 @@ passive evals are enabled, and cases run sequentially to keep provider load and 
 | `dataset` | Array of `EvalCase` (`prompt`, optional `expected`, `vars`, `assertions`). Empty uses a built-in 3-case dataset |
 | `system_prompt` | Run-level system prompt prepended to every case, with `{{vars}}` substituted per case |
 | `judge_model` | One fixed model that judges every `llm_judge` assertion (fair cross-model compare) |
+| `evaluators` | Optional run-level registry evaluator ids (from `GET /v1/evaluators`) scored against every case, unioned with any per-case `evaluators` |
 | `agent_id` | Optional id forwarded for per-agent budget tracking |
 
 Each case also supports `assertions` evaluated against the response text - `contains`, `not_contains`,
@@ -97,7 +98,9 @@ verdict is parsed defensively, with a missing verdict failing safe). Unlike `GET
 endpoint authenticates with any valid API key, not the master key, because a dataset run is a normal
 metered call.
 
-From Core, `POST /api/gateway/evals/run` proxies the dataset run.
+From Core, `POST /api/gateway/evals/run` proxies the dataset run (including optional
+`evaluators` and Core-local `code_evaluators`). `GET /api/gateway/evaluators` proxies the
+evaluator catalog.
 
 <Callout type="warn">
   Dataset runs are sequential and synchronous. A multi-model run with `llm_judge` fans out
@@ -149,8 +152,12 @@ Evaluators are bound to a firewall scope through `FirewallConfig.evaluators`, a 
 | `offline` | Offline scoring config (threshold, judge model) |
 | `locked` | Freeze the binding so a narrower scope can only tighten it |
 
-<Callout type="warn">
-This documents the catalog and the `GET /v1/evaluators` endpoint, not execution. Binding **execution** is still in progress - the `EvaluatorBinding` dial is "config plumbing + cascade + persistence only" today, with inline scanning and the offline runner as later phases (`apps/gateway/src/config.rs`, the `FirewallConfig.evaluators` doc comment). The `enforced` flag exists precisely so a surface never claims an evaluator runs when it does not.
+<Callout type="info">
+Inline evaluator bindings (`FirewallConfig.evaluators`) cascade node → org → agent and are
+enforced on the chat pipeline for input- and output-target evaluators that report
+`enforced: true` (the five text detectors plus additional wired judges as they land). Image-target
+evaluators are catalogued but not yet enforced on the image path. The `enforced` flag on each
+catalog entry remains the honesty signal for what a surface may claim is live.
 </Callout>
 
 ## Audit

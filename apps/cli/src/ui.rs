@@ -574,6 +574,7 @@ fn render_main_app(f: &mut Frame, app: &mut App) {
         SidebarTab::Chat => render_chat_content(f, main_area, app),
         SidebarTab::Agents => render_agents_content(f, main_area, app),
         SidebarTab::Apps => render_apps_content(f, main_area, app),
+        SidebarTab::Plugins => render_plugins_content(f, main_area, app),
         SidebarTab::Gateway => render_gateway_content(f, main_area, app),
         SidebarTab::Workflows => render_workflows_content(f, main_area, app),
         SidebarTab::Spaces => render_spaces_content(f, main_area, app),
@@ -647,6 +648,15 @@ fn render_main_app(f: &mut Frame, app: &mut App) {
             ("↑↓", "navigate", HintAction::NavUp),
             ("i", "install", HintAction::Install),
             ("D", "uninstall", HintAction::Uninstall),
+            ("r", "refresh", HintAction::Refresh),
+            ("q", "quit", HintAction::Quit),
+        ],
+        // Plugin lifecycle keys (e/d/i/D/C) are handled in the Plugins key arm
+        // and documented in the tab header; the hint bar shows only the generic
+        // actions that map to a real HintAction.
+        SidebarTab::Plugins => vec![
+            ("tab", "switch", HintAction::SwitchTab),
+            ("↑↓", "nav", HintAction::NavUp),
             ("r", "refresh", HintAction::Refresh),
             ("q", "quit", HintAction::Quit),
         ],
@@ -2268,6 +2278,141 @@ fn render_schedules_content(f: &mut Frame, area: Rect, app: &mut App) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(MUTED))
                 .title(Span::styled(" scheduled jobs ", Style::default().fg(MUTED))),
+        )
+        .highlight_style(Style::default().bg(HIGHLIGHT_BG))
+        .highlight_symbol("");
+
+    f.render_stateful_widget(list, body, &mut list_state);
+}
+
+fn render_plugins_content(f: &mut Frame, area: Rect, app: &mut App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .split(area);
+
+    // Header: title + key legend, then the last action/refusal status on a
+    // second line (so a 409 refusal names exactly what to disable first).
+    let mut header_lines = vec![Line::from(vec![
+        Span::styled(
+            " Plugins",
+            Style::default().fg(FG).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "  ↑↓ nav · e enable · d disable · i install · D uninstall · C cascade · r refresh",
+            Style::default().fg(MUTED),
+        ),
+    ])];
+    if let Some(status) = &app.plugins_status {
+        header_lines.push(Line::from(Span::styled(
+            format!(" {status}"),
+            Style::default().fg(ACCENT),
+        )));
+    }
+    f.render_widget(Paragraph::new(header_lines), chunks[0]);
+
+    let body = chunks[1];
+
+    if !app.core_connected && app.plugins_list.is_empty() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                " core not running",
+                Style::default().fg(MUTED),
+            ))),
+            body,
+        );
+        return;
+    }
+
+    if app.plugins_list.is_empty() {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(MUTED));
+        let inner = block.inner(body);
+        f.render_widget(block, body);
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  no plugins for this surface — press r to refresh",
+                    Style::default().fg(MUTED),
+                )),
+            ]),
+            inner,
+        );
+        return;
+    }
+
+    let sel = app
+        .plugins_tab_index
+        .min(app.plugins_list.len().saturating_sub(1));
+    let mut items: Vec<ListItem> = Vec::with_capacity(app.plugins_list.len());
+
+    for (i, plugin) in app.plugins_list.iter().enumerate() {
+        let is_sel = i == sel;
+        let name_style = if is_sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(FG)
+        };
+
+        // Three states, distinct markers: enabled (●), installed-disabled (○),
+        // available/not-installed (·).
+        let (icon, icon_style, state_label, state_style) = if !plugin.installed {
+            (
+                "·",
+                Style::default().fg(MUTED),
+                "available",
+                Style::default().fg(MUTED),
+            )
+        } else if plugin.enabled {
+            (
+                "●",
+                Style::default().fg(SUCCESS),
+                "enabled",
+                Style::default().fg(SUCCESS),
+            )
+        } else {
+            (
+                "○",
+                Style::default().fg(MUTED),
+                "disabled",
+                Style::default().fg(MUTED),
+            )
+        };
+
+        let display_name = if plugin.name.is_empty() {
+            plugin.id.as_str()
+        } else {
+            plugin.name.as_str()
+        };
+        let version = if plugin.version.is_empty() {
+            "—".to_string()
+        } else {
+            format!("v{}", plugin.version)
+        };
+
+        let mut spans = vec![
+            Span::styled(format!(" {icon} "), icon_style),
+            Span::styled(format!("{:<24}", trunc(display_name, 24)), name_style),
+            Span::styled(format!("{state_label:<10}"), state_style),
+            Span::styled(format!(" {version:<8}"), Style::default().fg(MUTED)),
+        ];
+        if plugin.built_in {
+            spans.push(Span::styled("  built-in", Style::default().fg(MUTED)));
+        }
+        items.push(ListItem::new(Line::from(spans)));
+    }
+
+    let mut list_state = ratatui::widgets::ListState::default();
+    list_state.select(Some(sel));
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(MUTED))
+                .title(Span::styled(" plugins ", Style::default().fg(MUTED))),
         )
         .highlight_style(Style::default().bg(HIGHLIGHT_BG))
         .highlight_symbol("");

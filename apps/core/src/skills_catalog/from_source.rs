@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::skills_catalog::InstallResult;
+use crate::win_process::NoWindow;
 
 /// How to obtain the repository contents for a parsed source.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -387,6 +388,7 @@ async fn git_clone(url: &str, dest: &Path) -> Result<PathBuf> {
         for var in GIT_UNSAFE_ENV {
             cmd.env_remove(var);
         }
+        cmd.no_window();
         cmd.output()
     })
     .await

@@ -274,6 +274,13 @@ fn str_num(v: &Value) -> Option<u32> {
 
 /// `GET /api/gifs/search?q=&limit=` — search (or, with empty `q`, trending) GIFs
 /// via the configured provider. Returns `{ configured, provider, results }`.
+#[utoipa::path(
+    get,
+    path = "/api/gifs/search",
+    tag = "Media",
+    summary = "search (or, with empty `q`, trending) GIFs",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn search(
     State(state): State<super::ServerState>,
     Query(params): Query<GifSearchQuery>,

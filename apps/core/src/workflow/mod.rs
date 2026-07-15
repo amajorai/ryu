@@ -25,6 +25,7 @@
 
 pub mod delegation;
 pub mod durable;
+pub mod channel_send;
 pub mod executor;
 pub mod notify_user;
 pub mod store;
@@ -360,6 +361,50 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ack_timeout_ms: Option<u64>,
     },
+    /// Send a message OUT to an external chat channel (Telegram / Slack /
+    /// Discord / any HTTP webhook). Unlike [`NodeKind::NotifyUser`] (which pings
+    /// org members through the in-app inbox + OS toast + mobile push), this
+    /// delivers to a third-party channel addressed by `recipient` (a Telegram
+    /// `chat_id` / `@username`, or ignored for URL-encoded webhooks).
+    ///
+    /// Placement (Core vs Gateway): this decides *what runs* (fire a message on a
+    /// node) → Core. The BYO channel credential (`bot_token` / `webhook_url`) is
+    /// carried inline on the node, mirroring the swappable-channel shape of
+    /// [`crate::monitors::notify::NotifyTarget`], whose send primitives it reuses.
+    ///
+    /// `recipient`/`text` are templates (`{{input}}`, `{{nodes.<id>}}`,
+    /// `{{state.<key>}}`, `{{trigger.*}}`) resolved before delivery.
+    ChannelSend {
+        /// Which channel transport to use.
+        platform: ChannelPlatform,
+        /// Where to send (template-resolved). Telegram `chat_id`/`@username`;
+        /// ignored for `webhook` (the URL already encodes the destination).
+        #[serde(default)]
+        recipient: String,
+        /// The message body (template-resolved).
+        #[serde(default)]
+        text: String,
+        /// Telegram Bot API token. Required for `platform = "telegram"`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bot_token: Option<String>,
+        /// Incoming-webhook URL. Required for `slack` / `discord` / `webhook`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        webhook_url: Option<String>,
+    },
+}
+
+/// The channel transport a [`NodeKind::ChannelSend`] node delivers through.
+/// Slack and Discord both post to their respective incoming-webhook URLs (Core
+/// sends a `text`+`content` body that fits either), so they share the webhook
+/// path; Telegram is a direct Bot API `sendMessage`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelPlatform {
+    Telegram,
+    Slack,
+    Discord,
+    /// Any generic HTTP JSON webhook.
+    Webhook,
 }
 
 /// Who a [`NodeKind::NotifyUser`] node pings. Resolved to member user ids against

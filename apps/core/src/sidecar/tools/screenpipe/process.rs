@@ -6,6 +6,8 @@ use std::process::Child;
 
 use anyhow::{Context, Result};
 
+use crate::win_process::NoWindow;
+
 pub struct ScreenpipeProcess {
     child: Option<Child>,
 }
@@ -23,6 +25,7 @@ impl ScreenpipeProcess {
         let child = tokio::task::spawn_blocking(move || {
             std::process::Command::new("npx")
                 .args(&["screenpipe@latest", "record"])
+                .no_window()
                 .spawn()
         })
         .await
@@ -46,6 +49,7 @@ impl ScreenpipeProcess {
             // by checking if npx/screenpipe is accessible
             std::process::Command::new("npx")
                 .arg("--version")
+                .no_window()
                 .output()
                 .map(|_| true)
                 .unwrap_or(false)

@@ -1,0 +1,1063 @@
+---
+title: Environment Variables
+description: Ground-truth reference for every environment variable across the Ryu monorepo - required vs optional, defaults, and which app reads each one.
+---
+
+This page is the canonical inventory of environment variables in the Ryu monorepo. It is assembled from `packages/env` Zod schemas, per-app `.env.example` files, and code scans across Rust and TypeScript apps.
+
+<Callout type="info">
+  **Legend.** *Required* means the app fails to start or a feature is unusable without the var in that deployment mode. *Optional* means a built-in default exists or the feature is opt-in. *Required\** on `.env.example` rows means the example shows it uncommented for local dev - check the schema for production rules.
+</Callout>
+
+## How configuration is organized
+
+| Layer | Mechanism | Apps |
+|---|---|---|
+| Typed schemas | `@ryu/env` (`@t3-oss/env` + Zod) | `apps/server`, `apps/web`, `apps/native`, `packages/{auth,db,api,email,mail}` |
+| Env-only (no schema) | `process.env` / `import.meta.env` / `std::env` | `apps/core`, `apps/gateway`, desktop/webapp/extension (Vite), `cloud-bot`, `mcp`, `tui`, `island` |
+| TOML + env overrides | `gateway.toml` + `GATEWAY_*` env | `apps/gateway` |
+| User preferences | Raycast extension prefs (not env) | `apps/raycast` |
+
+Copy the matching `.env.example` to `.env` (or `.env.local`) in each app directory. Core and Gateway have **no config file** beyond env vars (Gateway also reads `gateway.toml`).
+
+## Summary
+
+| Project | Vars documented | Required (typical local) | Schema |
+|---|---:|---:|---|
+| @ryu/env server | 91 | 5 | Yes |
+| @ryu/env web | 11 | 1 | Yes |
+| @ryu/env native | 3 | 2 | Yes |
+| apps/core | 269 | 1 | No |
+| apps/gateway | 112 | 0 | No |
+| apps/server | 100 | 30 | No |
+| apps/web | 29 | 19 | No |
+| apps/desktop | 8 | 8 | No |
+| apps/webapp | 9 | 9 | No |
+| apps/native | 4 | 4 | No |
+| apps/extension | 2 | 2 | No |
+| apps/cloud-bot | 21 | 5 | No |
+| apps/island | 3 | 0 | No |
+| apps/mcp | 3 | 0 | No |
+| apps/tui | 3 | 0 | No |
+| apps/cli | 4 | 0 | No |
+| apps/shadow | 15 | 0 | No |
+| apps/predict | 2 | 0 | No |
+| **Additional apps** (see below) | ~5 | varies | Partial |
+| **Total (table above)** | **689** | **86** | |
+
+Additional apps without `.env.example` (`raycast`, `fumadocs`, `storyboard`, `ghost`, `hardware`) are covered in dedicated sections below.
+
+---
+
+## @ryu/env server
+
+Source: [`packages/env/src/server.ts`](https://github.com/amajorai/ryu/blob/main/packages/env/src/server.ts)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | Required | - | See `.env.example`. |
+| `BETTER_AUTH_SECRET` | Required | - | See `.env.example`. |
+| `BETTER_AUTH_URL` | Required | - | See `.env.example`. |
+| `POLAR_ACCESS_TOKEN` | Required | - | See `.env.example`. |
+| `POLAR_SUCCESS_URL` | Required | - | See `.env.example`. |
+| `CORS_ORIGIN` | Optional | - | See `.env.example`. |
+| `AUTH_COOKIE_DOMAIN` | Optional | - | Cross-subdomain auth cookie domain. The frontend (ryuhq.com) and the auth API (api.ryuhq.com) are different subdomains, so a host-only session cookie set by the API is never sent on a navigation to the apex  -  the SSR portal gate then reads "no session" and bounces to /login, which (client-side) has the session and bounces back, an infinite loop. Setting this to the shared parent (e.g. "ryuhq.com") makes the cookie cross-subdomain so SSR can read it. Leave UNSET in local dev (localhost has no shared parent domain) to keep host-only cookies. |
+| `RYU_DB_MASTER_KEY` | Optional | - | Server-managed field encryption for the control-plane MongoDB (docs/encryption-at-rest.md slice 4). Base64 of exactly 32 random bytes. Optional in the schema so Docker builds can set SKIP_ENV_VALIDATION; **required at runtime when NODE_ENV=production** (enforced after createEnv  -  see the throw below). Legacy plaintext rows still read once a key is configured so lazy migration can upgrade them on the next write. |
+| `RYU_DB_ALLOW_PLAINTEXT_SECRETS` | Optional | - | Local development escape hatch for running without RYU_DB_MASTER_KEY. Never set this in production. |
+| `USESEND_API_KEY` | Optional | - | Email (useSend  -  self-hosted Resend-compatible API) |
+| `USESEND_URL` | Optional | - | Base URL of the useSend instance (e.g. https://send.amajor.ai). When unset, @ryu/email falls back to the documented default host. |
+| `USESEND_CONTACT_BOOK_ID` | Optional | - | Contact book used for marketing-email subscribe/unsubscribe. |
+| `FROM_EMAIL` | Optional | - | See `.env.example`. |
+| `FRONTEND_URL` | Optional | - | See `.env.example`. |
+| `SERVER_URL` | Optional | - | Server-side control-plane base URL (non-public). Used when code must reach the Hono server without going through the browser bundle's NEXT_PUBLIC_SERVER_URL (e.g. SSR cert pages, Composio relay fallback). Optional: falls back to NEXT_PUBLIC_SERVER_URL / BETTER_AUTH_URL in each call site. |
+| `RYU_PUBLIC_URL` | Optional | - | Public URL Composio relay webhooks advertise to Composio (must be reachable from the internet in production). Optional: falls back to BETTER_AUTH_URL, then SERVER_URL, then http://localhost:3000. |
+| `NEXT_PUBLIC_FRONTEND_URL` | Optional | - | Marketing web origin for server-side billing/email redirects when the API router builds a profile URL. Optional: defaults to http://localhost:3001 (same as FRONTEND_URL in dev). |
+| `ADMIN_EMAILS` | Optional | - | Waitlist admins (comma-separated emails). Empty = waitlist bypassed on self-hosted installs (see packages/auth/lib/waitlist.ts). Cloud sets this to a non-empty allowlist so the queue is fail-closed. |
+| `WAITLIST_INVITES_PER_WEEK` | Optional | - | Rough waitlist throughput estimate (invites per week). Optional: packages/auth defaults to 50 when unset or invalid. |
+| `EXTENSION_ORIGIN` | Optional | - | Chrome extension origin trusted by Better Auth CORS (device-auth flow). Optional: defaults to chrome-extension://&lt;NEXT_PUBLIC_EXTENSION_ID&gt;. |
+| `GOOGLE_CLIENT_ID` | Optional | - | Auth providers |
+| `GOOGLE_CLIENT_SECRET` | Optional | - | See `.env.example`. |
+| `TURNSTILE_SECRET_KEY` | Optional | - | See `.env.example`. |
+| `STORAGE_ACCESS_KEY_ID` | Optional | - | Storage (S3-compatible) |
+| `STORAGE_SECRET_ACCESS_KEY` | Optional | - | See `.env.example`. |
+| `STORAGE_REGION` | Optional | - | See `.env.example`. |
+| `STORAGE_ENDPOINT` | Optional | - | See `.env.example`. |
+| `STORAGE_BUCKET_NAME` | Optional | - | See `.env.example`. |
+| `STORAGE_FORCE_PATH_STYLE` | Optional | - | See `.env.example`. |
+| `NOTION_API_KEY` | Optional | - | Notion |
+| `NOTION_BLOG_DATABASE_ID` | Optional | - | See `.env.example`. |
+| `NOTION_PAGES_DATABASE_ID` | Optional | - | See `.env.example`. |
+| `NOTION_HELP_DATABASE_ID` | Optional | - | See `.env.example`. |
+| `NOTION_CHANGELOG_DATABASE_ID` | Optional | - | See `.env.example`. |
+| `POLAR_ORGANIZATION_ID` | Optional | - | Polar |
+| `POLAR_SERVER` | Optional | `sandbox` | See `.env.example`. |
+| `POLAR_PRODUCT_DESKTOP_LICENSE` | Optional | - | Plan-catalog product/price ids (epic #496). All optional: each falls back to the documented default in `@ryu/auth/lib/plans`. See `docs/polar-products.md` for which products/prices/benefits to create. |
+| `POLAR_PRODUCT_PRO_MONTHLY` | Optional | - | See `.env.example`. |
+| `POLAR_PRODUCT_PRO_YEARLY` | Optional | - | See `.env.example`. |
+| `POLAR_PRODUCT_MAX_MONTHLY` | Optional | - | See `.env.example`. |
+| `POLAR_PRODUCT_MAX_YEARLY` | Optional | - | See `.env.example`. |
+| `POLAR_PRODUCT_TEAMS_MONTHLY` | Optional | - | See `.env.example`. |
+| `POLAR_PRICE_TEAMS_MONTHLY_SEAT` | Optional | - | See `.env.example`. |
+| `POLAR_PRODUCT_TEAMS_YEARLY` | Optional | - | See `.env.example`. |
+| `POLAR_PRICE_TEAMS_YEARLY_SEAT` | Optional | - | See `.env.example`. |
+| `POLAR_PRODUCT_CLOUD_INSTANCE` | Optional | - | Single recurring product cloud-instance checkouts attach an ad-hoc fixed price to (per-checkout amount = round(live Hetzner cost × markup); the product's own base price is only a catalog placeholder). The Max plan already includes a free BASE (cx23) node, so BASE has no charge. Optional: absent ⇒ ad-hoc cloud-instance checkout is refused. |
+| `POLAR_PRODUCT_CREDITS` | Optional | - | Pay-what-you-want product credit top-ups check out against (Unit B2). |
+| `POLAR_PRODUCT_AUTOTOPUP` | Optional | - | FIXED-price product auto top-up charges off-session (its price must equal the configured pack `amountCents`). Optional: absent ⇒ auto-topup cannot charge and is effectively off. Requires the Polar org to have the `off_session_charges_enabled` feature flag. |
+| `POLAR_WEBHOOK_SECRET` | Optional | - | Polar webhook signing secret (Standard Webhooks). When unset, the first-party credits top-up webhook degrades cleanly (503), never crashes. |
+| `STRIPE_SECRET_KEY` | Optional | - | Stripe (marketplace monetization #485). All optional: absent keys must degrade cleanly (credits top-up/webhook disabled), never crash on import. |
+| `STRIPE_WEBHOOK_SECRET` | Optional | - | See `.env.example`. |
+| `STRIPE_CONNECT_CLIENT_ID` | Optional | - | Connect vars are consumed by the paid-items unit (#486); declared here so the env schema is complete and nothing crashes when they are present. |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | Optional | - | See `.env.example`. |
+| `MARKETPLACE_DIRECT_CHARGE` | Optional | - | Marketplace direct-charge migration flag (#490, docs/stripe-connect-direct-charges-migration.md). DEFAULT OFF: absent / anything but "true" keeps the destination-charge path (charge on the PLATFORM, seller SG-only). Set "true" to charge ON the seller's connected account (direct charge → 46 seller countries), keeping the platform fee. BEFORE flipping true you MUST (a) subscribe checkout.session.completed / payment_intent.succeeded / charge.refunded / charge.dispute.created on the Connect webhook endpoint (direct-charge success events fire there with `event.account` set  -  a platform endpoint never sees them, so licenses silently stop being written), and (b) re-onboard existing sellers for the `card_payments` capability + let `account.updated` backfill chargesEnabled. |
+| `RYU_CREDITS_INTERNAL_SECRET` | Optional | - | Secret shared with the gateway so the internal debit endpoint can be called service-to-service (the gateway debits arbitrary orgs). Optional: when unset, debit falls back to an authenticated user session. |
+| `STRIPE_SUCCESS_URL` | Optional | - | Where Stripe redirects after a credit top-up checkout. |
+| `STRIPE_CANCEL_URL` | Optional | - | See `.env.example`. |
+| `AFFILIATE_SUBSCRIPTION_TYPE` | Optional | - | First-party Ryu affiliate program (replaces Dub). The default subscription-commission rule is assembled from these in code; ALL optional and parsed/defaulted there (type=percent, value=2000 bps=20%, recurring=true, duration_months=12). See `@ryu/api` affiliate config. |
+| `AFFILIATE_SUBSCRIPTION_VALUE` | Optional | - | See `.env.example`. |
+| `AFFILIATE_SUBSCRIPTION_RECURRING` | Optional | - | See `.env.example`. |
+| `AFFILIATE_SUBSCRIPTION_DURATION_MONTHS` | Optional | - | See `.env.example`. |
+| `RYU_MAIL_DOMAIN` | Optional | - | Agent Inboxes / Ryu Mail (AgentMail-equivalent over AWS SES). ALL optional: with these unset the mail endpoints degrade to 503 "mail not configured"  -  they never crash boot or the web build. The domain SES sends/receives for; inbox addresses are &lt;local&gt;@&lt;domain&gt;. |
+| `AWS_SES_REGION` | Optional | - | AWS region the SES (send) + inbound receipt rule live in. Falls back to STORAGE_REGION, then us-east-1, when unset. |
+| `AWS_ACCESS_KEY_ID` | Optional | - | SES/S3 credentials. Fall back to the existing STORAGE_* creds (and then the ambient AWS credential chain) when unset. |
+| `AWS_SECRET_ACCESS_KEY` | Optional | - | See `.env.example`. |
+| `RYU_MAIL_S3_BUCKET` | Optional | - | S3 bucket the SES inbound receipt rule writes raw MIME into (and we read back to parse). When unset, inbound delivered inline by SNS still works; S3-backed delivery + attachments require this. |
+| `RYU_MAIL_INBOUND_SECRET` | Optional | - | Optional shared secret appended to the inbound webhook URL as `?token=` for defence-in-depth on top of SNS signature verification. |
+| `RYU_BRAND_URL` | Optional | - | Public marketing URL the "Sent from Ryu" agent-email footer links to (the growth-loop CTA). Optional: falls back to the DEFAULT_BRAND_URL in @ryu/mail. This is the brand site, NOT the app (FRONTEND_URL). |
+| `CLOUDFLARE_API_TOKEN` | Optional | - | Cloudflare DNS provisioning for per-tenant mail subdomains (`&lt;slug&gt;.&lt;RYU_MAIL_DOMAIN&gt;`  -  deliverability isolation). Both optional: absent ⇒ subdomain provisioning is off and inboxes stay on the base domain (@ryu/mail's isCloudflareConfigured() gates it). The token needs DNS-edit scope on the zone that owns RYU_MAIL_DOMAIN. |
+| `CLOUDFLARE_ZONE_ID` | Optional | - | See `.env.example`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional | - | Control-plane server logs -&gt; Axiom via OTLP wide events (#541, P2 of docs/observability-analytics-support-access.md). Server-side only (Ryu's own machines, no consent gate). ALL optional and swappable: the OTLP destination is config, never hardcoded. With the endpoint+token unset the emitter is a complete no-op (it never POSTs, never throws) so a deployment without observability keys runs unchanged. Standard OTLP/HTTP endpoint (e.g. https://api.axiom.co for Axiom, or any OTel Collector / Grafana host). The emitter appends the standard `/v1/logs` path itself. |
+| `AXIOM_TOKEN` | Optional | - | Bearer token for the OTLP endpoint (Axiom API token). |
+| `SENTRY_DSN` | Optional | - | Server-side crash reporting (Sentry). Server-tier posture like the OTLP wide events above: Ryu's own machines, NO per-user consent gate. Gated on env only  -  a DSN plus RYU_CRASH_REPORTS_ENABLED (default ON, opt-out). Both optional and swappable; unset ⇒ a complete no-op (see apps/server/src/instrument.ts). SENTRY_DSN is the Sentry-standard name; RYU_SENTRY_DSN is the Ryu-namespaced mirror shared with the Rust tiers. |
+| `RYU_SENTRY_DSN` | Optional | - | See `.env.example`. |
+| `RYU_CRASH_REPORTS_ENABLED` | Optional | - | See `.env.example`. |
+| `RYU_RELEASE` | Optional | - | Sentry release tag for server-side crash reports (instrument.ts). Also read by the web app when NEXT_PUBLIC_APP_VERSION is unset. Optional. |
+| `AXIOM_DATASET` | Optional | - | Axiom dataset the wide events land in (sent as the X-Axiom-Dataset header). Required by Axiom; ignored by a generic OTLP Collector. |
+| `COMPOSIO_WEBHOOK_SECRET` | Optional | - | Composio relay ingress (packages/api composio-relay router). Optional: when unset the ingress rejects all webhooks (fail-closed). |
+| `RYU_MARKETPLACE_ADMIN_EMAILS` | Optional | - | Marketplace staff-picks + affiliate admin allowlist (comma-separated emails). Optional: unset denies everyone (see marketplace.ts). |
+| `RYU_HF_API_URL` | Optional | - | Catalog / marketplace federation upstreams (packages/api federation.ts). All optional  -  each falls back to the live public default. |
+| `RYU_HF_HOST` | Optional | - | See `.env.example`. |
+| `SKILLS_SH_API_URL` | Optional | - | See `.env.example`. |
+| `RYU_MCP_REGISTRY_URL` | Optional | - | See `.env.example`. |
+| `RYU_HETZNER_LIVE` | Optional | - | MASTER SAFETY FLAG for live Hetzner infrastructure. Default OFF: with this unset/"false" the servers router records DB state and LOGS what it WOULD do, but fires NO Hetzner API call. Only "true" (or "1") arms the live CREATE path. Destroy stays gated even when this is on (see RYU_HETZNER_DESTROY_CONFIRM). |
+| `RYU_HETZNER_DESTROY_CONFIRM` | Optional | - | ADDITIONAL destroy gate. Live server DESTROY is the scariest automated action (a webhook replay could delete a node with user data), so it is NEVER wired to fire on its own  -  the live-delete seam is hardcoded off in code. This flag exists as the documented, human-set confirmation input for that seam; on its own it does nothing. Default OFF. |
+| `HCLOUD_TOKEN` | Optional | - | Hetzner Cloud API token, read from the CONTROL-PLANE HOST env only (never the vault  -  the vault serves provider keys to the fleet, this is Ryu's own infra credential). Optional: absent ⇒ live provisioning cannot run even if RYU_HETZNER_LIVE is set (the router logs and no-ops). |
+| `HCLOUD_DEFAULT_REGION` | Optional | - | Default Hetzner location for new servers when a request omits `region`. |
+| `HETZNER_MARKUP_MULTIPLIER` | Optional | - | Markup applied to the live Hetzner compute cost to price the paid 2X/3X cloud add-ons (monthlyAddUsd = liveMonthlyUsd * multiplier). Optional: `@ryu/api/lib/hetzner-catalog` defaults to 2.5 when unset. |
+| `HETZNER_EUR_USD` | Optional | - | EUR→USD fx rate used to convert Hetzner's EUR prices to USD. Optional: `@ryu/api/lib/hetzner-catalog` defaults to 1.08 when unset. |
+| `RYU_GATEWAY_URL` | Optional | - | The hosted gateway fleet base URL a managed node routes chat egress to (threaded into a node's cloud-init as RYU_GATEWAY_URL). Optional. |
+| `RYU_VAULT_INTERNAL_SECRET` | Optional | - | Shared secret the hosted gateway fleet presents (as `x-ryu-internal- secret`) to read UNSEALED provider keys from the vault. Mirrors RYU_CREDITS_INTERNAL_SECRET. Optional: when unset, the unsealed vault read is unreachable (fail-closed), never a session fallback. |
+
+## @ryu/env web
+
+Source: [`packages/env/src/web.ts`](https://github.com/amajorai/ryu/blob/main/packages/env/src/web.ts)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `NEXT_PUBLIC_SERVER_URL` | Required | - | See `.env.example`. |
+| `NEXT_PUBLIC_SITE_URL` | Optional | - | Public canonical site URL (canonical tags, sitemap, robots, OG, JSON-LD). Defaults to https://ryu.com in metadata when unset; set the real domain in prod. |
+| `NEXT_PUBLIC_CORE_URL` | Optional | `http://localhost:7980` | Base URL of the local Ryu Core node (:7980), the sidecar manager + chat backend. Web `/chat` proxies /api/chat/stream, /api/agents, and /api/spaces here via next.config rewrites; falls back to localhost when unset. |
+| `NEXT_PUBLIC_DOCS_URL` | Optional | `http://localhost:4000` | Base URL of the docs site (separate Fumadocs app). The marketing header links here for "Docs". Defaults to the local docs dev server on :4000; set to https://docs.ryuhq.com in prod. |
+| `NEXT_PUBLIC_WEBAPP_URL` | Optional | `http://localhost:5175` | Browser build of the desktop app (apps/webapp). The download menu links here for "Web app". Local dev server runs on :5175. |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Optional | - | See `.env.example`. |
+| `NEXT_PUBLIC_STORAGE_ENDPOINT` | Optional | - | See `.env.example`. |
+| `NEXT_PUBLIC_STORAGE_BUCKET_NAME` | Optional | - | See `.env.example`. |
+| `NEXT_PUBLIC_POSTHOG_KEY` | Optional | - | PostHog product analytics (P3, closed-UI plane). Optional: when the key is unset the analytics provider is a graceful no-op, so the site runs with no analytics vendor wired (the "nothing hardcoded" posture). The host defaults to PostHog EU Cloud so EU residency (IP capture off by default) is the privacy-leaning default; point it at any PostHog-compatible ingest endpoint. |
+| `NEXT_PUBLIC_POSTHOG_HOST` | Optional | `https://eu.i.posthog.com` | See `.env.example`. |
+| `NEXT_PUBLIC_SENTRY_DSN` | Optional | - | Sentry crash reporting for the browser bundle (P3 crash tier). Optional: unset ⇒ the client Sentry init is a graceful no-op (no vendor wired). The server/edge runtimes may also read SENTRY_DSN/RYU_SENTRY_DSN directly. |
+
+## @ryu/env native
+
+Source: [`packages/env/src/native.ts`](https://github.com/amajorai/ryu/blob/main/packages/env/src/native.ts)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `EXPO_PUBLIC_SERVER_URL` | Required | - | See `.env.example`. |
+| `EXPO_PUBLIC_WEB_URL` | Required | - | See `.env.example`. |
+| `EXPO_PUBLIC_CORE_URL` | Optional | `http://localhost:7980` | Ryu Core  -  the converged chat backend (default :7980). A physical device cannot reach the host's localhost, so this must point at a LAN/tunnel URL in real use; the default only works on simulators/emulators on the host. |
+
+## apps/core
+
+Source: [`apps/core/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/core/.env.example)
+
+
+### Address Core binds to. This is also the fail-closed gate: exposing beyond
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_BIND` | Required* | `127.0.0.1:7980` | Address Core binds to. This is also the fail-closed gate: exposing beyond loopback is governed by this var (a `--bind=` flag cannot bypass it). |
+| `RYU_TOKEN` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). |
+| `RYU_DIR` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. |
+| `RYU_CORS_ORIGINS` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. |
+| `RYU_NODE_NAME` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. |
+| `RYU_NODE_PUBLIC_URL` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). |
+| `RYU_BACKEND_URL` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 |
+| `RYU_SERVER_URL` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. |
+| `RYU_CONTROL_PLANE_URL` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. Managed-cloud control-plane base URL (credits, fleet). Falls back to RYU_SERVER_URL. |
+| `RYU_AUTH_BASE_URL` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. Managed-cloud control-plane base URL (credits, fleet). Falls back to RYU_SERVER_URL. Better Auth base URL used to verify node-user JWTs. Default: RYU_BACKEND_URL. |
+| `BETTER_AUTH_URL` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. Managed-cloud control-plane base URL (credits, fleet). Falls back to RYU_SERVER_URL. Better Auth base URL used to verify node-user JWTs. Default: RYU_BACKEND_URL. |
+| `RYU_MASTER_KEY` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. Managed-cloud control-plane base URL (credits, fleet). Falls back to RYU_SERVER_URL. Better Auth base URL used to verify node-user JWTs. Default: RYU_BACKEND_URL. Master key (base64/hex) encrypting secrets at rest. Default: derived local key. |
+| `RYU_TEAM_ID` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. Managed-cloud control-plane base URL (credits, fleet). Falls back to RYU_SERVER_URL. Better Auth base URL used to verify node-user JWTs. Default: RYU_BACKEND_URL. Master key (base64/hex) encrypting secrets at rest. Default: derived local key. Multi-tenant scoping for a managed/cloud node. |
+| `RYU_PROJECT_ID` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. Managed-cloud control-plane base URL (credits, fleet). Falls back to RYU_SERVER_URL. Better Auth base URL used to verify node-user JWTs. Default: RYU_BACKEND_URL. Master key (base64/hex) encrypting secrets at rest. Default: derived local key. Multi-tenant scoping for a managed/cloud node. |
+| `RYU_MANAGED_NODE` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. Managed-cloud control-plane base URL (credits, fleet). Falls back to RYU_SERVER_URL. Better Auth base URL used to verify node-user JWTs. Default: RYU_BACKEND_URL. Master key (base64/hex) encrypting secrets at rest. Default: derived local key. Multi-tenant scoping for a managed/cloud node. Marks this as a managed cloud node (routes model traffic to the hosted fleet). |
+| `RYU_EXEC_APPROVAL_MODE` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. Managed-cloud control-plane base URL (credits, fleet). Falls back to RYU_SERVER_URL. Better Auth base URL used to verify node-user JWTs. Default: RYU_BACKEND_URL. Master key (base64/hex) encrypting secrets at rest. Default: derived local key. Multi-tenant scoping for a managed/cloud node. Marks this as a managed cloud node (routes model traffic to the hosted fleet). Tool-exec approval mode for sandboxed/agent command execution (e.g. off/prompt). |
+| `RYU_AGENT_EGRESS_SSRF_GUARD` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. Managed-cloud control-plane base URL (credits, fleet). Falls back to RYU_SERVER_URL. Better Auth base URL used to verify node-user JWTs. Default: RYU_BACKEND_URL. Master key (base64/hex) encrypting secrets at rest. Default: derived local key. Multi-tenant scoping for a managed/cloud node. Marks this as a managed cloud node (routes model traffic to the hosted fleet). Tool-exec approval mode for sandboxed/agent command execution (e.g. off/prompt). SSRF guard for agent HTTP egress (on by default); allowlist relaxes it. |
+| `RYU_AGENT_EGRESS_ALLOW_HOSTS` | Optional | - | Bearer token required on protected API routes. Unset = no node auth (local only). Data directory root (db, models, plugins, spaces). Default: OS app-data dir. Extra CORS origins (comma-separated) added to the built-in desktop/web set. Human-friendly node name (webhook relay, presence). Default: machine hostname. Publicly reachable URL of this node (control-plane registration). Ryu backend / identity+content plane base URL. Default: http://127.0.0.1:3000 Alias/override for the backend base URL used by cloud sync + gateway seeding. Managed-cloud control-plane base URL (credits, fleet). Falls back to RYU_SERVER_URL. Better Auth base URL used to verify node-user JWTs. Default: RYU_BACKEND_URL. Master key (base64/hex) encrypting secrets at rest. Default: derived local key. Multi-tenant scoping for a managed/cloud node. Marks this as a managed cloud node (routes model traffic to the hosted fleet). Tool-exec approval mode for sandboxed/agent command execution (e.g. off/prompt). SSRF guard for agent HTTP egress (on by default); allowlist relaxes it. |
+
+### Default agent installed/selected. Default: ryu (Pi + Gateway flagship).
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_DEFAULT_AGENT` | Optional | `ryu` | Default agent installed/selected. Default: ryu (Pi + Gateway flagship). |
+| `RYU_DEFAULT_LLM_MODEL` | Optional | - | Default agent installed/selected. Default: ryu (Pi + Gateway flagship). Model id for clean-context utility/sub-agent completions. Default: gpt-4o-mini. |
+| `RYU_DEFAULT_LLM_BASE_URL` | Optional | - | Default agent installed/selected. Default: ryu (Pi + Gateway flagship). Model id for clean-context utility/sub-agent completions. Default: gpt-4o-mini. OpenAI-compatible base URL for the default LLM. Default: https://api.openai.com |
+| `RYU_DEFAULT_LLM_API_KEY` | Optional | - | Default agent installed/selected. Default: ryu (Pi + Gateway flagship). Model id for clean-context utility/sub-agent completions. Default: gpt-4o-mini. OpenAI-compatible base URL for the default LLM. Default: https://api.openai.com Bearer key for the default LLM (falls back to OPENAI_API_KEY). |
+| `RYU_FALLBACK_LLM_MODEL` | Optional | - | Default agent installed/selected. Default: ryu (Pi + Gateway flagship). Model id for clean-context utility/sub-agent completions. Default: gpt-4o-mini. OpenAI-compatible base URL for the default LLM. Default: https://api.openai.com Bearer key for the default LLM (falls back to OPENAI_API_KEY). Local fallback model when the primary provider fails. Default: gemma2. |
+| `RYU_FALLBACK_LLM_BASE_URL` | Optional | - | Default agent installed/selected. Default: ryu (Pi + Gateway flagship). Model id for clean-context utility/sub-agent completions. Default: gpt-4o-mini. OpenAI-compatible base URL for the default LLM. Default: https://api.openai.com Bearer key for the default LLM (falls back to OPENAI_API_KEY). Local fallback model when the primary provider fails. Default: gemma2. Fallback base URL (local llama.cpp). Default: http://127.0.0.1:8080 |
+| `RYU_FALLBACK_LLM_API_KEY` | Optional | - | Default agent installed/selected. Default: ryu (Pi + Gateway flagship). Model id for clean-context utility/sub-agent completions. Default: gpt-4o-mini. OpenAI-compatible base URL for the default LLM. Default: https://api.openai.com Bearer key for the default LLM (falls back to OPENAI_API_KEY). Local fallback model when the primary provider fails. Default: gemma2. Fallback base URL (local llama.cpp). Default: http://127.0.0.1:8080 |
+| `RYU_ALLOW_GATEWAY_FALLBACK` | Optional | - | Default agent installed/selected. Default: ryu (Pi + Gateway flagship). Model id for clean-context utility/sub-agent completions. Default: gpt-4o-mini. OpenAI-compatible base URL for the default LLM. Default: https://api.openai.com Bearer key for the default LLM (falls back to OPENAI_API_KEY). Local fallback model when the primary provider fails. Default: gemma2. Fallback base URL (local llama.cpp). Default: http://127.0.0.1:8080 Fail-OPEN switch: allow a direct provider call when the Gateway is unreachable. |
+| `LOCAL_LLM_URL` | Optional | - | Default agent installed/selected. Default: ryu (Pi + Gateway flagship). Model id for clean-context utility/sub-agent completions. Default: gpt-4o-mini. OpenAI-compatible base URL for the default LLM. Default: https://api.openai.com Bearer key for the default LLM (falls back to OPENAI_API_KEY). Local fallback model when the primary provider fails. Default: gemma2. Fallback base URL (local llama.cpp). Default: http://127.0.0.1:8080 Fail-OPEN switch: allow a direct provider call when the Gateway is unreachable. Local llama.cpp chat server URL the managed gateway forwards to. |
+
+### Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_GATEWAY_URL` | Optional | - | Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981 |
+| `RYU_GATEWAY_TOKEN` | Optional | - | Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981 Bearer token for the gateway when it runs with auth enabled. |
+| `RYU_GATEWAY_KEY` | Optional | - | Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981 Bearer token for the gateway when it runs with auth enabled. Signing/data-plane key for a keyed/remote gateway. |
+| `RYU_GATEWAY_BIN` | Optional | - | Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981 Bearer token for the gateway when it runs with auth enabled. Signing/data-plane key for a keyed/remote gateway. Path/override for the gateway binary Core spawns. |
+| `RYU_GATEWAY_MANAGED` | Optional | - | Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981 Bearer token for the gateway when it runs with auth enabled. Signing/data-plane key for a keyed/remote gateway. Path/override for the gateway binary Core spawns. Treat the gateway as externally managed (do not spawn a local one). |
+| `RYU_GATEWAY_REMOTE` | Optional | - | Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981 Bearer token for the gateway when it runs with auth enabled. Signing/data-plane key for a keyed/remote gateway. Path/override for the gateway binary Core spawns. Treat the gateway as externally managed (do not spawn a local one). Remote data plane: keys live only in the hosted fleet; requires URL + TOKEN. |
+| `GATEWAY_CONFIG` | Optional | - | Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981 Bearer token for the gateway when it runs with auth enabled. Signing/data-plane key for a keyed/remote gateway. Path/override for the gateway binary Core spawns. Treat the gateway as externally managed (do not spawn a local one). Remote data plane: keys live only in the hosted fleet; requires URL + TOKEN. Path to a gateway config file passed through to the sidecar. |
+| `GATEWAY_FIREWALL_ENABLED` | Optional | - | Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981 Bearer token for the gateway when it runs with auth enabled. Signing/data-plane key for a keyed/remote gateway. Path/override for the gateway binary Core spawns. Treat the gateway as externally managed (do not spawn a local one). Remote data plane: keys live only in the hosted fleet; requires URL + TOKEN. Path to a gateway config file passed through to the sidecar. Seed the gateway firewall ON at first boot. |
+| `GATEWAY_SMART_ROUTING_ENABLED` | Optional | - | Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981 Bearer token for the gateway when it runs with auth enabled. Signing/data-plane key for a keyed/remote gateway. Path/override for the gateway binary Core spawns. Treat the gateway as externally managed (do not spawn a local one). Remote data plane: keys live only in the hosted fleet; requires URL + TOKEN. Path to a gateway config file passed through to the sidecar. Seed the gateway firewall ON at first boot. Seed smart (classifier) model routing ON at first boot. |
+| `RYU_ACP_GATEWAY_INJECT` | Optional | - | Gateway base URL (no trailing /v1). Default: http://127.0.0.1:7981 Bearer token for the gateway when it runs with auth enabled. Signing/data-plane key for a keyed/remote gateway. Path/override for the gateway binary Core spawns. Treat the gateway as externally managed (do not spawn a local one). Remote data plane: keys live only in the hosted fleet; requires URL + TOKEN. Path to a gateway config file passed through to the sidecar. Seed the gateway firewall ON at first boot. Seed smart (classifier) model routing ON at first boot. Inject OPENAI_BASE_URL/KEY into gateway-honoring ACP agents. Default: true. |
+
+### Enable credit metering + wallet enforcement on the gateway.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `GATEWAY_CREDITS_ENABLED` | Optional | - | Enable credit metering + wallet enforcement on the gateway. |
+| `GATEWAY_CREDITS_URL` | Optional | - | Enable credit metering + wallet enforcement on the gateway. Credits/debit endpoint the gateway posts to. |
+| `RYU_CREDITS_INTERNAL_SECRET` | Optional | - | Enable credit metering + wallet enforcement on the gateway. Credits/debit endpoint the gateway posts to. Shared secret for internal credit debit calls. |
+| `GATEWAY_CREDITS_WALLET_EMPTY_ACTION` | Optional | - | Enable credit metering + wallet enforcement on the gateway. Credits/debit endpoint the gateway posts to. Shared secret for internal credit debit calls. Action when a wallet hits zero (e.g. stop/allow). |
+| `GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD` | Optional | - | Enable credit metering + wallet enforcement on the gateway. Credits/debit endpoint the gateway posts to. Shared secret for internal credit debit calls. Action when a wallet hits zero (e.g. stop/allow). Per-tool-call cost in micro-USD. |
+| `GATEWAY_CREDITS_SANDBOX_FREE_STORAGE_GIB` | Optional | - | Enable credit metering + wallet enforcement on the gateway. Credits/debit endpoint the gateway posts to. Shared secret for internal credit debit calls. Action when a wallet hits zero (e.g. stop/allow). Per-tool-call cost in micro-USD. Free sandbox storage allowance (GiB) before metering. |
+| `GATEWAY_CREDITS_SANDBOX_MARKUP_BPS` | Optional | - | Enable credit metering + wallet enforcement on the gateway. Credits/debit endpoint the gateway posts to. Shared secret for internal credit debit calls. Action when a wallet hits zero (e.g. stop/allow). Per-tool-call cost in micro-USD. Free sandbox storage allowance (GiB) before metering. Sandbox billing markup in basis points. |
+
+### Local chat GGUF id / weight URL / checksum (bundled Gemma). Default: built-in.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_LOCAL_CHAT_MODEL_ID` | Optional | - | Local chat GGUF id / weight URL / checksum (bundled Gemma). Default: built-in. |
+| `RYU_LOCAL_CHAT_MODEL_URL` | Optional | - | Local chat GGUF id / weight URL / checksum (bundled Gemma). Default: built-in. |
+| `RYU_LOCAL_CHAT_MODEL_SHA256` | Optional | - | Local chat GGUF id / weight URL / checksum (bundled Gemma). Default: built-in. |
+| `RYU_REGISTRY_PATH` | Optional | - | Local chat GGUF id / weight URL / checksum (bundled Gemma). Default: built-in. RYU_LOCAL_CHAT_MODEL_SHA256= Path to the persisted registry.json (model/agent defaults). |
+| `RYU_MMPROJ_QUANT` | Optional | - | Local chat GGUF id / weight URL / checksum (bundled Gemma). Default: built-in. RYU_LOCAL_CHAT_MODEL_SHA256= Path to the persisted registry.json (model/agent defaults). Vision projector (mmproj) quantization for multimodal GGUFs. |
+| `RYU_MODELS_DEV_URL` | Optional | - | Local chat GGUF id / weight URL / checksum (bundled Gemma). Default: built-in. RYU_LOCAL_CHAT_MODEL_SHA256= Path to the persisted registry.json (model/agent defaults). Vision projector (mmproj) quantization for multimodal GGUFs. models.dev catalog URL for provider/model metadata. |
+
+### Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar).
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_EMBED_MODEL` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). |
+| `RYU_EMBED_BASE_URL` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). |
+| `RYU_EMBED_API_KEY` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). |
+| `RYU_EMBED_DIMS` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. |
+| `RYU_LOCAL_EMBED_MODEL_ID` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. |
+| `RYU_LOCAL_EMBED_MODEL_URL` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. |
+| `RYU_LOCAL_EMBED_MODEL_SHA256` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. |
+| `RYU_RERANKER_MODEL` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. |
+| `RYU_RERANKER_BASE_URL` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). |
+| `RYU_RERANKER_API_KEY` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). |
+| `RYU_LOCAL_RERANKER_MODEL_ID` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). Local reranker weight id / URL / checksum. |
+| `RYU_LOCAL_RERANKER_MODEL_URL` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). Local reranker weight id / URL / checksum. |
+| `RYU_LOCAL_RERANKER_MODEL_SHA256` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). Local reranker weight id / URL / checksum. |
+| `RYU_RAG_STRATEGY` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). Local reranker weight id / URL / checksum. RYU_LOCAL_RERANKER_MODEL_SHA256= Default RAG strategy: vector \| graph. Default: vector. |
+| `RYU_GRAPH_EXTRACTION_MODEL` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). Local reranker weight id / URL / checksum. RYU_LOCAL_RERANKER_MODEL_SHA256= Default RAG strategy: vector \| graph. Default: vector. GraphRAG entity-extraction model id. |
+| `RYU_AUTO_RECALL_ENABLED` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). Local reranker weight id / URL / checksum. RYU_LOCAL_RERANKER_MODEL_SHA256= Default RAG strategy: vector \| graph. Default: vector. GraphRAG entity-extraction model id. Auto-recall of prior context into chat (semantic). |
+| `RYU_FTS_RECALL_ENABLED` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). Local reranker weight id / URL / checksum. RYU_LOCAL_RERANKER_MODEL_SHA256= Default RAG strategy: vector \| graph. Default: vector. GraphRAG entity-extraction model id. Auto-recall of prior context into chat (semantic). Full-text-search recall complement. |
+| `RYU_AUTO_RECALL_TOP_K` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). Local reranker weight id / URL / checksum. RYU_LOCAL_RERANKER_MODEL_SHA256= Default RAG strategy: vector \| graph. Default: vector. GraphRAG entity-extraction model id. Auto-recall of prior context into chat (semantic). Full-text-search recall complement. Top-K memories injected on auto-recall. |
+| `RYU_CONTEXT_MAX_TOKENS` | Optional | - | Embedding model id. Default: nomic-embed-text-v1.5 (llamacpp-embed sidecar). Remote embeddings base URL (unset = local llamacpp-embed on :8081). Bearer key for remote embeddings (falls back to OPENAI_API_KEY). Embedding dimensionality override. Local embedding weight id / URL / checksum. RYU_LOCAL_EMBED_MODEL_SHA256= Reranker model id. Default: BAAI/bge-reranker. Remote reranker base URL + key (unset = local). Local reranker weight id / URL / checksum. RYU_LOCAL_RERANKER_MODEL_SHA256= Default RAG strategy: vector \| graph. Default: vector. GraphRAG entity-extraction model id. Auto-recall of prior context into chat (semantic). Full-text-search recall complement. Top-K memories injected on auto-recall. Max tokens of recalled context injected per turn. |
+
+### Local inference engines (weight/model overrides — pick per format)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_WHISPER_MODEL` | Optional | `# whisper.cpp STT model` | Override; see `.env.example`. |
+| `RYU_VLLM_MODEL` | Optional | `# vLLM served model` | Override; see `.env.example`. |
+| `RYU_SGLANG_MODEL` | Optional | `# SGLang served model` | Override; see `.env.example`. |
+| `RYU_MLX_MODEL` | Optional | `# MLX (Apple) chat model` | Override; see `.env.example`. |
+| `RYU_MLX_VLM_MODEL` | Optional | `# MLX vision model` | Override; see `.env.example`. |
+| `RYU_OMLX_MODEL_DIR` | Optional | `# OpenMLX model directory` | Override; see `.env.example`. |
+| `RYU_SD_MODEL` | Optional | `# stable-diffusion.cpp image model` | Override; see `.env.example`. |
+| `RYU_SILERO_VAD_MODEL_URL` | Optional | `# Silero VAD weight URL` | Override; see `.env.example`. |
+| `RYU_SILERO_VAD_MODEL_SHA256` | Optional | - | Override; see `.env.example`. |
+| `RYU_PARAKEET_MODEL_URL` | Optional | `# Parakeet STT weight URL` | RYU_SILERO_VAD_MODEL_SHA256= |
+
+### TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_TTS_ENGINE` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. |
+| `RYU_TTS_DIR` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. |
+| `RYU_TTS_HF_HOME` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. |
+| `RYU_TTS_PYTHON` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. |
+| `RYU_KOKORO_MODEL` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. Kokoro model + voices (weights and their download URLs). |
+| `RYU_KOKORO_MODEL_URL` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. Kokoro model + voices (weights and their download URLs). |
+| `RYU_KOKORO_VOICES` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. Kokoro model + voices (weights and their download URLs). |
+| `RYU_KOKORO_VOICES_URL` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. Kokoro model + voices (weights and their download URLs). |
+| `RYU_OUTETTS_MODEL` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. Kokoro model + voices (weights and their download URLs). OuteTTS model + vocoder. |
+| `RYU_OUTETTS_VOCODER` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. Kokoro model + voices (weights and their download URLs). OuteTTS model + vocoder. |
+| `RYU_STT_ENGINE` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. Kokoro model + voices (weights and their download URLs). OuteTTS model + vocoder. STT engine for chat voice input. |
+| `RYU_STT_GATEWAY_PROVIDER` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. Kokoro model + voices (weights and their download URLs). OuteTTS model + vocoder. STT engine for chat voice input. Route STT through the gateway to a hosted provider/model instead of local. |
+| `RYU_STT_GATEWAY_MODEL` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. Kokoro model + voices (weights and their download URLs). OuteTTS model + vocoder. STT engine for chat voice input. Route STT through the gateway to a hosted provider/model instead of local. |
+| `RYU_CLIP_STT_ENGINE` | Optional | - | TTS engine selector (e.g. kokoro/outetts). Default: bundled Kokoro. TTS runtime dirs / python interpreter. Kokoro model + voices (weights and their download URLs). OuteTTS model + vocoder. STT engine for chat voice input. Route STT through the gateway to a hosted provider/model instead of local. STT engine used when transcribing recorded clips. |
+
+### MCP registry URL for the catalog.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_MCP_REGISTRY_URL` | Optional | - | MCP registry URL for the catalog. |
+| `RYU_MCP_CONFIG` | Optional | - | MCP registry URL for the catalog. Path to a static MCP server config. |
+| `RYU_MCP_ALLOWLIST` | Optional | - | MCP registry URL for the catalog. Path to a static MCP server config. Global MCP tool allowlist. Per-agent override: RYU_MCP_ALLOWLIST_&lt;AGENT_ID&gt;. |
+| `RYU_SPIDER_BIN` | Optional | `# spider (scraper)` | MCP registry URL for the catalog. Path to a static MCP server config. Global MCP tool allowlist. Per-agent override: RYU_MCP_ALLOWLIST_&lt;AGENT_ID&gt;. Binary overrides for bundled tool sidecars. |
+| `RYU_RTK_BIN` | Optional | `# rtk token-killer` | MCP registry URL for the catalog. Path to a static MCP server config. Global MCP tool allowlist. Per-agent override: RYU_MCP_ALLOWLIST_&lt;AGENT_ID&gt;. Binary overrides for bundled tool sidecars. |
+| `RYU_BUN_BIN` | Optional | `# bun (securexec tool backend)` | MCP registry URL for the catalog. Path to a static MCP server config. Global MCP tool allowlist. Per-agent override: RYU_MCP_ALLOWLIST_&lt;AGENT_ID&gt;. Binary overrides for bundled tool sidecars. |
+| `RYU_DENO_BIN` | Optional | `# deno (PTC/tool sandbox backend)` | MCP registry URL for the catalog. Path to a static MCP server config. Global MCP tool allowlist. Per-agent override: RYU_MCP_ALLOWLIST_&lt;AGENT_ID&gt;. Binary overrides for bundled tool sidecars. |
+| `RYU_EXA_API_KEY` | Optional | - | MCP registry URL for the catalog. Path to a static MCP server config. Global MCP tool allowlist. Per-agent override: RYU_MCP_ALLOWLIST_&lt;AGENT_ID&gt;. Binary overrides for bundled tool sidecars. Exa search MCP. |
+| `RYU_EXA_BASE_URL` | Optional | - | MCP registry URL for the catalog. Path to a static MCP server config. Global MCP tool allowlist. Per-agent override: RYU_MCP_ALLOWLIST_&lt;AGENT_ID&gt;. Binary overrides for bundled tool sidecars. Exa search MCP. |
+| `RYU_SECUREXEC_DIR` | Optional | - | MCP registry URL for the catalog. Path to a static MCP server config. Global MCP tool allowlist. Per-agent override: RYU_MCP_ALLOWLIST_&lt;AGENT_ID&gt;. Binary overrides for bundled tool sidecars. Exa search MCP. Tool-exec sandbox: work dir + per-exec memory cap (MB). |
+| `RYU_TOOL_EXEC_MEMORY_MB` | Optional | - | MCP registry URL for the catalog. Path to a static MCP server config. Global MCP tool allowlist. Per-agent override: RYU_MCP_ALLOWLIST_&lt;AGENT_ID&gt;. Binary overrides for bundled tool sidecars. Exa search MCP. Tool-exec sandbox: work dir + per-exec memory cap (MB). |
+| `RYU_APPS_CHAT_TOOLS` | Optional | - | MCP registry URL for the catalog. Path to a static MCP server config. Global MCP tool allowlist. Per-agent override: RYU_MCP_ALLOWLIST_&lt;AGENT_ID&gt;. Binary overrides for bundled tool sidecars. Exa search MCP. Tool-exec sandbox: work dir + per-exec memory cap (MB). Which chat tools the apps layer exposes. |
+
+### Backend selector (wasmtime | docker | daytona | microsandbox | opensandbox).
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_SANDBOX_BACKEND` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). |
+| `RYU_SANDBOX_DISABLED` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. |
+| `RYU_SANDBOX_DOCKER_BINARY` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. |
+| `RYU_SANDBOX_DOCKER_IMAGE` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. |
+| `RYU_SANDBOX_DOCKER_DETECT_SECS` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. |
+| `RYU_SANDBOX_MICROSANDBOX_BINARY` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. |
+| `RYU_SANDBOX_MICROSANDBOX_IMAGE` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. |
+| `RYU_SANDBOX_MICROSANDBOX_DETECT_SECS` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. |
+| `RYU_SANDBOX_OPENSANDBOX_BINARY` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. |
+| `RYU_SANDBOX_OPENSANDBOX_IMAGE` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. |
+| `RYU_SANDBOX_OPENSANDBOX_TIMEOUT` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. |
+| `RYU_SANDBOX_OPENSANDBOX_DETECT_SECS` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. |
+| `RYU_SANDBOX_DAYTONA_URL` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `RYU_SANDBOX_DAYTONA_TOKEN` | Optional | `# or DAYTONA_API_KEY` | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `DAYTONA_API_KEY` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `RYU_SANDBOX_DAYTONA_TARGET` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `RYU_SANDBOX_DAYTONA_SNAPSHOT` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `RYU_SANDBOX_DAYTONA_TIMEOUT_SECS` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `RYU_SANDBOX_DAYTONA_VCPU` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `RYU_SANDBOX_DAYTONA_MEM_GIB` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `RYU_SANDBOX_DAYTONA_STORAGE_GIB` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `RYU_SANDBOX_DAYTONA_OS` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `RYU_SANDBOX_DAYTONA_GPU` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+| `RYU_SANDBOX_DAYTONA_GPU_COUNT` | Optional | - | Backend selector (wasmtime \| docker \| daytona \| microsandbox \| opensandbox). Disable the sandbox entirely. Docker backend. microsandbox backend. opensandbox backend. Daytona cloud sandbox (billed compute). |
+
+### Ghost desktop-automation MCP release URL override.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_GHOST_RELEASE_URL` | Optional | - | Ghost desktop-automation MCP release URL override. |
+| `RYU_SHADOW_URL` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. |
+| `RYU_SHADOW_RELEASE_URL` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. |
+| `SHADOW_LLM_BASE_URL` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. |
+| `SHADOW_LLM_MODEL` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. |
+| `SHADOW_LLM_API_KEY` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. |
+| `RYU_DIARIZE_URL` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. Speaker-diarization service URL (meetings). |
+| `RYU_RESTATE_ADMIN_URL` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. Speaker-diarization service URL (meetings). Restate durable-execution admin URL + version (legacy; in-process engine is default). |
+| `RYU_RESTATE_VERSION` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. Speaker-diarization service URL (meetings). Restate durable-execution admin URL + version (legacy; in-process engine is default). |
+| `RYU_YTDLP_VERSION` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. Speaker-diarization service URL (meetings). Restate durable-execution admin URL + version (legacy; in-process engine is default). yt-dlp downloader version / URL. |
+| `RYU_YTDLP_URL` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. Speaker-diarization service URL (meetings). Restate durable-execution admin URL + version (legacy; in-process engine is default). yt-dlp downloader version / URL. |
+| `RESEARCH_DIR` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. Speaker-diarization service URL (meetings). Restate durable-execution admin URL + version (legacy; in-process engine is default). yt-dlp downloader version / URL. Deep-research tool: workspace dir + python interpreter. |
+| `RESEARCH_PYTHON` | Optional | - | Ghost desktop-automation MCP release URL override. Shadow (screen/audio capture) service URL + release + its own LLM. Speaker-diarization service URL (meetings). Restate durable-execution admin URL + version (legacy; in-process engine is default). yt-dlp downloader version / URL. Deep-research tool: workspace dir + python interpreter. |
+
+### Skills directory + active-skills file.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_SKILLS_DIR` | Optional | - | Skills directory + active-skills file. |
+| `RYU_SKILLS_ACTIVE_FILE` | Optional | - | Skills directory + active-skills file. |
+| `RYU_SKILLS_DISCLOSURE` | Optional | - | Skills directory + active-skills file. Progressive-disclosure mode for skills. |
+| `RYU_SKILLS_AUTHOR` | Optional | - | Skills directory + active-skills file. Progressive-disclosure mode for skills. Author identity stamped on skills you create. |
+| `SKILLS_SH_API_URL` | Optional | - | Skills directory + active-skills file. Progressive-disclosure mode for skills. Author identity stamped on skills you create. skills.sh catalog API URL. |
+
+### Plugin + app install directories.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_PLUGINS_DIR` | Optional | - | Plugin + app install directories. |
+| `RYU_APPS_DIR` | Optional | - | Plugin + app install directories. |
+| `RYU_APP_REGISTRY_URL` | Optional | - | Plugin + app install directories. App/plugin registry URL. |
+| `RYU_STUB_GRANT_VALIDATION` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). |
+| `RYU_STUB_SELF_BUILD_GRANTS` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). |
+| `RYU_CATALOG_SOURCES_FILE` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). Catalog source overrides. |
+| `RYU_MARKETPLACE_REPO` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). Catalog source overrides. Marketplace (git-standard) repo + hosted API + publish token + verify key. |
+| `RYU_MARKETPLACE_API_URL` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). Catalog source overrides. Marketplace (git-standard) repo + hosted API + publish token + verify key. |
+| `RYU_MARKETPLACE_TOKEN` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). Catalog source overrides. Marketplace (git-standard) repo + hosted API + publish token + verify key. |
+| `RYU_MARKETPLACE_PUBLIC_KEY` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). Catalog source overrides. Marketplace (git-standard) repo + hosted API + publish token + verify key. |
+| `RYU_HOSTED_MCP_INDEX_URL` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). Catalog source overrides. Marketplace (git-standard) repo + hosted API + publish token + verify key. Hosted MCP index for the catalog. |
+| `RYU_INTEGRATIONS_SH_API_URL` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). Catalog source overrides. Marketplace (git-standard) repo + hosted API + publish token + verify key. Hosted MCP index for the catalog. integrations.sh (Composio-style) API/raw URLs + cache TTL. |
+| `RYU_INTEGRATIONS_SH_RAW_OPENAPI_URL` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). Catalog source overrides. Marketplace (git-standard) repo + hosted API + publish token + verify key. Hosted MCP index for the catalog. integrations.sh (Composio-style) API/raw URLs + cache TTL. |
+| `RYU_INTEGRATIONS_SH_CACHE_TTL_SECS` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). Catalog source overrides. Marketplace (git-standard) repo + hosted API + publish token + verify key. Hosted MCP index for the catalog. integrations.sh (Composio-style) API/raw URLs + cache TTL. |
+| `SMITHERY_API_KEY` | Optional | - | Plugin + app install directories. App/plugin registry URL. Stub grant validation (dev only  -  bypasses real permission checks). Catalog source overrides. Marketplace (git-standard) repo + hosted API + publish token + verify key. Hosted MCP index for the catalog. integrations.sh (Composio-style) API/raw URLs + cache TTL. Smithery MCP registry key. |
+
+### Chat power-feature models & judges (each falls back to the default LLM)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_ADVISOR_MODEL` | Optional | `# /advisor stronger-reviewer model` | Override; see `.env.example`. |
+| `RYU_BTW_MODEL` | Optional | `# /btw side-question model` | Override; see `.env.example`. |
+| `RYU_BTW_EFFORT` | Optional | `# /btw reasoning effort` | Override; see `.env.example`. |
+| `RYU_PREDICT_MODEL` | Optional | `# predictive-typing model` | Override; see `.env.example`. |
+| `RYU_WHITEBOARD_MODEL` | Optional | `# whiteboard AI-generation model` | Override; see `.env.example`. |
+| `RYU_WHITEBOARD_EFFORT` | Optional | - | Override; see `.env.example`. |
+| `RYU_MEETING_NOTES_MODEL` | Optional | `# meeting-notes summarizer model` | Override; see `.env.example`. |
+| `RYU_MEETING_NOTES_EFFORT` | Optional | - | Override; see `.env.example`. |
+| `RYU_MEETING_NOTES_MAX_CHARS` | Optional | `# transcript cap fed to the summarizer` | Override; see `.env.example`. |
+| `RYU_QUEST_JUDGE_MODEL` | Optional | `# quest auto-detect judge model` | Override; see `.env.example`. |
+| `RYU_QUEST_JUDGE_EFFORT` | Optional | - | Override; see `.env.example`. |
+| `RYU_QUEST_INTERVAL` | Optional | `# quest detection interval (secs)` | Override; see `.env.example`. |
+
+### Continual learning
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_LEARNING_ENABLED` | Optional | `# master switch (default off)` | Override; see `.env.example`. |
+| `RYU_LEARNING_SKILLS_ENABLED` | Optional | `# skill synthesis from experience` | Override; see `.env.example`. |
+| `RYU_LEARNING_INTERVAL` | Optional | `# learning-loop interval (secs)` | Override; see `.env.example`. |
+| `RYU_LEARNING_PRM_MODEL` | Optional | `# process-reward model (falls back to default LLM)` | Override; see `.env.example`. |
+| `RYU_LEARNING_SYNTH_MODEL` | Optional | `# synthesis model (falls back to default LLM)` | Override; see `.env.example`. |
+
+### OpenAI (also the fallback key for default LLM + embeddings).
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `OPENAI_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). |
+| `ANTHROPIC_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). |
+| `GEMINI_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `GROQ_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `DEEPSEEK_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `MISTRAL_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `XAI_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `CEREBRAS_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `FIREWORKS_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `TOGETHER_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `NVIDIA_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `MOONSHOT_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `ZAI_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `MINIMAX_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). |
+| `RYU_OPENROUTER_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). |
+| `OPENROUTER_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). |
+| `OPENROUTER_DATA_COLLECTION` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). |
+| `HF_TOKEN` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). |
+| `RYU_FAL_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). |
+| `FAL_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). |
+| `FAL_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). |
+| `RYU_REPLICATE_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. |
+| `REPLICATE_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. |
+| `RYU_COMPOSIO_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). |
+| `COMPOSIO_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). |
+| `COMPOSIO_BASE_URL` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). |
+| `COMPOSIO_ENTITY_ID` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). |
+| `COMPOSIO_WEBHOOK_SECRET` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). |
+| `RYU_GIF_PROVIDER` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. |
+| `RYU_GIF_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. |
+| `TENOR_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. |
+| `GIPHY_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. |
+| `KLIPY_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. |
+| `ARTIFICIAL_ANALYSIS_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. Artificial Analysis model-benchmark data (RYU_ prefixed alias accepted). |
+| `RYU_AA_API_KEY` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. Artificial Analysis model-benchmark data (RYU_ prefixed alias accepted). |
+| `RYU_PI_OAUTH_ANTHROPIC_CLIENT_ID` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. Artificial Analysis model-benchmark data (RYU_ prefixed alias accepted). Pi agent OAuth client/token endpoints (for BYO-subscription Anthropic/OpenAI login). |
+| `RYU_PI_OAUTH_ANTHROPIC_TOKEN_URL` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. Artificial Analysis model-benchmark data (RYU_ prefixed alias accepted). Pi agent OAuth client/token endpoints (for BYO-subscription Anthropic/OpenAI login). |
+| `RYU_PI_OAUTH_OPENAI_CLIENT_ID` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. Artificial Analysis model-benchmark data (RYU_ prefixed alias accepted). Pi agent OAuth client/token endpoints (for BYO-subscription Anthropic/OpenAI login). |
+| `RYU_PI_OAUTH_OPENAI_TOKEN_URL` | Optional | - | OpenAI (also the fallback key for default LLM + embeddings). Anthropic (Pi provider catalog + gateway upstream). Pi provider catalog keys (apps/core/src/pi_config/mod.rs  -  all optional BYOK). OpenRouter (RYU_ prefixed takes precedence over the bare name). Opt into OpenRouter prompt/data collection ("1" to allow). Hugging Face token (gated model downloads). fal.ai image/media (RYU_ prefixed wins; FAL_KEY also accepted). Replicate image/media. Composio integrations (RYU_ prefixed wins). GIF search: provider (default klipy) + key. Provider-specific keys also read: TENOR_API_KEY / GIPHY_API_KEY / KLIPY_API_KEY. Artificial Analysis model-benchmark data (RYU_ prefixed alias accepted). Pi agent OAuth client/token endpoints (for BYO-subscription Anthropic/OpenAI login). |
+
+### Default identity source id.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_IDENTITY_DEFAULT_SOURCE` | Optional | - | Default identity source id. |
+| `RYU_IDENTITY_HEALTH_INTERVAL` | Optional | - | Default identity source id. Identity-health check interval (secs). |
+
+### Email / SMTP (agent + notification egress)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_SMTP_HOST` | Optional | - | Override; see `.env.example`. |
+| `RYU_SMTP_PORT` | Optional | - | Override; see `.env.example`. |
+| `RYU_SMTP_USERNAME` | Optional | - | Override; see `.env.example`. |
+| `RYU_SMTP_PASSWORD` | Optional | - | Override; see `.env.example`. |
+| `RYU_SMTP_FROM` | Optional | - | Override; see `.env.example`. |
+| `RYU_SMTP_STARTTLS` | Optional | - | Override; see `.env.example`. |
+
+### Enable the mesh (required; fail-closed when tokenless).
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_MESH_ENABLED` | Optional | - | Enable the mesh (required; fail-closed when tokenless). |
+| `RYU_MESH_AUTHKEY` | Optional | - | Enable the mesh (required; fail-closed when tokenless). |
+| `RYU_MESH_LOGIN_SERVER` | Optional | - | Enable the mesh (required; fail-closed when tokenless). |
+| `RYU_MESH_SOCKS5_ADDR` | Optional | - | Enable the mesh (required; fail-closed when tokenless). |
+| `RYU_MESH_HTTP_PROXY_ADDR` | Optional | - | Enable the mesh (required; fail-closed when tokenless). RYU_MESH_SOCKS5_ADDR= |
+| `RYU_TAILSCALE_BIN` | Optional | - | Enable the mesh (required; fail-closed when tokenless). RYU_MESH_SOCKS5_ADDR= Tailscale binary overrides. |
+| `RYU_TAILSCALED_BIN` | Optional | - | Enable the mesh (required; fail-closed when tokenless). RYU_MESH_SOCKS5_ADDR= Tailscale binary overrides. |
+| `RYU_WEBHOOK_INGRESS_URL` | Optional | - | Enable the mesh (required; fail-closed when tokenless). RYU_MESH_SOCKS5_ADDR= Tailscale binary overrides. Public URL for inbound webhook ingress. |
+
+### Hardware companion nodes
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_HARDWARE_NODE_URL` | Optional | - | Override; see `.env.example`. |
+| `RYU_HARDWARE_ALLOWED_HOSTS` | Optional | - | Override; see `.env.example`. |
+
+### Encryption key for Spaces content.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_SPACES_KEY` | Optional | - | Encryption key for Spaces content. |
+| `RYU_SPACES_LINK_EXPANSION` | Optional | - | Encryption key for Spaces content. Enable wiki link expansion in Spaces. |
+| `RYU_MEDIA_DIR` | Optional | - | Encryption key for Spaces content. Enable wiki link expansion in Spaces. Media output directory (generated images/audio). |
+| `RYU_DOWNLOADS_FILE` | Optional | - | Encryption key for Spaces content. Enable wiki link expansion in Spaces. Media output directory (generated images/audio). Download manager state files + behavior. |
+| `RYU_DOWNLOADS_HISTORY_FILE` | Optional | - | Encryption key for Spaces content. Enable wiki link expansion in Spaces. Media output directory (generated images/audio). Download manager state files + behavior. |
+| `RYU_DOWNLOADS_AUTORESUME` | Optional | - | Encryption key for Spaces content. Enable wiki link expansion in Spaces. Media output directory (generated images/audio). Download manager state files + behavior. |
+| `RYU_MAX_CONCURRENT_DOWNLOADS` | Optional | - | Encryption key for Spaces content. Enable wiki link expansion in Spaces. Media output directory (generated images/audio). Download manager state files + behavior. |
+
+### Fine-tuning (Unsloth LoRA/QLoRA sidecar)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_UNSLOTH_DIR` | Optional | - | Override; see `.env.example`. |
+| `RYU_UNSLOTH_HF_HOME` | Optional | - | Override; see `.env.example`. |
+| `RYU_UNSLOTH_OUTPUT_DIR` | Optional | - | Override; see `.env.example`. |
+| `RYU_UNSLOTH_PYTHON` | Optional | - | Override; see `.env.example`. |
+
+### Enable cross-device SyncClient.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_SYNC_ENABLED` | Optional | - | Enable cross-device SyncClient. |
+| `RYU_HEADROOM_ENABLED` | Optional | - | Enable cross-device SyncClient. Headroom (community savings telemetry) service. |
+| `RYU_HEADROOM_URL` | Optional | - | Enable cross-device SyncClient. Headroom (community savings telemetry) service. |
+| `RYU_HEADROOM_MANAGED` | Optional | - | Enable cross-device SyncClient. Headroom (community savings telemetry) service. |
+| `RYU_HEADROOM_BIN` | Optional | - | Enable cross-device SyncClient. Headroom (community savings telemetry) service. |
+| `RYU_PI_AGENT_DIR` | Optional | - | Enable cross-device SyncClient. Headroom (community savings telemetry) service. Pi agent config directory. |
+| `RYU_CODEX_HOME` | Optional | - | Enable cross-device SyncClient. Headroom (community savings telemetry) service. Pi agent config directory. Codex home (RYU_ override; CODEX_HOME is the upstream default). |
+| `CODEX_HOME` | Optional | - | Enable cross-device SyncClient. Headroom (community savings telemetry) service. Pi agent config directory. Codex home (RYU_ override; CODEX_HOME is the upstream default). |
+| `CLAUDE_CONFIG_DIR` | Optional | - | Enable cross-device SyncClient. Headroom (community savings telemetry) service. Pi agent config directory. Codex home (RYU_ override; CODEX_HOME is the upstream default). Claude Code config dir (usage/history integration). |
+
+### Crash reporting DSN (RYU_ override; SENTRY_DSN also read).
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_SENTRY_DSN` | Optional | - | Crash reporting DSN (RYU_ override; SENTRY_DSN also read). |
+| `SENTRY_DSN` | Optional | - | Crash reporting DSN (RYU_ override; SENTRY_DSN also read). |
+| `RYU_CRASH_REPORTS_ENABLED` | Optional | - | Crash reporting DSN (RYU_ override; SENTRY_DSN also read). |
+| `RYU_PRODUCT_ANALYTICS_ENABLED` | Optional | - | Crash reporting DSN (RYU_ override; SENTRY_DSN also read). |
+| `RYU_DIAGNOSTICS_EXPORT_ENABLED` | Optional | - | Crash reporting DSN (RYU_ override; SENTRY_DSN also read). |
+| `RYU_COMMUNITY_STATS_ENABLED` | Optional | - | Crash reporting DSN (RYU_ override; SENTRY_DSN also read). |
+| `RYU_SUPPORT_ACCESS_LOCAL_ENABLED` | Optional | - | Crash reporting DSN (RYU_ override; SENTRY_DSN also read). |
+| `RYU_POSTHOG_KEY` | Optional | - | Crash reporting DSN (RYU_ override; SENTRY_DSN also read). PostHog key for product analytics. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional | - | Crash reporting DSN (RYU_ override; SENTRY_DSN also read). PostHog key for product analytics. OpenTelemetry OTLP export. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Optional | - | Crash reporting DSN (RYU_ override; SENTRY_DSN also read). PostHog key for product analytics. OpenTelemetry OTLP export. |
+
+### URL/port of a running SDK app Core bridges to.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_SDK_APP_URL` | Optional | - | URL/port of a running SDK app Core bridges to. |
+| `RYU_SDK_APP_PORT` | Optional | - | URL/port of a running SDK app Core bridges to. |
+
+### Force the updater to report a fake latest version (dev/testing only).
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_UPDATE_FAKE_LATEST` | Optional | - | Force the updater to report a fake latest version (dev/testing only). |
+
+## apps/gateway
+
+Source: [`apps/gateway/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/gateway/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `GATEWAY_BIND` | Optional | `127.0.0.1:7981` | --------------------------------------------------------------------------- Bind & config path --------------------------------------------------------------------------- Address the gateway HTTP server binds to. Default scheme is loopback:7981. |
+| `GATEWAY_CONFIG` | Optional | `/path/to/gateway.toml` | --------------------------------------------------------------------------- Bind & config path --------------------------------------------------------------------------- Address the gateway HTTP server binds to. Default scheme is loopback:7981. Absolute path to gateway.toml. Unset -&gt; $config_dir/ryu/gateway.toml. |
+| `GATEWAY_MASTER_KEY` | Optional | `change-me-master-key` | --------------------------------------------------------------------------- Master key & internal secrets --------------------------------------------------------------------------- Bearer key that guards the gateway's admin/config surface. Set in any shared deployment; unset means loopback-only trust. |
+| `RYU_CREDITS_INTERNAL_SECRET` | Optional | `change-me-credits-secret` | --------------------------------------------------------------------------- Master key & internal secrets --------------------------------------------------------------------------- Bearer key that guards the gateway's admin/config surface. Set in any shared deployment; unset means loopback-only trust. Shared secret Core presents to the gateway's internal credits endpoints (#486). |
+| `RYU_MARKETPLACE_SIGNING_KEY` | Optional | - | --------------------------------------------------------------------------- Master key & internal secrets --------------------------------------------------------------------------- Bearer key that guards the gateway's admin/config surface. Set in any shared deployment; unset means loopback-only trust. Shared secret Core presents to the gateway's internal credits endpoints (#486). ed25519 signing key for marketplace publish (grant signing). |
+| `RYU_MARKETPLACE_GRANT_ALLOWLIST` | Optional | - | --------------------------------------------------------------------------- Master key & internal secrets --------------------------------------------------------------------------- Bearer key that guards the gateway's admin/config surface. Set in any shared deployment; unset means loopback-only trust. Shared secret Core presents to the gateway's internal credits endpoints (#486). ed25519 signing key for marketplace publish (grant signing). Comma-separated allowlist of grants the gateway will sign/publish. |
+| `CONTROL_PLANE_URL` | Optional | `https://control.ryu.example` | --------------------------------------------------------------------------- Control plane (managed / fleet mode) --------------------------------------------------------------------------- URL of the managed control plane that serves org policy + shared budgets. |
+| `CONTROL_PLANE_KEY` | Optional | - | --------------------------------------------------------------------------- Control plane (managed / fleet mode) --------------------------------------------------------------------------- URL of the managed control plane that serves org policy + shared budgets. API key this gateway uses to authenticate to the control plane. |
+| `GATEWAY_KEY` | Optional | - | --------------------------------------------------------------------------- Control plane (managed / fleet mode) --------------------------------------------------------------------------- URL of the managed control plane that serves org policy + shared budgets. API key this gateway uses to authenticate to the control plane. Gateway key the policy layer presents to the control plane. |
+| `CONTROL_PLANE_SHARED_BUDGET_ID` | Optional | - | --------------------------------------------------------------------------- Control plane (managed / fleet mode) --------------------------------------------------------------------------- URL of the managed control plane that serves org policy + shared budgets. API key this gateway uses to authenticate to the control plane. Gateway key the policy layer presents to the control plane. Shared budget id this gateway debits against in the control plane. |
+| `RYU_GATEWAY_FLEET` | Optional | `false` | --------------------------------------------------------------------------- Control plane (managed / fleet mode) --------------------------------------------------------------------------- URL of the managed control plane that serves org policy + shared budgets. API key this gateway uses to authenticate to the control plane. Gateway key the policy layer presents to the control plane. Shared budget id this gateway debits against in the control plane. Marks this gateway as part of the managed fleet (multi-tenant data plane). |
+| `CORE_URL` | Optional | `http://127.0.0.1:7980` | --------------------------------------------------------------------------- Core node link (tools, credits, channel replies) --------------------------------------------------------------------------- URL of the Core node the gateway calls back into. Default local: :7980. |
+| `CORE_TOKEN` | Optional | - | --------------------------------------------------------------------------- Core node link (tools, credits, channel replies) --------------------------------------------------------------------------- URL of the Core node the gateway calls back into. Default local: :7980. Bearer token the gateway presents to Core. |
+| `RYU_CORE_URL` | Optional | `http://127.0.0.1:7980` | --------------------------------------------------------------------------- Core node link (tools, credits, channel replies) --------------------------------------------------------------------------- URL of the Core node the gateway calls back into. Default local: :7980. Bearer token the gateway presents to Core. Core URL used by the built-in channel bots (falls back to the default local Core). |
+| `OPENAI_API_KEY` | Optional | - | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. |
+| `OPENAI_BASE_URL` | Optional | `https://api.openai.com/v1` | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. |
+| `ANTHROPIC_API_KEY` | Optional | - | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. |
+| `ANTHROPIC_BASE_URL` | Optional | `https://api.anthropic.com` | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. |
+| `OPENROUTER_API_KEY` | Optional | - | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). |
+| `OPENROUTER_BASE_URL` | Optional | `https://openrouter.ai/api/v1` | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). |
+| `OPENROUTER_SITE_URL` | Optional | - | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). |
+| `OPENROUTER_SITE_NAME` | Optional | - | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). |
+| `OPENROUTER_DATA_COLLECTION` | Optional | `deny` | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). |
+| `OPENROUTER_SORT` | Optional | - | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). |
+| `REPLICATE_API_KEY` | Optional | - | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). Replicate (image/video/media). |
+| `REPLICATE_BASE_URL` | Optional | `https://api.replicate.com/v1` | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). Replicate (image/video/media). |
+| `FAL_API_KEY` | Optional | - | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). Replicate (image/video/media). fal.ai (image/media). |
+| `FAL_BASE_URL` | Optional | `https://fal.run` | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). Replicate (image/video/media). fal.ai (image/media). |
+| `MODAL_API_KEY` | Optional | - | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). Replicate (image/video/media). fal.ai (image/media). Modal (hosted inference). |
+| `MODAL_BASE_URL` | Optional | - | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). Replicate (image/video/media). fal.ai (image/media). Modal (hosted inference). |
+| `LOCAL_LLM_URL` | Optional | `http://127.0.0.1:8080/v1` | --------------------------------------------------------------------------- Provider keys & base URLs (upstream LLM / media providers) --------------------------------------------------------------------------- OpenAI-compatible provider. Anthropic provider. OpenRouter aggregator (provider upstream, not the user-level layer). Replicate (image/video/media). fal.ai (image/media). Modal (hosted inference). Local OpenAI-compatible engine (e.g. llama.cpp on :8080). |
+| `GATEWAY_FIREWALL_ENABLED` | Optional | `true` | --------------------------------------------------------------------------- Firewall & smart routing --------------------------------------------------------------------------- Toggle the request firewall / DLP inspection. |
+| `GATEWAY_FIREWALL_POLICY` | Optional | `block` | --------------------------------------------------------------------------- Firewall & smart routing --------------------------------------------------------------------------- Toggle the request firewall / DLP inspection. Firewall action policy (e.g. block / redact / audit). |
+| `GATEWAY_SMART_ROUTING_ENABLED` | Optional | `false` | --------------------------------------------------------------------------- Firewall & smart routing --------------------------------------------------------------------------- Toggle the request firewall / DLP inspection. Firewall action policy (e.g. block / redact / audit). Opt-in classifier-based model routing (Plane A). Fail-open. |
+| `GATEWAY_SMART_ROUTING_MODEL` | Optional | - | --------------------------------------------------------------------------- Firewall & smart routing --------------------------------------------------------------------------- Toggle the request firewall / DLP inspection. Firewall action policy (e.g. block / redact / audit). Opt-in classifier-based model routing (Plane A). Fail-open. Cheap classifier model used to pick the downstream model. |
+| `GATEWAY_TOOLS_ENABLED` | Optional | `true` | --------------------------------------------------------------------------- Tool execution --------------------------------------------------------------------------- Enable the gateway tool-search front + POST /v1/exec/tool. |
+| `RYU_EXEC_APPROVAL_MODE` | Optional | `auto` | --------------------------------------------------------------------------- Tool execution --------------------------------------------------------------------------- Enable the gateway tool-search front + POST /v1/exec/tool. Approval mode for exec (e.g. auto / ask / never). |
+| `GATEWAY_COMPRESSION_ENABLED` | Optional | `false` | --------------------------------------------------------------------------- Context compression sidecar --------------------------------------------------------------------------- |
+| `GATEWAY_COMPRESSION_URL` | Optional | - | --------------------------------------------------------------------------- Context compression sidecar --------------------------------------------------------------------------- |
+| `GATEWAY_COMPRESSION_TOKEN` | Optional | - | --------------------------------------------------------------------------- Context compression sidecar --------------------------------------------------------------------------- |
+| `GATEWAY_COMPRESSION_TIMEOUT_MS` | Optional | `10000` | --------------------------------------------------------------------------- Context compression sidecar --------------------------------------------------------------------------- |
+| `GATEWAY_COMPRESSION_MIN_MESSAGES` | Optional | `8` | --------------------------------------------------------------------------- Context compression sidecar --------------------------------------------------------------------------- |
+| `GATEWAY_SESSION_BUDGET_LIMIT` | Optional | `0` | --------------------------------------------------------------------------- Per-session token budget (#510) --------------------------------------------------------------------------- Token cap per session. 0 disables. gateway.toml [budgets.session] is primary. |
+| `GATEWAY_SESSION_BUDGET_ACTION` | Optional | `notify` | --------------------------------------------------------------------------- Per-session token budget (#510) --------------------------------------------------------------------------- Token cap per session. 0 disables. gateway.toml [budgets.session] is primary. Action on cap: notify / downgrade / restrict / stop. |
+| `GATEWAY_CREDITS_ENABLED` | Optional | `false` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- |
+| `GATEWAY_CREDITS_URL` | Optional | - | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- |
+| `GATEWAY_CREDITS_MARKUP_BPS` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. |
+| `GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). |
+| `GATEWAY_CREDITS_COST_PER_IMAGE_MICRO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). |
+| `GATEWAY_CREDITS_COST_PER_VIDEO_MICRO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). |
+| `GATEWAY_CREDITS_COST_PER_TTS_MICRO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). |
+| `GATEWAY_CREDITS_COST_PER_STT_MICRO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). |
+| `GATEWAY_CREDITS_SANDBOX_MARKUP_BPS` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. |
+| `GATEWAY_CREDITS_SANDBOX_FREE_STORAGE_GIB` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. |
+| `GATEWAY_CREDITS_COST_PER_SANDBOX_VCPU_SECOND_NANO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). |
+| `GATEWAY_CREDITS_COST_PER_SANDBOX_MEM_GIB_SECOND_NANO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). |
+| `GATEWAY_CREDITS_COST_PER_SANDBOX_STORAGE_GIB_SECOND_NANO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). |
+| `GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). |
+| `GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H100_SECOND_NANO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD=0 |
+| `GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_PRO_6000_SECOND_NANO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H100_SECOND_NANO_USD=0 |
+| `GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_5090_SECOND_NANO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H100_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_PRO_6000_SECOND_NANO_USD=0 |
+| `GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_4090_SECOND_NANO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H100_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_PRO_6000_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_5090_SECOND_NANO_USD=0 |
+| `GATEWAY_CREDITS_COST_PER_SANDBOX_WINDOWS_VCPU_SECOND_NANO_USD` | Optional | `0` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H100_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_PRO_6000_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_5090_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_4090_SECOND_NANO_USD=0 |
+| `GATEWAY_CREDITS_WALLET_EMPTY_ACTION` | Optional | `stop` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H100_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_PRO_6000_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_5090_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_4090_SECOND_NANO_USD=0 What to do when a wallet is empty: notify / downgrade / restrict / stop. |
+| `GATEWAY_CREDITS_WALLET_EMPTY_DOWNGRADE_TO` | Optional | - | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H100_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_PRO_6000_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_5090_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_4090_SECOND_NANO_USD=0 What to do when a wallet is empty: notify / downgrade / restrict / stop. Model to downgrade to when the wallet is empty (with the downgrade action). |
+| `GATEWAY_CREDITS_FAIL_CLOSED` | Optional | `false` | --------------------------------------------------------------------------- Managed credits / metering (#486)  -  off by default, Core enables it --------------------------------------------------------------------------- Markup applied to metered spend, in basis points. Flat per-modality rates (micro-USD; 0 = free). Sandbox metering. Sandbox resource rates (nano-USD per second; 0 = free). GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H200_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_H100_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_PRO_6000_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_5090_SECOND_NANO_USD=0 GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_4090_SECOND_NANO_USD=0 What to do when a wallet is empty: notify / downgrade / restrict / stop. Model to downgrade to when the wallet is empty (with the downgrade action). Refuse requests when the credits backend is unreachable (fail-closed). |
+| `RYU_PASSTHROUGH_ANTHROPIC_UPSTREAM` | Optional | `https://api.anthropic.com` | --------------------------------------------------------------------------- Passthrough proxy (subscription-preserving Claude Code / Codex egress) --------------------------------------------------------------------------- Upstream the Anthropic (Claude Code) passthrough forwards to. |
+| `RYU_PASSTHROUGH_CODEX_UPSTREAM` | Optional | `https://api.openai.com` | --------------------------------------------------------------------------- Passthrough proxy (subscription-preserving Claude Code / Codex egress) --------------------------------------------------------------------------- Upstream the Anthropic (Claude Code) passthrough forwards to. Upstream the Codex passthrough forwards to. |
+| `RYU_MESH_ENABLED` | Optional | `false` | --------------------------------------------------------------------------- Mesh (cross-node tool egress) --------------------------------------------------------------------------- Enable Tailscale mesh. Fail-closed: refuses tokenless requests when on. |
+| `RYU_CRASH_REPORTS_ENABLED` | Optional | `true` | --------------------------------------------------------------------------- Observability (crash reporting & OTEL diagnostics) --------------------------------------------------------------------------- Crash reporting is opt-out; set false to disable. |
+| `RYU_SENTRY_DSN` | Optional | - | --------------------------------------------------------------------------- Observability (crash reporting & OTEL diagnostics) --------------------------------------------------------------------------- Crash reporting is opt-out; set false to disable. Sentry DSN (Ryu mirror first, then generic). Empty = no destination. |
+| `SENTRY_DSN` | Optional | - | --------------------------------------------------------------------------- Observability (crash reporting & OTEL diagnostics) --------------------------------------------------------------------------- Crash reporting is opt-out; set false to disable. Sentry DSN (Ryu mirror first, then generic). Empty = no destination. |
+| `RYU_DIAGNOSTICS_EXPORT_ENABLED` | Optional | `false` | --------------------------------------------------------------------------- Observability (crash reporting & OTEL diagnostics) --------------------------------------------------------------------------- Crash reporting is opt-out; set false to disable. Sentry DSN (Ryu mirror first, then generic). Empty = no destination. Enable OTLP diagnostics export. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional | - | --------------------------------------------------------------------------- Observability (crash reporting & OTEL diagnostics) --------------------------------------------------------------------------- Crash reporting is opt-out; set false to disable. Sentry DSN (Ryu mirror first, then generic). Empty = no destination. Enable OTLP diagnostics export. OTLP collector endpoint. |
+| `OTEL_SEMCONV_STABILITY_OPT_IN` | Optional | - | --------------------------------------------------------------------------- Observability (crash reporting & OTEL diagnostics) --------------------------------------------------------------------------- Crash reporting is opt-out; set false to disable. Sentry DSN (Ryu mirror first, then generic). Empty = no destination. Enable OTLP diagnostics export. OTLP collector endpoint. OpenTelemetry semantic-convention stability opt-in. |
+| `COMPOSIO_API_KEY` | Optional | - | --------------------------------------------------------------------------- Composio (tool provider for channel bots / workflows) --------------------------------------------------------------------------- |
+| `COMPOSIO_ENTITY_ID` | Optional | - | --------------------------------------------------------------------------- Composio (tool provider for channel bots / workflows) --------------------------------------------------------------------------- |
+| `COMPOSIO_BASE_URL` | Optional | `https://backend.composio.dev` | --------------------------------------------------------------------------- Composio (tool provider for channel bots / workflows) --------------------------------------------------------------------------- |
+| `RYU_CHANNEL_ALLOWED_USERS` | Optional | - | --------------------------------------------------------------------------- Channel connectors (built-in bots) --------------------------------------------------------------------------- Setting a token enables that channel. Per-channel MODEL/SYSTEM_PROMPT/AGENT_ID/ TEAM_ID/GROUP_REPLY_MODE tune behaviour. Allowlist a channel's chats with the global RYU_CHANNEL_ALLOWED_USERS or a per-platform RYU_CHANNEL_ALLOWED_USERS_&lt;PLATFORM&gt;. |
+| `RYU_CHANNEL_ALLOWED_USERS_TELEGRAM` | Optional | - | --------------------------------------------------------------------------- Channel connectors (built-in bots) --------------------------------------------------------------------------- Setting a token enables that channel. Per-channel MODEL/SYSTEM_PROMPT/AGENT_ID/ TEAM_ID/GROUP_REPLY_MODE tune behaviour. Allowlist a channel's chats with the global RYU_CHANNEL_ALLOWED_USERS or a per-platform RYU_CHANNEL_ALLOWED_USERS_&lt;PLATFORM&gt;. |
+| `TELEGRAM_BOT_TOKEN` | Optional | - | Telegram |
+| `TELEGRAM_MODEL` | Optional | - | Telegram |
+| `TELEGRAM_SYSTEM_PROMPT` | Optional | - | Telegram |
+| `TELEGRAM_AGENT_ID` | Optional | - | Telegram |
+| `TELEGRAM_TEAM_ID` | Optional | - | Telegram |
+| `TELEGRAM_GROUP_REPLY_MODE` | Optional | - | Telegram |
+| `SLACK_APP_TOKEN` | Optional | - | Slack |
+| `SLACK_BOT_TOKEN` | Optional | - | Slack |
+| `SLACK_MODEL` | Optional | - | Slack |
+| `SLACK_SYSTEM_PROMPT` | Optional | - | Slack |
+| `SLACK_AGENT_ID` | Optional | - | Slack |
+| `SLACK_TEAM_ID` | Optional | - | Slack |
+| `SLACK_GROUP_REPLY_MODE` | Optional | - | Slack |
+| `DISCORD_BOT_TOKEN` | Optional | - | Discord |
+| `DISCORD_CHANNEL_IDS` | Optional | - | Discord |
+| `DISCORD_MODEL` | Optional | - | Discord |
+| `DISCORD_SYSTEM_PROMPT` | Optional | - | Discord |
+| `DISCORD_AGENT_ID` | Optional | - | Discord |
+| `DISCORD_TEAM_ID` | Optional | - | Discord |
+| `DISCORD_GROUP_REPLY_MODE` | Optional | - | Discord |
+| `WHATSAPP_ACCESS_TOKEN` | Optional | - | WhatsApp |
+| `WHATSAPP_PHONE_NUMBER_ID` | Optional | - | WhatsApp |
+| `WHATSAPP_VERIFY_TOKEN` | Optional | - | WhatsApp |
+| `WHATSAPP_APP_SECRET` | Optional | - | WhatsApp |
+| `WHATSAPP_WEBHOOK_BIND` | Optional | - | WhatsApp |
+| `WHATSAPP_WEBHOOK_PATH` | Optional | - | WhatsApp |
+| `WHATSAPP_GRAPH_VERSION` | Optional | - | WhatsApp |
+| `WHATSAPP_MODEL` | Optional | - | WhatsApp |
+| `WHATSAPP_SYSTEM_PROMPT` | Optional | - | WhatsApp |
+| `WHATSAPP_AGENT_ID` | Optional | - | WhatsApp |
+| `WHATSAPP_TEAM_ID` | Optional | - | WhatsApp |
+| `WHATSAPP_GROUP_REPLY_MODE` | Optional | - | WhatsApp |
+
+## apps/server
+
+Source: [`apps/server/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/server/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `BETTER_AUTH_SECRET` | Required* | - | Better Auth Configuration |
+| `BETTER_AUTH_URL` | Required* | `http://localhost:3000` | See `.env.example`. |
+| `AUTH_COOKIE_DOMAIN` | Optional | - | Cross-subdomain auth cookie domain (e.g. ryuhq.com). Leave UNSET for localhost. |
+| `ADMIN_EMAILS` | Required* | - | Waitlist admins (comma-separated emails). These accounts skip the waitlist and can access the admin dashboard at /admin/waitlist to invite others. Bootstraps the first admin without any DB change. Non-empty (cloud): the waitlist is fail-closed  -  every new signup is queued until an admin approves them. Empty (self-hosted default): the waitlist is BYPASSED  -  with no admins, nobody could ever approve anyone, so new signups are auto-approved and existing waitlisted accounts are treated as approved (a one-time warning is logged). |
+| `DATABASE_URL` | Required* | `mongodb://localhost:27017/ryu` | Database |
+| `RYU_DB_MASTER_KEY` | Required* | `base64-encoded-32-byte-key` | Generate with: bun -e 'console.log(Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64"))' Required when NODE_ENV=production (server throws at boot without it). Optional in dev; set RYU_DB_ALLOW_PLAINTEXT_SECRETS=1 only for local plaintext escape. |
+| `RYU_DB_ALLOW_PLAINTEXT_SECRETS` | Optional | `1` | Local development only. Leave unset in production. |
+| `CORS_ORIGIN` | Required* | `http://localhost:3001,http://localhost:1420,http://localhost:5173,http://localhost:5175,tauri://localhost` | CORS Configuration |
+| `EXTENSION_ORIGIN` | Optional | - | Chrome extension origin override (defaults to chrome-extension://&lt;NEXT_PUBLIC_EXTENSION_ID&gt;) |
+| `FRONTEND_URL` | Required* | `http://localhost:3001` | Frontend/Server URLs |
+| `SERVER_URL` | Required* | `http://localhost:3000` | See `.env.example`. |
+| `NEXT_PUBLIC_FRONTEND_URL` | Optional | `http://localhost:3001` | Marketing web origin for server-side billing redirect URLs (packages/api). |
+| `RYU_PUBLIC_URL` | Optional | `http://localhost:3000` | Marketing web origin for server-side billing redirect URLs (packages/api). Public URL for Composio relay webhooks (falls back to BETTER_AUTH_URL / SERVER_URL) |
+| `GOOGLE_CLIENT_ID` | Required* | - | Google OAuth Configuration |
+| `GOOGLE_CLIENT_SECRET` | Required* | - | See `.env.example`. |
+| `TURNSTILE_SECRET_KEY` | Required* | - | Cloudflare Turnstile Captcha |
+| `POLAR_ACCESS_TOKEN` | Required* | - | Polar Payment Configuration |
+| `POLAR_SUCCESS_URL` | Required* | `http://localhost:3001/success?checkout_id={CHECKOUT_ID}` | See `.env.example`. |
+| `POLAR_SERVER` | Required* | `sandbox` | Set to "production" for live payments, "sandbox" for testing |
+| `POLAR_ORGANIZATION_ID` | Optional | `# required for license-key validation` | Override; see `.env.example`. |
+| `POLAR_WEBHOOK_SECRET` | Optional | - | Override; see `.env.example`. |
+| `POLAR_PRODUCT_DESKTOP_LICENSE` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_BENEFIT_DESKTOP_LICENSE` | Optional | `# benefit id granted by the desktop-license product` | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_METER_MANAGED_INFERENCE` | Optional | `# usage meter id for managed-inference credit draw` | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_PRODUCT_PRO_MONTHLY` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_PRODUCT_PRO_YEARLY` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_PRODUCT_MAX_MONTHLY` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_PRODUCT_MAX_YEARLY` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_PRODUCT_TEAMS_MONTHLY` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_PRICE_TEAMS_MONTHLY_SEAT` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_PRODUCT_TEAMS_YEARLY` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_PRICE_TEAMS_YEARLY_SEAT` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md |
+| `POLAR_PRODUCT_CLOUD_INSTANCE` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md Single recurring product for dynamic cloud instances  -  the per-checkout amount is an ad-hoc fixed price (round(live Hetzner cost × markup)). Max includes a free BASE (cx23) node. |
+| `POLAR_PRODUCT_CLOUD_CLOUD1X` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md Single recurring product for dynamic cloud instances  -  the per-checkout amount is an ad-hoc fixed price (round(live Hetzner cost × markup)). Max includes a free BASE (cx23) node. Fixed-tier cloud product ids (1x / 5x / 10x compute bands) |
+| `POLAR_PRODUCT_CLOUD_CLOUD5X` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md Single recurring product for dynamic cloud instances  -  the per-checkout amount is an ad-hoc fixed price (round(live Hetzner cost × markup)). Max includes a free BASE (cx23) node. Fixed-tier cloud product ids (1x / 5x / 10x compute bands) POLAR_PRODUCT_CLOUD_CLOUD1X= |
+| `POLAR_PRODUCT_CLOUD_CLOUD10X` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md Single recurring product for dynamic cloud instances  -  the per-checkout amount is an ad-hoc fixed price (round(live Hetzner cost × markup)). Max includes a free BASE (cx23) node. Fixed-tier cloud product ids (1x / 5x / 10x compute bands) POLAR_PRODUCT_CLOUD_CLOUD1X= POLAR_PRODUCT_CLOUD_CLOUD5X= |
+| `POLAR_PRODUCT_CREDITS` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md Single recurring product for dynamic cloud instances  -  the per-checkout amount is an ad-hoc fixed price (round(live Hetzner cost × markup)). Max includes a free BASE (cx23) node. Fixed-tier cloud product ids (1x / 5x / 10x compute bands) POLAR_PRODUCT_CLOUD_CLOUD1X= POLAR_PRODUCT_CLOUD_CLOUD5X= POLAR_PRODUCT_CLOUD_CLOUD10X= |
+| `POLAR_PRODUCT_AUTOTOPUP` | Optional | - | Plan catalog product ids  -  see docs/polar-products.md Single recurring product for dynamic cloud instances  -  the per-checkout amount is an ad-hoc fixed price (round(live Hetzner cost × markup)). Max includes a free BASE (cx23) node. Fixed-tier cloud product ids (1x / 5x / 10x compute bands) POLAR_PRODUCT_CLOUD_CLOUD1X= POLAR_PRODUCT_CLOUD_CLOUD5X= POLAR_PRODUCT_CLOUD_CLOUD10X= |
+| `STRIPE_SECRET_KEY` | Optional | - | Stripe (marketplace monetization #485). All optional  -  absent keys degrade cleanly. |
+| `STRIPE_WEBHOOK_SECRET` | Optional | - | Stripe (marketplace monetization #485). All optional  -  absent keys degrade cleanly. |
+| `STRIPE_CONNECT_CLIENT_ID` | Optional | - | Stripe (marketplace monetization #485). All optional  -  absent keys degrade cleanly. |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | Optional | - | Stripe (marketplace monetization #485). All optional  -  absent keys degrade cleanly. |
+| `MARKETPLACE_DIRECT_CHARGE` | Optional | - | Stripe (marketplace monetization #485). All optional  -  absent keys degrade cleanly. Marketplace direct-charge migration (#490, docs/stripe-connect-direct-charges-migration.md). DEFAULT OFF. "true" charges buyers ON the seller's connected account (direct charge, 46 seller countries) instead of a platform destination charge (SG-only), keeping the platform fee. BEFORE setting "true": subscribe checkout.session.completed / payment_intent.succeeded / charge.refunded / charge.dispute.created on the CONNECT webhook endpoint (direct-charge events fire there, not the platform one) and re-onboard existing sellers for the card_payments capability. See the doc's rollout section. |
+| `STRIPE_SUCCESS_URL` | Optional | - | Stripe (marketplace monetization #485). All optional  -  absent keys degrade cleanly. Marketplace direct-charge migration (#490, docs/stripe-connect-direct-charges-migration.md). DEFAULT OFF. "true" charges buyers ON the seller's connected account (direct charge, 46 seller countries) instead of a platform destination charge (SG-only), keeping the platform fee. BEFORE setting "true": subscribe checkout.session.completed / payment_intent.succeeded / charge.refunded / charge.dispute.created on the CONNECT webhook endpoint (direct-charge events fire there, not the platform one) and re-onboard existing sellers for the card_payments capability. See the doc's rollout section. |
+| `STRIPE_CANCEL_URL` | Optional | - | Stripe (marketplace monetization #485). All optional  -  absent keys degrade cleanly. Marketplace direct-charge migration (#490, docs/stripe-connect-direct-charges-migration.md). DEFAULT OFF. "true" charges buyers ON the seller's connected account (direct charge, 46 seller countries) instead of a platform destination charge (SG-only), keeping the platform fee. BEFORE setting "true": subscribe checkout.session.completed / payment_intent.succeeded / charge.refunded / charge.dispute.created on the CONNECT webhook endpoint (direct-charge events fire there, not the platform one) and re-onboard existing sellers for the card_payments capability. See the doc's rollout section. |
+| `RYU_CREDITS_INTERNAL_SECRET` | Optional | - | Stripe (marketplace monetization #485). All optional  -  absent keys degrade cleanly. Marketplace direct-charge migration (#490, docs/stripe-connect-direct-charges-migration.md). DEFAULT OFF. "true" charges buyers ON the seller's connected account (direct charge, 46 seller countries) instead of a platform destination charge (SG-only), keeping the platform fee. BEFORE setting "true": subscribe checkout.session.completed / payment_intent.succeeded / charge.refunded / charge.dispute.created on the CONNECT webhook endpoint (direct-charge events fire there, not the platform one) and re-onboard existing sellers for the card_payments capability. See the doc's rollout section. |
+| `AFFILIATE_SUBSCRIPTION_TYPE` | Optional | `percent` | First-party Ryu affiliate program (replaces Dub). The default subscription commission rule is assembled from these; all optional (code applies the defaults shown below). type=percent uses BASIS POINTS (2000 = 20%); a flat type would use MINOR UNITS (cents). |
+| `AFFILIATE_SUBSCRIPTION_VALUE` | Optional | `2000` | First-party Ryu affiliate program (replaces Dub). The default subscription commission rule is assembled from these; all optional (code applies the defaults shown below). type=percent uses BASIS POINTS (2000 = 20%); a flat type would use MINOR UNITS (cents). |
+| `AFFILIATE_SUBSCRIPTION_RECURRING` | Optional | `true` | First-party Ryu affiliate program (replaces Dub). The default subscription commission rule is assembled from these; all optional (code applies the defaults shown below). type=percent uses BASIS POINTS (2000 = 20%); a flat type would use MINOR UNITS (cents). |
+| `AFFILIATE_SUBSCRIPTION_DURATION_MONTHS` | Optional | `12` | First-party Ryu affiliate program (replaces Dub). The default subscription commission rule is assembled from these; all optional (code applies the defaults shown below). type=percent uses BASIS POINTS (2000 = 20%); a flat type would use MINOR UNITS (cents). |
+| `RYU_MARKETPLACE_ADMIN_EMAILS` | Optional | - | First-party Ryu affiliate program (replaces Dub). The default subscription commission rule is assembled from these; all optional (code applies the defaults shown below). type=percent uses BASIS POINTS (2000 = 20%); a flat type would use MINOR UNITS (cents). RYU_MARKETPLACE_ADMIN_EMAILS gates the affiliate admin endpoints (/api/affiliate/admin/*). Comma-separated allowlist of admin emails. |
+| `DUB_PARTNERS_PORTAL_URL` | Optional | - | Legacy Dub partner links  -  only referenced if migrating from the old Dub affiliate program; safe to leave unset on new installs. |
+| `DUB_PARTNERS_PROGRAM_URL` | Optional | - | Legacy Dub partner links  -  only referenced if migrating from the old Dub affiliate program; safe to leave unset on new installs. |
+| `NOTION_API_KEY` | Required* | - | Notion API Configuration |
+| `NOTION_BLOG_DATABASE_ID` | Required* | - | See `.env.example`. |
+| `NOTION_PAGES_DATABASE_ID` | Required* | - | See `.env.example`. |
+| `NOTION_HELP_DATABASE_ID` | Required* | - | See `.env.example`. |
+| `NOTION_CHANGELOG_DATABASE_ID` | Required* | - | See `.env.example`. |
+| `STORAGE_ACCESS_KEY_ID` | Required* | - | Object Storage Configuration (AWS S3 Compatible) Supports: AWS S3, Hetzner Object Storage, DigitalOcean Spaces, Cloudflare R2, etc. |
+| `STORAGE_SECRET_ACCESS_KEY` | Required* | - | See `.env.example`. |
+| `STORAGE_REGION` | Required* | - | See `.env.example`. |
+| `STORAGE_ENDPOINT` | Required* | - | See `.env.example`. |
+| `STORAGE_BUCKET_NAME` | Required* | - | See `.env.example`. |
+| `STORAGE_FORCE_PATH_STYLE` | Required* | `true` | See `.env.example`. |
+| `USESEND_API_KEY` | Required* | `us_xxxxxxxxx` | useSend Email Service Configuration (self-hosted, Resend-compatible API) |
+| `USESEND_URL` | Required* | `https://send.amajor.ai` | See `.env.example`. |
+| `USESEND_CONTACT_BOOK_ID` | Required* | - | Contact book id for marketing-email subscribe/unsubscribe (optional). |
+| `FROM_EMAIL` | Required* | `hey@amajor.ai` | See `.env.example`. |
+| `RYU_MAIL_DOMAIN` | Optional | - | Agent Inboxes / Ryu Mail (optional  -  endpoints return 503 when unset) |
+| `AWS_SES_REGION` | Optional | - | Agent Inboxes / Ryu Mail (optional  -  endpoints return 503 when unset) |
+| `AWS_ACCESS_KEY_ID` | Optional | - | Agent Inboxes / Ryu Mail (optional  -  endpoints return 503 when unset) |
+| `AWS_SECRET_ACCESS_KEY` | Optional | - | Agent Inboxes / Ryu Mail (optional  -  endpoints return 503 when unset) |
+| `RYU_MAIL_S3_BUCKET` | Optional | - | Agent Inboxes / Ryu Mail (optional  -  endpoints return 503 when unset) |
+| `RYU_MAIL_INBOUND_SECRET` | Optional | - | Agent Inboxes / Ryu Mail (optional  -  endpoints return 503 when unset) RYU_MAIL_S3_BUCKET= |
+| `RYU_BRAND_URL` | Optional | - | Agent Inboxes / Ryu Mail (optional  -  endpoints return 503 when unset) RYU_MAIL_S3_BUCKET= |
+| `CLOUDFLARE_API_TOKEN` | Optional | - | Agent Inboxes / Ryu Mail (optional  -  endpoints return 503 when unset) RYU_MAIL_S3_BUCKET= |
+| `CLOUDFLARE_ZONE_ID` | Optional | - | Agent Inboxes / Ryu Mail (optional  -  endpoints return 503 when unset) RYU_MAIL_S3_BUCKET= |
+| `COMPOSIO_WEBHOOK_SECRET` | Optional | - | Composio relay (optional  -  ingress rejects when COMPOSIO_WEBHOOK_SECRET unset) |
+| `RYU_GATEWAY_URL` | Optional | `http://localhost:7981` | Gateway URL for marketplace publish grant validation (optional) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional | - | Observability  -  OTLP wide events (#541). No-op when endpoint/token unset. |
+| `AXIOM_TOKEN` | Optional | - | Observability  -  OTLP wide events (#541). No-op when endpoint/token unset. |
+| `AXIOM_DATASET` | Optional | - | Observability  -  OTLP wide events (#541). No-op when endpoint/token unset. |
+| `HETZNER_MARKUP_MULTIPLIER` | Optional | `2.5` | Managed Cloud pricing (optional  -  hetzner-catalog defaults apply when unset). Markup on live Hetzner compute cost for the paid 2X/3X add-ons (default 2.5). |
+| `HETZNER_EUR_USD` | Optional | `1.08` | Managed Cloud pricing (optional  -  hetzner-catalog defaults apply when unset). Markup on live Hetzner compute cost for the paid 2X/3X add-ons (default 2.5). EUR→USD fx used to convert Hetzner EUR prices to USD (default 1.08). |
+| `SENTRY_DSN` | Required* | `https://1371a855920ed833ba44d6292442d471@o4511706237304832.ingest.us.sentry.io/4511706239139840` | Crash reporting  -  Sentry (server tier, Ryu's own machines, no user consent gate). No-op when SENTRY_DSN is unset. Opt out with RYU_CRASH_REPORTS_ENABLED=false. instrument.ts reads RYU_SENTRY_DSN (falls back to SENTRY_DSN) and tags events with RYU_RELEASE. Both optional. |
+| `RYU_SENTRY_DSN` | Optional | - | Override; see `.env.example`. |
+| `RYU_RELEASE` | Optional | - | Override; see `.env.example`. |
+| `RYU_CRASH_REPORTS_ENABLED` | Optional | `true` | Override; see `.env.example`. |
+| `RYU_HF_API_URL` | Optional | - | Catalog / marketplace federation upstreams (all optional  -  code applies live defaults: Hugging Face, skills.sh, the Ryu MCP registry, the hosted marketplace). Override only to point at a mirror or self-hosted index. See lib/federation.ts. |
+| `RYU_HF_HOST` | Optional | - | Catalog / marketplace federation upstreams (all optional  -  code applies live defaults: Hugging Face, skills.sh, the Ryu MCP registry, the hosted marketplace). Override only to point at a mirror or self-hosted index. See lib/federation.ts. |
+| `RYU_MCP_REGISTRY_URL` | Optional | - | Catalog / marketplace federation upstreams (all optional  -  code applies live defaults: Hugging Face, skills.sh, the Ryu MCP registry, the hosted marketplace). Override only to point at a mirror or self-hosted index. See lib/federation.ts. |
+| `SKILLS_SH_API_URL` | Optional | - | Catalog / marketplace federation upstreams (all optional  -  code applies live defaults: Hugging Face, skills.sh, the Ryu MCP registry, the hosted marketplace). Override only to point at a mirror or self-hosted index. See lib/federation.ts. |
+| `RYU_MARKETPLACE_API_URL` | Optional | - | Catalog / marketplace federation upstreams (all optional  -  code applies live defaults: Hugging Face, skills.sh, the Ryu MCP registry, the hosted marketplace). Override only to point at a mirror or self-hosted index. See lib/federation.ts. |
+| `WAITLIST_INVITES_PER_WEEK` | Optional | - | Waitlist invite budget per admin per week (default applies when unset). |
+| `RYU_VAULT_INTERNAL_SECRET` | Optional | - | Identity/provider-key vault internal secret (optional; gates internal vault ops). |
+| `HCLOUD_TOKEN` | Optional | - | Managed Cloud provisioning  -  Hetzner Cloud (only when actually provisioning nodes). RYU_HETZNER_LIVE gates real provisioning; RYU_HETZNER_DESTROY_CONFIRM guards teardown. |
+| `HCLOUD_DEFAULT_REGION` | Optional | - | Managed Cloud provisioning  -  Hetzner Cloud (only when actually provisioning nodes). RYU_HETZNER_LIVE gates real provisioning; RYU_HETZNER_DESTROY_CONFIRM guards teardown. |
+| `RYU_HETZNER_LIVE` | Optional | - | Managed Cloud provisioning  -  Hetzner Cloud (only when actually provisioning nodes). RYU_HETZNER_LIVE gates real provisioning; RYU_HETZNER_DESTROY_CONFIRM guards teardown. |
+| `RYU_HETZNER_DESTROY_CONFIRM` | Optional | - | Managed Cloud provisioning  -  Hetzner Cloud (only when actually provisioning nodes). RYU_HETZNER_LIVE gates real provisioning; RYU_HETZNER_DESTROY_CONFIRM guards teardown. |
+| `SKIP_ENV_VALIDATION` | Optional | `1` | Build-time only  -  set SKIP_ENV_VALIDATION=1 during Docker builds, never at runtime. |
+
+## apps/web
+
+Source: [`apps/web/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/web/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `NEXT_PUBLIC_FRONTEND_URL` | Required* | `http://localhost:3001` | Frontend URLs |
+| `NEXT_PUBLIC_SERVER_URL` | Required* | `http://localhost:3000` | See `.env.example`. |
+| `SERVER_URL` | Optional | `http://localhost:3000` | Server-side base URL for the control-plane API (non-public; read by web SSR / route handlers, distinct from the public NEXT_PUBLIC_SERVER_URL). Defaults to NEXT_PUBLIC_SERVER_URL when unset. |
+| `NEXT_PUBLIC_SITE_URL` | Required* | `https://ryu.com` | Server-side base URL for the control-plane API (non-public; read by web SSR / route handlers, distinct from the public NEXT_PUBLIC_SERVER_URL). Defaults to NEXT_PUBLIC_SERVER_URL when unset. Public canonical site URL  -  used for canonical tags, sitemap.xml, robots.txt, OpenGraph, and JSON-LD. MUST be the real production domain in prod (defaults to https://ryu.com when unset). |
+| `NEXT_PUBLIC_CORE_URL` | Required* | `http://localhost:7980` | Ryu Core local backend. Web /chat proxies /api/chat/stream, /api/agents, and /api/spaces here via next.config rewrites. Defaults to http://localhost:7980. |
+| `NEXT_PUBLIC_DOCS_URL` | Required* | `http://localhost:4000` | Docs site (separate Fumadocs app). The marketing header "Docs" link points here. Local dev server runs on :4000; use https://docs.ryuhq.com in prod. |
+| `NEXT_PUBLIC_WEBAPP_URL` | Required* | `http://localhost:5175` | Browser build of the desktop app (apps/webapp). Download menu "Open Web App" link. Local dev server runs on :5175. |
+| `NEXT_PUBLIC_EXTENSION_ID` | Required* | `eahmgoelihpjlbejliklmfcohjhpgeml` | Extension ID (Chrome extension) |
+| `NEXT_PUBLIC_FIREFOX_EXTENSION_SLUG` | Required* | - | Optional: Firefox AMO slug and Edge add-ons ID for the download menu browser links |
+| `NEXT_PUBLIC_EDGE_EXTENSION_ID` | Required* | - | See `.env.example`. |
+| `NOTION_API_KEY` | Required* | - | Notion (server-only secret, NOT public). Required by the web app's in-app image proxy at /api/notion-image, which retrieves a page and 307-redirects to the fresh signed Banner/Author-Avatar URL so blog/changelog banners never bake an expiring URL into HTML. Without this the proxy returns 404 (broken images). Use the SAME value as the backend server's NOTION_API_KEY. |
+| `DATABASE_URL` | Required* | `mongodb://localhost:27017/ryu` | Database (used by some server-side routes in the web app) |
+| `ADMIN_EMAILS` | Required* | - | Waitlist admins (comma-separated emails). Server-only (NOT public). Must match the same var on the control-plane server  -  the web app gates /admin/waitlist with it. These accounts skip the waitlist. |
+| `NEXT_PUBLIC_STORAGE_ENDPOINT` | Required* | - | Object Storage (S3-compatible, public-facing avatar URLs) |
+| `NEXT_PUBLIC_STORAGE_BUCKET_NAME` | Required* | - | See `.env.example`. |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Required* | - | Cloudflare Turnstile Captcha |
+| `NEXT_PUBLIC_POSTHOG_KEY` | Required* | - | PostHog product analytics (closed-UI plane). Anonymous + content-free; opt-out via the in-browser toggle. Leave the key blank to disable analytics entirely (the provider becomes a no-op). Host defaults to PostHog EU Cloud so IP capture is off by default; use the EU ingest host for EU data residency. |
+| `NEXT_PUBLIC_POSTHOG_HOST` | Required* | `https://eu.i.posthog.com` | See `.env.example`. |
+| `NEXT_PUBLIC_SENTRY_DSN` | Required* | `https://1371a855920ed833ba44d6292442d471@o4511706237304832.ingest.us.sentry.io/4511706239139840` | Crash reporting  -  Sentry. NEXT_PUBLIC_SENTRY_DSN is baked into the browser bundle (client errors); the server/edge runtimes also read SENTRY_DSN. No-op when unset. Opt out with RYU_CRASH_REPORTS_ENABLED=false. SENTRY_AUTH_TOKEN + SENTRY_ORG/SENTRY_PROJECT are build-time only (source-map upload); omit to skip. |
+| `SENTRY_DSN` | Required* | `https://1371a855920ed833ba44d6292442d471@o4511706237304832.ingest.us.sentry.io/4511706239139840` | See `.env.example`. |
+| `RYU_CRASH_REPORTS_ENABLED` | Optional | `true` | Override; see `.env.example`. |
+| `SENTRY_ORG` | Optional | - | Override; see `.env.example`. |
+| `SENTRY_PROJECT` | Optional | - | Override; see `.env.example`. |
+| `SENTRY_AUTH_TOKEN` | Optional | - | Override; see `.env.example`. |
+| `RYU_SENTRY_DSN` | Optional | - | Server/edge Sentry init reads RYU_SENTRY_DSN (falls back to SENTRY_DSN) and tags events with RYU_RELEASE. App version baked into the bundle + used as the Sentry release tag. All optional. |
+| `RYU_RELEASE` | Optional | - | Server/edge Sentry init reads RYU_SENTRY_DSN (falls back to SENTRY_DSN) and tags events with RYU_RELEASE. App version baked into the bundle + used as the Sentry release tag. All optional. |
+| `NEXT_PUBLIC_APP_VERSION` | Optional | - | Server/edge Sentry init reads RYU_SENTRY_DSN (falls back to SENTRY_DSN) and tags events with RYU_RELEASE. App version baked into the bundle + used as the Sentry release tag. All optional. Baked into the browser bundle for the footer + Sentry release tag. CI/Dokploy should set both so "Site" reflects the deploy and the commit links to GitHub. Falls back to apps/web/package.json version + `git rev-parse HEAD` locally. |
+| `NEXT_PUBLIC_GIT_COMMIT` | Optional | - | Server/edge Sentry init reads RYU_SENTRY_DSN (falls back to SENTRY_DSN) and tags events with RYU_RELEASE. App version baked into the bundle + used as the Sentry release tag. All optional. Baked into the browser bundle for the footer + Sentry release tag. CI/Dokploy should set both so "Site" reflects the deploy and the commit links to GitHub. Falls back to apps/web/package.json version + `git rev-parse HEAD` locally. |
+| `SKIP_ENV_VALIDATION` | Optional | `1` | Build-time only  -  set SKIP_ENV_VALIDATION=1 during Docker builds, never at runtime. |
+
+## apps/desktop
+
+Source: [`apps/desktop/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/desktop/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `VITE_CORE_URL` | Required* | `http://127.0.0.1:7980` | Core node the desktop app talks to. |
+| `VITE_APP_BACKEND_URL` | Required* | `http://localhost:3000` | Identity / content plane (apps/server) |
+| `VITE_APP_FRONTEND_URL` | Required* | `http://localhost:3001` | See `.env.example`. |
+| `VITE_APP_WEB_URL` | Required* | `http://localhost:3001` | See `.env.example`. |
+| `VITE_POSTHOG_KEY` | Required* | - | Analytics  -  no-op when empty |
+| `VITE_POSTHOG_HOST` | Required* | - | See `.env.example`. |
+| `VITE_SENTRY_DSN` | Required* | `https://1371a855920ed833ba44d6292442d471@o4511706237304832.ingest.us.sentry.io/4511706239139840` | Crash reporting  -  no-op when empty |
+| `VITE_APP_VERSION` | Required* | `0.0.1` | See `.env.example`. |
+
+## apps/webapp
+
+Source: [`apps/webapp/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/webapp/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `VITE_CORE_URL` | Required* | `http://127.0.0.1:7980` | Core node the webapp talks to. Seeds the default node in src/platform/nodes.ts. For production set this to your hosted Core, e.g. https://core.ryuhq.com |
+| `VITE_RYU_SURFACE` | Required* | `webapp` | Browser build of the desktop app (apps/webapp). Default :5175 in local dev. |
+| `VITE_APP_BACKEND_URL` | Required* | `http://localhost:3000` | Identity / content plane (apps/server)  -  consumed by desktop lib/auth-client.ts |
+| `VITE_APP_FRONTEND_URL` | Required* | `http://localhost:3001` | See `.env.example`. |
+| `VITE_APP_WEB_URL` | Required* | `http://localhost:3001` | See `.env.example`. |
+| `VITE_POSTHOG_KEY` | Required* | - | Analytics  -  no-op when empty |
+| `VITE_POSTHOG_HOST` | Required* | - | See `.env.example`. |
+| `VITE_SENTRY_DSN` | Required* | `https://1371a855920ed833ba44d6292442d471@o4511706237304832.ingest.us.sentry.io/4511706239139840` | Crash reporting  -  no-op when empty |
+| `VITE_APP_VERSION` | Required* | `0.0.1` | See `.env.example`. |
+
+## apps/native
+
+Source: [`apps/native/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/native/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `EXPO_PUBLIC_SERVER_URL` | Required* | `http://localhost:3000` | Server Configuration |
+| `EXPO_PUBLIC_CORE_URL` | Required* | `http://localhost:7980` | Ryu Core local backend (primary chat path: /api/chat/stream) |
+| `EXPO_PUBLIC_WEB_URL` | Required* | `http://localhost:3001` | Web app URL (for browser-based OAuth flow) |
+| `EXPO_PUBLIC_SENTRY_DSN` | Required* | `https://1371a855920ed833ba44d6292442d471@o4511706237304832.ingest.us.sentry.io/4511706239139840` | Crash reporting  -  Sentry. No-op when empty; gated on the user's crash-reports consent (default ON, opt-out). EXPO_PUBLIC_ is required to reach the app bundle. |
+
+## apps/extension
+
+Source: [`apps/extension/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/extension/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `VITE_SENTRY_DSN` | Required* | `https://1371a855920ed833ba44d6292442d471@o4511706237304832.ingest.us.sentry.io/4511706239139840` | Crash reporting  -  Sentry. No-op when empty; gated on the user's crash-reports consent (default ON, opt-out) in extension-origin contexts only. |
+| `VITE_APP_VERSION` | Required* | `0.0.1` | See `.env.example`. |
+
+## apps/cloud-bot
+
+Source: [`apps/cloud-bot/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/cloud-bot/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | Required* | `mongodb://localhost:27017/ryu` | MongoDB (same DB as apps/server) |
+| `CLOUD_CORE_URL` | Required* | `http://localhost:7980` | The shared cloud Core node all new users route to until they have a dedicated node |
+| `CLOUD_BOT_AGENT_ID` | Required* | - | Optional: which agent handles cloud bot messages (falls back to Core default) |
+| `TELEGRAM_BOT_TOKEN` | Required* | - | Ryu's official Telegram bot token (from @BotFather) Set to enable Telegram connector |
+| `DISCORD_BOT_TOKEN` | Required* | - | Ryu's official Discord bot token (from Discord Developer Portal) Set to enable Discord connector |
+| `DISCORD_THREADS` | Optional | `true` | Enable Discord thread-per-user routing |
+| `SLACK_APP_TOKEN` | Optional | - | ── Slack (Socket Mode  -  needs NO public URL) ───────────────────────────────── Both are required to start the connector; a partial set is refused. SLACK_APP_TOKEN: app-level token (xapp-…) with the connections:write scope, and Socket Mode enabled. Slack app → Basic Information → App-Level Tokens. SLACK_BOT_TOKEN: bot user OAuth token (xoxb-…) with chat:write, subscribed to message events. Slack app → OAuth & Permissions. |
+| `SLACK_BOT_TOKEN` | Optional | - | ── Slack (Socket Mode  -  needs NO public URL) ───────────────────────────────── Both are required to start the connector; a partial set is refused. SLACK_APP_TOKEN: app-level token (xapp-…) with the connections:write scope, and Socket Mode enabled. Slack app → Basic Information → App-Level Tokens. SLACK_BOT_TOKEN: bot user OAuth token (xoxb-…) with chat:write, subscribed to message events. Slack app → OAuth & Permissions. |
+| `WHATSAPP_ACCESS_TOKEN` | Optional | - | ── WhatsApp (Meta Cloud API  -  REQUIRES a public HTTPS webhook) ─────────────── All four are required to start the connector; a partial set is refused. Unlike every other platform here, WhatsApp cannot poll: Meta delivers inbound messages by webhook. This container must therefore be exposed at a public HTTPS URL, and https://&lt;your-domain&gt;/webhooks/whatsapp  -  with WHATSAPP_VERIFY_TOKEN  -  must be registered as the callback in Meta app → WhatsApp → Configuration. Without that, the bot can send but will never receive. Outbound limit (Meta's, not ours): free-form sends are only allowed inside the 24-hour customer-service window (i.e. as a reply). A cold /push outside that window needs a pre-approved message template and will be rejected by Meta; templates are not implemented. WHATSAPP_ACCESS_TOKEN: Meta app → WhatsApp → API Setup (use a permanent System User token in production; the test token expires in 24h). WHATSAPP_PHONE_NUMBER_ID: the numeric Phone number ID (not the phone number). WHATSAPP_VERIFY_TOKEN: a random string you invent; paste the same value into Meta's webhook callback config. WHATSAPP_APP_SECRET: Meta app → Settings → Basic → App Secret. Verifies the X-Hub-Signature-256 on every inbound webhook  -  required, not optional. |
+| `WHATSAPP_PHONE_NUMBER_ID` | Optional | - | ── WhatsApp (Meta Cloud API  -  REQUIRES a public HTTPS webhook) ─────────────── All four are required to start the connector; a partial set is refused. Unlike every other platform here, WhatsApp cannot poll: Meta delivers inbound messages by webhook. This container must therefore be exposed at a public HTTPS URL, and https://&lt;your-domain&gt;/webhooks/whatsapp  -  with WHATSAPP_VERIFY_TOKEN  -  must be registered as the callback in Meta app → WhatsApp → Configuration. Without that, the bot can send but will never receive. Outbound limit (Meta's, not ours): free-form sends are only allowed inside the 24-hour customer-service window (i.e. as a reply). A cold /push outside that window needs a pre-approved message template and will be rejected by Meta; templates are not implemented. WHATSAPP_ACCESS_TOKEN: Meta app → WhatsApp → API Setup (use a permanent System User token in production; the test token expires in 24h). WHATSAPP_PHONE_NUMBER_ID: the numeric Phone number ID (not the phone number). WHATSAPP_VERIFY_TOKEN: a random string you invent; paste the same value into Meta's webhook callback config. WHATSAPP_APP_SECRET: Meta app → Settings → Basic → App Secret. Verifies the X-Hub-Signature-256 on every inbound webhook  -  required, not optional. |
+| `WHATSAPP_VERIFY_TOKEN` | Optional | - | ── WhatsApp (Meta Cloud API  -  REQUIRES a public HTTPS webhook) ─────────────── All four are required to start the connector; a partial set is refused. Unlike every other platform here, WhatsApp cannot poll: Meta delivers inbound messages by webhook. This container must therefore be exposed at a public HTTPS URL, and https://&lt;your-domain&gt;/webhooks/whatsapp  -  with WHATSAPP_VERIFY_TOKEN  -  must be registered as the callback in Meta app → WhatsApp → Configuration. Without that, the bot can send but will never receive. Outbound limit (Meta's, not ours): free-form sends are only allowed inside the 24-hour customer-service window (i.e. as a reply). A cold /push outside that window needs a pre-approved message template and will be rejected by Meta; templates are not implemented. WHATSAPP_ACCESS_TOKEN: Meta app → WhatsApp → API Setup (use a permanent System User token in production; the test token expires in 24h). WHATSAPP_PHONE_NUMBER_ID: the numeric Phone number ID (not the phone number). WHATSAPP_VERIFY_TOKEN: a random string you invent; paste the same value into Meta's webhook callback config. WHATSAPP_APP_SECRET: Meta app → Settings → Basic → App Secret. Verifies the X-Hub-Signature-256 on every inbound webhook  -  required, not optional. |
+| `WHATSAPP_APP_SECRET` | Optional | - | ── WhatsApp (Meta Cloud API  -  REQUIRES a public HTTPS webhook) ─────────────── All four are required to start the connector; a partial set is refused. Unlike every other platform here, WhatsApp cannot poll: Meta delivers inbound messages by webhook. This container must therefore be exposed at a public HTTPS URL, and https://&lt;your-domain&gt;/webhooks/whatsapp  -  with WHATSAPP_VERIFY_TOKEN  -  must be registered as the callback in Meta app → WhatsApp → Configuration. Without that, the bot can send but will never receive. Outbound limit (Meta's, not ours): free-form sends are only allowed inside the 24-hour customer-service window (i.e. as a reply). A cold /push outside that window needs a pre-approved message template and will be rejected by Meta; templates are not implemented. WHATSAPP_ACCESS_TOKEN: Meta app → WhatsApp → API Setup (use a permanent System User token in production; the test token expires in 24h). WHATSAPP_PHONE_NUMBER_ID: the numeric Phone number ID (not the phone number). WHATSAPP_VERIFY_TOKEN: a random string you invent; paste the same value into Meta's webhook callback config. WHATSAPP_APP_SECRET: Meta app → Settings → Basic → App Secret. Verifies the X-Hub-Signature-256 on every inbound webhook  -  required, not optional. |
+| `WHATSAPP_GRAPH_VERSION` | Optional | `v21.0` | ── WhatsApp (Meta Cloud API  -  REQUIRES a public HTTPS webhook) ─────────────── All four are required to start the connector; a partial set is refused. Unlike every other platform here, WhatsApp cannot poll: Meta delivers inbound messages by webhook. This container must therefore be exposed at a public HTTPS URL, and https://&lt;your-domain&gt;/webhooks/whatsapp  -  with WHATSAPP_VERIFY_TOKEN  -  must be registered as the callback in Meta app → WhatsApp → Configuration. Without that, the bot can send but will never receive. Outbound limit (Meta's, not ours): free-form sends are only allowed inside the 24-hour customer-service window (i.e. as a reply). A cold /push outside that window needs a pre-approved message template and will be rejected by Meta; templates are not implemented. WHATSAPP_ACCESS_TOKEN: Meta app → WhatsApp → API Setup (use a permanent System User token in production; the test token expires in 24h). WHATSAPP_PHONE_NUMBER_ID: the numeric Phone number ID (not the phone number). WHATSAPP_VERIFY_TOKEN: a random string you invent; paste the same value into Meta's webhook callback config. WHATSAPP_APP_SECRET: Meta app → Settings → Basic → App Secret. Verifies the X-Hub-Signature-256 on every inbound webhook  -  required, not optional. |
+| `WHATSAPP_WEBHOOK_PATH` | Optional | `/webhooks/whatsapp` | ── WhatsApp (Meta Cloud API  -  REQUIRES a public HTTPS webhook) ─────────────── All four are required to start the connector; a partial set is refused. Unlike every other platform here, WhatsApp cannot poll: Meta delivers inbound messages by webhook. This container must therefore be exposed at a public HTTPS URL, and https://&lt;your-domain&gt;/webhooks/whatsapp  -  with WHATSAPP_VERIFY_TOKEN  -  must be registered as the callback in Meta app → WhatsApp → Configuration. Without that, the bot can send but will never receive. Outbound limit (Meta's, not ours): free-form sends are only allowed inside the 24-hour customer-service window (i.e. as a reply). A cold /push outside that window needs a pre-approved message template and will be rejected by Meta; templates are not implemented. WHATSAPP_ACCESS_TOKEN: Meta app → WhatsApp → API Setup (use a permanent System User token in production; the test token expires in 24h). WHATSAPP_PHONE_NUMBER_ID: the numeric Phone number ID (not the phone number). WHATSAPP_VERIFY_TOKEN: a random string you invent; paste the same value into Meta's webhook callback config. WHATSAPP_APP_SECRET: Meta app → Settings → Basic → App Secret. Verifies the X-Hub-Signature-256 on every inbound webhook  -  required, not optional. |
+| `PORT` | Optional | `3000` | HTTP server port (default 3000). Only bound when a route needs it  -  i.e. when CLOUD_BOT_PUSH_KEY is set or the WhatsApp connector is configured. |
+| `CLOUD_BOT_PUSH_KEY` | Optional | - | Push notification auth key (optional) |
+| `OPENROUTER_API_KEY` | Optional | - | Pi front-door for unrouted users (OpenRouter-powered) |
+| `OPENROUTER_MODEL` | Optional | `openrouter/free` | Pi front-door for unrouted users (OpenRouter-powered) |
+| `PRICING_URL` | Optional | `https://ryuhq.com/pricing` | Pi front-door for unrouted users (OpenRouter-powered) |
+| `PI_FRONTDOOR_DIR` | Optional | `/tmp/pi-frontdoor` | Pi front-door for unrouted users (OpenRouter-powered) |
+| `FRONTDOOR_RATE_MAX` | Optional | `15` | Pi front-door for unrouted users (OpenRouter-powered) |
+
+## apps/island
+
+Source: [`apps/island/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/island/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_TOKEN` | Optional | - | Core bearer token when Core auth is enabled (RYU_TOKEN on the node). Falls back to the value saved in island-services.json when unset. |
+| `ELECTRON_RENDERER_URL` | Optional | `http://localhost:5173` | Dev-only: Vite HMR renderer URL. When set, windows load this instead of the packaged renderer HTML (electron-vite sets this during `bun run dev`). |
+| `ISLAND_DEBUG` | Optional | `1` | Enable verbose proactive-engine debug logging in the main process. |
+
+## apps/mcp
+
+Source: [`apps/mcp/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/mcp/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_CORE_URL` | Optional | `http://127.0.0.1:7980` | Target Core node base URL (no trailing slash). Default: http://127.0.0.1:7980 |
+| `RYU_CORE_TOKEN` | Optional | - | Optional bearer token for Core API routes (the node secret RYU_CORE_TOKEN). |
+| `RYU_AUTH_URL` | Optional | `http://localhost:3000` | Control-plane (Better Auth) base URL for session validation during login. Default: http://localhost:3000 |
+
+## apps/tui
+
+Source: [`apps/tui/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/tui/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_CORE_URL` | Optional | `http://127.0.0.1:7980` | Target Core node base URL (no trailing slash). Default: http://127.0.0.1:7980 |
+| `RYU_CORE_TOKEN` | Optional | - | Optional bearer token for Core API routes (the node secret RYU_CORE_TOKEN). |
+| `RYU_AUTH_URL` | Optional | `http://localhost:3000` | Control-plane (Better Auth) base URL for the Account tab device-auth flow. Default: http://localhost:3000 |
+
+## apps/cli
+
+Source: [`apps/cli/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/cli/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_CORE_URL` | Optional | `http://localhost:7980` | Target Core node base URL. Default: http://localhost:7980 |
+| `RYU_AUTH_URL` | Optional | `http://localhost:3000` | Control-plane (Better Auth) base URL for OAuth device flow. Default: http://localhost:3000 |
+| `RYU_ORG` | Optional | - | Active org id for `ryu apply` / `ryu config` GitOps commands. Can also pass --org on the command line. |
+| `RYU_TUI_CMD` | Optional | `bun run --filter tui dev` | Override the command used to launch the modern TUI (`ryu tui`). Escape hatch for packaged installs where the monorepo root is not discoverable. |
+
+## apps/shadow
+
+Source: [`apps/shadow/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/shadow/.env.example)
+
+
+### HTTP bind port. Default: 3030
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `SHADOW_PORT` | Optional | `3030` | HTTP bind port. Default: 3030 |
+| `SHADOW_DATA_DIR` | Optional | - | HTTP bind port. Default: 3030 Root data directory for indices, clips, and memory DB. Default: ~/.shadow |
+
+### OpenAI-compatible base URL. Default: http://localhost:11434/v1 (Ollama)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `SHADOW_LLM_BASE_URL` | Optional | `http://localhost:11434/v1` | OpenAI-compatible base URL. Default: http://localhost:11434/v1 (Ollama) |
+| `SHADOW_LLM_MODEL` | Optional | `qwen2.5:7b` | OpenAI-compatible base URL. Default: http://localhost:11434/v1 (Ollama) Model id. Default: qwen2.5:7b |
+| `SHADOW_LLM_API_KEY` | Optional | - | OpenAI-compatible base URL. Default: http://localhost:11434/v1 (Ollama) Model id. Default: qwen2.5:7b Bearer API key  -  empty for local providers. Default: (empty) |
+
+### Comma-separated extra filesystem roots to watch (in addition to Desktop/Downloads).
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `SHADOW_FS_WATCH` | Optional | - | Comma-separated extra filesystem roots to watch (in addition to Desktop/Downloads). |
+| `SHADOW_GIT_REPOS` | Optional | - | Comma-separated extra filesystem roots to watch (in addition to Desktop/Downloads). Comma-separated git repo paths for passive commit events (plus auto-discovered repos). |
+| `SHADOW_CALENDAR_ICS` | Optional | - | Comma-separated extra filesystem roots to watch (in addition to Desktop/Downloads). Comma-separated git repo paths for passive commit events (plus auto-discovered repos). Path or URL to an iCalendar (.ics) file for calendar-aware capture. |
+
+### Core base URL for clip transcription (loopback-only SSRF guard). Default:
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_CORE_URL` | Optional | `http://127.0.0.1:7980` | Core base URL for clip transcription (loopback-only SSRF guard). Default: http://127.0.0.1:7980 |
+| `SHADOW_CLIP_FPS` | Optional | - | Core base URL for clip transcription (loopback-only SSRF guard). Default: http://127.0.0.1:7980 Clip screen-capture FPS override. |
+| `RYU_CLIP_FRAME_WIDTH` | Optional | - | Core base URL for clip transcription (loopback-only SSRF guard). Default: http://127.0.0.1:7980 Clip screen-capture FPS override. Keyframe extraction tunables (see apps/shadow/src/capture/frames.rs). |
+| `RYU_CLIP_EFFICIENT_FRAMES` | Optional | - | Core base URL for clip transcription (loopback-only SSRF guard). Default: http://127.0.0.1:7980 Clip screen-capture FPS override. Keyframe extraction tunables (see apps/shadow/src/capture/frames.rs). |
+| `RYU_CLIP_SCENE_THRESHOLD` | Optional | - | Core base URL for clip transcription (loopback-only SSRF guard). Default: http://127.0.0.1:7980 Clip screen-capture FPS override. Keyframe extraction tunables (see apps/shadow/src/capture/frames.rs). |
+| `RYU_CLIP_DEDUP_DELTA` | Optional | - | Core base URL for clip transcription (loopback-only SSRF guard). Default: http://127.0.0.1:7980 Clip screen-capture FPS override. Keyframe extraction tunables (see apps/shadow/src/capture/frames.rs). |
+| `RYU_CLIP_BALANCED_CAP` | Optional | - | Core base URL for clip transcription (loopback-only SSRF guard). Default: http://127.0.0.1:7980 Clip screen-capture FPS override. Keyframe extraction tunables (see apps/shadow/src/capture/frames.rs). |
+
+## apps/predict
+
+Source: [`apps/predict/.env.example`](https://github.com/amajorai/ryu/blob/main/apps/predict/.env.example)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RYU_CORE_URL` | Optional | `http://127.0.0.1:7980` | Local Core node base URL. Default: http://127.0.0.1:7980 |
+| `RYU_TOKEN` | Optional | - | Bearer token when Core node auth is enabled (same as RYU_TOKEN on the node). |
+
+
+## apps/raycast
+
+Raycast uses **extension preferences**, not environment variables: `coreUrl` (default `http://localhost:7980`), `apiToken`, `defaultAgent`.
+
+## apps/ghost
+
+No application env vars. Ghost is configured from Core via `RYU_GHOST_RELEASE_URL`.
+
+## apps/hardware (ESP32 firmware)
+
+Built with ESP-IDF; no runtime `.env`. Chip target and flash settings are CMake/IDF config, not Ryu env vars.
+
+## apps/fumadocs and apps/storyboard
+
+No app-specific env vars. Standard `NODE_ENV` only.
+
+## docker-compose.yml
+
+| Variable | Service | Required | Default | Description |
+|---|---|---|---|---|
+| `RYU_GATEWAY_PORT` | gateway | Optional | `7981` | Gateway listen port |
+| `OPENAI_API_KEY` | gateway | Optional | - | Upstream provider (or use local stack) |
+| `ANTHROPIC_API_KEY` | gateway | Optional | - | Upstream provider |
+| `RYU_BIND` | core | Optional | `0.0.0.0:7980` | Core bind address |
+| `RYU_DIR` | core | Optional | `/data` | Persistent data volume |
+| `RYU_GATEWAY_MANAGED` | core | Optional | `0` | Use external gateway service |
+| `RYU_GATEWAY_URL` | core | Required* | `http://gateway:7981` | Gateway URL in compose split |
+
+## Gap analysis
+
+### Vars in `packages/env/web` schema but also read outside it
+
+`NEXT_PUBLIC_SERVER_URL` is consumed by `packages/email` server-side (should be in server schema or a shared export).
+
+### Vars in `.env.example` but not in `packages/env/server` schema
+
+`apps/server/.env.example` documents `DUB_PARTNERS_*`, `POLAR_BENEFIT_DESKTOP_LICENSE`, `POLAR_METER_MANAGED_INFERENCE`, `POLAR_PRODUCT_CLOUD_CLOUD*`, `RYU_MARKETPLACE_API_URL` — legacy or comment-only.
+
+### Remaining gaps
+
+- **No Vite schema:** `VITE_*` vars for desktop, webapp, and extension are ad hoc with no Zod validation.
+- **Core vars in code not in `.env.example`:** e.g. `RYU_ADVISOR_MODEL`, `RYU_DOUBLE_CHECK_MODEL`, `GEMINI_API_KEY`, `GROQ_API_KEY`, and other Pi provider keys in `apps/core/src/pi_config/mod.rs`.
+- **turbo.json** lists `.env*` as build inputs only - no env passthrough whitelist.
+
+## Related pages
+
+- [Deploy and self-host](/docs/start-here/getting-started/self-host) - Docker and one-click deploy
+- [Gateway configuration](/docs/gateway/configuration) - `gateway.toml` plus env overrides
+- [Core observability](/docs/core/observability) - OTLP and crash reporting vars
+- [Credential scrubbing](/docs/security/credential-scrubbing) - what subprocesses inherit

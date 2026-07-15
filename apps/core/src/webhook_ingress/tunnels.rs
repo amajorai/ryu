@@ -19,6 +19,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use super::{IngressKind, WebhookIngress};
+use crate::win_process::NoWindow;
 
 /// The path Composio is pointed at. Every tunnel/relay appends this to its public
 /// base so an inbound webhook lands on Core's existing handler.
@@ -200,6 +201,7 @@ impl WebhookIngress for CloudflaredSource {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
+            .no_window()
             .spawn()
             .map_err(|e| {
                 anyhow!(
@@ -432,6 +434,7 @@ mod tests {
             .arg("--version")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
+            .no_window()
             .status()
             .is_ok();
         if !has_binary {

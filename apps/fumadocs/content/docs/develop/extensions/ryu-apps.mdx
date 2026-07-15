@@ -12,10 +12,21 @@ those.
 <Callout type="warn">
   Ryu Apps are gated behind the plugin-runtime flag (`PLUGIN_RUNTIME_FLAG`) and the end-to-end path
   is not yet fully live-verified (headless widget render is proven; a running node whose model calls
-  a widget-bearing tool in the live desktop is not). `defineApp` in v1 is **declarative
-  pass-through only** - there is no `run` handler, so a widget renders from its tool's arguments and
-  output; third-party tool *code* needs the [plugin runtime](/docs/develop/extensions/plugin-runtime),
-  which is out of scope here. Treat this as an early surface.
+  a widget-bearing tool in the live desktop is not). Because the flag stays OFF in a default
+  install, a bundled widget mounts an inert placeholder there until it is turned on. `defineApp` in
+  v1 is **declarative pass-through only** — there is no `run` handler, so a widget renders from its
+  tool's arguments and output (`window.openai.toolInput` / `toolOutput`), and a companion tool the
+  widget calls is an **alias / hook / pass-through** target, not third-party code that executes.
+  Treat this as an early surface.
+</Callout>
+
+<Callout type="info">
+  **What is 1.1, not today.** The following are explicitly out of scope for this surface and land in
+  a later tier: net-new **third-party tool *code* execution** (a real `run` handler — this is the
+  serialized Core tool-exec / catalog-install slice, so today a tool is an alias/hook/pass-through,
+  never author code that runs on call); the **WASM tool tier**; and the **out-of-process plugin
+  host**. Ship declarative widgets + companion call targets now; do not write docs or code implying a
+  third-party `run` handler executes.
 </Callout>
 
 ## 1. Declare the app with `defineApp`

@@ -5,6 +5,8 @@ use std::process::Child;
 
 use anyhow::{Context, Result};
 
+use crate::win_process::NoWindow;
+
 /// Startup options for the llama-server process.
 pub struct LlamaCppStartOptions {
     /// Port to bind (default 8080 — matches `local_engine_base_url("llamacpp")`).
@@ -56,7 +58,10 @@ impl Default for LlamaCppStartOptions {
         // disk (onboarding installs it for a multimodal default).
         let mmproj_path = model_path.as_deref().and_then(mmproj_for_model);
         Self {
-            port: 8080,
+            // Profile-aware base port (release 8080, dev 9080, …). The client that
+            // dials this — `active_engine::local_engine_url("llamacpp")` — computes
+            // the SAME `profile::port(8080)`, so spawn and client never diverge.
+            port: crate::profile::port(8080),
             model_path,
             mmproj_path,
             ctx_size: 0,
@@ -122,6 +127,7 @@ impl LlamaCppProcess {
 
         let child = tokio::task::spawn_blocking(move || {
             let mut cmd = std::process::Command::new(&binary_path);
+            cmd.no_window();
             cmd.arg("--port")
                 .arg(&port_str)
                 .arg("--host")

@@ -53,6 +53,14 @@ pub struct SuggestionsResponse {
 
 /// `POST /api/chat/suggestions` — best-effort next-prompt chips. Never errors:
 /// any failure (toggle off, no model, empty reply) returns an empty list.
+#[utoipa::path(
+    post,
+    path = "/api/chat/suggestions",
+    tag = "Chat",
+    summary = "best-effort next-prompt chips. Never errors:",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn chat_suggestions(
     State(state): State<ServerState>,
     Json(req): Json<SuggestionsRequest>,
@@ -139,7 +147,7 @@ async fn local_generate(state: &ServerState, transcript: &str) -> Option<String>
         return None;
     }
     let base = local_engine_url(&engine)?; // e.g. http://127.0.0.1:8080/v1
-    let model = served_model_id(state, base)
+    let model = served_model_id(state, &base)
         .await
         .unwrap_or_else(|| engine.clone());
     let body = post_completion(

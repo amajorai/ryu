@@ -1,0 +1,10 @@
+{
+  "title": "Knowledge",
+  "description": "Knowledge API endpoints.",
+  "pages": [
+    "knowledge_catalog_list",
+    "knowledge_catalog_detail",
+    "knowledge_catalog_install",
+    "okf_export"
+  ]
+}

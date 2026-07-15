@@ -43,6 +43,8 @@ use std::time::Duration;
 use anyhow::Result;
 use serde_json::{json, Value};
 
+use crate::win_process::NoWindow;
+
 use super::RegistryTool;
 
 /// Wall-clock cap on a wrapped command, mirroring Spider's crawl timeout.
@@ -183,11 +185,11 @@ async fn do_run(arguments: Value) -> Result<Value> {
     let line = format!("\"{bin_q}\" {prefix}{command}");
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = tokio::process::Command::new("cmd");
-        c.arg("/C").arg(&line);
+        c.arg("/C").arg(&line).no_window();
         c
     } else {
         let mut c = tokio::process::Command::new("sh");
-        c.arg("-c").arg(&line);
+        c.arg("-c").arg(&line).no_window();
         c
     };
     cmd.stdin(Stdio::null())

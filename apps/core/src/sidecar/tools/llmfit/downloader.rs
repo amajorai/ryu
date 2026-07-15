@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use crate::sidecar::download_manager::{ryu_dir, ProgressCallback, ProgressEvent, VersionStore};
+use crate::win_process::NoWindow;
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ impl LlmFitDownloader {
         // Verify cargo is available.
         let cargo_check = std::process::Command::new("cargo")
             .arg("--version")
+            .no_window()
             .output()
             .context("cargo not found in PATH — is Rust installed?")?;
 
@@ -68,6 +70,7 @@ impl LlmFitDownloader {
         let status = tokio::task::spawn_blocking(move || {
             std::process::Command::new("cargo")
                 .args(["install", "llmfit"])
+                .no_window()
                 .status()
         })
         .await
@@ -116,6 +119,7 @@ impl LlmFitDownloader {
         // Record the installed version.
         let version = tokio::process::Command::new(&dest)
             .arg("--version")
+            .no_window()
             .output()
             .await
             .ok()

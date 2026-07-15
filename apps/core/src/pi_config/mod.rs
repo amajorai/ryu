@@ -527,7 +527,66 @@ pub fn ensure_managed_defaults() -> Result<()> {
     if dirty {
         write_settings(&settings)?;
     }
-    ensure_gateway_models_json()
+    ensure_gateway_models_json()?;
+    ensure_pi_mcp_extension()
+}
+
+/// The Ryu-MCP Pi extension source, embedded into the Core binary so it ships
+/// regardless of install layout (Core is a compiled binary; the repo `assets/`
+/// dir is not present next to it at runtime). Written into the managed Pi config
+/// dir at spawn — see [`ensure_pi_mcp_extension`].
+const PI_MCP_EXTENSION_SRC: &str = include_str!("../../assets/pi-extensions/ryu-mcp.ts");
+
+/// Absolute path to the managed Pi's Ryu-MCP extension file, under the managed
+/// config dir's `extensions/` folder. Pi ALSO auto-discovers `<agentDir>/extensions/`,
+/// so the `settings.json` registration below is belt-and-suspenders (Pi dedups by
+/// resolved path). Never touches the user's `~/.pi`.
+fn pi_mcp_extension_path() -> PathBuf {
+    config_dir().join("extensions").join("ryu-mcp.ts")
+}
+
+/// Ship + register the Ryu-MCP Pi extension into the MANAGED Pi config
+/// (`~/.ryu/pi-agent`). This is what lets the flagship `ryu` (Pi) agent call
+/// Core's MCP tools — including widget-bearing ones (Apps-SDK / MCP apps), which
+/// Pi otherwise cannot reach (it advertises no MCP-server support, so Core's
+/// in-process bridge is skipped for it).
+///
+/// Idempotent: the extension source is (re)written only when it differs (so an
+/// engine update ships the current bridge without needless disk churn), and the
+/// absolute path is appended to `settings.json`'s `extensions` array only when
+/// missing.
+fn ensure_pi_mcp_extension() -> Result<()> {
+    let ext_path = pi_mcp_extension_path();
+    if let Some(dir) = ext_path.parent() {
+        fs::create_dir_all(dir).context("create Pi extensions dir")?;
+    }
+    let needs_write = fs::read_to_string(&ext_path)
+        .map(|existing| existing != PI_MCP_EXTENSION_SRC)
+        .unwrap_or(true);
+    if needs_write {
+        fs::write(&ext_path, PI_MCP_EXTENSION_SRC).context("write ryu-mcp.ts")?;
+    }
+
+    let abs = ext_path.to_string_lossy().into_owned();
+    let mut settings = read_settings();
+    let entry = settings
+        .extra
+        .entry("extensions".to_owned())
+        .or_insert_with(|| json!([]));
+    if !entry.is_array() {
+        *entry = json!([]);
+    }
+    let already = entry
+        .as_array()
+        .map(|arr| arr.iter().any(|v| v.as_str() == Some(abs.as_str())))
+        .unwrap_or(false);
+    if !already {
+        if let Some(arr) = entry.as_array_mut() {
+            arr.push(Value::String(abs));
+        }
+        write_settings(&settings)?;
+    }
+    Ok(())
 }
 
 /// Persist a composer-picked model for the managed Pi (QA finding B2).
@@ -1781,6 +1840,11 @@ pub struct DiscoverInput {
     /// An explicit key to try (never persisted here; used only for the probe).
     #[serde(rename = "apiKey", default)]
     pub api_key: Option<String>,
+    /// Pi `api` type of a not-yet-saved custom provider (e.g. `anthropic-messages`).
+    /// Lets an Anthropic-format endpoint be probed with `x-api-key` +
+    /// `anthropic-version` instead of a bearer token. Defaults to OpenAI-style.
+    #[serde(default)]
+    pub api: Option<String>,
 }
 
 /// How a discovery request authenticates to the upstream `GET /models`.
@@ -1789,6 +1853,18 @@ enum DiscoveryAuth {
     /// Anthropic uses `x-api-key` + `anthropic-version` rather than a bearer token.
     Anthropic(String),
     None,
+}
+
+/// Pick the discovery auth for a custom/explicit provider from its Pi `api` type:
+/// Anthropic-format endpoints (`anthropic-messages`) authenticate with
+/// `x-api-key` + `anthropic-version`; every other (OpenAI-style) endpoint uses a
+/// bearer token. No key → an unauthenticated probe (`None`).
+fn discovery_auth_for(api: Option<&str>, key: Option<String>) -> DiscoveryAuth {
+    match key {
+        Some(k) if api == Some("anthropic-messages") => DiscoveryAuth::Anthropic(k),
+        Some(k) => DiscoveryAuth::Bearer(k),
+        None => DiscoveryAuth::None,
+    }
 }
 
 /// Build the `.../models` URL from a base URL, tolerating trailing slashes and an
@@ -1810,13 +1886,11 @@ pub async fn discover_models(input: DiscoverInput) -> Value {
     let provider_id = non_empty(&input.provider);
     let explicit_base = non_empty(&input.base_url);
     let explicit_key = non_empty(&input.api_key);
+    let explicit_api = non_empty(&input.api);
 
     // Resolve (url, auth) for the probe.
     let resolved: Option<(String, DiscoveryAuth)> = if let Some(base) = &explicit_base {
-        let auth = explicit_key
-            .clone()
-            .map(DiscoveryAuth::Bearer)
-            .unwrap_or(DiscoveryAuth::None);
+        let auth = discovery_auth_for(explicit_api.as_deref(), explicit_key.clone());
         Some((models_url_from_base(base), auth))
     } else if let Some(id) = &provider_id {
         resolve_provider_discovery(id, explicit_key.clone())
@@ -1868,6 +1942,10 @@ pub struct CheckInput {
     /// An explicit key to try (never persisted; used only for the probe).
     #[serde(rename = "apiKey", default)]
     pub api_key: Option<String>,
+    /// Pi `api` type of a not-yet-saved custom provider (e.g. `anthropic-messages`),
+    /// so an Anthropic-format endpoint is probed with `x-api-key`.
+    #[serde(default)]
+    pub api: Option<String>,
 }
 
 /// The result of a [`check_provider`] connectivity probe.
@@ -1890,13 +1968,11 @@ pub async fn check_provider(input: CheckInput) -> CheckResult {
     let provider_id = non_empty(&input.provider);
     let explicit_base = non_empty(&input.base_url);
     let explicit_key = non_empty(&input.api_key);
+    let explicit_api = non_empty(&input.api);
 
     // Resolve (url, auth) exactly like Tier 1 of discovery.
     let resolved: Option<(String, DiscoveryAuth)> = if let Some(base) = &explicit_base {
-        let auth = explicit_key
-            .clone()
-            .map(DiscoveryAuth::Bearer)
-            .unwrap_or(DiscoveryAuth::None);
+        let auth = discovery_auth_for(explicit_api.as_deref(), explicit_key.clone());
         Some((models_url_from_base(base), auth))
     } else if let Some(id) = &provider_id {
         resolve_provider_discovery(id, explicit_key.clone())
@@ -1961,7 +2037,9 @@ fn resolve_provider_discovery(
         return Some((meta.models_url.to_owned(), auth));
     }
 
-    // Custom provider defined in models.json → its baseUrl + /models.
+    // Custom provider defined in models.json → its baseUrl + /models. Honor the
+    // stored `api` type so an Anthropic-format custom endpoint probes with
+    // `x-api-key` instead of a bearer token.
     let entry = read_models()["providers"].get(id)?.clone();
     let base = entry.get("baseUrl").and_then(Value::as_str)?;
     let key = explicit_key.or_else(|| {
@@ -1971,9 +2049,8 @@ fn resolve_provider_discovery(
             .map(str::to_owned)
             .filter(|s| !s.is_empty())
     });
-    let auth = key
-        .map(DiscoveryAuth::Bearer)
-        .unwrap_or(DiscoveryAuth::None);
+    let api = entry.get("api").and_then(Value::as_str);
+    let auth = discovery_auth_for(api, key);
     Some((models_url_from_base(base), auth))
 }
 
@@ -2044,6 +2121,67 @@ mod tests {
             let view = current();
             assert_eq!(view.provider, GATEWAY_PROVIDER_ID);
             assert_eq!(view.routing, "gateway");
+        });
+    }
+
+    #[test]
+    fn pi_mcp_extension_is_shipped_and_registered_idempotently() {
+        with_temp_dir(|| {
+            // First call: writes the extension source and registers its absolute
+            // path in settings.json "extensions".
+            ensure_pi_mcp_extension().expect("first ensure");
+            let ext_path = pi_mcp_extension_path();
+            assert!(ext_path.exists(), "extension file is shipped to the managed dir");
+            let shipped = fs::read_to_string(&ext_path).unwrap();
+            assert_eq!(shipped, PI_MCP_EXTENSION_SRC, "shipped source matches the embed");
+
+            let abs = ext_path.to_string_lossy().into_owned();
+            let settings = read_settings();
+            let exts = settings.extra.get("extensions").and_then(Value::as_array).cloned();
+            let exts = exts.expect("extensions array present");
+            assert!(
+                exts.iter().filter(|v| v.as_str() == Some(abs.as_str())).count() == 1,
+                "registered exactly once"
+            );
+
+            // Second call: idempotent — no duplicate path, source unchanged.
+            ensure_pi_mcp_extension().expect("second ensure");
+            let settings2 = read_settings();
+            let exts2 = settings2
+                .extra
+                .get("extensions")
+                .and_then(Value::as_array)
+                .cloned()
+                .expect("extensions array present");
+            assert_eq!(
+                exts2.iter().filter(|v| v.as_str() == Some(abs.as_str())).count(),
+                1,
+                "second ensure does not duplicate the registration"
+            );
+        });
+    }
+
+    #[test]
+    fn pi_mcp_extension_preserves_unrelated_extensions() {
+        with_temp_dir(|| {
+            // A user (or another Ryu write) already listed an extension; ours must
+            // be appended, not clobber theirs.
+            let mut settings = read_settings();
+            settings
+                .extra
+                .insert("extensions".to_owned(), json!(["/tmp/other-ext.ts"]));
+            write_settings(&settings).unwrap();
+
+            ensure_pi_mcp_extension().expect("ensure");
+            let exts = read_settings()
+                .extra
+                .get("extensions")
+                .and_then(Value::as_array)
+                .cloned()
+                .expect("extensions array");
+            let abs = pi_mcp_extension_path().to_string_lossy().into_owned();
+            assert!(exts.iter().any(|v| v.as_str() == Some("/tmp/other-ext.ts")));
+            assert!(exts.iter().any(|v| v.as_str() == Some(abs.as_str())));
         });
     }
 
@@ -2478,6 +2616,7 @@ mod tests {
                 provider: Some("definitely-not-a-provider-xyz".to_owned()),
                 base_url: None,
                 api_key: None,
+                api: None,
             }));
             std::env::remove_var("RYU_MODELS_DEV_URL");
             assert_eq!(out["source"], "fallback");

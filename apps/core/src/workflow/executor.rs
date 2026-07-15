@@ -969,6 +969,26 @@ async fn execute_node(
             )
             .await
         }
+        NodeKind::ChannelSend {
+            platform,
+            recipient,
+            text,
+            bot_token,
+            webhook_url,
+        } => {
+            // Resolve the recipient + message templates, then hand off to the
+            // channel-send helper (which reuses the monitor notify primitives).
+            let rendered_recipient = resolve(recipient, &ctx);
+            let rendered_text = resolve(text, &ctx);
+            super::channel_send::run(
+                *platform,
+                &rendered_recipient,
+                &rendered_text,
+                bot_token.as_deref(),
+                webhook_url.as_deref(),
+            )
+            .await
+        }
         // Signal the outer loop to suspend by returning the sentinel. The outer
         // loop recognises this exact value and transitions the run to
         // `AwaitingInput` without marking the node Failed.

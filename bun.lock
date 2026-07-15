@@ -66,7 +66,7 @@
     },
     "apps/desktop": {
       "name": "desktop",
-      "version": "0.0.2",
+      "version": "0.0.4",
       "dependencies": {
         "@ai-sdk/react": "catalog:",
         "@base-ui/react": "^1.3.0",
@@ -235,7 +235,7 @@
     },
     "apps/island": {
       "name": "island",
-      "version": "0.0.2",
+      "version": "0.0.4",
       "dependencies": {
         "@fontsource-variable/inter": "^5.2.8",
         "@ryu/app-host": "workspace:*",
@@ -528,7 +528,7 @@
     },
     "apps/webapp": {
       "name": "webapp",
-      "version": "0.0.2",
+      "version": "0.0.4",
       "dependencies": {
         "@ai-sdk/react": "catalog:",
         "@base-ui/react": "^1.3.0",
@@ -618,6 +618,7 @@
         "@ryu/mail": "workspace:*",
         "dotenv": "catalog:",
         "hono": "^4.8.2",
+        "mongoose": "^8.14.0",
         "sharp": "^0.33.0",
         "stripe": "^18.5.0",
         "zod": "catalog:",
@@ -698,9 +699,27 @@
         "react-dom": "*",
       },
     },
+    "packages/canvas-app": {
+      "name": "@ryu/canvas-app",
+      "version": "1.0.0",
+      "dependencies": {
+        "@xyflow/react": "^12.10.2",
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0",
+      },
+      "devDependencies": {
+        "@ryu/config": "workspace:*",
+        "@types/react": "^19.2.10",
+        "@types/react-dom": "^19.2.0",
+        "@vitejs/plugin-react": "^5.2.0",
+        "typescript": "^5",
+        "vite": "^7.3.1",
+        "vite-plugin-singlefile": "^2.3.0",
+      },
+    },
     "packages/client": {
       "name": "@ryuhq/client",
-      "version": "0.0.2",
+      "version": "0.0.4",
       "devDependencies": {
         "tsup": "^8.5.0",
         "typescript": "^5",
@@ -727,11 +746,11 @@
     },
     "packages/config": {
       "name": "@ryu/config",
-      "version": "0.0.2",
+      "version": "0.0.4",
     },
     "packages/core-client": {
       "name": "@ryuhq/core-client",
-      "version": "0.0.2",
+      "version": "0.0.4",
       "dependencies": {
         "@ryuhq/protocol": "workspace:*",
       },
@@ -742,7 +761,7 @@
     },
     "packages/create-ryu-app": {
       "name": "create-ryu-app",
-      "version": "0.0.2",
+      "version": "0.0.4",
       "bin": {
         "create-ryu-app": "./dist/index.js",
       },
@@ -798,6 +817,23 @@
         "typescript": "^5",
       },
     },
+    "packages/finetune-app": {
+      "name": "@ryu/finetune-app",
+      "version": "1.0.0",
+      "dependencies": {
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0",
+      },
+      "devDependencies": {
+        "@ryu/config": "workspace:*",
+        "@types/react": "^19.2.10",
+        "@types/react-dom": "^19.2.0",
+        "@vitejs/plugin-react": "^5.2.0",
+        "typescript": "^5",
+        "vite": "^7.3.1",
+        "vite-plugin-singlefile": "^2.3.0",
+      },
+    },
     "packages/hotkeys": {
       "name": "@ryu/hotkeys",
       "version": "0.0.0",
@@ -827,7 +863,7 @@
     },
     "packages/protocol": {
       "name": "@ryuhq/protocol",
-      "version": "0.0.2",
+      "version": "0.0.4",
       "devDependencies": {
         "@ryu/config": "workspace:*",
         "@types/bun": "catalog:",
@@ -854,7 +890,7 @@
     },
     "packages/sdk": {
       "name": "@ryuhq/sdk",
-      "version": "0.0.2",
+      "version": "0.0.4",
       "bin": {
         "ryu": "./dist/cli.js",
       },
@@ -2528,6 +2564,8 @@
 
     "@ryu/blocks": ["@ryu/blocks@workspace:packages/blocks"],
 
+    "@ryu/canvas-app": ["@ryu/canvas-app@workspace:packages/canvas-app"],
+
     "@ryu/command": ["@ryu/command@workspace:packages/command"],
 
     "@ryu/config": ["@ryu/config@workspace:packages/config"],
@@ -2537,6 +2575,8 @@
     "@ryu/email": ["@ryu/email@workspace:packages/email"],
 
     "@ryu/env": ["@ryu/env@workspace:packages/env"],
+
+    "@ryu/finetune-app": ["@ryu/finetune-app@workspace:packages/finetune-app"],
 
     "@ryu/hotkeys": ["@ryu/hotkeys@workspace:packages/hotkeys"],
 

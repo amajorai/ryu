@@ -26,19 +26,29 @@ use serde::{Deserialize, Serialize};
 pub const RYU_DIR_ENV: &str = "RYU_DIR";
 
 /// The default data dir: `~/.ryu` (falling back to `./.ryu` if home is unknown).
+///
+/// Profile-aware (`RYU_PROFILE`): release ⇒ `~/.ryu` (byte-identical to today),
+/// any other profile ⇒ `~/.ryu-<profile>` (e.g. `~/.ryu-dev`), so a dev stack's
+/// data folder never overlaps a release stack's. Keeping this suffixed also keeps
+/// [`is_custom`] honest under a profile (dev's default is its own baseline, not a
+/// "relocation" off the release default).
 pub fn default_ryu_dir() -> PathBuf {
+    let name = format!(".ryu{}", crate::profile::suffix());
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".ryu")
+        .join(name)
 }
 
 /// Directory holding the bootstrap pointer file. Lives in the OS *config* dir
 /// (`%APPDATA%\ryu` on Windows, `~/.config/ryu` on Linux, `~/Library/Application
 /// Support/ryu` on macOS), NOT inside the data dir.
 fn config_dir() -> PathBuf {
+    // Profile-suffixed (`ryu` ⇒ `ryu-dev`) so the bootstrap pointer file is
+    // isolated per profile too — a release relocation must not silently move a
+    // dev stack's data dir (and vice-versa).
     dirs::config_dir()
         .unwrap_or_else(default_ryu_dir)
-        .join("ryu")
+        .join(format!("ryu{}", crate::profile::suffix()))
 }
 
 /// Path to the data-path pointer file (`<config>/ryu/data-path.json`).

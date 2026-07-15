@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use tokio::process::Command;
 
 use crate::sidecar::download_manager::{ryu_dir, VersionStore};
+use crate::win_process::NoWindow;
 
 fn bin_path() -> PathBuf {
     // npm creates a `.cmd` wrapper on Windows, a plain script on Unix.
@@ -44,6 +45,7 @@ pub async fn ensure_installed() -> Result<()> {
     // without touching the global npm prefix or invoking any post-install daemon.
     let status = Command::new("npm")
         .args(["install", "--prefix", &prefix, "openclaw@latest"])
+        .no_window()
         .status()
         .await
         .context("running `npm install --prefix ~/.ryu openclaw@latest`")?;
@@ -55,6 +57,7 @@ pub async fn ensure_installed() -> Result<()> {
     // Query the installed version from npm.
     let version = tokio::process::Command::new("npm")
         .args(["view", "openclaw", "version"])
+        .no_window()
         .output()
         .await
         .ok()

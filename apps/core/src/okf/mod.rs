@@ -35,6 +35,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_yml::Value as YamlValue;
 
+use crate::win_process::NoWindow;
+
 /// The OKF specification version this module targets.
 pub const OKF_VERSION: &str = "0.1";
 
@@ -516,6 +518,7 @@ impl Bundle {
             }
             cmd.args(["--", &url, &dest_str])
                 .env("GIT_TERMINAL_PROMPT", "0");
+            cmd.no_window();
             cmd.output()
         })
         .await

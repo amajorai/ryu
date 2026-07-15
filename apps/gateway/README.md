@@ -5,11 +5,11 @@
 [![License](https://shieldcn.dev/badge/License-AGPL--3.0-4B78E6.svg?logo=gnu&logoColor=white)](./LICENSE)
 [![Stack](https://shieldcn.dev/badge/Rust-Axum-dea584.svg?logo=rust&logoColor=white)](../../README.md)
 
-Ryu Gateway is the moat: a full LLM gateway that decides *what is allowed, shared, measured, and paid for*. It exposes an OpenAI-compatible API and sits in front of any agent, applying routing, caching, rate limiting, a firewall, evals, and audit to every request. Core runs it as a managed sidecar, and all default-route chat traffic flows through it.
+Ryu Gateway is the control layer: a full LLM gateway that decides *what is allowed, shared, measured, and paid for*. It exposes an OpenAI-compatible API and sits in front of any agent, applying routing, caching, rate limiting, a firewall, evals, and audit to every request. Core runs it as a managed sidecar, and all default-route chat traffic flows through it.
 
 **Tier:** OSS, self-hostable, AGPL-3.0
 
-> **AGPL note (deliberate):** the Gateway is copyleft. Under AGPL §13, running a *modified* Gateway as a network service obligates you to offer its source to your users. This is intentional: it keeps the control-layer moat open and prevents a SaaS competitor from forking it and closing the source. Unmodified self-hosting carries no such obligation.
+> **AGPL note (deliberate):** the Gateway is copyleft. Under AGPL §13, running a *modified* Gateway as a network service obligates you to offer its source to your users. This is intentional: it keeps the control layer open and prevents a SaaS competitor from forking it and closing the source. Unmodified self-hosting carries no such obligation.
 
 ## Stack
 

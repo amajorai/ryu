@@ -8,6 +8,7 @@ use axum::{
 };
 use serde_json::json;
 use std::collections::HashMap;
+use crate::win_process::NoWindow;
 use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -16,7 +17,7 @@ use tower_http::cors::CorsLayer;
 pub mod activity_api;
 pub mod approvals_api;
 pub mod auto_title;
-pub mod canvas;
+pub mod canvas_migrate;
 pub mod chat_suggestions;
 pub mod clips;
 pub mod conversations;
@@ -320,7 +321,7 @@ pub(crate) fn enforce_remote_auth(
     Ok(auth_token)
 }
 
-fn is_insecure_auth_token_placeholder(token: &str) -> bool {
+pub(crate) fn is_insecure_auth_token_placeholder(token: &str) -> bool {
     const PLACEHOLDERS: &[&str] = &[
         "CHANGE_ME",
         "CHANGEME",
@@ -442,6 +443,27 @@ fn header_decoded(headers: &axum::http::HeaderMap, key: &str) -> Option<String> 
     })
 }
 
+/// The caller's host surface, from the self-declared `x-ryu-surface` header.
+///
+/// Returns `None` when the header is absent OR names a surface we don't know.
+/// **`None` means "do not filter"**, never "filter everything out": a plugin's
+/// `targets` list narrows where it is surfaced, and a caller that doesn't say who
+/// it is must keep seeing everything (which is what every client that predates
+/// the header does).
+///
+/// This header is self-declared and therefore spoofable. That is acceptable here
+/// because `targets` is a **presentation** concern — it decides what a surface
+/// *shows*, not what a caller is *allowed* to do. Authorization stays with the
+/// Gateway (grants) and the node token; a client that lies about its surface only
+/// changes which plugins it lists for itself.
+fn surface_from_headers(
+    headers: &axum::http::HeaderMap,
+) -> Option<crate::plugin_manifest::Surface> {
+    header_str(headers, "x-ryu-surface")
+        .as_deref()
+        .and_then(crate::plugin_manifest::Surface::parse)
+}
+
 /// Parse the self-declared caller identity from request headers (see
 /// [`crate::connections`]). All fields are optional except `client_id`, which is
 /// what makes a request trackable at all.
@@ -468,6 +490,113 @@ async fn track_connection(
     let identity = identity_from_headers(req.headers());
     if identity.is_trackable() {
         registry.touch(&identity);
+    }
+    next.run(req).await
+}
+
+// ── The App route gate ────────────────────────────────────────────────────────
+
+/// Layer state for [`require_app_enabled`]: the app-lifecycle store plus the App
+/// that owns the routes being gated.
+///
+/// Deliberately holds ONLY the [`PluginStore`], not the whole [`ServerState`] —
+/// the gate needs nothing else, and a narrow state makes it testable against an
+/// in-memory store without standing up a Core. This mirrors the
+/// `from_fn_with_state(connections, track_connection)` precedent: the layer owns
+/// its own state, independent of the router's.
+#[derive(Clone)]
+pub(crate) struct AppGate {
+    store: PluginStore,
+    /// The manifest id of the owning App (e.g. `com.ryu.meetings`).
+    app_id: &'static str,
+    /// Display name for the refusal message ("Enable the **Meetings** app").
+    label: &'static str,
+}
+
+impl AppGate {
+    pub(crate) fn new(store: &PluginStore, app_id: &'static str, label: &'static str) -> Self {
+        Self {
+            store: store.clone(),
+            app_id,
+            label,
+        }
+    }
+}
+
+/// The refusal body. Machine-readable (`error` + `app`) so the desktop can offer a
+/// one-click "Enable" without string-parsing, plus a human `message` for surfaces
+/// that just render it.
+fn app_disabled_response(gate: &AppGate) -> axum::response::Response {
+    let body = json!({
+        "error": "app_disabled",
+        "app": gate.app_id,
+        "message": format!("Enable the {} app", gate.label),
+    })
+    .to_string();
+    axum::response::Response::builder()
+        .status(StatusCode::SERVICE_UNAVAILABLE)
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(body))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response())
+}
+
+/// The ONE route gate: refuse a feature's routes while the App that owns them is
+/// disabled.
+///
+/// This is the extension point that makes a feature *pluginizable without moving
+/// it*. The implementation stays in-crate (`meetings_api.rs` keeps calling
+/// `state.spaces` directly); what changes is that the App record now **governs**
+/// it — install / enable / disable / dependency-resolve — and this gate is where
+/// "disabled" acquires teeth. Any future feature becomes an App by declaring a
+/// manifest and wrapping its existing routes in one `route_layer`:
+///
+/// ```ignore
+/// .merge(
+///     Router::new()
+///         .route("/api/thing", get(list_things))
+///         .route_layer(middleware::from_fn_with_state(
+///             AppGate::new(&state.app_store, THING_PLUGIN_ID, "Thing"),
+///             require_app_enabled,
+///         )),
+/// )
+/// ```
+///
+/// Generic over the app id, so there is exactly one of these — never a per-feature
+/// copy. It is a `route_layer`, so it runs only on *matched* routes: an unknown
+/// path still 404s normally rather than reporting "app disabled".
+///
+/// # Why 503, when [`plugin_ui_bundle`] returns 404
+///
+/// The two gates answer different questions, so they diverge on purpose.
+///
+/// `plugin_ui_bundle` is a **secrecy** gate: a disabled plugin's *code* must not be
+/// served, and 404 is right because it must not even confirm the bundle exists.
+///
+/// This is an **availability** gate on a first-party, OpenAPI-documented route. The
+/// resource plainly exists; it is temporarily unavailable because its App is off.
+/// 404 would be actively harmful here: a client could not distinguish "this Core is
+/// too old to have Meetings" (a genuine 404) from "Meetings is installed but
+/// disabled" (actionable — show an Enable button). 503 states exactly that: the
+/// route is real, the capability is off, and the fix is a config change the caller
+/// can make. It is also honestly retryable — enable the App and the same request
+/// succeeds.
+async fn require_app_enabled(
+    State(gate): State<AppGate>,
+    req: Request<axum::body::Body>,
+    next: middleware::Next,
+) -> axum::response::Response {
+    let enabled = match gate.store.get(gate.app_id).await {
+        Ok(Some(rec)) => rec.enabled,
+        // No record at all — the App is not installed, so its routes are not live.
+        // Fail closed, exactly as a disabled record does.
+        Ok(None) => false,
+        Err(e) => {
+            tracing::warn!("app gate: lookup of '{}' failed: {e:#}", gate.app_id);
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+        }
+    };
+    if !enabled {
+        return app_disabled_response(&gate);
     }
     next.run(req).await
 }
@@ -609,12 +738,992 @@ async fn enforce_permission(
     }
 }
 
+// ── Per-resource ACL (the HTTP plane) ────────────────────────────────────────
+//
+// [`enforce_permission`] above is COARSE org/team RBAC: "may this caller touch
+// documents at all?". It cannot answer "may this caller touch THIS document?" —
+// so on its own it let any org member with `space.read` read another member's
+// PRIVATE doc, and let any holder of the node token read ANY user's conversation.
+//
+// The realtime WS gateway already closed this on its plane (`decide_access` in
+// `server/realtime_ws.rs`): a join is refused unless the caller is authorized for
+// the specific room. Without the same gate here, a caller denied at the socket
+// could simply `GET` the resource over HTTP — the ACL was strictly weaker on the
+// plane that is easier to reach. The helpers below are that plane's twin.
+//
+// Both gates run, in order: RBAC first (cheap, no row read), then the per-resource
+// check. Defense in depth — neither replaces the other.
+
+/// WHAT THIS ACL IS FOR (read this before changing the matrix below).
+///
+/// It is a **per-user gate for SHARED nodes** — an org-bound "company brain" or a
+/// Ryu Cloud node several humans reach. On an **unbound (personal, local-first)
+/// node there is exactly one principal**, and the shared `RYU_TOKEN` is the
+/// boundary — the same rule [`enforce_permission`] already applies (it ALWAYS
+/// ALLOWS when `registered_org()` is `None`). Two consequences, both deliberate:
+///
+///   1. Tenancy is only STAMPED on rows when the node is org-bound (see
+///      [`claim_conversation_tenancy`]). A personal node's rows stay untenanted, so
+///      its behaviour — HTTP *and* the realtime WS twin — is byte-identical to
+///      before this gate existed. Scoping them would buy no security (the node token
+///      already admits everyone who can reach it) and WOULD lock the owner out of
+///      their own chats whenever the control plane is unreachable and the desktop
+///      cannot mint a user JWT (it is cached in memory only).
+///   2. An untenanted row on an ORG-BOUND node is therefore an *unattributable
+///      legacy* row, and is DENIED rather than granted — the old unconditional
+///      `Access::Write` on NULL tenancy is what made this gate vacuous.
+///
+/// This node's org binding is passed IN (`node_org`) rather than read from the
+/// global, so the matrix stays a pure, unit-testable function.
+fn node_org_id() -> Option<String> {
+    crate::sidecar::control_plane::registered_org().map(|o| o.id)
+}
+
+/// Resolve a caller's access to ONE resource from its tenancy quartet, mapping a
+/// denial straight to the HTTP response the handler should return.
+///
+/// The matrix mirrors `decide_access` (`server/realtime_ws.rs`) MINUS its
+/// loopback grant for *unknown* rooms. That grant exists so the local single user
+/// can pre-join a conversation id that has not been persisted yet; an HTTP read of
+/// a row that does not exist is simply a 404, so there is nothing to widen here.
+///
+///   - lookup `Err`                → 500. Fail closed: never serve a row we could
+///                                   not authorize.
+///   - `Ok(None)`                  → 404. No such resource.
+///   - untenanted row (`owner_user_id` AND `org_id` both NULL) + node **UNBOUND**
+///     → [`Access::Write`]. The single-tenant, local-first row: nobody ever
+///     authenticated to create it and nobody ever will on this node. Keeps the
+///     single-user flow byte-identical to before this gate existed.
+///   - untenanted row + node **ORG-BOUND** → 403. An unattributable row on a shared
+///     node: it belongs to *someone*, we cannot say who, so nobody gets it. Fail
+///     closed. (`ConversationStore::backfill_tenancy` attributes these to the local
+///     owner on the first open after the node binds, so this is a narrow window.)
+///   - scoped row + verified caller → [`crate::identity_verify::can_access`]
+///     verbatim; [`Access::None`] → 403.
+///   - scoped row + anonymous caller + node **ORG-BOUND** → 403. The
+///     credential-downgrade attack: drop the JWT, re-request, be treated as "the
+///     local single user", read someone else's private row.
+///   - scoped row + anonymous caller + node **UNBOUND** → [`Access::Write`]. On a
+///     personal node the node token is the boundary; the row is only scoped because
+///     the owner happened to be signed in when they created it, and they must not be
+///     locked out of it the next time they open the app offline.
+fn resource_access(
+    meta: anyhow::Result<Option<crate::identity_verify::ResourceTenancy>>,
+    caller: Option<&crate::identity_verify::VerifiedCaller>,
+    node_org: Option<&str>,
+    not_found: &str,
+) -> Result<crate::identity_verify::Access, axum::response::Response> {
+    use crate::identity_verify::Access;
+
+    let tenancy = match meta {
+        Ok(Some(tenancy)) => tenancy,
+        Ok(None) => return Err(json_error(StatusCode::NOT_FOUND, not_found.to_owned())),
+        Err(e) => {
+            tracing::warn!("per-resource ACL: tenancy lookup failed: {e:#}");
+            return Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "resource access lookup failed".to_owned(),
+            ));
+        }
+    };
+
+    if tenancy.owner_user_id.is_none() && tenancy.org_id.is_none() {
+        return if node_org.is_none() {
+            Ok(Access::Write)
+        } else {
+            Err(json_error(
+                StatusCode::FORBIDDEN,
+                "forbidden: this resource has no owner on a shared node".to_owned(),
+            ))
+        };
+    }
+
+    match caller {
+        Some(caller) => {
+            match crate::identity_verify::can_access(
+                caller,
+                tenancy.owner_user_id.as_deref(),
+                tenancy.org_id.as_deref(),
+                &tenancy.visibility,
+                tenancy.team_id.as_deref(),
+            ) {
+                Access::None => Err(json_error(
+                    StatusCode::FORBIDDEN,
+                    "forbidden: you do not have access to this resource".to_owned(),
+                )),
+                granted => Ok(granted),
+            }
+        }
+        None if node_org.is_none() => Ok(Access::Write),
+        None => Err(json_error(
+            StatusCode::FORBIDDEN,
+            "forbidden: anonymous caller on a scoped resource".to_owned(),
+        )),
+    }
+}
+
+/// Require at least READ access to a resource. Any grant above [`Access::None`]
+/// passes (`resource_access` already turns `None` into a 403).
+fn require_resource_read(
+    meta: anyhow::Result<Option<crate::identity_verify::ResourceTenancy>>,
+    caller: Option<&crate::identity_verify::VerifiedCaller>,
+    not_found: &str,
+) -> Result<(), axum::response::Response> {
+    require_resource_read_at(meta, caller, node_org_id().as_deref(), not_found)
+}
+
+/// [`require_resource_read`] with THIS node's org binding passed in — the pure form
+/// the unit tests drive (they cannot register an org).
+fn require_resource_read_at(
+    meta: anyhow::Result<Option<crate::identity_verify::ResourceTenancy>>,
+    caller: Option<&crate::identity_verify::VerifiedCaller>,
+    node_org: Option<&str>,
+    not_found: &str,
+) -> Result<(), axum::response::Response> {
+    resource_access(meta, caller, node_org, not_found)?;
+    Ok(())
+}
+
+/// Require WRITE access to a resource. A read-only grant (e.g. an org `Viewer` on
+/// an `org`-visible doc) is refused — mirrors the realtime gateway, which drops a
+/// read-only member's mutating frames.
+fn require_resource_write(
+    meta: anyhow::Result<Option<crate::identity_verify::ResourceTenancy>>,
+    caller: Option<&crate::identity_verify::VerifiedCaller>,
+    not_found: &str,
+) -> Result<(), axum::response::Response> {
+    require_resource_write_at(meta, caller, node_org_id().as_deref(), not_found)
+}
+
+/// [`require_resource_write`] with THIS node's org binding passed in — the pure
+/// form the unit tests drive.
+fn require_resource_write_at(
+    meta: anyhow::Result<Option<crate::identity_verify::ResourceTenancy>>,
+    caller: Option<&crate::identity_verify::VerifiedCaller>,
+    node_org: Option<&str>,
+    not_found: &str,
+) -> Result<(), axum::response::Response> {
+    match resource_access(meta, caller, node_org, not_found)? {
+        crate::identity_verify::Access::Write => Ok(()),
+        // `Access::None` never reaches here (it is a 403 above), so this is the
+        // read-only grant.
+        _ => Err(json_error(
+            StatusCode::FORBIDDEN,
+            "forbidden: read-only access to this resource".to_owned(),
+        )),
+    }
+}
+
+/// Stamp the verified caller as the owner of a conversation — **the write that
+/// makes the ACL bite**. Before this existed every conversation row was created
+/// with NULL tenancy, which the matrix above read as "the untenanted local row" and
+/// granted to every holder of the node token.
+///
+/// Only runs on an **org-bound** node (see the [`resource_access`] preamble):
+/// scoping rows on a personal node buys nothing and risks locking the owner out
+/// offline. Anonymous callers stamp nothing (on a bound node they are already
+/// denied by [`enforce_permission`] before reaching here).
+///
+/// Best-effort by design — a failed stamp must never fail the user's chat turn. The
+/// row simply stays untenanted, and on a bound node the ACL then DENIES it (fail
+/// closed), which is loud rather than silent.
+async fn claim_conversation_tenancy(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    conversation_id: &str,
+) {
+    let Some(node_org) = node_org_id() else {
+        return;
+    };
+    let Some(caller) = caller.as_ref() else {
+        return;
+    };
+    if let Err(e) = state
+        .conversations
+        .claim_tenancy(conversation_id, &caller.user_id, Some(node_org.as_str()))
+        .await
+    {
+        tracing::warn!("failed to stamp conversation tenancy on {conversation_id}: {e:#}");
+    }
+}
+
+/// The strict by-id READ gate for a conversation: the row must exist (404 if not)
+/// and the caller must be able to read it. The `pub(crate)` form used by handlers in
+/// sibling modules (`learning::synthesize`, …) that take a client-supplied
+/// conversation id.
+pub(crate) async fn require_conversation_read_by_id(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    conversation_id: &str,
+) -> Result<(), axum::response::Response> {
+    require_resource_read(
+        state.conversations.get_access_meta(conversation_id).await,
+        caller.as_ref(),
+        &format!("conversation '{conversation_id}' not found"),
+    )
+}
+
+/// Lower a verified caller into the [`Tenancy`](conversations::Tenancy) a new
+/// conversation row is CREATED with — the single place an HTTP principal becomes a
+/// stored owner.
+///
+/// Mirrors [`claim_conversation_tenancy`] / [`enforce_permission`] exactly: only an
+/// **org-bound** node stamps. On an unbound personal node there is one principal and
+/// `RYU_TOKEN` is the boundary, so rows stay NULL-tenanted and every path behaves
+/// byte-identically to the pre-ACL build (no offline lockout).
+pub(crate) fn caller_tenancy(
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+) -> conversations::Tenancy {
+    let Some(node_org) = node_org_id() else {
+        return conversations::Tenancy::Unattributed;
+    };
+    match caller.as_ref() {
+        Some(c) => conversations::Tenancy::Owned {
+            user_id: c.user_id.clone(),
+            org_id: Some(node_org),
+        },
+        None => conversations::Tenancy::Unattributed,
+    }
+}
+
+/// Build the Spaces visibility filter ([`spaces::DocFilter`]) for an HTTP caller.
+/// Mirrors [`caller_tenancy`] / [`ConversationStore::list_conversations_visible`]:
+/// an UNBOUND node yields the unrestricted filter (byte-identical, one principal);
+/// a BOUND node narrows to the caller's id + org so list/search only surface rows
+/// the caller may read.
+fn caller_doc_filter(
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+) -> spaces::DocFilter<'_> {
+    match (node_org_id().is_some(), caller.as_ref()) {
+        (true, Some(c)) => {
+            spaces::DocFilter::for_caller(Some(c.user_id.as_str()), c.org_id.as_deref(), true)
+        }
+        // Bound node + anonymous caller: bound with no ids → predicate matches only
+        // system spaces / shared rows (nothing owner-scoped). Unbound → unrestricted.
+        (true, None) => spaces::DocFilter::for_caller(None, None, true),
+        (false, _) => spaces::DocFilter::unrestricted(),
+    }
+}
+
+/// The memory `user_id` an HTTP write attributes to. Bound node + verified caller →
+/// the caller's id (the per-user tenancy key); otherwise the `LOCAL_USER` sentinel,
+/// so an unbound personal node is byte-identical to the pre-ACL build.
+fn memory_owner_user_id(caller: &Option<crate::identity_verify::VerifiedCaller>) -> String {
+    match (node_org_id().is_some(), caller.as_ref()) {
+        (true, Some(c)) => c.user_id.clone(),
+        _ => memory::LOCAL_USER.to_owned(),
+    }
+}
+
+/// The memory `user_id` a BACKGROUND capture (chat auto-capture, learning) attributes
+/// to — no HTTP caller, so it resolves the local vault owner exactly as the bind-time
+/// backfill does. On an unbound node → `LOCAL_USER` (byte-identical). This is what
+/// stops a bound-node auto-capture writing a `'local'` row the real owner can never
+/// recall (a lockout).
+pub(crate) fn background_memory_user_id() -> String {
+    match (
+        node_org_id().is_some(),
+        crate::auth::load_accounts().active(),
+    ) {
+        (true, Some(acct)) => acct.user_id.clone(),
+        _ => memory::LOCAL_USER.to_owned(),
+    }
+}
+
+/// Whether `caller` may READ/WRITE memory `entry`. UNBOUND node → always (one
+/// principal). BOUND node → `node`/`project`-scope facts are the shared brain (any
+/// member); a `user`-scope fact is private to its owner. Missing owner on a bound
+/// user-scope row (legacy `'local'`/None the backfill has not reached) → denied
+/// (fail closed).
+fn memory_access_ok(
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    entry: &memory::LongTermEntry,
+) -> bool {
+    if node_org_id().is_none() {
+        return true;
+    }
+    match entry.scope {
+        memory::MemoryScope::Node | memory::MemoryScope::Project => true,
+        memory::MemoryScope::User => matches!(
+            (entry.owner_user_id.as_deref(), caller.as_ref()),
+            (Some(owner), Some(c)) if owner == c.user_id
+        ),
+    }
+}
+
+/// The create-or-use gate for a conversation id supplied by the client.
+///
+/// `chat_stream` is the ONLY handler that both CREATES and REUSES a conversation:
+/// the desktop pre-generates the id client-side, so a brand-new chat has no row yet
+/// and must NOT 404. So:
+///   - row already exists → full WRITE gate (this is what closes the
+///     `POST /api/chat/stream` bypass, where user B simply passed user A's
+///     `conversation_id` and had A's history streamed back as context and B's turn
+///     appended into A's thread);
+///   - no row yet → nothing to gate; fall through and CLAIM it for this caller,
+///     which also means the id can never be claimed by anyone else afterwards.
+async fn gate_and_claim_conversation(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    conversation_id: &str,
+) -> Result<(), axum::response::Response> {
+    match state.conversations.get_access_meta(conversation_id).await {
+        Ok(Some(tenancy)) => require_resource_write(
+            Ok(Some(tenancy)),
+            caller.as_ref(),
+            &format!("conversation '{conversation_id}' not found"),
+        )?,
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!("per-resource ACL: tenancy lookup failed: {e:#}");
+            return Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "resource access lookup failed".to_owned(),
+            ));
+        }
+    }
+    claim_conversation_tenancy(state, caller, conversation_id).await;
+    Ok(())
+}
+
+/// Gate a route keyed by a conversation id whose OWN resource lives elsewhere (a
+/// worktree keyed by `run_id`, an in-flight ACP stream, a trace) — i.e. the
+/// conversation row may legitimately not exist yet and its absence is NOT a denial
+/// (those handlers have their own "nothing here" response, and there is nothing to
+/// leak from a conversation that was never created).
+///
+/// Once the row DOES exist the full gate applies, which is what matters: the
+/// worktree of a run, the live token stream of a turn, and a run's trace are all
+/// derived from a conversation's content.
+async fn require_conversation_access_if_known(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    conversation_id: &str,
+    write: bool,
+) -> Result<(), axum::response::Response> {
+    let meta = match state.conversations.get_access_meta(conversation_id).await {
+        Ok(Some(tenancy)) => Ok(Some(tenancy)),
+        Ok(None) => return Ok(()),
+        Err(e) => Err(e),
+    };
+    let not_found = format!("conversation '{conversation_id}' not found");
+    if write {
+        require_resource_write(meta, caller.as_ref(), &not_found)
+    } else {
+        require_resource_read(meta, caller.as_ref(), &not_found)
+    }
+}
+
+/// The machine-ingress variant: gate ONLY when the conversation is actually owned
+/// by somebody. Used by `POST /api/channels/run`, whose caller is a bot service
+/// holding the node token and carrying NO human identity — so a strict gate would
+/// deny it its own (necessarily untenanted) bot conversations on an org-bound node
+/// and take every Telegram/Slack bot down with it.
+///
+/// What it still closes — and this is the point — is the cross-user bypass: a
+/// caller cannot pass a HUMAN's conversation id to the channel endpoint and have
+/// that thread's history loaded and appended to. Bot conversations remain reachable
+/// by any holder of the node token, which is exactly the trust level a bot ingress
+/// already has.
+async fn require_conversation_write_if_owned(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    conversation_id: &str,
+) -> Result<(), axum::response::Response> {
+    match state.conversations.get_access_meta(conversation_id).await {
+        Ok(Some(tenancy)) if tenancy.owner_user_id.is_some() || tenancy.org_id.is_some() => {
+            require_resource_write(
+                Ok(Some(tenancy)),
+                caller.as_ref(),
+                &format!("conversation '{conversation_id}' not found"),
+            )
+        }
+        Ok(_) => Ok(()),
+        Err(e) => {
+            tracing::warn!("per-resource ACL: tenancy lookup failed: {e:#}");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "resource access lookup failed".to_owned(),
+            ))
+        }
+    }
+}
+
+/// Gate a route keyed by a CHILD id (a session, a `/btw` entry) on its PARENT
+/// conversation's tenancy — children carry no tenancy of their own. `Ok(None)` from
+/// the resolver means the child does not exist → 404 (never a silent allow).
+async fn require_parent_conversation(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    parent: anyhow::Result<Option<String>>,
+    write: bool,
+    not_found: &str,
+) -> Result<(), axum::response::Response> {
+    let conversation_id = match parent {
+        Ok(Some(id)) => id,
+        Ok(None) => return Err(json_error(StatusCode::NOT_FOUND, not_found.to_owned())),
+        Err(e) => {
+            tracing::warn!("per-resource ACL: parent lookup failed: {e:#}");
+            return Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "resource access lookup failed".to_owned(),
+            ));
+        }
+    };
+    let meta = state.conversations.get_access_meta(&conversation_id).await;
+    if write {
+        require_resource_write(meta, caller.as_ref(), not_found)
+    } else {
+        require_resource_read(meta, caller.as_ref(), not_found)
+    }
+}
+
+/// The caller's tenancy tuple for a SQL-level read filter: `(user_id, org_id,
+/// node_bound)`. The single place handlers translate a [`VerifiedCaller`] into the
+/// arguments of `ConversationStore::{list_conversations_visible, list_runs_visible,
+/// visible_conversation_ids}`, whose `WHERE` mirrors [`resource_access`].
+fn tenancy_filter_args(
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+) -> (Option<String>, Option<String>, bool) {
+    let node_bound = node_org_id().is_some();
+    let user_id = caller.as_ref().map(|c| c.user_id.clone());
+    let org_id = caller.as_ref().and_then(|c| c.org_id.clone());
+    (user_id, org_id, node_bound)
+}
+
+#[cfg(test)]
+mod resource_acl_tests {
+    use super::{require_resource_read_at, require_resource_write_at, resource_access};
+    use crate::identity_verify::{Access, OrgRole, ResourceTenancy, VerifiedCaller};
+    use axum::http::StatusCode;
+
+    /// This node is bound to `org1` — a SHARED "company brain" node. This is the
+    /// mode the per-resource ACL exists for, and every denial case below is stated
+    /// in it. (`None` = an unbound personal node, where the node token is the
+    /// boundary by design; see the `resource_access` preamble.)
+    const BOUND: Option<&str> = Some("org1");
+    const UNBOUND: Option<&str> = None;
+
+    /// A resource owned by `owner`, scoped to `org`, at `visibility`.
+    fn scoped(
+        owner: Option<&str>,
+        org: Option<&str>,
+        visibility: &str,
+    ) -> anyhow::Result<Option<ResourceTenancy>> {
+        Ok(Some(ResourceTenancy {
+            owner_user_id: owner.map(str::to_owned),
+            org_id: org.map(str::to_owned),
+            visibility: visibility.to_owned(),
+            team_id: None,
+        }))
+    }
+
+    fn caller(user_id: &str, org: Option<&str>, role: OrgRole) -> VerifiedCaller {
+        VerifiedCaller {
+            user_id: user_id.to_owned(),
+            email: None,
+            org_id: org.map(str::to_owned),
+            role,
+        }
+    }
+
+    fn status(result: Result<(), axum::response::Response>) -> Option<StatusCode> {
+        result.err().map(|resp| resp.status())
+    }
+
+    #[test]
+    fn untenanted_row_keeps_the_local_first_flow_wide_open_on_an_unbound_node() {
+        // The single-user local-first row (no JWT ever ⇒ NULL owner AND NULL org) on
+        // a personal node. This gate must be byte-identical to no gate at all for it,
+        // or every existing local install breaks on upgrade.
+        assert_eq!(
+            resource_access(scoped(None, None, "private"), None, UNBOUND, "nf").unwrap(),
+            Access::Write,
+            "an untenanted row on an unbound node grants full access to an anonymous caller"
+        );
+        assert!(
+            require_resource_write_at(scoped(None, None, "private"), None, UNBOUND, "nf").is_ok()
+        );
+    }
+
+    #[test]
+    fn untenanted_row_is_denied_on_an_org_bound_node() {
+        // THE VACUITY THAT MADE THIS GATE FAKE: an unconditional `Access::Write` on
+        // NULL tenancy, combined with nothing ever writing tenancy, meant every
+        // caller had Write on every row. On a SHARED node an unattributable row now
+        // fails closed instead.
+        let bob = caller("bob", Some("org1"), OrgRole::Member);
+        assert_eq!(
+            status(require_resource_read_at(
+                scoped(None, None, "private"),
+                Some(&bob),
+                BOUND,
+                "nf"
+            )),
+            Some(StatusCode::FORBIDDEN)
+        );
+        assert_eq!(
+            status(require_resource_read_at(
+                scoped(None, None, "private"),
+                None,
+                BOUND,
+                "nf"
+            )),
+            Some(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn scoped_row_denies_an_anonymous_caller_on_a_bound_node() {
+        // The credential-downgrade attack: Bob drops his JWT and re-requests, hoping
+        // to be treated as "the local single user". A row is scoped ONLY because
+        // someone authenticated to create it, so anonymity here must fail closed.
+        assert_eq!(
+            status(require_resource_read_at(
+                scoped(Some("alice"), Some("org1"), "private"),
+                None,
+                BOUND,
+                "nf"
+            )),
+            Some(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn scoped_row_still_serves_its_offline_owner_on_an_unbound_node() {
+        // The local-first regression guard. The desktop's user JWT is minted against
+        // the control plane and cached IN MEMORY ONLY: a signed-in user who restarts
+        // the app offline is ANONYMOUS. On a personal node they must still reach the
+        // rows they created while signed in — the node token is the boundary there.
+        assert_eq!(
+            resource_access(
+                scoped(Some("alice"), Some("org1"), "private"),
+                None,
+                UNBOUND,
+                "nf"
+            )
+            .unwrap(),
+            Access::Write
+        );
+    }
+
+    #[test]
+    fn private_row_denies_a_non_owner() {
+        // The headline hole: any org member with `space.read` could read another
+        // member's PRIVATE doc, because the coarse RBAC gate never looked at the row.
+        let bob = caller("bob", Some("org1"), OrgRole::Member);
+        assert_eq!(
+            status(require_resource_read_at(
+                scoped(Some("alice"), Some("org1"), "private"),
+                Some(&bob),
+                BOUND,
+                "nf"
+            )),
+            Some(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn owner_gets_write() {
+        let alice = caller("alice", Some("org1"), OrgRole::Member);
+        assert_eq!(
+            resource_access(
+                scoped(Some("alice"), Some("org1"), "private"),
+                Some(&alice),
+                BOUND,
+                "nf"
+            )
+            .unwrap(),
+            Access::Write
+        );
+    }
+
+    #[test]
+    fn org_visible_row_grants_a_member_write_and_a_viewer_read_only() {
+        let member = caller("bob", Some("org1"), OrgRole::Member);
+        assert!(require_resource_write_at(
+            scoped(Some("alice"), Some("org1"), "org"),
+            Some(&member),
+            BOUND,
+            "nf"
+        )
+        .is_ok());
+
+        // A Viewer may READ an org-visible doc but must not write it — mirroring the
+        // realtime gateway, which drops a read-only member's mutating frames.
+        let viewer = caller("carol", Some("org1"), OrgRole::Viewer);
+        assert!(require_resource_read_at(
+            scoped(Some("alice"), Some("org1"), "org"),
+            Some(&viewer),
+            BOUND,
+            "nf"
+        )
+        .is_ok());
+        assert_eq!(
+            status(require_resource_write_at(
+                scoped(Some("alice"), Some("org1"), "org"),
+                Some(&viewer),
+                BOUND,
+                "nf"
+            )),
+            Some(StatusCode::FORBIDDEN),
+            "a read-only grant must not satisfy a write"
+        );
+    }
+
+    #[test]
+    fn cross_org_caller_is_denied_even_on_an_org_visible_row() {
+        let outsider = caller("mallory", Some("org2"), OrgRole::Owner);
+        assert_eq!(
+            status(require_resource_read_at(
+                scoped(Some("alice"), Some("org1"), "org"),
+                Some(&outsider),
+                BOUND,
+                "nf"
+            )),
+            Some(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn unknown_id_is_404_and_lookup_failure_is_500() {
+        let alice = caller("alice", Some("org1"), OrgRole::Member);
+        assert_eq!(
+            status(require_resource_read_at(
+                Ok(None),
+                Some(&alice),
+                BOUND,
+                "nf"
+            )),
+            Some(StatusCode::NOT_FOUND)
+        );
+        // Fail closed: we never serve a row we could not authorize.
+        assert_eq!(
+            status(require_resource_read_at(
+                Err(anyhow::anyhow!("db is on fire")),
+                Some(&alice),
+                BOUND,
+                "nf"
+            )),
+            Some(StatusCode::INTERNAL_SERVER_ERROR)
+        );
+    }
+
+    /// THE ACCEPTANCE TEST, threading the seam that was actually broken:
+    /// real store → `claim_tenancy` (the write that did not exist) →
+    /// `get_access_meta` (the read the handlers do) → the gate.
+    ///
+    /// Testing `claim_tenancy` and `resource_access` in isolation would leave exactly
+    /// the join that was vacuous unverified, so this drives BOTH through one row.
+    #[tokio::test]
+    async fn user_b_is_denied_user_a_s_conversation_end_to_end() {
+        let store = crate::server::conversations::ConversationStore::open_in_memory().unwrap();
+
+        // Alice starts a chat on a shared, org-bound node. This is the call that did
+        // not exist before: every row used to be created with NULL tenancy.
+        store
+            .claim_tenancy("c1", "alice", Some("org1"))
+            .await
+            .unwrap();
+
+        // Bob — a legitimate, fully-authenticated member of the SAME org — asks for it.
+        let bob = caller("bob", Some("org1"), OrgRole::Member);
+
+        assert_eq!(
+            status(require_resource_read_at(
+                store.get_access_meta("c1").await,
+                Some(&bob),
+                BOUND,
+                "conversation not found"
+            )),
+            Some(StatusCode::FORBIDDEN),
+            "user B must NOT be able to read user A's conversation"
+        );
+        assert_eq!(
+            status(require_resource_write_at(
+                store.get_access_meta("c1").await,
+                Some(&bob),
+                BOUND,
+                "conversation not found"
+            )),
+            Some(StatusCode::FORBIDDEN),
+            "user B must NOT be able to write into user A's conversation \
+             (this is the POST /api/chat/stream bypass)"
+        );
+
+        // …and Alice herself is unaffected.
+        let alice = caller("alice", Some("org1"), OrgRole::Member);
+        assert!(require_resource_write_at(
+            store.get_access_meta("c1").await,
+            Some(&alice),
+            BOUND,
+            "conversation not found"
+        )
+        .is_ok());
+
+        // Before this change the SAME row would have had NULL tenancy and Bob would
+        // have gotten Write. Prove the pre-fix state is what the gate now denies.
+        assert_eq!(
+            resource_access(store.get_access_meta("unclaimed").await, Some(&bob), BOUND, "nf")
+                .err()
+                .map(|r| r.status()),
+            Some(StatusCode::NOT_FOUND),
+            "an id with no row at all is a 404, not a silent allow"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Task items (3) and (4): the handlers that took a client-supplied
+    // conversation id but were never gated.
+    //
+    // These handlers need a full `ServerState` (sidecars, stores, spawn) to drive
+    // over HTTP, which no unit test in this crate builds. So each is covered by TWO
+    // tests, which together are what the acceptance bar asks for:
+    //
+    //   a) the DECISION — the gate the handler now calls, driven through a real store
+    //      row, denies the wrong caller and admits the owner (below);
+    //   b) the WIRING — the handler actually calls it. A source-level assertion, i.e.
+    //      the same shape as the choke-point INSERT test. It is what fails in CI if a
+    //      future edit quietly drops the gate, which is the realistic regression.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// (3)+(4a) — one real store row, every by-id gate the newly-gated handlers use.
+    #[tokio::test]
+    async fn every_newly_gated_handler_denies_a_non_owner_and_admits_the_owner() {
+        let store = crate::server::conversations::ConversationStore::open_in_memory().unwrap();
+        store
+            .claim_tenancy("alice-chat", "alice", Some("org1"))
+            .await
+            .unwrap();
+
+        let bob = caller("bob", Some("org1"), OrgRole::Member);
+        let alice = caller("alice", Some("org1"), OrgRole::Member);
+
+        // `/api/voice/ws` (start.conversation_id → `gate_and_claim_conversation`) and
+        // `/api/chat/permission` (the prompt's parent conversation) are WRITE gates.
+        assert_eq!(
+            status(require_resource_write_at(
+                store.get_access_meta("alice-chat").await,
+                Some(&bob),
+                BOUND,
+                "not found"
+            )),
+            Some(StatusCode::FORBIDDEN),
+            "voice_ws / chat_permission must not let Bob act on Alice's conversation"
+        );
+        // `/api/learn/synthesize` distills the conversation's content — a READ.
+        assert_eq!(
+            status(require_resource_read_at(
+                store.get_access_meta("alice-chat").await,
+                Some(&bob),
+                BOUND,
+                "not found"
+            )),
+            Some(StatusCode::FORBIDDEN),
+            "learn/synthesize must not distill Alice's conversation for Bob"
+        );
+
+        // NOT LOCKED OUT: Alice still passes both.
+        assert!(require_resource_write_at(
+            store.get_access_meta("alice-chat").await,
+            Some(&alice),
+            BOUND,
+            "not found"
+        )
+        .is_ok());
+        assert!(require_resource_read_at(
+            store.get_access_meta("alice-chat").await,
+            Some(&alice),
+            BOUND,
+            "not found"
+        )
+        .is_ok());
+
+        // UNBOUND PARITY: on a personal node the very same row and the very same
+        // anonymous caller are allowed — no offline lockout, byte-identical to before.
+        assert!(require_resource_write_at(
+            store.get_access_meta("alice-chat").await,
+            None,
+            UNBOUND,
+            "not found"
+        )
+        .is_ok());
+        assert!(require_resource_read_at(
+            store.get_access_meta("alice-chat").await,
+            None,
+            UNBOUND,
+            "not found"
+        )
+        .is_ok());
+    }
+
+    /// (1) — the danger-zone clear is SCOPED on a bound node: it removes the caller's
+    /// own conversations and NOT anybody else's. (It stays an unscoped truncate on an
+    /// unbound personal node, which is the whole point of the feature there.)
+    #[tokio::test]
+    async fn data_clear_on_a_bound_node_only_removes_the_callers_own_chats() {
+        let store = crate::server::conversations::ConversationStore::open_in_memory().unwrap();
+        store.claim_tenancy("a1", "alice", Some("org1")).await.unwrap();
+        store.claim_tenancy("b1", "bob", Some("org1")).await.unwrap();
+
+        let removed = store.clear_conversations_owned_by("bob").await.unwrap();
+        assert_eq!(removed, 1);
+        assert!(
+            store.get_access_meta("a1").await.unwrap().is_some(),
+            "clearing Bob's data destroyed Alice's conversation"
+        );
+        assert!(store.get_access_meta("b1").await.unwrap().is_none());
+    }
+
+    /// (3)+(4b) — THE WIRING. Each handler must actually invoke its gate. This is the
+    /// assertion that fails if someone deletes the gate while keeping the handler.
+    #[test]
+    fn the_newly_gated_handlers_actually_call_their_gate() {
+        // (3) `/api/voice/ws` lives on the PUBLIC router (a browser WS upgrade cannot
+        // set headers), so `attach_verified_caller` never runs on it. It must resolve
+        // the caller itself and gate the client-supplied conversation_id.
+        let voice = include_str!("voice_ws.rs");
+        assert!(
+            voice.contains("verified_caller_from_token"),
+            "voice_ws no longer resolves a user identity — the node token is back to \
+             being the only check"
+        );
+        assert!(
+            voice.contains("gate_and_claim_conversation"),
+            "voice_ws no longer gates its client-supplied conversation_id — this is the \
+             exact POST /api/chat/stream bypass, re-opened"
+        );
+
+        // (4) `/api/learn/synthesize` distills a client-supplied conversation.
+        assert!(
+            include_str!("learning.rs").contains("require_conversation_read_by_id"),
+            "learn/synthesize no longer gates its conversation_id"
+        );
+
+        // (4) `/api/data/clear` must never be an unscoped truncate on a bound node.
+        let data_admin = include_str!("data_admin.rs");
+        assert!(
+            data_admin.contains("clear_conversations_owned_by"),
+            "data/clear no longer scopes the chat wipe to the caller's own rows"
+        );
+        assert!(
+            data_admin.contains("VerifiedCaller"),
+            "data/clear no longer reads a caller — any node-token holder can wipe every \
+             user's data again"
+        );
+
+        // (4) `/api/chat/permission` gates on the parent conversation of the pending
+        // request (its body carries no conversation_id — the ids are `perm-<seq>` and
+        // trivially guessable, so this is a HITL-integrity gate).
+        //
+        // NOTE: this test's own source lives in mod.rs, so a plain
+        // `include_str!("mod.rs").contains("peek_permission_scope")` would match the
+        // ASSERTION rather than the handler and pass unconditionally. The needles are
+        // therefore split, so the contiguous literal exists ONLY in the handler.
+        let this_file = include_str!("mod.rs");
+        let peek = ["peek_permission", "_scope("].concat();
+        assert!(
+            this_file.contains(&peek),
+            "chat_permission no longer resolves the prompt's parent conversation"
+        );
+
+        // (4) `/api/retrieval/search` must at minimum refuse a tokenless caller on a
+        // bound node (the cross-user space CONTENT leak is NOT closed here — it needs
+        // the Spaces tenancy unit, since spaces/documents carry no owner columns).
+        let space_read = ["permissions::", "SPACE_READ,"].concat();
+        assert!(
+            this_file.contains(&space_read),
+            "retrieval/search no longer enforces any permission — any node-token holder \
+             can pull RAG chunks out of every user's spaces again"
+        );
+    }
+
+    /// (1) — the sync replay REFUSES rather than minting rows nobody can read.
+    #[tokio::test]
+    async fn sync_replay_refuses_to_mint_untenanted_rows_on_a_bound_node() {
+        use crate::server::conversations::Tenancy;
+        use crate::server::sync::{apply_sync_payload_at, SyncPayload};
+
+        let store = crate::server::conversations::ConversationStore::open_in_memory().unwrap();
+        // The payload carries its ORIGINAL author ("alice") — the row's owner comes
+        // from here, not from the receiving loop's context.
+        let payload = SyncPayload {
+            conversation_id: "synced".to_owned(),
+            title: Some("t".to_owned()),
+            agent_id: None,
+            folder_path: None,
+            branch: None,
+            worktree_path: None,
+            run_status: None,
+            owner_user_id: Some("alice".to_owned()),
+            created_at: 1,
+            updated_at: 1,
+            messages: vec![],
+        };
+
+        // BOUND node + no context principal ⇒ refuse (the row would be denied to
+        // everyone). An `Unattributed` context forces `Unattributed` regardless of the
+        // payload's author, so this is the fail-closed path.
+        assert!(
+            apply_sync_payload_at(&store, &payload, Tenancy::Unattributed, true)
+                .await
+                .is_err()
+        );
+        assert!(store.get_access_meta("synced").await.unwrap().is_none());
+
+        // BOUND node + an org context ⇒ the replayed row is born owned by the
+        // PAYLOAD's author (alice), scoped to the node's org, and reachable. The
+        // context's own `user_id` is never stamped onto the pulled row.
+        apply_sync_payload_at(
+            &store,
+            &payload,
+            Tenancy::Owned {
+                user_id: "device-owner".to_owned(),
+                org_id: Some("org1".to_owned()),
+            },
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            store
+                .get_access_meta("synced")
+                .await
+                .unwrap()
+                .unwrap()
+                .owner_user_id
+                .as_deref(),
+            Some("alice")
+        );
+
+        // UNBOUND node ⇒ unchanged: an unattributed replay is fine and stays NULL.
+        let store2 = crate::server::conversations::ConversationStore::open_in_memory().unwrap();
+        apply_sync_payload_at(&store2, &payload, Tenancy::Unattributed, false)
+            .await
+            .unwrap();
+        assert!(store2
+            .get_access_meta("synced")
+            .await
+            .unwrap()
+            .unwrap()
+            .owner_user_id
+            .is_none());
+    }
+}
+
 /// `GET /api/connections` — the clients currently connected to THIS node.
 ///
 /// Presence/attribution only: identities are self-declared behind the shared
 /// token and the data model is single-tenant, so this answers "who is here", not
 /// "who is allowed to see what" (see [`crate::connections`]). `user_count` counts
 /// distinct declared users (anonymous clients each count once by `client_id`).
+#[utoipa::path(
+    get,
+    path = "/api/connections",
+    tag = "Core",
+    summary = "List the clients currently connected to this node",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn list_connections(State(state): State<ServerState>) -> impl IntoResponse {
     let ttl = crate::connections::DEFAULT_TTL_SECS;
     let clients = state.connections.list_active(ttl);
@@ -642,6 +1751,13 @@ async fn list_connections(State(state): State<ServerState>) -> impl IntoResponse
 /// selector so a client can see which metered sandboxes a node is running (and
 /// their elapsed/accrued figures) before routing work to it. Populated by the
 /// sandbox metering registry (`crate::sidecar::sandbox::heartbeat`).
+#[utoipa::path(
+    get,
+    path = "/api/sandboxes",
+    tag = "Sandboxes",
+    summary = "List the active run sandboxes",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn list_sandboxes() -> impl IntoResponse {
     let sandboxes = crate::sidecar::sandbox::heartbeat::list_active_runs();
     Json(json!({ "sandboxes": sandboxes }))
@@ -682,6 +1798,15 @@ struct ExecSandboxRequest {
     timeout_secs: Option<u64>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/sandboxes/{run_id}/exec",
+    tag = "Sandboxes",
+    summary = "Execute a command inside a run's sandbox",
+    params(("run_id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn exec_sandbox(
     Path(run_id): Path<String>,
     Json(req): Json<ExecSandboxRequest>,
@@ -705,6 +1830,14 @@ async fn exec_sandbox(
 
 /// `DELETE /api/sandboxes/{run_id}` — destroy a live sandbox (final tail debit +
 /// workspace teardown). Idempotent: an already-destroyed run returns `ok`.
+#[utoipa::path(
+    delete,
+    path = "/api/sandboxes/{run_id}",
+    tag = "Sandboxes",
+    summary = "Destroy a run's sandbox",
+    params(("run_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn destroy_sandbox(Path(run_id): Path<String>) -> impl IntoResponse {
     match crate::sidecar::sandbox::session::destroy_sandbox(&run_id).await {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
@@ -730,6 +1863,13 @@ struct DataPathExportReq {
 
 /// `GET /api/data-path` — current data-folder location, default, size, free space.
 /// All path logic lives in Core (`crate::data_path`); the desktop only renders it.
+#[utoipa::path(
+    get,
+    path = "/api/data-path",
+    tag = "Data",
+    summary = "The active data folder and its disk info",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn get_data_path() -> impl IntoResponse {
     match tokio::task::spawn_blocking(crate::data_path::info).await {
         Ok(info) => Json(info).into_response(),
@@ -743,6 +1883,14 @@ async fn get_data_path() -> impl IntoResponse {
 
 /// `POST /api/data-path/validate` — check a candidate target folder (writable,
 /// empty, not nested in the current folder, enough free space for a copy).
+#[utoipa::path(
+    post,
+    path = "/api/data-path/validate",
+    tag = "Data",
+    summary = "Validate a candidate data folder",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn validate_data_path(Json(req): Json<DataPathTarget>) -> impl IntoResponse {
     let target = std::path::PathBuf::from(&req.path);
     let res = tokio::task::spawn_blocking(move || {
@@ -763,6 +1911,14 @@ async fn validate_data_path(Json(req): Json<DataPathTarget>) -> impl IntoRespons
 /// pointer; takes effect on the next Core restart. The old data stays intact, so
 /// this is the "start fresh in a new folder" path. (Copy-and-migrate runs as the
 /// offline `data-path migrate` subcommand the desktop invokes while Core is down.)
+#[utoipa::path(
+    post,
+    path = "/api/data-path/switch",
+    tag = "Data",
+    summary = "Relocate the data folder (restart required)",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn switch_data_path(Json(req): Json<DataPathTarget>) -> impl IntoResponse {
     let target = std::path::PathBuf::from(&req.path);
     let v = crate::data_path::validate_target(&crate::paths::ryu_dir(), &target, false);
@@ -784,6 +1940,13 @@ async fn switch_data_path(Json(req): Json<DataPathTarget>) -> impl IntoResponse 
 }
 
 /// `POST /api/data-path/reset` — revert to the default `~/.ryu` (point-only).
+#[utoipa::path(
+    post,
+    path = "/api/data-path/reset",
+    tag = "Data",
+    summary = "Reset the data folder to the default location",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn reset_data_path() -> impl IntoResponse {
     match crate::paths::set_data_dir(None) {
         Ok(()) => Json(json!({ "ok": true, "restart_required": true })).into_response(),
@@ -798,7 +1961,39 @@ async fn reset_data_path() -> impl IntoResponse {
 /// `POST /api/data-path/export` — zip the current data folder to `out`. Read-only
 /// on the data folder, so it runs online (no restart). Import/restore is offline
 /// (the `data-path import` subcommand) because it overwrites the live DB files.
-async fn export_data_path(Json(req): Json<DataPathExportReq>) -> impl IntoResponse {
+#[utoipa::path(
+    post,
+    path = "/api/data-path/export",
+    tag = "Data",
+    summary = "Export the data folder to a zip backup",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn export_data_path(
+    axum::Extension(caller): axum::Extension<
+        Option<crate::identity_verify::VerifiedCaller>,
+    >,
+    Json(req): Json<DataPathExportReq>,
+) -> impl IntoResponse {
+    // ── ACL ──────────────────────────────────────────────────────────────────
+    // This zips the ENTIRE data folder — every user's conversations, documents and
+    // memory DBs — so on an org-bound node it is inherently cross-tenant and there is
+    // no scoped variant. Mirror `data_clear`'s danger-zone posture:
+    //   - Node UNBOUND (personal): one principal, `RYU_TOKEN` is the boundary — the
+    //     user backing up their own machine. Behaves exactly as before.
+    //   - Node ORG-BOUND: a whole-folder export dumps other users' data. Even a
+    //     signed-in member must not exfiltrate the shared node, so REFUSE outright.
+    if node_org_id().is_some() {
+        let _ = &caller;
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "ok": false,
+                "error": "forbidden: the data-folder export dumps every user's data and is disabled on a shared (org-bound) node"
+            })),
+        )
+            .into_response();
+    }
     let out = std::path::PathBuf::from(&req.out);
     let res = tokio::task::spawn_blocking(move || {
         crate::data_path::export_zip(&crate::paths::ryu_dir(), &out)
@@ -857,6 +2052,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         "http://localhost:1420",   // tauri dev
         "tauri://localhost",       // tauri prod (macOS/Linux)
         "https://tauri.localhost", // tauri prod (Windows)
+        "http://tauri.localhost",  // tauri prod (Windows alt)
         "https://app.ryuhq.com",   // hosted web app → local Core
     ]
     .into_iter()
@@ -944,6 +2140,14 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // Inbound agent mail: public (a mail provider/forwarder can't send the node
         // bearer) but HMAC-authenticated against the inbox's `inbound_secret`,
         // fail-closed inside the handler.
+        // Governed widget asset proxy. A sandboxed widget frame (CSP `connect-src
+        // 'none'`) loads declared remote images/fonts as `<img>`/`@font-face`
+        // subresources, which cannot carry the node bearer — so this rides the
+        // PUBLIC router and authenticates in-handler against the minted `instance`
+        // id + the origin server's declared `resource_domains` allowlist, with a
+        // fail-closed SSRF guard. It is the img-src analogue of the governed
+        // `callTool` lane and the ONLY egress path a widget's passive assets have.
+        .route("/api/widgets/asset", get(widgets::widget_asset))
         .merge(crate::mail::api::public_routes());
 
     let protected = Router::new()
@@ -1045,6 +2249,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/plugins/:id/enable", post(enable_app_handler))
         .route("/api/plugins/:id/grants", post(set_app_grants_handler))
         .route("/api/plugins/:id/disable", post(disable_app_handler))
+        .route("/api/plugins/:id/uninstall", post(uninstall_app_handler))
         .route("/api/plugins/:id/update", post(update_app_handler))
         .route("/api/plugins/:id/ui-bundle", get(plugin_ui_bundle))
         // App host-capability bridge (model.complete / agent.run / storage.*).
@@ -1070,6 +2275,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/apps/:id/enable", post(enable_app_handler))
         .route("/api/apps/:id/grants", post(set_app_grants_handler))
         .route("/api/apps/:id/disable", post(disable_app_handler))
+        .route("/api/apps/:id/uninstall", post(uninstall_app_handler))
         .route("/api/apps/:id/update", post(update_app_handler))
         .route("/api/skills", get(list_skills).post(create_skill_handler))
         // ── Skill authoring + version history (desktop SKILL.md editor) ──
@@ -1199,12 +2405,16 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         )
         // ── Mesh status (#478): opt-in Tailscale/Headscale reachability ───────
         .route("/api/mesh/status", get(mesh_status))
+        .route("/api/mesh/peers", get(mesh_peers))
         // ── Webhook ingress seam (#479, P6a): public URL status + backend ─────
         .route("/api/webhook-ingress/status", get(webhook_ingress_status))
         .route(
             "/api/webhook-ingress/backend",
             get(webhook_ingress_get_backend).post(webhook_ingress_set_backend),
         )
+        // Unified webhook registry (webhook-unify #3): list every inbound webhook
+        // endpoint with its resolved public URL, secret presence + last delivery.
+        .route("/api/webhooks", get(webhooks_list))
         // ── MCP catalog (browse + install from the official MCP registry; #464) ──
         .route("/api/mcp/catalog", get(mcp_catalog_list))
         .route("/api/mcp/catalog/detail", get(mcp_catalog_detail))
@@ -1349,50 +2559,11 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/conversations/:id/sessions",
             get(list_sessions_for_conversation_handler),
         )
-        .route("/api/spaces", get(list_spaces).post(create_space))
-        .route("/api/spaces/:id", axum::routing::delete(delete_space))
-        .route(
-            "/api/spaces/:id/documents",
-            get(list_documents).post(ingest_document),
-        )
-        .route("/api/spaces/:id/pages", post(create_page))
-        .route("/api/spaces/:id/databases", post(create_database))
-        .route("/api/spaces/:id/whiteboards", post(create_whiteboard))
-        .route("/api/spaces/:id/files", post(create_file))
-        .route(
-            "/api/spaces/:id/documents/:doc_id/blob",
-            get(get_file_blob),
-        )
-        .route(
-            "/api/spaces/:id/documents/:doc_id",
-            get(get_document)
-                .put(update_document)
-                .delete(delete_document),
-        )
-        // Page version history (Prompt-Studio-style, server-backed).
-        .route(
-            "/api/spaces/:id/documents/:doc_id/versions",
-            get(list_document_versions).post(create_document_version),
-        )
-        .route(
-            "/api/spaces/:id/documents/:doc_id/versions/:version_id",
-            get(get_document_version),
-        )
-        .route(
-            "/api/spaces/:id/documents/:doc_id/versions/:version_id/restore",
-            post(restore_document_version),
-        )
-        .route("/api/spaces/:id/search", post(search_space))
-        // Wiki page-link graph: backlinks, outgoing links, and graph topology.
-        .route(
-            "/api/spaces/:id/documents/:doc_id/backlinks",
-            get(get_document_backlinks),
-        )
-        .route(
-            "/api/spaces/:id/documents/:doc_id/links",
-            get(get_document_links),
-        )
-        .route("/api/spaces/:id/graph", get(get_space_graph))
+        // ── Document Spaces (the store Meetings/Whiteboard/Canvas depend on) ──
+        // The ONE mount of `/api/spaces/*`. Same treatment as `/api/meetings/*`:
+        // its own sub-router so a single `route_layer` can carry the App gate.
+        // See `spaces_routes`.
+        .merge(spaces_routes(&state.app_store))
         // Global document-link graph across every space (static prefix → own route
         // so it never collides with `/api/spaces/:id`).
         .route("/api/graph", get(get_global_graph))
@@ -1565,18 +2736,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/gateway/evals/run", post(gateway_run_evals))
         // ── Gateway audit proxy (M4 / #177) ─────────────────────────────────
         .route("/api/gateway/audit", get(gateway_audit))
-        // ── Canvas (node-based creative playground) ─────────────────────────
-        // Static collection route before the `:id` routes (convention).
-        .route(
-            "/api/canvases",
-            get(canvas::list_canvases).post(canvas::create_canvas),
-        )
-        .route(
-            "/api/canvases/:id",
-            get(canvas::get_canvas)
-                .put(canvas::save_canvas_handler)
-                .delete(canvas::delete_canvas),
-        )
+        // ── Canvas: ported to the `com.ryu.canvas` Ryu App (Path-B companion).
+        // The board is now a Space document owned by the app; there is no bespoke
+        // `/api/canvases` file store any more (legacy files are imported at startup
+        // by `server::canvas_migrate`). ────────────────────────────────────────
         // ── Workflow template catalog (curated, installable blueprints) ─────
         // Static `catalog` segments registered before the `:id` workflow routes.
         .route("/api/workflows/catalog", get(list_workflow_templates))
@@ -1770,37 +2933,11 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             post(dashboard_api::refresh_widget),
         )
         // ── Meeting notes (record → live transcript → AI notes) ─────────────
-        // Static segments are registered before `:id` so `stream` / `detect` /
-        // `detection-config` match first.
-        .route("/api/meetings/stream", get(meetings_api::meetings_stream))
-        .route("/api/meetings/detect", post(meetings_api::detect))
-        .route(
-            "/api/meetings/detection-config",
-            get(meetings_api::get_detection_config).put(meetings_api::put_detection_config),
-        )
-        .route("/api/meetings/templates", get(meetings_api::list_templates))
-        .route("/api/meetings/import", post(meetings_api::import_meeting))
-        .route(
-            "/api/meetings",
-            get(meetings_api::list_meetings).post(meetings_api::create_meeting),
-        )
-        .route(
-            "/api/meetings/:id",
-            get(meetings_api::get_meeting).delete(meetings_api::delete_meeting),
-        )
-        .route(
-            "/api/meetings/:id/title",
-            post(meetings_api::rename_meeting),
-        )
-        .route("/api/meetings/:id/chunk", post(meetings_api::ingest_chunk))
-        .route(
-            "/api/meetings/:id/finalize",
-            post(meetings_api::finalize_meeting),
-        )
-        .route(
-            "/api/meetings/:id/transcript",
-            get(meetings_api::get_transcript),
-        )
+        // The ONE mount of `/api/meetings/*`. It lives in its own sub-router so it
+        // can carry the App gate (see `meetings_routes`); merged here — INSIDE the
+        // `require_auth` / `track_connection` / `attach_verified_caller` layers
+        // added at the end of this chain — so the gate changes nothing about auth.
+        .merge(meetings_routes(&state.app_store))
         // ── Hardware device registry (management; protected) ────────────────
         // The realtime `/api/hardware/ws` + nonce-gated `/api/hardware/pair` are
         // public (registered on the public router above). These management routes
@@ -1896,6 +3033,149 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .layer(axum::Extension(auth_token));
 
     public.merge(protected).layer(cors).with_state(state)
+}
+
+/// The `/api/spaces/*` surface, gated on the **Spaces App** being enabled.
+///
+/// The routes are unchanged and still mounted exactly once — they just live in
+/// their own `Router` so a single `route_layer` can wrap all of them, exactly as
+/// [`meetings_routes`] does. Same gate, same middleware, no second path.
+///
+/// # Why Spaces is gated at all
+///
+/// Spaces is the *dependency target* of the graph (`Meetings`, `Whiteboard`, and
+/// `Canvas` all declare `requires.apps = [com.ryu.spaces]`). An App whose `enabled`
+/// bit governs nothing would make that graph decorative: the Store renders a live
+/// Switch for Spaces, and flipping it must actually turn the capability off. With
+/// this gate, "disabled" has the same teeth for Spaces that it has for Meetings.
+///
+/// # What is (deliberately) NOT gated
+///
+/// Only the HTTP surface is refused. Core's *in-process* uses of `state.spaces` —
+/// chat/RAG retrieval, `meetings_api::save_notes_to_space`, the artifact tool's
+/// `store.create_file` — are untouched, and that is correct: gating a route governs
+/// what *callers* may reach, not what the crate may do internally. Every HTTP caller
+/// of `/api/spaces/*` is a Spaces UI surface (desktop/web/cli/tui/extension/native)
+/// or a plugin already protected by a `requires` edge, so a disabled Spaces degrades
+/// exactly the surfaces the user just turned off — and never a background path.
+///
+/// `/api/graph` (the cross-space link graph) and `/api/embedding/*` keep their own
+/// prefixes and stay ungated; they are global, not per-Space.
+///
+/// Spaces is default-on (`plugins::builtins::CORE_DEFAULT_ON`) and is seeded before
+/// its dependents, so on any normal install the gate is transparent.
+fn spaces_routes(app_store: &PluginStore) -> Router<ServerState> {
+    Router::new()
+        .route("/api/spaces", get(list_spaces).post(create_space))
+        .route("/api/spaces/:id", axum::routing::delete(delete_space))
+        .route(
+            "/api/spaces/:id/documents",
+            get(list_documents).post(ingest_document),
+        )
+        .route("/api/spaces/:id/pages", post(create_page))
+        .route("/api/spaces/:id/databases", post(create_database))
+        .route("/api/spaces/:id/whiteboards", post(create_whiteboard))
+        .route("/api/spaces/:id/files", post(create_file))
+        .route(
+            "/api/spaces/:id/documents/:doc_id/blob",
+            get(get_file_blob),
+        )
+        .route(
+            "/api/spaces/:id/documents/:doc_id",
+            get(get_document)
+                .put(update_document)
+                .delete(delete_document),
+        )
+        // Page version history (Prompt-Studio-style, server-backed).
+        .route(
+            "/api/spaces/:id/documents/:doc_id/versions",
+            get(list_document_versions).post(create_document_version),
+        )
+        .route(
+            "/api/spaces/:id/documents/:doc_id/versions/:version_id",
+            get(get_document_version),
+        )
+        .route(
+            "/api/spaces/:id/documents/:doc_id/versions/:version_id/restore",
+            post(restore_document_version),
+        )
+        .route("/api/spaces/:id/search", post(search_space))
+        // Wiki page-link graph: backlinks, outgoing links, and graph topology.
+        .route(
+            "/api/spaces/:id/documents/:doc_id/backlinks",
+            get(get_document_backlinks),
+        )
+        .route(
+            "/api/spaces/:id/documents/:doc_id/links",
+            get(get_document_links),
+        )
+        .route("/api/spaces/:id/graph", get(get_space_graph))
+        // `route_layer`, not `layer`: the gate runs only on these matched routes,
+        // so an unknown path stays a plain 404.
+        .route_layer(middleware::from_fn_with_state(
+            AppGate::new(
+                app_store,
+                crate::plugins::builtins::SPACES_PLUGIN_ID,
+                "Spaces",
+            ),
+            require_app_enabled,
+        ))
+}
+
+/// The `/api/meetings/*` surface, gated on the **Meetings App** being enabled.
+///
+/// The routes are unchanged and still mounted exactly once — they just live in
+/// their own `Router` so a single `route_layer` can wrap all of them at once. This
+/// is the first user of [`require_app_enabled`]; every future feature that becomes
+/// an App follows the same three lines.
+///
+/// Meetings is default-on (`plugins::builtins::CORE_DEFAULT_ON`) and its dependency
+/// on Spaces is seeded first, so on any normal install the gate is transparent: it
+/// only bites once a user deliberately disables the App.
+///
+/// Static segments are registered before `:id` so `stream` / `detect` /
+/// `detection-config` match first.
+fn meetings_routes(app_store: &PluginStore) -> Router<ServerState> {
+    Router::new()
+        .route("/api/meetings/stream", get(meetings_api::meetings_stream))
+        .route("/api/meetings/detect", post(meetings_api::detect))
+        .route(
+            "/api/meetings/detection-config",
+            get(meetings_api::get_detection_config).put(meetings_api::put_detection_config),
+        )
+        .route("/api/meetings/templates", get(meetings_api::list_templates))
+        .route("/api/meetings/import", post(meetings_api::import_meeting))
+        .route(
+            "/api/meetings",
+            get(meetings_api::list_meetings).post(meetings_api::create_meeting),
+        )
+        .route(
+            "/api/meetings/:id",
+            get(meetings_api::get_meeting).delete(meetings_api::delete_meeting),
+        )
+        .route(
+            "/api/meetings/:id/title",
+            post(meetings_api::rename_meeting),
+        )
+        .route("/api/meetings/:id/chunk", post(meetings_api::ingest_chunk))
+        .route(
+            "/api/meetings/:id/finalize",
+            post(meetings_api::finalize_meeting),
+        )
+        .route(
+            "/api/meetings/:id/transcript",
+            get(meetings_api::get_transcript),
+        )
+        // `route_layer`, not `layer`: the gate must run only on these matched
+        // routes, never on the fallback (an unknown path stays a plain 404).
+        .route_layer(middleware::from_fn_with_state(
+            AppGate::new(
+                app_store,
+                crate::plugins::builtins::MEETINGS_PLUGIN_ID,
+                "Meetings",
+            ),
+            require_app_enabled,
+        ))
 }
 
 // ── Version + update handlers (unified update service) ─────────────────────────
@@ -2165,6 +3445,13 @@ fn default_true_bool() -> bool {
 
 /// `GET /api/email/transport` - the current non-secret SMTP transport config plus
 /// a `passwordSet` flag. Never returns the password.
+#[utoipa::path(
+    get,
+    path = "/api/email/transport",
+    tag = "Notifications",
+    summary = "Get the SMTP transport config (never the password)",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn get_email_transport(State(_state): State<ServerState>) -> axum::response::Response {
     let prefs = crate::email::current_transport_prefs();
     let password_set = crate::smtp_auth::password().is_some();
@@ -2192,6 +3479,14 @@ async fn get_email_transport(State(_state): State<ServerState>) -> axum::respons
 /// `PUT /api/email/transport` - persist the non-secret transport config (and,
 /// when supplied, the password) and apply both to the in-process sink without a
 /// restart.
+#[utoipa::path(
+    put,
+    path = "/api/email/transport",
+    tag = "Notifications",
+    summary = "Set the SMTP transport config",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn put_email_transport(
     State(state): State<ServerState>,
     Json(body): Json<EmailTransportBody>,
@@ -2262,6 +3557,14 @@ struct EmailTestBody {
 
 /// `POST /api/email/test` - send a test email over the currently-configured
 /// transport, surfacing any [`crate::email::EmailError`] to the caller.
+#[utoipa::path(
+    post,
+    path = "/api/email/test",
+    tag = "Notifications",
+    summary = "Send a test email through the configured transport",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn post_email_test(
     State(_state): State<ServerState>,
     Json(body): Json<EmailTestBody>,
@@ -2306,6 +3609,13 @@ struct AlertDeliveryBody {
 
 /// `GET /api/alerts/delivery` - the node's configured policy-alert delivery
 /// targets (empty default when unset).
+#[utoipa::path(
+    get,
+    path = "/api/alerts/delivery",
+    tag = "Notifications",
+    summary = "Get the node's policy-alert delivery targets",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn get_alert_delivery(State(state): State<ServerState>) -> axum::response::Response {
     let store = match crate::monitors::global_engine() {
         Some(engine) => engine.store.clone(),
@@ -2329,6 +3639,14 @@ async fn get_alert_delivery(State(state): State<ServerState>) -> axum::response:
 }
 
 /// `PUT /api/alerts/delivery` - persist the node's policy-alert delivery targets.
+#[utoipa::path(
+    put,
+    path = "/api/alerts/delivery",
+    tag = "Notifications",
+    summary = "Set the node's policy-alert delivery targets",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn put_alert_delivery(
     State(state): State<ServerState>,
     Json(body): Json<AlertDeliveryBody>,
@@ -2518,6 +3836,13 @@ async fn notifications_stream() -> axum::response::sse::Sse<
 /// 6-connection-per-host HTTP/1.1 budget and starve all other fetches (the
 /// "every page loads forever" bug). The per-feature endpoints stay for
 /// non-desktop clients (mobile, CLI).
+#[utoipa::path(
+    get,
+    path = "/api/events/all",
+    tag = "Events",
+    summary = "Stream every node event (SSE)",
+    responses((status = 200, description = "Server-Sent Events stream"))
+)]
 async fn all_events_stream(
     State(state): State<ServerState>,
 ) -> axum::response::sse::Sse<
@@ -2799,10 +4124,22 @@ async fn download_clear(
 
 // ── Auth handlers ─────────────────────────────────────────────────────────────
 
+fn append_return_to_query(uri: &str, return_to: &str) -> String {
+    match url::Url::parse(uri) {
+        Ok(mut url) => {
+            url.query_pairs_mut().append_pair("return_to", return_to);
+            url.to_string()
+        }
+        Err(_) => uri.to_string(),
+    }
+}
+
 #[derive(serde::Deserialize, Default)]
 struct AuthLoginBody {
     #[serde(rename = "backendUrl")]
     backend_url: Option<String>,
+    #[serde(rename = "returnTo")]
+    return_to: Option<String>,
 }
 
 #[utoipa::path(
@@ -2823,14 +4160,21 @@ async fn auth_login(
         .backend_url
         .or_else(|| std::env::var("RYU_BACKEND_URL").ok())
         .unwrap_or_else(|| "http://localhost:3000".to_string());
+    let return_to = body.return_to;
     tracing::info!("auth_login: backend={backend_url}");
 
     match crate::auth::start_device_login(Arc::clone(&state.auth), &backend_url).await {
-        Ok(info) => Json(json!({
-            "userCode": info.user_code,
-            "verificationUri": info.verification_uri,
-            "verificationUriComplete": info.verification_uri_complete,
-        })),
+        Ok(mut info) => {
+            if let Some(return_to) = return_to {
+                info.verification_uri_complete =
+                    append_return_to_query(&info.verification_uri_complete, &return_to);
+            }
+            Json(json!({
+                "userCode": info.user_code,
+                "verificationUri": info.verification_uri,
+                "verificationUriComplete": info.verification_uri_complete,
+            }))
+        }
         Err(e) => Json(json!({ "error": e.to_string() })),
     }
 }
@@ -3054,6 +4398,18 @@ async fn chat_stream(
             StatusCode::FORBIDDEN,
             "insufficient permissions: agent.run".to_owned(),
         );
+    }
+    // Per-resource ACL. `conversation_id` is CLIENT-supplied, so without this gate
+    // user B could POST another user's conversation id and have that thread's
+    // history loaded as context, streamed back, and their own turn appended into it
+    // — a read AND write bypass on the primary chat path, strictly worse than the
+    // ungated `fork`. A brand-new chat (no row yet) is not a 404 here: it falls
+    // through and is CLAIMED for this caller, which is the write that makes every
+    // downstream gate on this conversation non-vacuous.
+    if let Some(conversation_id) = req.conversation_id.clone() {
+        if let Err(resp) = gate_and_claim_conversation(&state, &caller, &conversation_id).await {
+            return resp;
+        }
     }
     // Wake any `onChat`-gated plugins the first time a chat turn is handled
     // (once per process, off the hot path — see `fire_on_chat_once`). Cheap
@@ -3512,6 +4868,14 @@ async fn run_chat_with_hooks(
 /// `null` when unsupported). This is the data the desktop's per-agent permission
 /// mode / reasoning effort / model pickers are built from — fully agent-driven,
 /// nothing hardcoded. Non-ACP agents return all-null. Cached per spawn command.
+#[utoipa::path(
+    get,
+    path = "/api/agents/{id}/acp-config",
+    tag = "Agents",
+    summary = "Get an agent's ACP configuration",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn acp_config(
     State(state): State<ServerState>,
     Path(agent_id): Path<String>,
@@ -3952,6 +5316,14 @@ async fn resolve_capability_model_ref(
 /// the default; a persisted per-agent override (set via PUT) wins. The desktop
 /// gates its composer and edit-page controls on the effective flags. Nothing is
 /// hardcoded — detection is data-driven from the agent's own model/probe.
+#[utoipa::path(
+    get,
+    path = "/api/agents/{id}/capabilities",
+    tag = "Agents",
+    summary = "Resolve an agent's capabilities (tools / reasoning / vision)",
+    params(("id" = String, Path), ("model" = Option<String>, Query, description = "Override the model ref to probe")),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn agent_capabilities(
     State(state): State<ServerState>,
     Path(agent_id): Path<String>,
@@ -4047,6 +5419,15 @@ struct CapabilityOverridePatch {
 
 /// `PUT /api/agents/:id/capabilities` — persist the agent's capability overrides
 /// and return the recomputed report.
+#[utoipa::path(
+    put,
+    path = "/api/agents/{id}/capabilities",
+    tag = "Agents",
+    summary = "Persist an agent's capability overrides",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn set_agent_capabilities(
     State(state): State<ServerState>,
     Path(agent_id): Path<String>,
@@ -4089,10 +5470,57 @@ struct PermissionDecision {
 /// `POST /api/chat/permission` — deliver the user's decision for an interactive
 /// ACP tool-permission prompt, unblocking the awaiting agent turn. `resolved` is
 /// `false` when no matching pending request was found (e.g. it already timed out).
-async fn chat_permission(Json(body): Json<PermissionDecision>) -> Json<serde_json::Value> {
+#[utoipa::path(
+    post,
+    path = "/api/chat/permission",
+    tag = "Chat",
+    summary = "Resolve an interactive tool-permission prompt",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn chat_permission(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Json(body): Json<PermissionDecision>,
+) -> axum::response::Response {
+    // Human-in-the-loop INTEGRITY gate. This handler previously took neither `State`
+    // nor the caller, so `attach_verified_caller` was inert on it: any holder of the
+    // node token could APPROVE or DENY another user's pending tool-permission prompt.
+    // The ids are `perm-<seq>` (sequential, trivially guessable), so that is not a
+    // theoretical attack. Its body carries no conversation_id, so the gate is on the
+    // PARENT conversation the prompt was raised in.
+    let Some(scope) = crate::sidecar::adapters::acp::peek_permission_scope(&body.request_id) else {
+        // No such pending request (already answered or timed out). Identical answer
+        // to the pre-gate behaviour — and not an existence oracle, since an unowned
+        // id and an expired id look the same.
+        return Json(serde_json::json!({ "resolved": false })).into_response();
+    };
+    match scope.as_deref().filter(|s| !s.is_empty()) {
+        Some(conversation_id) => {
+            // A decision MUTATES the awaiting turn, so WRITE, not read.
+            if let Err(resp) = require_resource_write(
+                state.conversations.get_access_meta(conversation_id).await,
+                caller.as_ref(),
+                &format!("permission request '{}' not found", body.request_id),
+            ) {
+                return resp;
+            }
+        }
+        // Pending, but raised by an ephemeral instance with no conversation to gate
+        // on. Unbound node ⇒ single principal, allow (unchanged). BOUND node ⇒ fail
+        // closed rather than let any node-token holder answer a prompt they may not
+        // own.
+        None if node_org_id().is_some() => {
+            return json_error(
+                StatusCode::FORBIDDEN,
+                format!("permission request '{}' not found", body.request_id),
+            );
+        }
+        None => {}
+    }
     let resolved =
         crate::sidecar::adapters::acp::resolve_permission(&body.request_id, body.option_id);
-    Json(serde_json::json!({ "resolved": resolved }))
+    Json(serde_json::json!({ "resolved": resolved })).into_response()
 }
 
 /// Body for `POST /api/chat/cancel`.
@@ -4114,18 +5542,45 @@ struct CancelRequest {
     request_body = serde_json::Value,
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-async fn chat_cancel(Json(body): Json<CancelRequest>) -> Json<serde_json::Value> {
+async fn chat_cancel(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Json(body): Json<CancelRequest>,
+) -> axum::response::Response {
+    // Per-resource ACL: cancelling someone else's in-flight turn is a write.
+    if let Err(resp) =
+        require_conversation_access_if_known(&state, &caller, &body.conversation_id, true).await
+    {
+        return resp;
+    }
     let cancelled = crate::sidecar::adapters::acp::request_cancel(&body.conversation_id);
-    Json(serde_json::json!({ "cancelled": cancelled }))
+    Json(serde_json::json!({ "cancelled": cancelled })).into_response()
 }
 
 /// `GET /api/chat/stream/resume/:conversation_id` — reconnect to an in-flight
 /// ACP turn's live UI frame stream. Returns the accumulated reply text as a
 /// synthetic replay, then forwards live frames until the turn completes.
 /// Returns 404 when no turn is running for the conversation.
+#[utoipa::path(
+    get,
+    path = "/api/chat/stream/resume/{conversation_id}",
+    tag = "Chat",
+    summary = "Resume an in-flight chat turn (SSE)",
+    params(("conversation_id" = String, Path)),
+    responses((status = 200, description = "Server-Sent Events stream"))
+)]
 async fn chat_stream_resume(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(conversation_id): axum::extract::Path<String>,
 ) -> axum::response::Response {
+    // Per-resource ACL: this replays the accumulated reply text of a live turn and
+    // then forwards every token of it — a read of the conversation by another name.
+    if let Err(resp) =
+        require_conversation_access_if_known(&state, &caller, &conversation_id, false).await
+    {
+        return resp;
+    }
     match crate::sidecar::adapters::subscribe_live_stream(&conversation_id) {
         Some(stream) => {
             crate::sidecar::adapters::sse_response(axum::body::Body::from_stream(stream))
@@ -4189,8 +5644,20 @@ struct ChannelRunRequest {
 )]
 async fn channel_run(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(req): Json<ChannelRunRequest>,
 ) -> axum::response::Response {
+    // Per-resource ACL (machine-ingress variant). `conversation_id` is caller-supplied
+    // here too, so without this a node-token holder could pass a HUMAN's conversation
+    // id and have that thread's history loaded as context and their turn appended
+    // into it — the `chat_stream` bypass through the bot door. Bot conversations
+    // themselves carry no human owner and stay reachable; see
+    // `require_conversation_write_if_owned`.
+    if let Err(resp) =
+        require_conversation_write_if_owned(&state, &caller, &req.conversation_id).await
+    {
+        return resp;
+    }
     // A non-empty team_id targets a whole team (lead orchestrates members) and
     // takes precedence over agent_id; otherwise route to a single agent.
     let team_id = req.team_id.as_deref().filter(|s| !s.trim().is_empty());
@@ -4256,8 +5723,14 @@ async fn channel_run(
 )]
 async fn worktree_diff_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(run_id): Path<String>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    // Per-resource ACL: `run_id` IS the conversation id, and the diff is the code
+    // the run produced in that conversation's working folder.
+    if let Err(resp) = require_conversation_access_if_known(&state, &caller, &run_id, false).await {
+        return resp;
+    }
     let store = state.worktree_diffs.lock().await;
     match store.get(&run_id) {
         Some(run) => {
@@ -4281,8 +5754,12 @@ async fn worktree_diff_handler(
 )]
 async fn worktree_status_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(run_id): Path<String>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    if let Err(resp) = require_conversation_access_if_known(&state, &caller, &run_id, false).await {
+        return resp;
+    }
     let store = state.worktree_diffs.lock().await;
     match store.get(&run_id) {
         Some(run) => {
@@ -4330,11 +5807,17 @@ struct WorktreeApplyBody {
 )]
 async fn worktree_apply_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(run_id): Path<String>,
     Json(body): Json<WorktreeApplyBody>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     if body.message.trim().is_empty() {
         return json_error(StatusCode::BAD_REQUEST, "message is required".to_owned());
+    }
+    // Per-resource ACL: apply COMMITS/MERGES another user's run into their repo — the
+    // most destructive conversation-derived write on the node.
+    if let Err(resp) = require_conversation_access_if_known(&state, &caller, &run_id, true).await {
+        return resp;
     }
 
     // Take the guard out of the store so it is live during apply and then
@@ -4424,15 +5907,25 @@ struct IndexChunkBody {
 )]
 async fn index_retrieval_chunk(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<IndexChunkBody>,
 ) -> axum::response::Response {
     let source = match body.source.as_deref() {
         Some("space") => ChunkSource::Space,
         _ => ChunkSource::Memory,
     };
+    // Stamp the indexing caller as the chunk's owner on a bound node so the
+    // retrieval tenancy filter can gate it; unbound → shared (filter is a no-op).
+    let node_org = node_org_id();
+    let owner = match (node_org.as_deref(), caller.as_ref()) {
+        (Some(org), Some(c)) => {
+            retrieval::RetrievalOwner::owned(Some(c.user_id.as_str()), Some(org), Some("private"))
+        }
+        _ => retrieval::RetrievalOwner::shared(),
+    };
     match state
         .retrieval
-        .index_chunk(&body.id, source, body.space_id.as_deref(), &body.content)
+        .index_chunk(&body.id, source, body.space_id.as_deref(), &body.content, owner)
         .await
     {
         Ok(()) => Json(json!({ "success": true, "id": body.id })).into_response(),
@@ -4463,13 +5956,41 @@ struct RetrievalSearchBody {
 )]
 async fn search_retrieval(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<RetrievalSearchBody>,
 ) -> axum::response::Response {
+    // This returns RAG chunks of SPACE/DOCUMENT content. It took no caller at all, so
+    // on an org-bound node any holder of the node token — signed in or not — could
+    // pull document text out of every user's spaces.
+    //
+    // What this closes: the TOKENLESS bypass. An anonymous or non-member caller on a
+    // bound node is now refused (`enforce_permission` denies `None` callers there and
+    // allows everyone on an unbound personal node, so local-first is untouched).
+    //
+    // Two gates run: coarse RBAC (tokenless caller on a bound node → 403), then the
+    // per-caller tenancy filter threaded into `RetrievalOptions` below. The filter
+    // (`memory_tenancy_allows` / `space_tenancy_allows`) is what stops a signed-in
+    // member retrieving a colleague's user-scope memory or private document chunks —
+    // the content-escape path the earlier build could not close because nothing
+    // stamped an owner. Now every memory/Space chunk carries a denormalized owner.
+    if let Err(status) = enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    {
+        return json_error(status, "forbidden".to_owned());
+    }
+    let node_bound = node_org_id().is_some();
     let opts = retrieval::RetrievalOptions {
         top_k: body.top_k.unwrap_or(retrieval::DEFAULT_TOP_K),
         space_ids: body.space_ids,
         include_memory: body.include_memory.unwrap_or(true),
         min_score: body.min_score.unwrap_or(0.0),
+        node_bound,
+        caller_user_id: caller.as_ref().map(|c| c.user_id.clone()),
+        caller_org_id: caller.as_ref().and_then(|c| c.org_id.clone()),
         ..Default::default()
     };
     match state.retrieval.retrieve(&body.query, &opts).await {
@@ -4545,6 +6066,17 @@ where
 /// Best-effort: mirror a memory entry into the retrieval index so it is
 /// immediately RAG-retrievable. Logs and continues on failure (fail-open).
 pub(crate) async fn index_memory_entry(state: &ServerState, entry: &memory::LongTermEntry) {
+    // Denormalize the memory's owner onto its retrieval chunk so the per-caller
+    // filter (`memory_tenancy_allows`) runs in-process. On an unbound node, or for a
+    // legacy `'local'`-owned row, stamp `shared()` — the retrieval memory filter is a
+    // no-op on an unbound node, and the bind-time backfill re-stamps legacy rows.
+    let node_org = node_org_id();
+    let owner = match (node_org.as_deref(), entry.owner_user_id.as_deref()) {
+        (Some(org), Some(uid)) if uid != memory::LOCAL_USER => {
+            retrieval::RetrievalOwner::owned(Some(uid), Some(org), None)
+        }
+        _ => retrieval::RetrievalOwner::shared(),
+    };
     if let Err(e) = state
         .retrieval
         .index_memory_chunk(
@@ -4554,6 +6086,7 @@ pub(crate) async fn index_memory_entry(state: &ServerState, entry: &memory::Long
             entry.scope_id.as_deref(),
             entry.category.as_str(),
             entry.importance,
+            owner,
         )
         .await
     {
@@ -4564,8 +6097,17 @@ pub(crate) async fn index_memory_entry(state: &ServerState, entry: &memory::Long
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/memory",
+    tag = "Memory",
+    summary = "List memory entries",
+    params(("scope" = Option<String>, Query, description = "user | node | project"), ("scope_id" = Option<String>, Query), ("category" = Option<String>, Query), ("limit" = Option<usize>, Query)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn list_memory(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Query(q): axum::extract::Query<MemoryListQuery>,
 ) -> axum::response::Response {
     let filter = memory::MemoryFilter {
@@ -4574,7 +6116,13 @@ async fn list_memory(
         category: q.category.as_deref().map(memory::MemoryCategory::from_str),
         limit: q.limit,
     };
-    match state.memory.list(&filter).await {
+    // Per-caller tenancy: a bound-node member sees the shared node/project brain plus
+    // only their OWN user-scope facts. Unbound → unrestricted (byte-identical).
+    let vis = memory::MemoryVisibility::for_caller(
+        caller.as_ref().map(|c| c.user_id.as_str()),
+        node_org_id().is_some(),
+    );
+    match state.memory.list_visible(&filter, vis).await {
         Ok(entries) => Json(json!({ "memories": entries })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -4582,6 +6130,7 @@ async fn list_memory(
 
 async fn create_memory(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<CreateMemoryBody>,
 ) -> axum::response::Response {
     let new = memory::NewMemory {
@@ -4603,11 +6152,10 @@ async fn create_memory(
         author_agent_id: body.agent_id.clone(),
     };
     let agent = body.agent_id.unwrap_or_else(|| "default".to_string());
-    match state
-        .memory
-        .record_full(memory::LOCAL_USER, &agent, new)
-        .await
-    {
+    // Stamp the verified caller as the fact's owner on a bound node (the per-user
+    // tenancy key); unbound → LOCAL_USER, byte-identical to the pre-ACL build.
+    let owner = memory_owner_user_id(&caller);
+    match state.memory.record_full(&owner, &agent, new).await {
         Ok(Some(id)) => match state.memory.get(&id).await {
             Ok(Some(entry)) => {
                 index_memory_entry(&state, &entry).await;
@@ -4620,22 +6168,58 @@ async fn create_memory(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/memory/{id}",
+    tag = "Memory",
+    summary = "Get one memory entry",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn get_memory(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
     match state.memory.get(&id).await {
-        Ok(Some(entry)) => Json(json!({ "memory": entry })).into_response(),
+        Ok(Some(entry)) => {
+            // Per-caller tenancy: another member cannot read a private (user-scope)
+            // fact by id. A 404 (not 403) so the id's existence is not confirmed.
+            if !memory_access_ok(&caller, &entry) {
+                return json_error(StatusCode::NOT_FOUND, "memory not found".to_string());
+            }
+            Json(json!({ "memory": entry })).into_response()
+        }
         Ok(None) => json_error(StatusCode::NOT_FOUND, "memory not found".to_string()),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/memory/{id}",
+    tag = "Memory",
+    summary = "Update a memory entry",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn update_memory(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(id): Path<String>,
     Json(body): Json<UpdateMemoryBody>,
 ) -> axum::response::Response {
+    // Per-caller tenancy: a member cannot mutate another's private fact. Load first
+    // so the gate reads the row's owner + scope (404 hides existence on denial).
+    match state.memory.get(&id).await {
+        Ok(Some(entry)) if !memory_access_ok(&caller, &entry) => {
+            return json_error(StatusCode::NOT_FOUND, "memory not found".to_string());
+        }
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "memory not found".to_string()),
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Ok(Some(_)) => {}
+    }
     let patch = memory::MemoryPatch {
         content: body.content,
         scope: body.scope.as_deref().map(memory::MemoryScope::from_str),
@@ -4660,8 +6244,18 @@ async fn update_memory(
 
 async fn delete_memory(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
+    // Per-caller tenancy: a member cannot delete another's private fact.
+    match state.memory.get(&id).await {
+        Ok(Some(entry)) if !memory_access_ok(&caller, &entry) => {
+            return json_error(StatusCode::NOT_FOUND, "memory not found".to_string());
+        }
+        Ok(None) => return json_error(StatusCode::NOT_FOUND, "memory not found".to_string()),
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Ok(Some(_)) => {}
+    }
     match state.memory.delete(&id).await {
         Ok(removed) => {
             let _ = state.retrieval.remove_chunk(&id).await;
@@ -4691,15 +6285,28 @@ async fn delete_memory(
     summary = "List installed plugins with state",
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-async fn list_apps(State(state): State<ServerState>) -> Json<serde_json::Value> {
+async fn list_apps(
+    State(state): State<ServerState>,
+    headers: axum::http::HeaderMap,
+) -> Json<serde_json::Value> {
     // Attach lifecycle state to each manifest so the client knows install/enable
     // status without a separate round-trip.
     let lifecycle: Vec<crate::plugins::PluginRecord> =
         state.app_store.list().await.unwrap_or_default();
 
+    // Surface filter (`targets`). Applied HERE, at the read boundary — never in
+    // the store — so a plugin that doesn't target this surface stays installed and
+    // inspectable, it just isn't listed for a host that can't run it.
+    //
+    // An empty/absent `targets` means EVERY surface, and an unknown/absent
+    // `x-ryu-surface` header means no filter at all, so every manifest that
+    // predates this field keeps listing everywhere.
+    let surface = surface_from_headers(&headers);
+
     let manifests = state.app_manifests.read().await;
     let manifests_with_state: Vec<serde_json::Value> = manifests
         .iter()
+        .filter(|m| surface.is_none_or(|s| m.supports_surface(s)))
         .map(|m| {
             let lc = lifecycle.iter().find(|r| r.id == m.id);
             let mut v = serde_json::to_value(m).unwrap_or_default();
@@ -5130,6 +6737,24 @@ fn merge_plugin_contract_fields(
     if let Some(setup) = &m.setup {
         obj.insert("setup".to_owned(), setup.clone());
     }
+    // The dependency + surface contract, mirrored onto the entry from the ONE
+    // definition of each field on the manifest.
+    //
+    // `requires` is what makes a catalog card honest about the closure an install
+    // will pull in ("also installs: Spaces") and is what
+    // `install_plugin_from_catalog` resolves before installing anything.
+    //
+    // `targets` is emitted ONLY when non-empty: an empty list means the plugin runs
+    // on EVERY surface (`PluginManifest::supports_surface`), so emitting `[]` would
+    // invert the meaning to "no surfaces" for any client reading it literally.
+    if let Some(requires) = &m.requires {
+        if !requires.apps.is_empty() || !requires.grants.is_empty() {
+            obj.insert("requires".to_owned(), json!(requires));
+        }
+    }
+    if !m.targets.is_empty() {
+        obj.insert("targets".to_owned(), json!(m.targets));
+    }
     // capabilities: declared, else derived from permission_grants.
     obj.insert("capabilities".to_owned(), json!(m.resolved_capabilities()));
     // runnables: bundled runnables as {id, kind, name}. `enabled` is intentionally
@@ -5189,7 +6814,7 @@ fn plugin_marketplace_item_to_entry(
         tags.push(d.clone());
     }
     let descriptor_only = source_id == "integrations-sh";
-    Some(json!({
+    let mut entry = json!({
         "id": id,
         "name": it.get("name").and_then(|v| v.as_str()).unwrap_or(id),
         "description": it.get("description").and_then(|v| v.as_str()).unwrap_or(""),
@@ -5203,7 +6828,27 @@ fn plugin_marketplace_item_to_entry(
         "integration_kind": integration_kind,
         "integration_url": integration_url,
         "icon_url": icon_url,
-    }))
+    });
+    // Carry the source card's `requires` / `targets` onto the entry when the
+    // publisher declared them, so a marketplace card is as honest about its
+    // dependency closure as a built-in card is. Passed through verbatim (the card
+    // is untrusted upstream JSON): the AUTHORITATIVE copy is the one on the signed
+    // manifest, which `install_plugin_from_catalog` resolves at install time — an
+    // absent or lying card field is a display gap, never a safety gap. `targets` is
+    // omitted when empty, since empty means EVERY surface.
+    if let Some(obj) = entry.as_object_mut() {
+        if let Some(requires) = it.get("requires").filter(|v| !v.is_null()) {
+            obj.insert("requires".to_owned(), requires.clone());
+        }
+        if let Some(targets) = it
+            .get("targets")
+            .and_then(|v| v.as_array())
+            .filter(|a| !a.is_empty())
+        {
+            obj.insert("targets".to_owned(), json!(targets));
+        }
+    }
+    Some(entry)
 }
 
 /// Merge plugin-catalog entry groups into one list, deduped by `id` (first writer
@@ -5573,6 +7218,14 @@ async fn install_app_from_url(
 /// desktop over the token'd Core API), so there is no SSRF surface. The manifest
 /// id is still validated before being used as a filesystem path component, and a
 /// duplicate id is rejected (never clobber an installed plugin).
+#[utoipa::path(
+    post,
+    path = "/api/plugins/install-bundle",
+    tag = "Plugins",
+    summary = "Install a plugin from an uploaded bundle",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn install_app_bundle(
     State(state): State<ServerState>,
     Json(body): Json<serde_json::Value>,
@@ -5709,27 +7362,7 @@ async fn persist_installed_plugin(
     // Persist the manifest to disk (same resolver the loader reads) WITHOUT the
     // `ui_code` blob — the code lives on the lifecycle record, not the on-disk
     // manifest (which is the loader's contract + keeps manifests small).
-    let plugin_dir = crate::plugin_manifest::PluginManifestLoader::plugins_dir().join(&manifest.id);
-    tokio::fs::create_dir_all(&plugin_dir).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to create plugin directory: {e}"),
-        )
-    })?;
-    let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to serialize manifest: {e}"),
-        )
-    })?;
-    tokio::fs::write(plugin_dir.join("plugin.json"), &manifest_json)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to write manifest: {e}"),
-            )
-        })?;
+    write_plugin_manifest_to_disk(&manifest).await?;
 
     reload_manifests_inner(state).await;
 
@@ -5759,6 +7392,38 @@ async fn persist_installed_plugin(
     }))
 }
 
+/// Write a plugin's manifest to its on-disk `plugin.json` (the resolver the loader
+/// reads), creating the directory if needed. The `PluginManifest` struct carries no
+/// `ui_code` field, so the bundle is never written here — it lives on the lifecycle
+/// record. Shared by the install sink ([`persist_installed_plugin`]) and the update
+/// handler so the two never drift on how a manifest lands on disk.
+async fn write_plugin_manifest_to_disk(
+    manifest: &crate::plugin_manifest::PluginManifest,
+) -> Result<(), (StatusCode, String)> {
+    let plugin_dir = crate::plugin_manifest::PluginManifestLoader::plugins_dir().join(&manifest.id);
+    tokio::fs::create_dir_all(&plugin_dir).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create plugin directory: {e}"),
+        )
+    })?;
+    let manifest_json = serde_json::to_string_pretty(manifest).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize manifest: {e}"),
+        )
+    })?;
+    tokio::fs::write(plugin_dir.join("plugin.json"), &manifest_json)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to write manifest: {e}"),
+            )
+        })?;
+    Ok(())
+}
+
 /// `POST /api/plugins/catalog/install { id }` — the marketplace/URL sink for a
 /// signed Plugin (the missing CODE CARRIAGE endpoint). Resolves the active Plugin
 /// catalog source's `install_descriptor` for `id`, which (in `catalog_source`)
@@ -5768,79 +7433,348 @@ async fn persist_installed_plugin(
 /// reach here (in `descriptor.raw`), so this handler just persists them through
 /// the SAME sink `install-bundle` uses. An unsigned item resolves with `ui_code`
 /// null (a benign summary). The buyer bearer is forwarded for paid plugins (#491).
+#[utoipa::path(
+    post,
+    path = "/api/plugins/catalog/install",
+    tag = "Plugins",
+    summary = "Install a plugin from the marketplace catalog",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn install_plugin_from_catalog(
     State(state): State<ServerState>,
     headers: axum::http::HeaderMap,
     Json(body): Json<PluginCatalogInstallBody>,
 ) -> axum::response::Response {
-    use crate::catalog_source::CatalogKind;
-
     let id = body.id.trim().to_string();
     if id.is_empty() {
         return json_error(StatusCode::BAD_REQUEST, "`id` must not be empty".to_owned());
     }
 
     // Forward the caller's bearer to the marketplace install handoff (#491) so a
-    // PAID plugin is denied unless the buyer org holds a license.
+    // PAID plugin is denied unless the buyer org holds a license. EVERY dependency
+    // resolved below goes through the SAME `install_descriptor` seam with the SAME
+    // bearer, so a dependency clears the identical signature + ui_code-integrity +
+    // paid-entitlement gates as the plugin the user actually clicked. A dependency
+    // is never a back door around the gate the target gets.
     let buyer_token = buyer_bearer_from_headers(&headers);
 
-    let Some(source) = state
-        .catalog_sources
-        .get_active(CatalogKind::Plugin, &state.preferences)
-        .await
-    else {
+    // The installed set: both the dependency graph's "already satisfied" side and
+    // the duplicate-install guard.
+    let installed: Vec<crate::plugin_manifest::PluginManifest> =
+        state.app_manifests.read().await.clone();
+    if installed.iter().any(|m| m.id == id) {
+        // Same 409 `persist_installed_plugin` would raise. Checked FIRST because an
+        // already-installed target resolves to an EMPTY plan below, which would
+        // otherwise report a phantom success.
         return json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "no active plugin catalog source".to_owned(),
-        );
-    };
-
-    // Resolve the descriptor: fetch detail → verify signature → ui_code integrity
-    // gate (all fail-closed inside `install_descriptor`).
-    let descriptor = match crate::catalog_source::with_buyer_token(
-        buyer_token,
-        source.install_descriptor(&state.client, &id),
-    )
-    .await
-    {
-        Ok(d) => d,
-        Err(e) => return json_error(StatusCode::BAD_GATEWAY, e.to_string()),
-    };
-    if descriptor.kind != CatalogKind::Plugin {
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            format!("resolved item `{id}` is not a plugin"),
+            StatusCode::CONFLICT,
+            format!("Plugin '{id}' is already installed"),
         );
     }
 
-    // The VALIDATED manifest + ui_code ride in `descriptor.raw` (the integrity gate
-    // has already run; `ui_code` is null for an unsigned/manifest-only item).
-    let manifest_value = descriptor
-        .raw
-        .get("manifest")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
-    let ui_code = descriptor
-        .raw
-        .get("ui_code")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned);
+    // ── Phase 1: DISCOVERY — walk `requires` and fetch what is not installed ──
+    //
+    // Breadth-first over the declared edges, from the target. An INSTALLED plugin
+    // contributes its own manifest (never refetched, never reinstalled); anything
+    // else is resolved from the catalog. The `visited` set makes the walk terminate
+    // on cyclic catalog data — the cycle is then *reported* by the resolver in
+    // phase 2 rather than hanging here.
+    let mut fetched: Vec<crate::plugin_manifest::PluginManifest> = Vec::new();
+    let mut ui_codes: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    queue.push_back(id.clone());
 
-    let manifest: crate::plugin_manifest::PluginManifest =
-        match serde_json::from_value(manifest_value) {
-            Ok(m) => m,
-            Err(e) => {
-                return json_error(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    format!("Invalid manifest JSON: {e}"),
-                );
+    while let Some(next) = queue.pop_front() {
+        if !visited.insert(next.clone()) {
+            continue;
+        }
+        if visited.len() > crate::plugins::catalog::MAX_INSTALL_CLOSURE {
+            return json_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "`{id}` pulls in more than {} plugins; refusing the install",
+                    crate::plugins::catalog::MAX_INSTALL_CLOSURE
+                ),
+            );
+        }
+
+        let manifest = if let Some(m) = installed.iter().find(|m| m.id == next) {
+            m.clone()
+        } else {
+            match resolve_plugin_from_catalog(&state, &next, buyer_token.clone()).await {
+                Ok((m, ui_code)) => {
+                    // A source that answers a request for `next` with a manifest for
+                    // some OTHER id would let a dependency name be swapped for an
+                    // arbitrary plugin. Refuse.
+                    if m.id != next {
+                        return json_error(
+                            StatusCode::BAD_GATEWAY,
+                            format!("catalog returned manifest `{}` for `{next}`", m.id),
+                        );
+                    }
+                    if let Some(code) = ui_code {
+                        ui_codes.insert(next.clone(), code);
+                    }
+                    fetched.push(m.clone());
+                    m
+                }
+                // The TARGET must resolve — that is exactly today's hard failure,
+                // with today's status code.
+                Err((status, msg)) if next == id => return json_error(status, msg),
+                // A DEPENDENCY no source can serve is simply left OUT of the graph.
+                // The resolver in phase 2 then reports it as a typed
+                // `MissingDependency` naming who needs it and the version they need
+                // — one definition of that error, rendered by the desktop already.
+                Err((_, msg)) => {
+                    tracing::warn!(
+                        plugin = %next,
+                        "plugin dependency could not be resolved from any catalog source: {msg}"
+                    );
+                    continue;
+                }
             }
         };
 
-    match persist_installed_plugin(&state, manifest, ui_code).await {
-        Ok(body) => Json(body).into_response(),
-        Err((status, msg)) => json_error(status, msg),
+        for dep in manifest.dependencies() {
+            if !visited.contains(&dep.id) {
+                queue.push_back(dep.id.clone());
+            }
+        }
     }
+
+    // ── Phase 2: PLAN — topological order, cycles/versions/missing deps ───────
+    //
+    // Delegates to `plugins::graph::resolve_enable_order` (via the catalog planner):
+    // one resolver, one semver rule, one cycle detector. Nothing has touched disk
+    // yet, so a refusal here installs NOTHING — the whole point.
+    let order = match crate::plugins::catalog::plan_install_closure(&id, &installed, &fetched) {
+        Ok(order) => order,
+        Err(e) => {
+            // 409 + the typed payload, the SAME envelope `enable_app_handler` uses,
+            // so the desktop's existing `describeDependencyError` renders it with no
+            // client change ("Meetings needs Spaces (1.2.0 or newer)").
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "success": false,
+                    "error": e.to_string(),
+                    "dependency_error": e,
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // ── Phase 3: INSTALL the closure in order, rolling back on any failure ────
+    let outcome = crate::plugins::catalog::install_closure(
+        order,
+        |manifest| {
+            let state = state.clone();
+            let ui_code = ui_codes.get(&manifest.id).cloned();
+            // The SAME sink the single-plugin path used: validate → write manifest →
+            // reload → lifecycle record (installed, DISABLED). Enabling stays with
+            // `enable_app`, which runs its own dependency closure over what we just
+            // made present.
+            async move { persist_installed_plugin(&state, manifest, ui_code).await }
+        },
+        |plugin_id| {
+            let state = state.clone();
+            async move { rollback_plugin_install(&state, &plugin_id).await }
+        },
+    )
+    .await;
+
+    match outcome {
+        Ok(installed_plugins) => {
+            let dependencies: Vec<&str> = installed_plugins
+                .iter()
+                .map(|(pid, _)| pid.as_str())
+                .filter(|pid| *pid != id)
+                .collect();
+            // The TARGET's body, additively augmented — the existing client contract
+            // (`{ success, app: {…}, has_ui }`) is unchanged; a dependency install is
+            // new information alongside it, not a new shape.
+            let mut body = installed_plugins
+                .iter()
+                .find(|(pid, _)| *pid == id)
+                .map(|(_, value)| value.clone())
+                .unwrap_or_else(|| json!({ "success": true }));
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("installed_dependencies".to_owned(), json!(dependencies));
+            }
+            Json(body).into_response()
+        }
+        Err(failure) => {
+            let (status, msg) = failure.error;
+            // A member that failed part-way through `persist_installed_plugin` (e.g.
+            // the manifest was written but the lifecycle row was not) is undone too,
+            // so the closure is all-or-nothing. Never on a 409: that status means the
+            // plugin was ALREADY there, and rolling it back would delete something
+            // this request did not create.
+            if status != StatusCode::CONFLICT {
+                rollback_plugin_install(&state, &failure.failed).await;
+            }
+            let undone = if failure.rolled_back.is_empty() {
+                String::new()
+            } else {
+                format!(" (rolled back: {})", failure.rolled_back.join(", "))
+            };
+            let message = if failure.failed == id {
+                format!("{msg}{undone}")
+            } else {
+                format!(
+                    "dependency `{}` of `{id}` failed to install: {msg}{undone}",
+                    failure.failed
+                )
+            };
+            json_error(status, message)
+        }
+    }
+}
+
+/// Resolve ONE plugin id to its validated manifest (+ pre-gated `ui_code`) from
+/// the plugin catalog.
+///
+/// Tries the **active** source first (the user's chosen marketplace — so the
+/// target's resolution, and its failure status codes, are exactly what they were
+/// before dependencies existed), then every other registered plugin source: a
+/// dependency may legitimately live in a different source than the plugin that
+/// needs it, and refusing to look there would strand an install the merged catalog
+/// can plainly satisfy.
+///
+/// Always goes through `install_descriptor`, never `detail` — that is the seam
+/// that runs the ed25519 signature verification and the fail-closed ui_code
+/// integrity gate. Returns the ACTIVE source's failure (status + message) when no
+/// source can serve the id.
+async fn resolve_plugin_from_catalog(
+    state: &ServerState,
+    id: &str,
+    buyer_token: Option<String>,
+) -> Result<(crate::plugin_manifest::PluginManifest, Option<String>), (StatusCode, String)> {
+    use crate::catalog_source::CatalogKind;
+
+    let active = state
+        .catalog_sources
+        .get_active(CatalogKind::Plugin, &state.preferences)
+        .await;
+    let active_id = active.as_ref().map(|s| s.id().to_owned());
+    let mut sources: Vec<crate::catalog_source::Source> = active.into_iter().collect();
+    for meta in state.catalog_sources.sources_for(CatalogKind::Plugin) {
+        if Some(&meta.id) == active_id.as_ref() {
+            continue;
+        }
+        if let Some(source) = state
+            .catalog_sources
+            .source_by_id(CatalogKind::Plugin, &meta.id)
+        {
+            sources.push(source);
+        }
+    }
+    if sources.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no active plugin catalog source".to_owned(),
+        ));
+    }
+
+    // Keep the FIRST failure (the active source's), so a caller sees the same error
+    // it always saw rather than whatever the last fallback source happened to say.
+    let mut first_err: Option<(StatusCode, String)> = None;
+    let mut remember = |err: (StatusCode, String)| {
+        if first_err.is_none() {
+            first_err = Some(err);
+        }
+    };
+
+    for source in sources {
+        // Fetch detail → verify signature → ui_code integrity gate (all fail-closed
+        // inside `install_descriptor`).
+        let descriptor = match crate::catalog_source::with_buyer_token(
+            buyer_token.clone(),
+            source.install_descriptor(&state.client, id),
+        )
+        .await
+        {
+            Ok(d) => d,
+            Err(e) => {
+                remember((StatusCode::BAD_GATEWAY, e.to_string()));
+                continue;
+            }
+        };
+        if descriptor.kind != CatalogKind::Plugin {
+            remember((
+                StatusCode::BAD_REQUEST,
+                format!("resolved item `{id}` is not a plugin"),
+            ));
+            continue;
+        }
+
+        // The VALIDATED manifest + ui_code ride in `descriptor.raw` (the integrity
+        // gate has already run; `ui_code` is null for an unsigned/manifest-only
+        // item).
+        let manifest_value = descriptor
+            .raw
+            .get("manifest")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let manifest: crate::plugin_manifest::PluginManifest =
+            match serde_json::from_value(manifest_value) {
+                Ok(m) => m,
+                Err(e) => {
+                    remember((
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        format!("Invalid manifest JSON: {e}"),
+                    ));
+                    continue;
+                }
+            };
+        let ui_code = descriptor
+            .raw
+            .get("ui_code")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
+        return Ok((manifest, ui_code));
+    }
+
+    Err(first_err.unwrap_or_else(|| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("`{id}` was not found in any plugin catalog source"),
+        )
+    }))
+}
+
+/// Undo ONE plugin install performed earlier in this same request: remove the
+/// on-disk manifest directory, drop the lifecycle row, and reload so no in-memory
+/// manifest outlives the files behind it.
+///
+/// Deliberately best-effort and infallible: a rollback runs *because* an install
+/// already failed, and letting the cleanup error mask the real failure would hide
+/// the reason the user's install refused. Every step is logged instead.
+///
+/// The id is re-validated before it is used as a path component — the ONE place
+/// that check is enforced for this path, so a rollback triggered by a manifest that
+/// failed id validation inside `persist_installed_plugin` can never be turned into
+/// a directory traversal.
+async fn rollback_plugin_install(state: &ServerState, id: &str) {
+    if crate::plugin_manifest::validate_plugin_id(id).is_err() {
+        tracing::warn!(plugin = %id, "refusing to roll back a plugin with an invalid id");
+        return;
+    }
+    let plugin_dir = crate::plugin_manifest::PluginManifestLoader::plugins_dir().join(id);
+    if plugin_dir.exists() {
+        if let Err(e) = tokio::fs::remove_dir_all(&plugin_dir).await {
+            tracing::warn!(plugin = %id, "rollback: failed to remove plugin directory: {e}");
+        }
+    }
+    if let Err(e) = state.app_store.remove(id).await {
+        tracing::warn!(plugin = %id, "rollback: failed to remove lifecycle record: {e}");
+    }
+    reload_manifests_inner(state).await;
+    tracing::info!(plugin = %id, "rolled back a partial plugin install");
 }
 
 /// `GET /api/plugins/:id/ui-bundle` — serve an ENABLED plugin's bundled
@@ -5849,6 +7783,14 @@ async fn install_plugin_from_catalog(
 /// code is never served, so an operator cannot be tricked into running the UI of
 /// a plugin whose grants the Gateway has not validated). The host base64-inlines
 /// the returned code into the null-origin iframe; the plugin never fetches this.
+#[utoipa::path(
+    get,
+    path = "/api/plugins/{id}/ui-bundle",
+    tag = "Plugins",
+    summary = "Serve a plugin's UI bundle",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn plugin_ui_bundle(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -5899,6 +7841,14 @@ async fn reload_app_manifests(State(state): State<ServerState>) -> Json<serde_js
 /// Scoped deliberately to the `onCommand:` prefix so it stays the onCommand
 /// seam and cannot be used to spoof `onStartup`/`onChat`/arbitrary events. The
 /// firing is awaited here (this is not the hot chat path) and is idempotent.
+#[utoipa::path(
+    post,
+    path = "/api/plugins/activation-event",
+    tag = "Plugins",
+    summary = "Fire a plugin activation event",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn fire_activation_event_handler(
     State(state): State<ServerState>,
     Json(body): Json<serde_json::Value>,
@@ -6010,6 +7960,14 @@ async fn list_skills(State(state): State<ServerState>) -> Json<serde_json::Value
 /// Returns both the decomposed form fields (name/description/allowed_tools/
 /// always_on/body) and the raw `source` string (the diff baseline for version
 /// history).
+#[utoipa::path(
+    get,
+    path = "/api/skills/{id}/source",
+    tag = "Skills",
+    summary = "Read a skill's SKILL.md source",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn get_skill_source(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -6093,6 +8051,15 @@ async fn create_skill_handler(
 
 /// `PUT /api/skills/:id` — update an existing skill's SKILL.md (autosaved from the
 /// editor). Front-matter keys the editor does not manage are preserved.
+#[utoipa::path(
+    put,
+    path = "/api/skills/{id}",
+    tag = "Skills",
+    summary = "Update a skill's source",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn update_skill_handler(
     State(state): State<ServerState>,
     axum::extract::Path(id): axum::extract::Path<String>,
@@ -6115,6 +8082,14 @@ async fn update_skill_handler(
 }
 
 /// `GET /api/skills/:id/versions` — list a skill's saved versions (newest first).
+#[utoipa::path(
+    get,
+    path = "/api/skills/{id}/versions",
+    tag = "Skills",
+    summary = "List a skill's version history",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn list_skill_versions_handler(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -6156,6 +8131,14 @@ async fn create_skill_version_handler(
 
 /// `GET /api/skills/:id/versions/:version_id` — fetch one version in full
 /// (including its captured SKILL.md source, used for the diff view).
+#[utoipa::path(
+    get,
+    path = "/api/skills/{id}/versions/{version_id}",
+    tag = "Skills",
+    summary = "Get one version of a skill",
+    params(("id" = String, Path), ("version_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn get_skill_version_handler(
     axum::extract::Path((id, version_id)): axum::extract::Path<(String, String)>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -6175,6 +8158,14 @@ async fn get_skill_version_handler(
 /// `POST /api/skills/:id/versions/:version_id/restore` — restore a version as the
 /// skill's current SKILL.md. The current definition is snapshotted first (as
 /// `"Before restore"`) so the restore is itself undoable.
+#[utoipa::path(
+    post,
+    path = "/api/skills/{id}/versions/{version_id}/restore",
+    tag = "Skills",
+    summary = "Restore a skill to an earlier version",
+    params(("id" = String, Path), ("version_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn restore_skill_version_handler(
     State(state): State<ServerState>,
     axum::extract::Path((id, version_id)): axum::extract::Path<(String, String)>,
@@ -6282,22 +8273,32 @@ async fn enable_app_handler(
     let gw_url = gateway_url();
     let gw_token = gateway_token();
 
-    let record = match enable_app(
+    // The full loaded manifest set — `enable_app` resolves the dependency graph
+    // over the INSTALLED subset of these, so a plugin's `requires` edges pull in
+    // (and enable, in topological order) whatever it depends on.
+    let all_manifests: Vec<crate::plugin_manifest::PluginManifest> =
+        state.app_manifests.read().await.clone();
+
+    let outcome = match enable_app(
         &state.app_store,
         &manifest,
+        &all_manifests,
         &gw_url,
         gw_token.as_deref(),
         &state.client,
     )
     .await
     {
-        Ok(record) => record,
-        Err(EnableError::GrantsDenied { denied }) => {
+        Ok(outcome) => outcome,
+        Err(EnableError::GrantsDenied { plugin, denied }) => {
             return (
                 StatusCode::FORBIDDEN,
                 Json(json!({
                     "success": false,
                     "error": "Gateway denied one or more grants",
+                    // May be an auto-enabled DEPENDENCY rather than the plugin the
+                    // user clicked — name it so the UI can say which.
+                    "plugin": plugin,
                     "denied_grants": denied,
                 })),
             )
@@ -6314,11 +8315,126 @@ async fn enable_app_handler(
             )
                 .into_response();
         }
+        // The dependency graph could not be satisfied (missing dep, version too
+        // low, cycle). Nothing was enabled — the graph resolves before any
+        // enabled bit flips. 409: the request is well-formed but conflicts with
+        // the current install state. The typed payload lets the desktop render
+        // "install X first" without string-parsing.
+        Err(EnableError::Dependency(e)) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "success": false,
+                    "error": e.to_string(),
+                    "dependency_error": e,
+                })),
+            )
+                .into_response();
+        }
         Err(EnableError::Other(e)) => {
             return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
         }
     };
 
+    // Activate EVERY plugin this call enabled, in enable order (dependencies
+    // first, target last). Flipping a dependency's enabled bit without running
+    // its activation side effects would leave it half-enabled — its runnables
+    // unregistered, its policy flags off, its sidecars not started.
+    let mut runnable_statuses: Vec<serde_json::Value> = Vec::new();
+    let mut enabled_dependencies: Vec<String> = Vec::new();
+    let mut policy_outcome = PolicyApplyOutcome::default();
+
+    for record in outcome.in_enable_order() {
+        let plugin_manifest = if record.id == manifest.id {
+            manifest.clone()
+        } else {
+            match all_manifests.iter().find(|m| m.id == record.id) {
+                Some(m) => m.clone(),
+                None => {
+                    tracing::warn!(
+                        "plugin enable: no manifest for auto-enabled dependency '{}'",
+                        record.id
+                    );
+                    continue;
+                }
+            }
+        };
+
+        let (statuses, outcome) = activate_plugin(&state, &plugin_manifest, record).await;
+        policy_outcome = policy_outcome.merge(outcome);
+
+        if record.id == manifest.id {
+            runnable_statuses = statuses;
+        } else {
+            enabled_dependencies.push(record.id.clone());
+        }
+    }
+
+    let mut body = json!({
+        "success": true,
+        "app": outcome.target,
+        "runnables": runnable_statuses,
+        // Dependencies auto-enabled to satisfy this plugin's `requires`, in the
+        // order they were enabled. Empty in the common no-dependency case.
+        "enabled_dependencies": enabled_dependencies,
+    });
+    // Truth-in-advertising: if a gateway-enforced policy (firewall/routing/
+    // compression) was toggled but the gateway is externally managed, the enable
+    // STILL succeeded (the record is enabled) — but the running gateway was NOT
+    // reconfigured, so the control is inert until a manual restart. Say so instead
+    // of silently reporting a security control as ON. Only emitted when a gateway
+    // policy was actually touched, to avoid noise on ordinary enables.
+    attach_gateway_policy_notice(&mut body, policy_outcome);
+    Json(body).into_response()
+}
+
+/// Attach the `externally_managed` truth to an enable/disable/uninstall response
+/// body when a gateway-enforced policy was toggled. Emits the SAME `externally_managed`
+/// + `notice` keys `gateway_config_write` uses for the identical condition
+/// (`refresh() == Ok(false)`), so any surface that already understands that shape
+/// handles this too.
+///
+/// Only emitted when `gateway_touched` is set: an enable/disable that changed no
+/// firewall/routing/compression policy never went near the gateway, so the fields
+/// would be meaningless noise. `externally_managed` is only ever `true` for the
+/// respawn-only compression policy; firewall/routing hot-swap live via PUT
+/// /v1/config and report `externally_managed: false` even against a remote gateway.
+fn attach_gateway_policy_notice(body: &mut serde_json::Value, outcome: PolicyApplyOutcome) {
+    if !outcome.gateway_touched {
+        return;
+    }
+    let Some(obj) = body.as_object_mut() else {
+        return;
+    };
+    obj.insert(
+        "externally_managed".to_owned(),
+        json!(outcome.gateway_externally_managed),
+    );
+    if outcome.gateway_externally_managed {
+        obj.insert(
+            "notice".to_owned(),
+            json!(
+                "a respawn-only gateway policy (compression) was toggled, but the gateway is \
+                 externally managed (RYU_GATEWAY_MANAGED=0); the running gateway was NOT \
+                 reconfigured. Restart the gateway process for this change to take effect. \
+                 (firewall/routing toggles hot-swap live via PUT /v1/config and are unaffected.)"
+            ),
+        );
+    }
+}
+
+/// Run every activation side effect for one freshly-enabled plugin, returning the
+/// per-Runnable outcomes.
+///
+/// The single definition of "what enabling a plugin *does*" beyond flipping its
+/// bit. `enable_app_handler` runs it once per plugin in the resolved enable order
+/// (a target and any auto-enabled dependencies), so a dependency activates
+/// exactly as it would have if the user had enabled it by hand.
+async fn activate_plugin(
+    state: &ServerState,
+    manifest: &crate::plugin_manifest::PluginManifest,
+    record: &crate::plugins::PluginRecord,
+) -> (Vec<serde_json::Value>, PolicyApplyOutcome) {
     // Build and run the RunnableRegistry to activate the manifest's Runnables.
     // Handlers capture cloned subsystem handles; the registry is built per-call
     // so ServerState stays Clone (no non-Clone field added).
@@ -6330,43 +8446,44 @@ async fn enable_app_handler(
     // lands via `fire_activation_event`. This keeps the enable path and the
     // event-driven path on one activation contract.
     let fired = crate::runnable::fired_activation_events();
-    let runnable_results = build_runnable_registry(&state).register_active(&manifest, &fired);
+    let runnable_results = build_runnable_registry(state).register_active(manifest, &fired);
 
     // Apply async runtime side effects the sync handlers can't (gateway I/O).
     // Dispatches per Policy runnable: headroom compression / firewall / routing /
-    // sandbox — turning each ON for this enable.
-    apply_policy(&state, &manifest, true).await;
+    // sandbox — turning each ON for this enable. The returned outcome tells the
+    // handler whether a gateway policy actually reconfigured the running gateway.
+    let policy_outcome = apply_policy(state, manifest, true).await;
 
     // Provision the plugin's declared external runtime (#449), if any. Gated on
     // tier + Gateway-approved grant (Core-tier auto-allowed; Community needs the
     // approved `runtime:external` grant), best-effort + spawned so a slow asset
     // fetch / pip install never blocks the enable response. The TTS sidecar
     // precedent (a Python venv) is the shape.
-    provision_external_runtime(&manifest, &record.approved_grants, state.downloads.clone());
+    provision_external_runtime(manifest, &record.approved_grants, state.downloads.clone());
 
     // Register + start the plugin's declared managed sidecars (the app ⇄ sidecar
     // bridge, M3): each rides the SidecarManager lifecycle (health monitor +
     // resource sampler + `/api/sidecar/status`) like a built-in. Gated on tier +
     // approved `sidecar:process` grant; spawned + best-effort so a slow binary
     // download never blocks the enable response.
-    apply_sidecars(&state, &manifest, &record.approved_grants, true).await;
+    apply_sidecars(state, manifest, &record.approved_grants, true).await;
+
+    // ONE plugin model: enabling a synth MCP-server record flips the mcp.json
+    // `enabled` flag that actually gates spawn + tool listing, so the record's
+    // enabled bit drives the running server instead of being a no-op. Best-effort
+    // + a no-op for every non-MCP-server manifest.
+    sync_mcp_entry_for_record(state, manifest, McpEntryMutation::SetEnabled(true)).await;
 
     // Collect per-Runnable outcomes for the response (success + failures both
     // surfaced so the caller can observe partial failures without silent drops).
-    let runnable_statuses: Vec<serde_json::Value> = runnable_results
+    let statuses = runnable_results
         .into_iter()
         .map(|(rid, res)| match res {
             Ok(()) => json!({ "id": rid, "ok": true }),
             Err(e) => json!({ "id": rid, "ok": false, "error": e }),
         })
         .collect();
-
-    Json(json!({
-        "success": true,
-        "app": record,
-        "runnables": runnable_statuses,
-    }))
-    .into_response()
+    (statuses, policy_outcome)
 }
 
 /// Build a [`crate::runnable::RunnableRegistry`] with default Core handlers
@@ -6755,7 +8872,17 @@ fn manifest_policy_types(manifest: &crate::plugin_manifest::PluginManifest) -> V
 /// from this; new widget types need no Core change (Core passes them verbatim).
 /// This is what lets a plugin like double-check/goal contribute its composer
 /// toggle / slash command without editing the closed desktop source.
-async fn plugin_contributions(State(state): State<ServerState>) -> axum::response::Response {
+#[utoipa::path(
+    get,
+    path = "/api/plugins/contributions",
+    tag = "Plugins",
+    summary = "List the UI contributions of every enabled plugin",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn plugin_contributions(
+    State(state): State<ServerState>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
     // Keep the full enabled records (not just ids): the companions payload maps
     // each enabled plugin's companion to that plugin's GATEWAY-APPROVED grants,
     // which live on the record (never the manifest's `permission_grants` claim).
@@ -6776,9 +8903,18 @@ async fn plugin_contributions(State(state): State<ServerState>) -> axum::respons
     let mut slash_commands = Vec::new();
     let mut turn_hooks = Vec::new();
 
+    // Surface filter (`targets`): a plugin that doesn't target the calling host
+    // contributes nothing to it. Absent/unknown `x-ryu-surface` = no filter, and
+    // an empty `targets` = every surface, so existing plugins keep contributing
+    // everywhere.
+    let surface = surface_from_headers(&headers);
+
     let manifests = state.app_manifests.read().await;
     for manifest in manifests.iter() {
         if !enabled_ids.contains(&manifest.id) {
+            continue;
+        }
+        if !surface.is_none_or(|s| manifest.supports_surface(s)) {
             continue;
         }
         let Some(c) = &manifest.contributes else {
@@ -6842,6 +8978,20 @@ async fn plugin_contributions(State(state): State<ServerState>) -> axum::respons
                 "plugin_id": manifest.id,
                 "approved_grants": record.approved_grants,
                 "has_ui": has_ui && cfg.ui_entry.is_some(),
+                // Per-app CSP allowlist (icons/logos direct-fetch for the canvas
+                // asset picker). This widens the sandbox egress lock, so it is a
+                // TRUST-GATED field: emitted ONLY for compiled-in built-in manifests
+                // (`CORE_PLUGINS`). A third-party/disk-loaded app's `csp` claim is
+                // dropped here (never reaches the host), so it can never punch an
+                // egress hole — its frame stays `connect-src 'none'`. Third-party
+                // per-app CSP would need moderation like a grant (not built).
+                "csp": if crate::plugins::builtins::CORE_PLUGINS
+                    .contains(&manifest.id.as_str())
+                {
+                    cfg.csp.clone()
+                } else {
+                    None
+                },
             }));
         }
     }
@@ -6877,46 +9027,232 @@ fn manifest_policies(
         .collect()
 }
 
+/// The **config-pack** payload a `firewall` policy plugin may carry in its
+/// `PolicyConfig.definition`. Today the one live-swappable config-pack target is a
+/// firewall pattern pack: a set of `custom_patterns` (kept as raw JSON so Core
+/// stays decoupled from the gateway's `CustomPattern` type — the gateway
+/// deserializes them). Absent/empty ⇒ the plugin is a pure on/off switch (the
+/// built-in `firewall` fixture), exactly as before. This is the seam where a
+/// policy plugin declares its bundle; enabling PUSHES the pack into the live
+/// gateway config, disabling REMOVES it (see [`build_firewall_patch`]).
+#[derive(serde::Deserialize, Default)]
+struct FirewallPolicyBundle {
+    #[serde(default)]
+    custom_patterns: Vec<serde_json::Value>,
+}
+
+impl FirewallPolicyBundle {
+    /// Parse the bundle from a policy `definition` JSON blob, tolerating extra
+    /// keys (`service`, `note`, …) and a missing `custom_patterns` (→ empty pack).
+    fn from_definition(def: &serde_json::Value) -> Self {
+        serde_json::from_value(def.clone()).unwrap_or_default()
+    }
+}
+
+/// Read the current `[section]` table of Core's LOCAL `gateway.toml` as JSON, or
+/// `{}` when the file / section is absent. Used to read-modify-write the `routing`
+/// policy toggle: we mutate only `smart_routing.enabled` and PUT the section back,
+/// so the toggle never resets the operator's other routing settings to defaults
+/// (the gateway's `PUT /v1/config` is full-replacement per section).
+///
+/// NOTE — `firewall` no longer uses this: its toggle sources the section from the
+/// gateway's LIVE config (`GET /v1/config` via [`crate::sidecar::gateway::fetch_config`]),
+/// because Core's local toml is empty for a REMOTE gateway and a full-replacement
+/// firewall PUT built from `{}` would silently downgrade enforcement (reset `policy`
+/// to warn-only, wipe `locked_fields`/`inspector`/operator patterns). Routing has the
+/// same-class limitation for a remote gateway (empty local toml → a defaulted
+/// `routing` persisted on the remote disk), but its only live-swapped field is
+/// `smart_routing.enabled`; `model_map`/`fallback_chain` are restart-only snapshots,
+/// so the live toggle is unaffected. A clean routing fix needs a full-routing live
+/// source (the `RoutingView` GET is lossy — it omits `eval_routing`/`modality_map`),
+/// which is out of scope for this round.
+///
+/// Known edge (routing): a field set ONLY via a spawn-time env override with no
+/// `gateway.toml` is invisible here; the dominant case — config persisted by a prior
+/// PUT / the web UI — round-trips correctly.
+fn read_gateway_section(section: &str) -> serde_json::Value {
+    gateway_config_path()
+        .and_then(|p| std::fs::read_to_string(&p).ok())
+        .and_then(|raw| toml::from_str::<toml::Value>(&raw).ok())
+        .and_then(|v| v.get(section).cloned())
+        .and_then(|s| serde_json::to_value(s).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| json!({}))
+}
+
+/// Build the `firewall` object for a live `PUT /v1/config` from the **live** gateway
+/// firewall section (read via `GET /v1/config`, so `policy` / `locked_fields` /
+/// `inspector` / operator `custom_patterns` are all present and round-trip through
+/// the full-replacement PUT untouched).
+///
+/// Two DECOUPLED effects, keyed off whether this plugin carries a config-pack:
+/// - A **pure on/off switch** (empty config-pack — the built-in `firewall` fixture)
+///   drives the GLOBAL `firewall.enabled` flag to the toggle direction. This is the
+///   ONE plugin shape allowed to arm/disarm the whole firewall.
+/// - A **pattern-pack** plugin (non-empty config-pack) contributes ONLY its
+///   `custom_patterns` (union by `name` on enable, remove-by-`name` on disable) and
+///   NEVER writes `enabled` — so removing one narrow add-on pack can never silently
+///   disarm the whole firewall (nor the patterns of every still-enabled pack). This
+///   closes the "any one firewall plugin drives the global switch" finding.
+///
+/// Every other field of the live config is preserved. Pure so the toggle logic is
+/// unit-testable without a gateway.
+fn build_firewall_patch(
+    mut firewall: serde_json::Value,
+    enabled: bool,
+    bundle: &FirewallPolicyBundle,
+) -> serde_json::Value {
+    if !firewall.is_object() {
+        firewall = json!({});
+    }
+    // A pattern-pack plugin (carries its own `custom_patterns`) contributes only
+    // patterns; a pure switch (empty pack) owns the global `enabled` flag. They are
+    // mutually exclusive by construction, so `is_pattern_pack` cleanly selects which
+    // effect this toggle applies.
+    let is_pattern_pack = !bundle.custom_patterns.is_empty();
+    let obj = firewall.as_object_mut().expect("object");
+    if !is_pattern_pack {
+        obj.insert("enabled".to_owned(), json!(enabled));
+    }
+
+    // The names contributed by this pack — dropped first (idempotent re-apply /
+    // clean removal), then re-added only when enabling.
+    let pack_names: std::collections::HashSet<String> = bundle
+        .custom_patterns
+        .iter()
+        .filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(str::to_owned))
+        .collect();
+
+    let mut patterns: Vec<serde_json::Value> = obj
+        .get("custom_patterns")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    patterns.retain(|p| {
+        !p.get("name")
+            .and_then(|n| n.as_str())
+            .is_some_and(|n| pack_names.contains(n))
+    });
+    if enabled {
+        patterns.extend(bundle.custom_patterns.iter().cloned());
+    }
+    obj.insert("custom_patterns".to_owned(), json!(patterns));
+    firewall
+}
+
+/// Build the `routing` object for a live `PUT /v1/config`: force
+/// `smart_routing.enabled` to the toggle direction, preserving every other routing
+/// field (model_map, fallback_chain, the rest of smart_routing). Pure.
+fn build_routing_patch(mut routing: serde_json::Value, enabled: bool) -> serde_json::Value {
+    if !routing.is_object() {
+        routing = json!({});
+    }
+    let obj = routing.as_object_mut().expect("object");
+    let smart = obj
+        .entry("smart_routing")
+        .or_insert_with(|| json!({}));
+    if !smart.is_object() {
+        *smart = json!({});
+    }
+    smart
+        .as_object_mut()
+        .expect("object")
+        .insert("enabled".to_owned(), json!(enabled));
+    routing
+}
+
+/// Whether a gateway policy type still needs a process **respawn** to take effect,
+/// vs the live config-push path. Only `compression` does: its config is env-only
+/// (`GATEWAY_COMPRESSION_*`, not in the gateway's `ConfigPatch`), so it rides the
+/// spawn-env → respawn path. `firewall` and `routing` are hot-swapped via
+/// `PUT /v1/config` (no respawn), closing the Round-A "toggle doesn't take effect
+/// remotely" gap. Pure so the respawn-vs-push split is unit-testable.
+fn policy_requires_respawn(policy_type: &str) -> bool {
+    matches!(policy_type, "compression")
+}
+
+/// Push one live `PUT /v1/config` section to the RUNNING gateway through the single
+/// shared [`crate::sidecar::gateway::push_config`] transport, logging the outcome. A
+/// push failure (gateway unreachable / non-2xx) is logged, not fatal — the toggle's
+/// process-global flag is already set, so the change still lands on the next spawn.
+async fn push_gateway_policy_section(
+    client: &reqwest::Client,
+    section: &str,
+    patch: &serde_json::Value,
+) {
+    match crate::sidecar::gateway::push_config(client, patch).await {
+        Ok((status, _)) if status.is_success() => {
+            tracing::info!("gateway: {section} policy pushed live via PUT /v1/config (no respawn)");
+        }
+        Ok((status, body)) => {
+            tracing::warn!("gateway: {section} policy push returned {status}: {body}");
+        }
+        Err(e) => {
+            tracing::warn!("gateway: {section} policy push failed: {e}");
+        }
+    }
+}
+
 /// Apply a manifest's **policy** runtime side effects (the async work the sync
 /// [`RunnableRegistry`] Policy handler cannot do — it stays validate-only per the
 /// Core-vs-Gateway rule). Dispatches on each `Policy` runnable's `policy_type`.
 ///
 /// `enabled` selects direction (true on plugin-enable, false on plugin-disable).
-/// Each arm only flips the policy's **active state** (a process-global flag) and,
-/// where needed, runs the local side effect (start/stop the headroom proxy); the
-/// rich policy *definition* (firewall pattern set, routing model_map) stays in
-/// the gateway's `/v1/config`. A `gateway.refresh()` respawns the gateway once at
-/// the end (batched) so `gateway_spawn_env` re-reads every flipped flag. An
-/// unknown `policy_type` is a logged no-op, never a panic. All steps are
-/// best-effort and logged.
 ///
-/// Arms:
-/// - `compression` — headroom egress compression (flag + proxy start/stop).
-/// - `firewall` — force the gateway firewall on (flag only; gateway enforces).
-/// - `routing` — force smart (classifier) routing on (flag only).
-/// - `sandbox` — Core wasmtime sandbox availability (in-process flag, no gateway).
-/// - `predict` — system-wide predictive typing on/off (Core-local flag, no gateway).
+/// Two distinct mechanisms, per the gateway's config surface:
+/// - **live config-push** (`firewall`, `routing`): the toggle (and, for firewall,
+///   its config-pack pattern set) is pushed to the RUNNING gateway via the shared
+///   `PUT /v1/config` transport ([`crate::sidecar::gateway::push_config`]), which
+///   hot-swaps with **no respawn** and works for a remote gateway too. Each arm
+///   still flips the process-global flag ([`set_firewall_enabled`] etc.) so the
+///   INITIAL spawn env is correct across a Core restart — but the runtime toggle no
+///   longer respawns.
+/// - **respawn** (`compression`): env-only config (`GATEWAY_COMPRESSION_*`, not in
+///   the gateway's `ConfigPatch`), so it flips the flag + runs the local proxy
+///   side effect and a batched `gateway.refresh()` re-reads `gateway_spawn_env`.
+///
+/// `sandbox` / `predict` are Core-local (no gateway). Unknown `policy_type` is a
+/// logged no-op. All steps are best-effort and logged.
 async fn apply_policy(
     state: &ServerState,
     manifest: &crate::plugin_manifest::PluginManifest,
     enabled: bool,
-) {
+) -> PolicyApplyOutcome {
     let policies = manifest_policies(manifest);
     if policies.is_empty() {
-        return;
+        return PolicyApplyOutcome::default();
     }
 
+    // Respawn only for env-only policies (compression). Live config-push patches
+    // accumulate here as (section-label, `PUT /v1/config` body) and are sent after
+    // the loop, before any respawn. `firewall` is the exception: it fetches the LIVE
+    // gateway config and pushes INLINE (per policy) so that two firewall policies in
+    // one manifest compose correctly — the second read-modify-write sees the first's
+    // patterns already applied, instead of both racing off one stale pre-loop
+    // snapshot. `outcome` is declared here (not after the loop) so the inline
+    // firewall push can record that the gateway was touched.
     let mut gateway_dirty = false;
+    let mut config_pushes: Vec<(&'static str, serde_json::Value)> = Vec::new();
+    let mut outcome = PolicyApplyOutcome::default();
 
     for policy in &policies {
         match policy.policy_type.as_str() {
             "compression" => {
-                // Data-drive the compression service from the policy `definition`
-                // (url/token/timeout_ms/min_messages/service) rather than a
-                // hardcoded URL, so any compression plugin — not just the bundled
-                // `headroom` — works by pointing at its own `/v1/compress`
-                // service. The gateway transform (`compression.rs`) is the generic
-                // protocol host; the *service* is the plugin (MCP-style split).
+                // ── THE PROTOCOL-HOST SEAM ──────────────────────────────────────
+                // The second gateway-plugin extension shape (distinct from the
+                // firewall/routing config-pack live-push above): the gateway HOSTS a
+                // protocol (here the egress-compression transform in
+                // `apps/gateway/src/.../compression.rs`) and the plugin is an
+                // EXTERNAL HTTP SERVICE the gateway calls. A policy plugin declares
+                // its service endpoint in the policy `definition`
+                // (url/token/timeout_ms/min_messages/service); Core data-drives the
+                // gateway to call it, hardcoding no URL — so any compression plugin,
+                // not just the bundled `headroom`, works by pointing at its own
+                // `/v1/compress` service (an MCP-style host/service split). This is
+                // the defined extension point future provider/protocol plugins (and
+                // the later WASM round) build on; it stays respawn-driven only
+                // because the compression wiring is env-only (`GATEWAY_COMPRESSION_*`,
+                // not in the gateway's `ConfigPatch`).
                 if enabled {
                     crate::sidecar::headroom::set_compression_policy(
                         crate::sidecar::headroom::CompressionPolicy::from_definition(
@@ -6944,12 +9280,56 @@ async fn apply_policy(
                 gateway_dirty = true;
             }
             "firewall" => {
-                crate::sidecar::gateway_policy::set_firewall_enabled(enabled);
-                gateway_dirty = true;
+                // Keep the flag: it seeds `gateway_spawn_env` so the INITIAL spawn
+                // (and any compression-triggered respawn) boots with the firewall
+                // forced on/off. The RUNTIME effect now comes from a live push.
+                //
+                // Only the pure on/off switch (empty config-pack) seeds the global
+                // spawn-env flag; a pattern-pack plugin must not flip the global
+                // switch (same decoupling as `build_firewall_patch`), else disabling
+                // one pack would force the firewall off at the next spawn.
+                let bundle = FirewallPolicyBundle::from_definition(&policy.definition);
+                if bundle.custom_patterns.is_empty() {
+                    crate::sidecar::gateway_policy::set_firewall_enabled(enabled);
+                }
+                // Read-modify-write the LIVE gateway firewall section (GET
+                // /v1/config), not Core's local toml — Core has no copy of a REMOTE
+                // gateway's config, and a full-replacement firewall PUT built from an
+                // empty section would silently reset `policy` to warn-only and wipe
+                // `locked_fields`/`inspector`/operator patterns (a firewall bypass).
+                // Fail CLOSED: if the live config can't be read (or carries no
+                // firewall object), we DO NOT push a reconstructed/defaulted section
+                // — the flag above still lands the change on the next spawn.
+                match crate::sidecar::gateway::fetch_config(&state.client).await {
+                    Ok(cfg) => match cfg.get("firewall") {
+                        Some(live_fw) if live_fw.is_object() => {
+                            let firewall =
+                                build_firewall_patch(live_fw.clone(), enabled, &bundle);
+                            outcome.gateway_touched = true;
+                            push_gateway_policy_section(
+                                &state.client,
+                                "firewall",
+                                &json!({ "firewall": firewall }),
+                            )
+                            .await;
+                        }
+                        _ => tracing::warn!(
+                            "gateway: firewall policy toggle skipped — live GET /v1/config \
+                             carried no firewall object; NOT pushing a defaulted firewall \
+                             (would clobber enforcement). The flag is set for the next spawn."
+                        ),
+                    },
+                    Err(e) => tracing::warn!(
+                        "gateway: firewall policy toggle skipped — could not read the live \
+                         gateway config ({e}); NOT pushing (avoids clobbering enforcement). \
+                         The flag is set for the next spawn."
+                    ),
+                }
             }
             "routing" => {
                 crate::sidecar::gateway_policy::set_routing_enabled(enabled);
-                gateway_dirty = true;
+                let routing = build_routing_patch(read_gateway_section("routing"), enabled);
+                config_pushes.push(("routing", json!({ "routing": routing })));
             }
             "sandbox" => {
                 // The wasmtime sandbox is a Core-local tool, not a gateway feature
@@ -6973,12 +9353,72 @@ async fn apply_policy(
         }
     }
 
-    // Respawn the gateway ONCE if any flipped flag affects gateway spawn-env
-    // (the routing/config "takes effect on next gateway restart" pattern). Batched
-    // so enabling several gateway policies at once is one refresh, not N.
+    // 1. Live config-push for the deferred hot-swappable policies (routing). This
+    //    reconfigures the RUNNING gateway — local OR remote — with no respawn, so
+    //    in-flight requests, rate-limit windows, and caches survive. (Firewall was
+    //    already pushed inline above, off a fresh live GET.) A push failure is logged
+    //    by the shared helper; the flag is still set, so the change lands on the next
+    //    spawn.
+    for (section, patch) in config_pushes {
+        outcome.gateway_touched = true;
+        push_gateway_policy_section(&state.client, section, &patch).await;
+    }
+
+    // 2. Respawn the gateway ONCE for env-only policies (compression). Batched so
+    //    enabling several respawn policies at once is one refresh, not N.
     if gateway_dirty {
-        if let Err(e) = state.gateway.refresh().await {
-            tracing::warn!("gateway: refresh after policy change failed: {e}");
+        outcome.gateway_touched = true;
+        match state.gateway.refresh().await {
+            // Core-managed gateway respawned with the new policy env — reconfigured.
+            Ok(true) => {}
+            // Externally managed (RYU_GATEWAY_MANAGED=0): the compression flag
+            // flipped in Core's memory, but the RUNNING gateway was NOT
+            // reconfigured (its config is env-only, so there is no live push to fall
+            // back on). Surface this so the enable/disable response tells the caller
+            // a manual restart is required rather than lying that it took effect.
+            Ok(false) => {
+                outcome.gateway_externally_managed = true;
+                tracing::warn!(
+                    "gateway: a compression policy flag changed but the gateway is externally \
+                     managed (RYU_GATEWAY_MANAGED=0); the running gateway was NOT reconfigured — \
+                     a manual gateway restart is required for the change to take effect"
+                );
+            }
+            Err(e) => {
+                tracing::warn!("gateway: refresh after policy change failed: {e}");
+            }
+        }
+    }
+    outcome
+}
+
+/// What [`apply_policy`] did with respect to the **gateway** — threaded up through
+/// [`activate_plugin`]/[`deactivate_plugin`] so the enable/disable/uninstall
+/// handlers can tell the client the truth about whether a gateway-enforced policy
+/// (firewall/routing/compression) actually took effect.
+#[derive(Debug, Clone, Copy, Default)]
+struct PolicyApplyOutcome {
+    /// A gateway-affecting policy was applied this call (a live config-push for
+    /// firewall/routing, or a respawn for compression). `false` means no
+    /// firewall/routing/compression policy was in this manifest and the gateway was
+    /// never touched.
+    gateway_touched: bool,
+    /// A **respawn-only** (compression) policy changed but the gateway is externally
+    /// managed (RYU_GATEWAY_MANAGED=0), so the running gateway was NOT reconfigured
+    /// and the control is a no-op until a manual restart. Never set by the
+    /// firewall/routing arms, which hot-swap live via PUT /v1/config (they reach a
+    /// remote gateway directly).
+    gateway_externally_managed: bool,
+}
+
+impl PolicyApplyOutcome {
+    /// Fold another plugin's outcome in (an enable/disable can touch several
+    /// plugins; if any of them left the gateway un-reconfigured, the whole call did).
+    fn merge(self, other: Self) -> Self {
+        Self {
+            gateway_touched: self.gateway_touched || other.gateway_touched,
+            gateway_externally_managed: self.gateway_externally_managed
+                || other.gateway_externally_managed,
         }
     }
 }
@@ -7146,6 +9586,15 @@ struct SetGrantsBody {
 /// [`crate::plugins::lifecycle::set_app_grants`], which escalation-guards against
 /// the manifest's declared set, re-validates through the Gateway, and refuses on a
 /// disabled app (no backdoor enable). Returns the new approved set.
+#[utoipa::path(
+    post,
+    path = "/api/plugins/{id}/grants",
+    tag = "Plugins",
+    summary = "Set a plugin's permission grants",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn set_app_grants_handler(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -7176,11 +9625,12 @@ async fn set_app_grants_handler(
             "approved_grants": record.approved_grants,
         }))
         .into_response(),
-        Err(EnableError::GrantsDenied { denied }) => (
+        Err(EnableError::GrantsDenied { plugin, denied }) => (
             StatusCode::FORBIDDEN,
             Json(json!({
                 "success": false,
                 "error": "Gateway denied one or more grants",
+                "plugin": plugin,
                 "denied_grants": denied,
             })),
         )
@@ -7191,6 +9641,19 @@ async fn set_app_grants_handler(
                 "success": false,
                 "error": "Gateway unreachable; grant update fails closed",
                 "reason": reason,
+            })),
+        )
+            .into_response(),
+        // Unreachable in practice: editing the grants of an ALREADY-enabled plugin
+        // never resolves the dependency graph (that happens on enable). Handled
+        // explicitly rather than with a catch-all so a future `set_app_grants` that
+        // does touch the graph cannot silently fall through to the wrong status.
+        Err(EnableError::Dependency(e)) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "success": false,
+                "error": e.to_string(),
+                "dependency_error": e,
             })),
         )
             .into_response(),
@@ -7206,107 +9669,356 @@ async fn set_app_grants_handler(
     path = "/api/plugins/{id}/disable",
     tag = "Plugins",
     summary = "Disable a plugin",
-    params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
+    params(
+        ("id" = String, Path),
+        ("cascade" = Option<bool>, Query,
+         description = "Also disable every enabled plugin that depends on this one \
+                        (reverse-topological order). Default false: a disable that \
+                        would break a dependent is refused with 409 and the blockers \
+                        named in `dependency_error.dependents`."),
+    ),
+    responses(
+        (status = 200, description = "OK", body = serde_json::Value),
+        (status = 404, description = "Plugin is not installed"),
+        (status = 409, description = "Enabled plugins depend on this one; retry with ?cascade=true"),
+    )
 )]
 async fn disable_app_handler(
     State(state): State<ServerState>,
     Path(id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<DisableAppParams>,
 ) -> axum::response::Response {
-    match crate::plugins::lifecycle::disable_app(&state.app_store, &id).await {
-        Ok(record) => {
-            // Deactivate the app's runtime contributions — the symmetric
-            // counterpart of `build_runnable_registry` (#444). Each kind enable
-            // registers is now torn down on disable, so a disabled plugin's
-            // Runnables stop being listable/callable instead of lingering:
-            //   - Tool     → unregister the app__<slug> MCP tool.
-            //   - Agent    → delete the app__<id> agent record.
-            //   - Workflow → delete the app__<id> workflow.
-            //   - Policy   → flip the gateway/sandbox policy flag OFF (apply_policy).
-            // Deletes are strictly namespaced on the `app__` prefix (the same
-            // prefix enable mints) so a user agent/workflow can never be removed.
-            if let Some(manifest) = find_manifest(&state, &id).await {
-                for entry in &manifest.runnables {
-                    match entry.kind {
-                        crate::runnable::RunnableKind::Tool => {
-                            if let Some(cfg) = entry.config.as_ref().and_then(|v| {
-                                serde_json::from_value::<
-                                    crate::plugin_manifest::schema::ToolConfig,
-                                >(v.clone())
-                                .ok()
-                            }) {
-                                state.mcp.unregister_app_tool(&format!("app__{}", cfg.slug));
-                            }
-                        }
-                        crate::runnable::RunnableKind::Agent => {
-                            let agent_id = format!("app__{}", entry.id);
-                            if let Err(e) = state.agent_store.delete(&agent_id).await {
-                                tracing::warn!(
-                                    "plugin disable: removing agent '{agent_id}' failed: {e}"
-                                );
-                            }
-                        }
-                        crate::runnable::RunnableKind::Workflow => {
-                            let wf_id = format!("app__{}", entry.id);
-                            if let Err(e) = crate::workflow::store::delete_workflow(&wf_id) {
-                                tracing::warn!(
-                                    "plugin disable: removing workflow '{wf_id}' failed: {e}"
-                                );
-                            }
-                        }
-                        crate::runnable::RunnableKind::Skill => {
-                            // Skill ids use `app__<skill_id>` (from SkillConfig),
-                            // not `app__<entry.id>`, so resolve the skill_id.
-                            if let Some(cfg) = entry.config.as_ref().and_then(|v| {
-                                serde_json::from_value::<
-                                    crate::plugin_manifest::schema::SkillConfig,
-                                >(v.clone())
-                                .ok()
-                            }) {
-                                state
-                                    .skills
-                                    .unregister_app_skill(&format!("app__{}", cfg.skill_id));
-                            }
-                        }
-                        crate::runnable::RunnableKind::Engine => {
-                            state
-                                .app_contrib
-                                .unregister_engine(&format!("app__{}", entry.id));
-                        }
-                        crate::runnable::RunnableKind::Channel => {
-                            state
-                                .app_contrib
-                                .unregister_channel(&format!("app__{}", entry.id));
-                        }
-                        crate::runnable::RunnableKind::Companion => {
-                            state
-                                .app_contrib
-                                .unregister_companion(&format!("app__{}", entry.id));
-                        }
-                        // Policy is handled by apply_policy below (one batched pass).
-                        crate::runnable::RunnableKind::Policy => {}
-                    }
+    use crate::plugins::lifecycle::{disable_app, DisableError};
+
+    let all_manifests: Vec<crate::plugin_manifest::PluginManifest> =
+        state.app_manifests.read().await.clone();
+
+    match disable_app(&state.app_store, &id, &all_manifests, params.cascade, params.force).await {
+        Ok(outcome) => {
+            // Deactivate every plugin this call disabled, in disable order
+            // (dependents first, the target last) — so a dependent is never left
+            // running for even an instant against a torn-down dependency.
+            let mut disabled_ids: Vec<String> = Vec::new();
+            let mut policy_outcome = PolicyApplyOutcome::default();
+            for record in &outcome.disabled {
+                if let Some(manifest) = all_manifests.iter().find(|m| m.id == record.id) {
+                    policy_outcome = policy_outcome.merge(deactivate_plugin(&state, manifest).await);
                 }
-                // Symmetric to enable: each Policy runnable (compression / firewall
-                // / routing / sandbox) is turned back OFF.
-                apply_policy(&state, &manifest, false).await;
-                // Symmetric to enable: stop + deregister the plugin's managed
-                // sidecars so a disabled plugin's process stops instead of lingering
-                // (the app ⇄ sidecar bridge teardown). Stop is ungated.
-                apply_sidecars(&state, &manifest, &[], false).await;
+                disabled_ids.push(record.id.clone());
             }
-            Json(json!({ "success": true, "app": record })).into_response()
+            let mut body = json!({
+                "success": true,
+                "app": outcome.target(),
+                // Every plugin disabled by this call (the target plus, when
+                // `?cascade=true`, its dependents), in disable order.
+                "disabled": disabled_ids,
+            });
+            // If disabling flipped a gateway policy OFF but the gateway is externally
+            // managed, the running gateway was NOT reconfigured — say so.
+            attach_gateway_policy_notice(&mut body, policy_outcome);
+            Json(body).into_response()
         }
-        Err(e) => {
-            let msg = e.to_string();
-            let status = if msg.contains("not installed") {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            json_error(status, msg)
+        Err(DisableError::NotInstalled { id }) => {
+            json_error(StatusCode::NOT_FOUND, format!("app '{id}' is not installed"))
+        }
+        // Load-bearing plugin (engines/durable): disabling it breaks a core function
+        // every install relies on, so it is refused unless `?force=true`. 409 with a
+        // stable machine code so the desktop can render a "force disable?" prompt.
+        Err(DisableError::LoadBearing { id }) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "success": false,
+                "error": format!(
+                    "app '{id}' is load-bearing and cannot be disabled without force"
+                ),
+                "code": "load_bearing",
+                "hint": "retry with ?force=true to disable anyway (this breaks a core function)",
+            })),
+        )
+            .into_response(),
+        // Other ENABLED plugins depend on this one. Refuse (the default) with the
+        // typed blast radius so the desktop can render "Disable Meetings,
+        // Whiteboard, Canvas first" — or re-issue with `?cascade=true`.
+        Err(DisableError::Dependency(e)) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "success": false,
+                "error": e.to_string(),
+                "dependency_error": e,
+            })),
+        )
+            .into_response(),
+        Err(DisableError::Other(e)) => {
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         }
     }
+}
+
+/// Query params for `POST /api/plugins/:id/disable`.
+#[derive(serde::Deserialize, Default)]
+struct DisableAppParams {
+    /// When `true`, also disable every ENABLED plugin that depends on this one
+    /// (in reverse-topological order, deepest dependent first).
+    ///
+    /// Defaults to `false`: a disable that would break a dependent is REFUSED
+    /// (409) with the blockers named, rather than silently cascading. Destroying
+    /// state the user did not ask to destroy is the worse failure, so the cascade
+    /// is an explicit opt-in.
+    #[serde(default)]
+    cascade: bool,
+    /// When `true`, override the load-bearing guard and disable a core plugin
+    /// (`engines`/`durable`) anyway. Defaults to `false`: disabling one of these
+    /// breaks a core function (local chat engine / durable workflow execution), so
+    /// it is refused (409, `code: "load_bearing"`) unless explicitly forced.
+    #[serde(default)]
+    force: bool,
+}
+
+/// Query params for `POST /api/plugins/:id/uninstall`.
+#[derive(serde::Deserialize, Default)]
+struct UninstallAppParams {
+    /// When `true`, disable every ENABLED plugin that depends on this one before
+    /// removing the target (reverse-topological order). Defaults to `false`: an
+    /// uninstall blocked by an enabled dependent is REFUSED (409) with the blockers
+    /// named — the same posture as the disable cascade.
+    #[serde(default)]
+    cascade: bool,
+}
+
+/// `POST /api/plugins/:id/uninstall` — disable the plugin (and, with
+/// `?cascade=true`, its enabled dependents), tear down its runtime contributions,
+/// then remove its lifecycle record.
+///
+/// # Semantics
+///
+/// Auto-disable-then-remove (see [`crate::plugins::lifecycle::uninstall_app`]):
+/// uninstalling first tears the plugin down through the same path a manual disable
+/// takes (reusing [`deactivate_plugin`]'s per-`RunnableKind` teardown + sidecar
+/// stop + policy-off), then deletes the record.
+///
+/// # Refusals
+///
+/// - **Built-in / default-on plugins** → 409 `code: "built_in"`. Their manifest is
+///   compiled into the binary and the startup seed would resurrect a removed
+///   default-on record, so they can only be disabled, never uninstalled — matching
+///   how `SystemAppCard` already offers no uninstall.
+/// - **Enabled dependents** → 409 with `dependency_error.dependents`, unless
+///   `?cascade=true`.
+#[utoipa::path(
+    post,
+    path = "/api/plugins/{id}/uninstall",
+    tag = "Plugins",
+    summary = "Uninstall a plugin (disable + remove its record)",
+    params(
+        ("id" = String, Path),
+        ("cascade" = Option<bool>, Query,
+         description = "Also disable every enabled plugin that depends on this one \
+                        before removing it. Default false: an uninstall blocked by a \
+                        dependent is refused with 409."),
+    ),
+    responses(
+        (status = 200, description = "OK", body = serde_json::Value),
+        (status = 404, description = "Plugin is not installed"),
+        (status = 409, description = "Built-in (cannot uninstall) or has enabled dependents"),
+    )
+)]
+async fn uninstall_app_handler(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<UninstallAppParams>,
+) -> axum::response::Response {
+    use crate::plugins::lifecycle::{uninstall_app, UninstallError};
+
+    let all_manifests: Vec<crate::plugin_manifest::PluginManifest> =
+        state.app_manifests.read().await.clone();
+
+    match uninstall_app(&state.app_store, &id, &all_manifests, params.cascade).await {
+        Ok(outcome) => {
+            // Tear down every plugin the uninstall disabled, in disable order
+            // (dependents first, target last) — reusing the SAME per-RunnableKind
+            // teardown a disable runs. The record was already removed by
+            // `uninstall_app`; `deactivate_plugin` operates on the in-memory
+            // manifest + subsystems, not the store row, so the order is safe.
+            let mut policy_outcome = PolicyApplyOutcome::default();
+            for record in &outcome.disabled {
+                if let Some(manifest) = all_manifests.iter().find(|m| m.id == record.id) {
+                    policy_outcome = policy_outcome.merge(deactivate_plugin(&state, manifest).await);
+                }
+            }
+            // ONE plugin model: uninstalling a synth MCP-server record must also
+            // remove its `~/.ryu/mcp.json` entry, else the server keeps running and
+            // its tools stay listed/callable — a misleading Uninstall that removed
+            // only the governance record. `deactivate_plugin` above already cleared
+            // the enabled flag; this drops the entry outright. Best-effort + a
+            // no-op for every non-MCP-server manifest.
+            if let Some(manifest) = all_manifests.iter().find(|m| m.id == outcome.removed) {
+                sync_mcp_entry_for_record(&state, manifest, McpEntryMutation::Remove).await;
+            }
+            // Complete the on-disk teardown for the removed target. `uninstall_app`
+            // dropped only the lifecycle row; the disk-backed Community plugins that
+            // are the ONLY things this path reaches (built-ins are refused earlier)
+            // still have their `<plugins_dir>/<id>/plugin.json` on disk and their
+            // manifest in `state.app_manifests`. Without this, `list_apps` keeps
+            // showing the plugin (installed:false), the orphan `plugin.json` survives
+            // reboot, and a reinstall hits the `app_manifests` duplicate guard and
+            // 409s. Mirror `rollback_plugin_install`'s dir-removal + reload (the
+            // store row is already gone, so we skip its `store.remove`). The id is
+            // re-validated before it is used as a path component, and the removal is
+            // `exists()`-guarded (a no-op for any compiled-in built-in without a dir).
+            if crate::plugin_manifest::validate_plugin_id(&outcome.removed).is_ok() {
+                let plugin_dir = crate::plugin_manifest::PluginManifestLoader::plugins_dir()
+                    .join(&outcome.removed);
+                if plugin_dir.exists() {
+                    if let Err(e) = tokio::fs::remove_dir_all(&plugin_dir).await {
+                        tracing::warn!(
+                            plugin = %outcome.removed,
+                            "uninstall: failed to remove plugin directory: {e}"
+                        );
+                    }
+                }
+                reload_manifests_inner(&state).await;
+            } else {
+                tracing::warn!(
+                    plugin = %outcome.removed,
+                    "uninstall: skipping on-disk teardown for a plugin with an invalid id"
+                );
+            }
+            let disabled_ids: Vec<String> =
+                outcome.disabled.iter().map(|r| r.id.clone()).collect();
+            let mut body = json!({
+                "success": true,
+                "removed": outcome.removed,
+                // Plugins disabled as part of the uninstall (the target plus, under
+                // `?cascade=true`, its dependents). Cascaded dependents stay
+                // installed-but-disabled; only the target's record is removed.
+                "disabled": disabled_ids,
+            });
+            attach_gateway_policy_notice(&mut body, policy_outcome);
+            Json(body).into_response()
+        }
+        Err(UninstallError::NotInstalled { id }) => {
+            json_error(StatusCode::NOT_FOUND, format!("app '{id}' is not installed"))
+        }
+        // Built-in / default-on: can only be disabled. 409 with a stable machine
+        // code so the desktop renders a "disable instead" affordance.
+        Err(UninstallError::Protected { id }) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "success": false,
+                "error": format!(
+                    "app '{id}' is a built-in and can only be disabled, not uninstalled"
+                ),
+                "code": "built_in",
+                "hint": "built-in plugins ship in the binary; disable it instead of uninstalling",
+            })),
+        )
+            .into_response(),
+        // Enabled dependents block the uninstall — same typed blast radius a disable
+        // uses; retry with `?cascade=true`.
+        Err(UninstallError::Dependency(e)) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "success": false,
+                "error": e.to_string(),
+                "dependency_error": e,
+            })),
+        )
+            .into_response(),
+        Err(UninstallError::Other(e)) => {
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    }
+}
+
+/// Tear down every runtime contribution of one plugin — the symmetric
+/// counterpart of [`activate_plugin`] (#444).
+///
+/// The single definition of "what disabling a plugin *does*" beyond flipping its
+/// bit. `disable_app_handler` runs it once per plugin in the resolved disable
+/// order (the target plus, under `?cascade=true`, its dependents), so a cascaded
+/// dependent is torn down exactly as if the user had disabled it by hand.
+///
+/// Each kind enable registers is torn down here, so a disabled plugin's Runnables
+/// stop being listable/callable instead of lingering:
+///   - Tool     → unregister the `app__<slug>` MCP tool.
+///   - Agent    → delete the `app__<id>` agent record.
+///   - Workflow → delete the `app__<id>` workflow.
+///   - Policy   → flip the gateway/sandbox policy flag OFF (`apply_policy`).
+///
+/// Deletes are strictly namespaced on the `app__` prefix (the same prefix enable
+/// mints) so a user agent/workflow can never be removed.
+async fn deactivate_plugin(
+    state: &ServerState,
+    manifest: &crate::plugin_manifest::PluginManifest,
+) -> PolicyApplyOutcome {
+    for entry in &manifest.runnables {
+        match entry.kind {
+            crate::runnable::RunnableKind::Tool => {
+                if let Some(cfg) = entry.config.as_ref().and_then(|v| {
+                    serde_json::from_value::<crate::plugin_manifest::schema::ToolConfig>(v.clone())
+                        .ok()
+                }) {
+                    state.mcp.unregister_app_tool(&format!("app__{}", cfg.slug));
+                }
+            }
+            crate::runnable::RunnableKind::Agent => {
+                let agent_id = format!("app__{}", entry.id);
+                if let Err(e) = state.agent_store.delete(&agent_id).await {
+                    tracing::warn!("plugin disable: removing agent '{agent_id}' failed: {e}");
+                }
+            }
+            crate::runnable::RunnableKind::Workflow => {
+                let wf_id = format!("app__{}", entry.id);
+                if let Err(e) = crate::workflow::store::delete_workflow(&wf_id) {
+                    tracing::warn!("plugin disable: removing workflow '{wf_id}' failed: {e}");
+                }
+            }
+            crate::runnable::RunnableKind::Skill => {
+                // Skill ids use `app__<skill_id>` (from SkillConfig), not
+                // `app__<entry.id>`, so resolve the skill_id.
+                if let Some(cfg) = entry.config.as_ref().and_then(|v| {
+                    serde_json::from_value::<crate::plugin_manifest::schema::SkillConfig>(v.clone())
+                        .ok()
+                }) {
+                    state
+                        .skills
+                        .unregister_app_skill(&format!("app__{}", cfg.skill_id));
+                }
+            }
+            crate::runnable::RunnableKind::Engine => {
+                state
+                    .app_contrib
+                    .unregister_engine(&format!("app__{}", entry.id));
+            }
+            crate::runnable::RunnableKind::Channel => {
+                state
+                    .app_contrib
+                    .unregister_channel(&format!("app__{}", entry.id));
+            }
+            crate::runnable::RunnableKind::Companion => {
+                state
+                    .app_contrib
+                    .unregister_companion(&format!("app__{}", entry.id));
+            }
+            // Policy is handled by apply_policy below (one batched pass).
+            crate::runnable::RunnableKind::Policy => {}
+        }
+    }
+    // Symmetric to enable: each Policy runnable (compression / firewall / routing
+    // / sandbox) is turned back OFF. The outcome reports whether the gateway was
+    // actually reconfigured (vs externally managed) so the disable/uninstall
+    // response can tell the truth about a security control that flipped off.
+    let policy_outcome = apply_policy(state, manifest, false).await;
+    // Symmetric to enable: stop + deregister the plugin's managed sidecars so a
+    // disabled plugin's process stops instead of lingering (the app ⇄ sidecar
+    // bridge teardown). Stop is ungated.
+    apply_sidecars(state, manifest, &[], false).await;
+    // Symmetric to enable: disabling a synth MCP-server record clears the mcp.json
+    // `enabled` flag so the server stops being spawned/listed — the toggle is no
+    // longer a no-op against the running server. Best-effort + a no-op for every
+    // non-MCP-server manifest.
+    sync_mcp_entry_for_record(state, manifest, McpEntryMutation::SetEnabled(false)).await;
+    policy_outcome
 }
 
 /// Request body for `POST /api/apps/:id/update`.
@@ -7317,9 +10029,40 @@ struct UpdateAppBody {
     force: bool,
 }
 
-/// `POST /api/apps/:id/update` — update the installed version from the manifest.
+/// `POST /api/apps/:id/update` — update an installed plugin by **re-installing the
+/// target version from the catalog**, not by trusting the already-loaded manifest.
 ///
-/// Refuses a downgrade unless `force = true`.
+/// # Security (the gap this closes)
+///
+/// The old handler bumped the store version off `find_manifest` (the in-memory,
+/// already-loaded manifest) and called `set_version` — it never re-fetched the
+/// target version, never re-ran the ed25519 signature verify, never re-checked the
+/// `ui_code_sha256` integrity gate, and never re-checked paid entitlement. An update
+/// could therefore swap in UNVERIFIED code. This handler treats an update as a
+/// re-install of the new version:
+///
+/// 1. **Installed?** else 404.
+/// 2. **Re-verify by re-resolving** the target from the catalog via
+///    [`resolve_plugin_from_catalog`] — the SAME path `install` uses, which runs
+///    `verify_manifest_signature` (ed25519) + the fail-closed `ui_code_sha256` gate
+///    (inside `install_descriptor`) + forwards the buyer bearer for the paid
+///    entitlement check. A tampered bundle, a bad signature, an unentitled paid
+///    plugin, or an unreachable verify gateway all fail HERE — before any mutation,
+///    so the OLD version stays fully intact.
+/// 3. **Downgrade / no-op gate** ([`plan_update`]) before any mutation.
+/// 4. **Resolve + install any NEW dependencies** the new version declares, reusing
+///    the exact closure machinery `install_plugin_from_catalog` uses (rollback on
+///    partial failure), so an update that adds a dependency never leaves the plugin
+///    un-enableable.
+/// 5. **Persist**: write the new manifest to disk, then `set_version` + `set_ui_code`
+///    in the store ([`update_app`]). The store transition preserves the `enabled`
+///    bit + grants, so a disabled app stays disabled. A store failure restores the
+///    previous on-disk manifest, keeping the target transition all-or-nothing.
+///
+/// Behaviour change (intended): a plugin with no resolvable catalog entry (e.g. one
+/// side-loaded via `install-bundle` with no marketplace listing) can no longer be
+/// updated through this endpoint — the catalog re-pull is the trust boundary and is
+/// mandatory.
 #[utoipa::path(
     post,
     path = "/api/plugins/{id}/update",
@@ -7332,36 +10075,102 @@ struct UpdateAppBody {
 async fn update_app_handler(
     State(state): State<ServerState>,
     Path(id): Path<String>,
+    headers: axum::http::HeaderMap,
     body: Option<Json<UpdateAppBody>>,
 ) -> axum::response::Response {
-    use crate::plugins::lifecycle::{update_app, UpdateError};
+    use crate::plugins::lifecycle::{plan_update, update_app, UpdateError, UpdatePlan};
 
     let body = body.map(|b| b.0).unwrap_or_default();
+    let id = id.trim().to_string();
 
-    let Some(manifest) = find_manifest(&state, &id).await else {
-        return json_error(
-            StatusCode::NOT_FOUND,
-            format!("no manifest found for app '{id}'; ensure the ryu.json is loaded"),
-        );
+    // 1. Installed? Capture the record (for the downgrade gate) and the OLD manifest
+    //    bytes (to restore disk on a late store failure).
+    let record = match state.app_store.get(&id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return json_error(StatusCode::NOT_FOUND, format!("app '{id}' is not installed"))
+        }
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     };
+    let old_manifest = find_manifest(&state, &id).await;
 
-    match update_app(&state.app_store, &manifest, body.force).await {
-        Ok(record) => Json(json!({ "success": true, "app": record })).into_response(),
+    // 2. RE-VERIFY: re-resolve the target from the catalog. This runs the ed25519
+    //    signature verify + the fail-closed ui_code integrity gate + the paid
+    //    entitlement check (buyer bearer forwarded), all inside `install_descriptor`.
+    //    Nothing is mutated yet — a verify failure leaves the OLD version intact.
+    let buyer_token = buyer_bearer_from_headers(&headers);
+    let (manifest, ui_code) =
+        match resolve_plugin_from_catalog(&state, &id, buyer_token.clone()).await {
+            Ok(pair) => pair,
+            Err((status, msg)) => return json_error(status, msg),
+        };
+    if manifest.id != id {
+        return json_error(
+            StatusCode::BAD_GATEWAY,
+            format!("catalog returned manifest `{}` for `{id}`", manifest.id),
+        );
+    }
+
+    // 3. Downgrade / no-op gate BEFORE any mutation (one definition: `plan_update`).
+    match plan_update(&record.version, &manifest.version, body.force) {
+        Ok(UpdatePlan::NoOp) => {
+            return Json(json!({
+                "success": true,
+                "app": record,
+                "installed_dependencies": Vec::<String>::new(),
+            }))
+            .into_response();
+        }
+        Ok(UpdatePlan::Proceed) => {}
         Err(UpdateError::Downgrade {
             installed,
             requested,
-        }) => (
-            StatusCode::CONFLICT,
-            Json(json!({
-                "success": false,
-                "error": "downgrade refused",
-                "installed_version": installed,
-                "requested_version": requested,
-                "hint": "pass force=true to override",
-            })),
-        )
-            .into_response(),
+        }) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "success": false,
+                    "error": "downgrade refused",
+                    "installed_version": installed,
+                    "requested_version": requested,
+                    "hint": "pass force=true to override",
+                })),
+            )
+                .into_response();
+        }
         Err(UpdateError::Other(e)) => {
+            return json_error(StatusCode::UNPROCESSABLE_ENTITY, e.to_string());
+        }
+    }
+
+    // 4. Resolve + install any NEW dependencies the new version declares.
+    let installed_dependencies =
+        match install_new_dependencies_for_update(&state, &manifest, buyer_token).await {
+            Ok(deps) => deps,
+            Err((status, msg)) => return json_error(status, msg),
+        };
+
+    // 5. Persist: write the new manifest to disk, then the store transition
+    //    (version + ui_code, enabled preserved). On a store failure restore the
+    //    previous on-disk manifest so the target transition is all-or-nothing.
+    if let Err((status, msg)) = write_plugin_manifest_to_disk(&manifest).await {
+        return json_error(status, msg);
+    }
+    match update_app(&state.app_store, &manifest, ui_code.as_deref(), body.force).await {
+        Ok(updated) => {
+            reload_manifests_inner(&state).await;
+            Json(json!({
+                "success": true,
+                "app": updated,
+                "installed_dependencies": installed_dependencies,
+            }))
+            .into_response()
+        }
+        Err(e) => {
+            if let Some(old) = &old_manifest {
+                let _ = write_plugin_manifest_to_disk(old).await;
+            }
+            reload_manifests_inner(&state).await;
             let msg = e.to_string();
             let status = if msg.contains("not installed") {
                 StatusCode::NOT_FOUND
@@ -7369,6 +10178,148 @@ async fn update_app_handler(
                 StatusCode::INTERNAL_SERVER_ERROR
             };
             json_error(status, msg)
+        }
+    }
+}
+
+/// Resolve + install any dependencies the UPDATED manifest declares that are not
+/// already installed, reusing the exact closure machinery
+/// [`install_plugin_from_catalog`] uses (one resolver, one signature/ui_code gate
+/// per dependency, rollback on partial failure). The target itself is NOT installed
+/// here — it is an update, persisted separately by [`update_app`]. Returns the ids
+/// of the plugins newly installed as dependencies (empty when the new version adds
+/// none).
+async fn install_new_dependencies_for_update(
+    state: &ServerState,
+    manifest: &crate::plugin_manifest::PluginManifest,
+    buyer_token: Option<String>,
+) -> Result<Vec<String>, (StatusCode, String)> {
+    use crate::plugin_manifest::PluginManifest;
+
+    let installed: Vec<PluginManifest> = state.app_manifests.read().await.clone();
+
+    // ── Discovery: BFS over the NEW manifest's declared edges; fetch what is not
+    //    installed (installed deps are already satisfied). Each fetch goes through
+    //    the SAME verify seam as the target. The visited-set (seeded with the target
+    //    so it is never fetched as its own dependency) terminates cyclic data.
+    let mut fetched: Vec<PluginManifest> = Vec::new();
+    let mut ui_codes: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+
+    visited.insert(manifest.id.clone());
+    for dep in manifest.dependencies() {
+        queue.push_back(dep.id.clone());
+    }
+
+    while let Some(next) = queue.pop_front() {
+        if !visited.insert(next.clone()) {
+            continue;
+        }
+        if visited.len() > crate::plugins::catalog::MAX_INSTALL_CLOSURE {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "`{}` pulls in more than {} plugins; refusing the update",
+                    manifest.id,
+                    crate::plugins::catalog::MAX_INSTALL_CLOSURE
+                ),
+            ));
+        }
+
+        if let Some(m) = installed.iter().find(|m| m.id == next) {
+            // Already installed: still walk its edges so a NEW dep behind an
+            // installed one is discovered.
+            for dep in m.dependencies() {
+                if !visited.contains(&dep.id) {
+                    queue.push_back(dep.id.clone());
+                }
+            }
+            continue;
+        }
+
+        match resolve_plugin_from_catalog(state, &next, buyer_token.clone()).await {
+            Ok((m, ui_code)) => {
+                if m.id != next {
+                    return Err((
+                        StatusCode::BAD_GATEWAY,
+                        format!("catalog returned manifest `{}` for `{next}`", m.id),
+                    ));
+                }
+                if let Some(code) = ui_code {
+                    ui_codes.insert(next.clone(), code);
+                }
+                for dep in m.dependencies() {
+                    if !visited.contains(&dep.id) {
+                        queue.push_back(dep.id.clone());
+                    }
+                }
+                fetched.push(m);
+            }
+            // A dependency no source can serve is left OUT; the planner reports it as
+            // a typed MissingDependency below (naming who needs it + the version).
+            Err((_, msg)) => {
+                tracing::warn!(plugin = %next, "update dependency could not be resolved: {msg}");
+                continue;
+            }
+        }
+    }
+
+    if fetched.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // ── Plan: the pure update-closure planner (target excluded, installed
+    //    subtracted, NEW edges seen). One resolver, tested in `plugins::lifecycle`.
+    let dep_order = match crate::plugins::lifecycle::plan_update_dep_closure(
+        manifest,
+        &installed,
+        &fetched,
+    ) {
+        Ok(order) => order,
+        Err(e) => {
+            return Err((
+                StatusCode::CONFLICT,
+                format!("dependency resolution failed for `{}`: {e}", manifest.id),
+            ));
+        }
+    };
+    if dep_order.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // ── Install the new-dep closure with rollback (reuses install_closure +
+    //    persist_installed_plugin + rollback_plugin_install — the same sinks
+    //    `install_plugin_from_catalog` uses).
+    let outcome = crate::plugins::catalog::install_closure(
+        dep_order,
+        |m| {
+            let state = state.clone();
+            let ui_code = ui_codes.get(&m.id).cloned();
+            async move { persist_installed_plugin(&state, m, ui_code).await }
+        },
+        |plugin_id| {
+            let state = state.clone();
+            async move { rollback_plugin_install(&state, &plugin_id).await }
+        },
+    )
+    .await;
+
+    match outcome {
+        Ok(installed_plugins) => Ok(installed_plugins.into_iter().map(|(pid, _)| pid).collect()),
+        Err(failure) => {
+            let (status, msg) = failure.error;
+            if status != StatusCode::CONFLICT {
+                rollback_plugin_install(state, &failure.failed).await;
+            }
+            Err((
+                status,
+                format!(
+                    "dependency `{}` of `{}` failed to install: {msg}",
+                    failure.failed, manifest.id
+                ),
+            ))
         }
     }
 }
@@ -7721,6 +10672,7 @@ async fn probe_npx_package_version(pkg: &str) -> Option<String> {
             .args(&args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            .no_window()
             .output(),
     )
     .await
@@ -7749,6 +10701,7 @@ async fn warm_npx_package(pkg: &str) {
     cmd.args(&args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    cmd.no_window();
     let _ = tokio::time::timeout(std::time::Duration::from_secs(180), cmd.status()).await;
 }
 
@@ -8655,8 +11608,20 @@ fn binary_installed_on_disk(name: &str) -> bool {
     summary = "List conversations",
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-async fn list_conversations(State(state): State<ServerState>) -> axum::response::Response {
-    match state.conversations.list_conversations().await {
+async fn list_conversations(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+) -> axum::response::Response {
+    // Per-resource ACL, pushed into the SQL `WHERE` (it used to be an N+1 in this
+    // handler: one `get_access_meta` per row, each taking the store mutex). The
+    // store's predicate mirrors `resource_access` exactly, so the list gate and the
+    // row gate cannot drift.
+    let (user_id, org_id, node_bound) = tenancy_filter_args(&caller);
+    match state
+        .conversations
+        .list_conversations_visible(user_id.as_deref(), org_id.as_deref(), node_bound)
+        .await
+    {
         Ok(items) => Json(json!({ "conversations": items })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -8688,6 +11653,7 @@ struct SearchConversationsQuery {
 )]
 async fn search_conversations_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Query(params): axum::extract::Query<SearchConversationsQuery>,
 ) -> axum::response::Response {
     let query = params.q.trim();
@@ -8695,12 +11661,44 @@ async fn search_conversations_handler(
         return Json(json!({ "hits": [], "indexed": true })).into_response();
     }
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
-    match state
+
+    // Per-resource ACL. This is a SEMANTIC SEARCH ACROSS EVERY MESSAGE ON THE NODE
+    // and it was completely ungated — on a shared node any caller could type a
+    // keyword and get decrypted snippets out of every other user's chats. Scope it
+    // to the conversations this caller may read, using the `conversation_ids` filter
+    // `search_messages` already accepts. On an unbound node the id list is every
+    // conversation (unchanged behaviour); on a bound node an anonymous caller gets
+    // an empty set and therefore no hits, never a node-wide dump.
+    let (user_id, org_id, node_bound) = tenancy_filter_args(&caller);
+    let visible = match state
         .conversations
-        .search_messages(query, limit, None)
+        .visible_conversation_ids(user_id.as_deref(), org_id.as_deref(), node_bound)
         .await
     {
-        Ok(Some(hits)) => Json(json!({ "hits": hits, "indexed": true })).into_response(),
+        Ok(ids) => ids,
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    if visible.is_empty() {
+        return Json(json!({ "hits": [], "indexed": true })).into_response();
+    }
+
+    match state
+        .conversations
+        .search_messages(query, limit, Some(&visible))
+        .await
+    {
+        Ok(Some(hits)) => {
+            // Belt and braces: post-filter against the same id set, so a stale vector
+            // row (e.g. one orphaned by a re-tenanted conversation) can never leak a
+            // snippet even if the index-side filter is bypassed.
+            let allowed: std::collections::HashSet<&str> =
+                visible.iter().map(String::as_str).collect();
+            let hits: Vec<_> = hits
+                .into_iter()
+                .filter(|h| allowed.contains(h.conversation_id.as_str()))
+                .collect();
+            Json(json!({ "hits": hits, "indexed": true })).into_response()
+        }
         Ok(None) => Json(json!({ "hits": [], "indexed": false })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -8716,13 +11714,19 @@ async fn search_conversations_handler(
 )]
 async fn get_conversation(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
-    // TODO (Phase 1 realtime join): enforce read ACL here. Extract
-    // `Extension<Option<VerifiedCaller>>`, load the conversation's
-    // owner_user_id/org_id/visibility/team_id, and gate on
-    // `crate::identity_verify::can_access(...) != Access::None`. Not enforced in
-    // Phase 0 so the single-tenant flow is unchanged.
+    // Per-resource ACL: a conversation carries its own tenancy, so holding the
+    // node token is NOT enough to read someone else's chat. (There is no coarse
+    // RBAC permission for conversations — this gate is the whole check.)
+    if let Err(resp) = require_resource_read(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     match state.conversations.get_conversation_detail(&id).await {
         Ok(Some(detail)) => Json(detail).into_response(),
         Ok(None) => json_error(
@@ -8743,8 +11747,19 @@ async fn get_conversation(
 )]
 async fn delete_conversation(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
+    // Per-resource ACL: deleting is a write, so a read-only grant is refused too.
+    // Runs BEFORE the session_end hooks — a denied caller must not be able to fire
+    // another user's hooks (which snapshot that user's transcript into the event).
+    if let Err(resp) = require_resource_write(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     // SessionEnd hooks (Claude parity): fire BEFORE the delete so a hook can still
     // observe the transcript (snapshotted into `event`). Observation-only + fully
     // detached — never blocks or fails the deletion.
@@ -8810,13 +11825,28 @@ struct ForkConversationBody {
 )]
 async fn fork_conversation(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     body: Option<Json<ForkConversationBody>>,
 ) -> axum::response::Response {
+    // Per-resource ACL. Fork was the open door next to the gated `GET`: it COPIES
+    // the whole transcript into a new conversation the caller then owns and can
+    // read freely, so leaving it ungated handed out any user's history verbatim.
+    // READ on the source is the right gate (forking only reads it), and the FORKER
+    // — not the source's owner — owns the copy.
+    if let Err(resp) = require_resource_read(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     let message_id = body.and_then(|Json(b)| b.message_id);
+    // Only an org-bound node scopes rows (see `resource_access`); on a personal node
+    // the copy stays untenanted like every other row there.
     match state
         .conversations
-        .fork_conversation(&id, message_id.as_deref())
+        .fork_conversation(&id, message_id.as_deref(), caller_tenancy(&caller))
         .await
     {
         Ok(Some(summary)) => (
@@ -8855,9 +11885,17 @@ struct EditMessageBody {
 )]
 async fn edit_message_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((id, message_id)): axum::extract::Path<(String, String)>,
     Json(body): Json<EditMessageBody>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_resource_write(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     match state
         .conversations
         .edit_user_message(&id, &message_id, &body.content)
@@ -8887,8 +11925,16 @@ async fn edit_message_handler(
 )]
 async fn regenerate_message_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((id, message_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_resource_write(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     match state
         .conversations
         .prepare_regenerate(&id, &message_id)
@@ -8919,8 +11965,16 @@ async fn regenerate_message_handler(
 )]
 async fn select_version_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((id, message_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_resource_write(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     match state.conversations.select_version(&id, &message_id).await {
         Ok(Some(leaf)) => Json(json!({ "ok": true, "leaf_message_id": leaf })).into_response(),
         Ok(None) => json_error(
@@ -8961,9 +12015,19 @@ struct MessageFeedbackBody {
 )]
 async fn set_message_feedback_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((id, message_id)): axum::extract::Path<(String, String)>,
     Json(body): Json<MessageFeedbackBody>,
 ) -> axum::response::Response {
+    // A vote mutates the message row AND feeds the learning/reward sinks, so it is
+    // a write on the conversation.
+    if let Err(resp) = require_resource_write(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     // Normalize the rating: only "up"/"down" set a vote; anything else clears it.
     let rating = match body.rating.as_deref().map(str::trim) {
         Some("up") => Some("up"),
@@ -9036,8 +12100,16 @@ async fn set_message_feedback_handler(
 )]
 async fn get_conversation_feedback_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_resource_read(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     match state.conversations.list_feedback(&id).await {
         Ok(pairs) => {
             let map: serde_json::Map<String, serde_json::Value> = pairs
@@ -9069,9 +12141,17 @@ struct SetFlagBody {
 )]
 async fn set_conversation_pinned_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<SetFlagBody>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_resource_write(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     match state.conversations.set_pinned(&id, body.value).await {
         Ok(()) => Json(json!({ "ok": true, "pinned": body.value })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -9092,9 +12172,17 @@ async fn set_conversation_pinned_handler(
 )]
 async fn set_conversation_archived_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<SetFlagBody>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_resource_write(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     match state.conversations.set_archived(&id, body.value).await {
         Ok(()) => Json(json!({ "ok": true, "archived": body.value })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -9122,9 +12210,17 @@ struct SetTitleBody {
 )]
 async fn set_conversation_title_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<SetTitleBody>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_resource_write(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     let title = body.title.trim();
     if title.is_empty() {
         return json_error(
@@ -9527,8 +12623,17 @@ struct BtwBody {
 
 /// `POST /api/btw` — answer an ephemeral side question against the conversation
 /// context. Stateless: Core persists nothing. Returns `{ answer, model }`.
+#[utoipa::path(
+    post,
+    path = "/api/btw",
+    tag = "Chat",
+    summary = "Ask a side question (`/btw`) over a conversation",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn btw_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<BtwBody>,
 ) -> axum::response::Response {
     let question = body.question.trim();
@@ -9537,6 +12642,13 @@ async fn btw_handler(
             StatusCode::BAD_REQUEST,
             "a side question is required".to_string(),
         );
+    }
+    // Per-resource ACL: `/btw` loads the conversation's stored transcript as context
+    // and persists the aside back onto it — a read AND a write of that thread.
+    if let Some(cid) = body.conversation_id.as_deref().filter(|s| !s.is_empty()) {
+        if let Err(resp) = require_conversation_access_if_known(&state, &caller, cid, true).await {
+            return resp;
+        }
     }
 
     // Prefer a client-supplied transcript; otherwise load it from the stored
@@ -9675,6 +12787,14 @@ const MERMAID_KEYWORDS: [&str; 10] = [
 /// `POST /api/whiteboard/generate` — produce a diagram for the whiteboard editor.
 /// Returns `{ format: "mermaid"|"skeleton", mermaid?, skeleton?, model }`. The
 /// client converts the payload into Excalidraw elements.
+#[utoipa::path(
+    post,
+    path = "/api/whiteboard/generate",
+    tag = "Core",
+    summary = "Generate a whiteboard diagram from a prompt",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn whiteboard_generate_handler(
     State(state): State<ServerState>,
     Json(body): Json<WhiteboardGenBody>,
@@ -9754,10 +12874,27 @@ async fn whiteboard_generate_handler(
 
 /// `GET /api/conversations/:id/btw` — list persisted `/btw` side chats for a
 /// conversation, newest first.
+#[utoipa::path(
+    get,
+    path = "/api/conversations/{id}/btw",
+    tag = "Chat",
+    summary = "List a conversation's side questions",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn list_btw_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(conversation_id): Path<String>,
 ) -> axum::response::Response {
+    // Per-resource ACL: side chats are part of a conversation's transcript.
+    if let Err(resp) = require_resource_read(
+        state.conversations.get_access_meta(&conversation_id).await,
+        caller.as_ref(),
+        &format!("conversation '{conversation_id}' not found"),
+    ) {
+        return resp;
+    }
     match state.conversations.list_btw(&conversation_id).await {
         Ok(entries) => Json(entries).into_response(),
         Err(e) => json_error(
@@ -9768,10 +12905,32 @@ async fn list_btw_handler(
 }
 
 /// `DELETE /api/btw/:id` — delete a single persisted side chat.
+#[utoipa::path(
+    delete,
+    path = "/api/btw/{id}",
+    tag = "Chat",
+    summary = "Delete a side question",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn delete_btw_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
+    // Per-resource ACL, keyed on the PARENT conversation (a btw entry carries no
+    // tenancy of its own).
+    if let Err(resp) = require_parent_conversation(
+        &state,
+        &caller,
+        state.conversations.conversation_id_for_btw(&id).await,
+        true,
+        "side chat not found",
+    )
+    .await
+    {
+        return resp;
+    }
     match state.conversations.delete_btw(&id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => json_error(StatusCode::NOT_FOUND, "side chat not found".to_string()),
@@ -9800,8 +12959,16 @@ struct AddParticipantBody {
 )]
 async fn get_participants_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_resource_read(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     match state.conversations.get_participants(&id).await {
         Ok(participants) => {
             let list: Vec<serde_json::Value> = participants
@@ -9825,15 +12992,21 @@ async fn get_participants_handler(
 )]
 async fn add_participant_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(id): Path<String>,
     Json(body): Json<AddParticipantBody>,
 ) -> axum::response::Response {
     if body.agent_id.trim().is_empty() {
         return json_error(StatusCode::BAD_REQUEST, "agent_id is required".to_owned());
     }
+    // Per-resource ACL. `add_participant` upserts the conversation row, so like
+    // `chat_stream` it is a create-or-use path: gate an existing row, claim a new one.
+    if let Err(resp) = gate_and_claim_conversation(&state, &caller, &id).await {
+        return resp;
+    }
     match state
         .conversations
-        .add_participant(&id, body.agent_id.trim())
+        .add_participant(&id, body.agent_id.trim(), caller_tenancy(&caller))
         .await
     {
         Ok(participants) => Json(json!({ "participants": participants })).into_response(),
@@ -9852,8 +13025,16 @@ async fn add_participant_handler(
 )]
 async fn remove_participant_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path((id, agent_id)): Path<(String, String)>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_resource_write(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     match state.conversations.remove_participant(&id, &agent_id).await {
         Ok(participants) => Json(json!({ "participants": participants })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -9871,8 +13052,18 @@ async fn remove_participant_handler(
     summary = "List runs",
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-async fn list_runs_handler(State(state): State<ServerState>) -> axum::response::Response {
-    match state.conversations.list_runs().await {
+async fn list_runs_handler(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+) -> axum::response::Response {
+    // Per-resource ACL, in SQL: a run IS a conversation, so listing every run on
+    // the node handed out every user's run titles + working folders.
+    let (user_id, org_id, node_bound) = tenancy_filter_args(&caller);
+    match state
+        .conversations
+        .list_runs_visible(user_id.as_deref(), org_id.as_deref(), node_bound)
+        .await
+    {
         Ok(items) => Json(json!({ "runs": items })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -9906,6 +13097,7 @@ enum RunStreamFrame {
 )]
 async fn runs_stream(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
 ) -> axum::response::sse::Sse<
     impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
 > {
@@ -9916,25 +13108,45 @@ async fn runs_stream(
     // still delivered as a delta (the snapshot may or may not include it; either
     // way the client converges on the right terminal status).
     let rx = conversations::subscribe_run_events();
-    let snapshot = RunStreamFrame::Snapshot {
-        runs: state.conversations.list_runs().await.unwrap_or_default(),
-    };
+    // Per-resource ACL on the opening snapshot: this used to fan out EVERY run on
+    // the node to every subscriber.
+    let (user_id, org_id, node_bound) = tenancy_filter_args(&caller);
+    let visible_runs = state
+        .conversations
+        .list_runs_visible(user_id.as_deref(), org_id.as_deref(), node_bound)
+        .await
+        .unwrap_or_default();
+    let snapshot = RunStreamFrame::Snapshot { runs: visible_runs };
+
+    // …and on the live deltas, which are the other half of the leak (a `running →
+    // completed` frame carries the run's title + working folder). A run id IS a
+    // conversation id, so each delta is re-gated against the same per-resource ACL.
+    // `None` on an unbound node ⇒ zero extra work on the single-user path.
+    let gate = node_bound.then(|| (state.conversations.clone(), caller.clone()));
 
     // State carries the (one-shot) snapshot until it's been emitted, then `None`.
     // First poll yields the snapshot; subsequent polls forward live deltas.
     let stream = futures_util::stream::unfold(
-        (rx, Some(snapshot)),
-        |(mut rx, pending_snapshot)| async move {
+        (rx, Some(snapshot), gate),
+        |(mut rx, pending_snapshot, gate)| async move {
             if let Some(snap) = pending_snapshot {
                 let data = serde_json::to_string(&snap).unwrap_or_default();
-                return Some((Ok(Event::default().data(data)), (rx, None)));
+                return Some((Ok(Event::default().data(data)), (rx, None, gate)));
             }
             loop {
                 match rx.recv().await {
                     Ok(ev) => {
+                        if let Some((store, caller)) = gate.as_ref() {
+                            let meta = store.get_access_meta(&ev.run.id).await;
+                            if require_resource_read(meta, caller.as_ref(), "run not found")
+                                .is_err()
+                            {
+                                continue;
+                            }
+                        }
                         let frame = RunStreamFrame::Run { run: ev.run };
                         let data = serde_json::to_string(&frame).unwrap_or_default();
-                        return Some((Ok(Event::default().data(data)), (rx, None)));
+                        return Some((Ok(Event::default().data(data)), (rx, None, gate)));
                     }
                     Err(RecvError::Lagged(_)) => continue,
                     Err(RecvError::Closed) => return None,
@@ -9960,8 +13172,13 @@ async fn runs_stream(
 )]
 async fn get_run_trace_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(run_id): Path<String>,
 ) -> axum::response::Response {
+    // Per-resource ACL: spans carry the run's prompts and tool arguments.
+    if let Err(resp) = require_conversation_access_if_known(&state, &caller, &run_id, false).await {
+        return resp;
+    }
     match state.traces.get_spans(&run_id).await {
         Ok(spans) => Json(json!({ "spans": spans })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -9990,6 +13207,7 @@ struct CreateSessionBody {
 )]
 async fn create_session_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<CreateSessionBody>,
 ) -> axum::response::Response {
     if body.runnable_id.trim().is_empty() {
@@ -10005,6 +13223,10 @@ async fn create_session_handler(
             body.runnable_kind,
             body.agent_id.as_deref(),
             body.title.as_deref(),
+            // A session mints a NEW conversation; it is born with its owner stamped by
+            // the store's choke point, so every gate keyed on that conversation
+            // (get/delete/fork/chat/worktree/…) is non-vacuous from the first instant.
+            caller_tenancy(&caller),
         )
         .await
     {
@@ -10023,8 +13245,20 @@ async fn create_session_handler(
 )]
 async fn get_session_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_parent_conversation(
+        &state,
+        &caller,
+        state.conversations.conversation_id_for_session(&id).await,
+        false,
+        &format!("session '{id}' not found"),
+    )
+    .await
+    {
+        return resp;
+    }
     match state.conversations.get_session(&id).await {
         Ok(Some(session)) => Json(json!({ "session": session })).into_response(),
         Ok(None) => json_error(StatusCode::NOT_FOUND, format!("session '{id}' not found")),
@@ -10048,9 +13282,21 @@ struct UpdateSessionStatusBody {
 )]
 async fn update_session_status_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<UpdateSessionStatusBody>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_parent_conversation(
+        &state,
+        &caller,
+        state.conversations.conversation_id_for_session(&id).await,
+        true,
+        &format!("session '{id}' not found"),
+    )
+    .await
+    {
+        return resp;
+    }
     match state
         .conversations
         .update_session_status(&id, body.status)
@@ -10072,8 +13318,16 @@ async fn update_session_status_handler(
 )]
 async fn list_sessions_for_conversation_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
+    if let Err(resp) = require_resource_read(
+        state.conversations.get_access_meta(&id).await,
+        caller.as_ref(),
+        &format!("conversation '{id}' not found"),
+    ) {
+        return resp;
+    }
     match state
         .conversations
         .list_sessions_for_conversation(&id)
@@ -10177,6 +13431,7 @@ struct ImportThreadBody {
 )]
 async fn import_agent_thread_handler(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(agent_id): axum::extract::Path<String>,
     Json(body): Json<ImportThreadBody>,
 ) -> axum::response::Response {
@@ -10230,12 +13485,19 @@ async fn import_agent_thread_handler(
     }
 
     let conversation_id = format!("conv_{}", uuid::Uuid::new_v4());
+    // Per-resource ACL: import is a conversation-CREATION site like `chat_stream`
+    // and `fork`, so it must stamp tenancy too. Without this the imported thread is
+    // untenanted, which `resource_access` denies to EVERYONE on an org-bound node —
+    // the importer would 403 out of the thread they just imported. No-op on a
+    // personal node (see `caller_tenancy`).
+    let tenancy = caller_tenancy(&caller);
     if let Err(e) = state
         .conversations
         .ensure_conversation(
             &conversation_id,
             Some(&agent_id),
             Some(&imported.thread.title),
+            tenancy.clone(),
         )
         .await
     {
@@ -10244,13 +13506,14 @@ async fn import_agent_thread_handler(
     for msg in &imported.messages {
         if let Err(e) = state
             .conversations
-            .append_message(
+            .append_message_as(
                 &conversation_id,
                 &msg.role,
                 &msg.content,
                 Some(&agent_id),
                 None,
                 None,
+                tenancy.clone(),
             )
             .await
         {
@@ -10816,6 +14079,14 @@ async fn mcp_catalog_install(
         Ok(()) => {
             // Hot-reload so the new server's tools are listable without a restart.
             state.mcp.reload();
+            // ONE plugin model: an installed MCP server also carries a plugin
+            // lifecycle record (installed DISABLED, mirroring the mcp.json entry),
+            // so requires/targets/grants/AppGate + the plugin disable/uninstall
+            // lifecycle govern it — instead of a parallel registry with its own
+            // install path. The mcp.json entry stays the spawn config + tool
+            // executor (delegate); the record is additive governance metadata.
+            // Best-effort: a failure here never fails the MCP install itself.
+            persist_mcp_plugin_record(&state, &plan).await;
             (
                 StatusCode::OK,
                 Json(json!({
@@ -10833,6 +14104,87 @@ async fn mcp_catalog_install(
             )
         }
         Err((status, msg)) => (status, Json(json!({ "success": false, "error": msg }))),
+    }
+}
+
+/// Create the plugin lifecycle record + on-disk manifest for a freshly-installed
+/// MCP server, so the ONE plugin model governs it (requires / targets / grants /
+/// AppGate / disable / uninstall) rather than a parallel registry.
+///
+/// The record is installed **DISABLED**, mirroring the mcp.json entry the catalog
+/// install just wrote. The mcp.json entry remains the authoritative spawn config
+/// and tool executor (`list_all_tools` / `call_tool` still read the server map);
+/// this record is additive governance metadata. The synthesized manifest declares
+/// **no runnables** (so it never double-lists the server's tools — the server map
+/// is the single tool source) and holds the `widget:render` grant so that, once
+/// the server's widget-bearing tools are recorded in `contributes.widgets`, the
+/// promotion gate approves them.
+///
+/// Best-effort by contract: every failure is logged and swallowed — the MCP
+/// install already succeeded, and a missing governance record must never fail it.
+/// Synthesize the governance manifest for an installed MCP server.
+///
+/// Pure (no I/O) so the install sink and its tests share exactly one definition of
+/// the record's shape. The MCP server name is the plugin id: external servers
+/// self-namespace their tools as `server__tool`, so `id == server_name` lets the
+/// plugin model resolve the owner of any such tool. Returns `None` when the server
+/// name is not a valid plugin id (the caller then skips the record, best-effort).
+///
+/// The manifest declares **no runnables** (the mcp.json server map stays the tool
+/// executor this pass, so runnables would double-list — Risk 4) and holds the
+/// `widget:render` grant so that, once the server's widget tools are recorded in
+/// `contributes.widgets`, the promotion gate approves them.
+fn synthesize_mcp_manifest(
+    plan: &crate::mcp_catalog::InstallPlan,
+) -> Option<crate::plugin_manifest::PluginManifest> {
+    if crate::plugin_manifest::validate_plugin_id(&plan.server_name).is_err() {
+        return None;
+    }
+    // A plugin record requires a valid semver version; the mcp.json entry keeps the
+    // catalog's raw version string, so falling back here is cosmetic only.
+    let version = plan
+        .version
+        .as_deref()
+        .filter(|v| semver::Version::parse(v).is_ok())
+        .unwrap_or("0.0.0")
+        .to_owned();
+    Some(crate::plugin_manifest::PluginManifest {
+        id: plan.server_name.clone(),
+        name: plan.server_name.clone(),
+        version,
+        runnables: Vec::new(),
+        permission_grants: vec![crate::sidecar::mcp::WIDGET_RENDER_GRANT.to_owned()],
+        description: plan.description.clone(),
+        category: Some(crate::sidecar::mcp::MCP_SERVER_CATEGORY.to_owned()),
+        ..Default::default()
+    })
+}
+
+async fn persist_mcp_plugin_record(state: &ServerState, plan: &crate::mcp_catalog::InstallPlan) {
+    let Some(manifest) = synthesize_mcp_manifest(plan) else {
+        tracing::warn!(
+            server = %plan.server_name,
+            "MCP install: skipping plugin-governance record — '{}' is not a valid plugin id",
+            plan.server_name
+        );
+        return;
+    };
+
+    match persist_installed_plugin(state, manifest, None).await {
+        Ok(_) => tracing::info!(
+            server = %plan.server_name,
+            "MCP install: created disabled plugin-governance record"
+        ),
+        // Already recorded (e.g. a forced re-install over an existing plugin) —
+        // benign; the record and manifest are left as-is.
+        Err((StatusCode::CONFLICT, msg)) => tracing::debug!(
+            server = %plan.server_name,
+            "MCP install: plugin-governance record already present ({msg})"
+        ),
+        Err((status, msg)) => tracing::warn!(
+            server = %plan.server_name,
+            "MCP install: could not create plugin-governance record ({status}): {msg}"
+        ),
     }
 }
 
@@ -10949,6 +14301,116 @@ async fn write_mcp_entry(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("write task panicked: {e}"),
         )),
+    }
+}
+
+/// An in-place mutation of a single `~/.ryu/mcp.json` entry, used to keep the
+/// spawn config in sync with the ONE plugin model's lifecycle for a synth
+/// MCP-server record (`category == MCP_SERVER_CATEGORY`).
+#[derive(Clone, Copy)]
+enum McpEntryMutation {
+    /// Flip the entry's `enabled` flag — the flag that actually gates spawn +
+    /// tool listing. Wired to the plugin enable/disable lifecycle so the record's
+    /// enabled bit is no longer a no-op against the running server.
+    SetEnabled(bool),
+    /// Remove the entry entirely — wired to plugin uninstall so removing the
+    /// governance record actually uninstalls the server (stops it + drops its
+    /// tools) instead of leaving a running orphan.
+    Remove,
+}
+
+/// Apply [`McpEntryMutation`] to the entry `name` in the mcp.json at `cfg_path`,
+/// read-modify-write with an atomic tmp + rename. Preserves the `mcpServers`
+/// schema and every other entry untouched. Returns `Ok(true)` when the file
+/// changed, `Ok(false)` when the entry was absent / already in the target state
+/// (a no-op). Path-injected so tests drive it against a temp file with no env or
+/// cross-module lock.
+async fn mutate_mcp_entry(
+    cfg_path: std::path::PathBuf,
+    name: &str,
+    mutation: McpEntryMutation,
+) -> Result<bool, String> {
+    use crate::sidecar::mcp::McpServerConfig;
+
+    let name = name.to_string();
+    let result = tokio::task::spawn_blocking(move || -> Result<bool, String> {
+        if !cfg_path.exists() {
+            return Ok(false);
+        }
+        let raw = std::fs::read_to_string(&cfg_path)
+            .map_err(|e| format!("cannot read mcp.json: {e}"))?;
+        let val: serde_json::Value =
+            serde_json::from_str(&raw).map_err(|e| format!("mcp.json is malformed: {e}"))?;
+        let mut file_map: std::collections::BTreeMap<String, McpServerConfig> = val
+            .get("mcpServers")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let changed = match mutation {
+            McpEntryMutation::SetEnabled(enabled) => match file_map.get_mut(&name) {
+                Some(cfg) if cfg.enabled != enabled => {
+                    cfg.enabled = enabled;
+                    true
+                }
+                _ => false,
+            },
+            McpEntryMutation::Remove => file_map.remove(&name).is_some(),
+        };
+        if !changed {
+            return Ok(false);
+        }
+
+        let out = serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": file_map }))
+            .map_err(|e| format!("failed to serialize mcp.json: {e}"))?;
+        let tmp = cfg_path.with_extension("json.tmp");
+        write_secret_file(&tmp, out.as_bytes())
+            .map_err(|e| format!("failed to write mcp.json: {e}"))?;
+        std::fs::rename(&tmp, &cfg_path)
+            .map_err(|e| format!("failed to rename mcp.json.tmp: {e}"))?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| format!("mcp.json write task panicked: {e}"))?;
+    result
+}
+
+/// Keep the `~/.ryu/mcp.json` spawn config in sync when a synth MCP-server plugin
+/// record's lifecycle changes. Best-effort by contract (mirrors
+/// `persist_mcp_plugin_record`): a mcp.json write/reload failure is logged and
+/// swallowed — the lifecycle record is the source of truth for the response, and
+/// this sync is a side effect that must never fail the enable/disable/uninstall.
+///
+/// No-op for any manifest that is not a synth MCP-server record, so the 8
+/// built-in apps and every ordinary plugin are untouched (they set no
+/// `category`, so the guard excludes them).
+async fn sync_mcp_entry_for_record(
+    state: &ServerState,
+    manifest: &crate::plugin_manifest::PluginManifest,
+    mutation: McpEntryMutation,
+) {
+    if manifest.category.as_deref() != Some(crate::sidecar::mcp::MCP_SERVER_CATEGORY) {
+        return;
+    }
+    let path = crate::sidecar::mcp::McpRegistry::config_path();
+    match mutate_mcp_entry(path, &manifest.id, mutation).await {
+        Ok(true) => {
+            // The server map changed — hot-reload so spawn/list reflects it.
+            state.mcp.reload();
+            tracing::info!(
+                server = %manifest.id,
+                "MCP-server plugin lifecycle: synced mcp.json spawn config"
+            );
+        }
+        Ok(false) => {
+            tracing::debug!(
+                server = %manifest.id,
+                "MCP-server plugin lifecycle: mcp.json already in target state (no-op)"
+            );
+        }
+        Err(e) => tracing::warn!(
+            server = %manifest.id,
+            "MCP-server plugin lifecycle: mcp.json sync failed (best-effort): {e}"
+        ),
     }
 }
 
@@ -11079,8 +14541,21 @@ async fn call_mcp_tool(
             &body.tool,
             body.arguments,
             allowlist.as_deref(),
+            // `body.user_id` is CLIENT-SUPPLIED. It selects a Composio entity and
+            // tags the audit line — it is NOT an authorization principal and must
+            // never be used as one (any node-token holder could name themselves
+            // anyone). See `ToolPrincipal`.
             body.user_id.as_deref(),
             &identity_profile_ids,
+            None,
+            // No SERVER-DERIVED host conversation reaches this callback (the
+            // openai-compat tool loop dispatches through the Gateway's
+            // `POST /v1/exec/tool`, which does not yet forward it — that is an
+            // apps/gateway change). So on an ORG-BOUND node the conversation-reading
+            // tools resolve to `ToolPrincipal::Unresolved` and refuse. That is a
+            // deliberate, honest fail-closed: openai-compat agents lose `threads__*`
+            // / `search_conversations__*` on bound nodes until the Gateway forwards
+            // the conversation id. Unbound (personal) nodes are unaffected.
             None,
         )
         .await
@@ -11342,6 +14817,30 @@ async fn mesh_status(State(state): State<ServerState>) -> Json<serde_json::Value
     Json(serde_json::to_value(status).unwrap_or_default())
 }
 
+/// `GET /api/mesh/peers` — reachable tailnet peers + a candidate bearer for the
+/// desktop's `addNode`, so a freshly added mesh peer's protected routes don't 401.
+///
+/// This route is on the protected router (`require_auth`), so only a caller who
+/// already holds THIS node's `RYU_TOKEN` reaches it — returning that same token as
+/// the peer bearer is not a disclosure. Fail-closed auth on the peer is NOT
+/// weakened: the peer still requires a valid token; we merely hand one over. The
+/// bearer is this node's `RYU_TOKEN` and is valid on a peer **only if that peer was
+/// provisioned with the same token** (the shared-fleet convention). That
+/// precondition is surfaced via `bearer_source`/`note` rather than faked — a peer
+/// running a distinct token 401s and the operator must supply its own token.
+#[utoipa::path(
+    get,
+    path = "/api/mesh/peers",
+    tag = "Nodes",
+    summary = "Reachable mesh peers + a candidate node-admittance bearer",
+    responses((status = 200, description = "Mesh peers + bearer", body = serde_json::Value))
+)]
+async fn mesh_peers(State(state): State<ServerState>) -> Json<serde_json::Value> {
+    let status = state.mesh.status().await;
+    let resp = crate::mesh::build_peers_response(&status, state.node_token.as_deref());
+    Json(serde_json::to_value(resp).unwrap_or_default())
+}
+
 // ── Webhook ingress seam (#479, P6a) ──────────────────────────────────────────
 
 /// `GET /api/webhook-ingress/status` — the active ingress backend, its public URL
@@ -11363,6 +14862,99 @@ async fn webhook_ingress_status(State(state): State<ServerState>) -> Json<serde_
         "kind": kind.as_str(),
         "public_url": public_url,
         "up": up,
+    }))
+}
+
+/// `GET /api/webhooks` — the unified webhook endpoint registry (webhook-unify #3).
+///
+/// One list/inspect surface over every inbound webhook receiver on this node —
+/// the composio webhook and every workflow that declares a `Webhook` trigger —
+/// each carrying its **resolved public URL** (the fix for the desktop showing a
+/// `localhost` URL), whether a secret is configured, and its last-delivery time.
+///
+/// The per-endpoint `public_url` is `public_base_url + <path>`. It is `null` when
+/// ingress is not up yet (no base resolved). For the tunnel backends the base is
+/// a real origin that forwards every path to Core, so the URL is directly
+/// reachable; for the managed RyuRelay per-path routing additionally depends on
+/// the relay server emitting the generic inbound frame (see the server handoff).
+#[utoipa::path(
+    get,
+    path = "/api/webhooks",
+    tag = "Nodes",
+    summary = "List all inbound webhook endpoints (registry) with resolved public URLs",
+    responses((status = 200, description = "Webhook registry", body = serde_json::Value))
+)]
+async fn webhooks_list(State(state): State<ServerState>) -> Json<serde_json::Value> {
+    let kind = crate::webhook_ingress::configured_kind(&state.preferences).await;
+    // `base` is Some ONLY when the active ingress is a true origin that forwards
+    // every path (the tunnel backends). Under the managed RyuRelay it is None, so
+    // per-path (workflow) URLs are advertised as null rather than a dead URL.
+    let base = crate::webhook_ingress::public_base_url();
+    // The raw stored public URL — the relay's own composio ingress endpoint, or
+    // `<origin>/api/composio/webhook` for the tunnel backends. Either way this is
+    // the actual URL composio should POST to, so it is the composio endpoint URL.
+    let raw_public_url = crate::webhook_ingress::public_url();
+    let up = raw_public_url.is_some();
+
+    // Resolve a per-endpoint public URL. A true path-forwarding origin (the tunnel
+    // backends) gives `<origin><path>`. Under RyuRelay there is no origin base, but a
+    // path IS reachable through the relay's generic inbound endpoint
+    // (`<relay>/api/composio-relay/inbound/<token>/<path>`), so fall back to that so
+    // a workflow webhook is discoverable on the default ingress too. `None` only when
+    // neither is available (e.g. relay not yet registered).
+    let resolve = |path: &str| -> Option<String> {
+        base.as_ref()
+            .map(|b| format!("{b}{path}"))
+            .or_else(|| crate::webhook_ingress::relay_inbound_url(path))
+    };
+
+    let mut endpoints: Vec<serde_json::Value> = Vec::new();
+
+    // (1) The composio webhook — one endpoint, N subscriptions. Its reachable URL
+    // is the raw stored public URL (the relay ingress, or origin+path), NOT a
+    // base-composed path — so it is populated even under RyuRelay.
+    let composio_path = crate::webhook_ingress::WEBHOOK_PATH;
+    let composio_subs = match crate::composio_triggers::global() {
+        Some(store) => store.list().await.map(|s| s.len()).unwrap_or(0),
+        None => 0,
+    };
+    endpoints.push(json!({
+        "kind": "composio",
+        "id": "composio",
+        "label": "Composio triggers",
+        "path": composio_path,
+        "public_url": raw_public_url,
+        "has_secret": crate::composio_triggers::webhook_secret().is_some(),
+        "subscription_count": composio_subs,
+        "last_delivery": crate::webhook_ingress::last_delivery(composio_path),
+    }));
+
+    // (2) Every workflow that declares a Webhook trigger.
+    for wf in crate::workflow::store::list_workflows() {
+        for trigger in &wf.triggers {
+            if let crate::workflow::WorkflowTrigger::Webhook { secret } = trigger {
+                let path = crate::webhook_ingress::workflow_webhook_path(&wf.id);
+                let has_secret = secret.as_ref().is_some_and(|s| !s.trim().is_empty());
+                endpoints.push(json!({
+                    "kind": "workflow",
+                    "id": wf.id,
+                    "label": wf.name,
+                    "workflow_id": wf.id,
+                    "workflow_name": wf.name,
+                    "path": path,
+                    "public_url": resolve(&path),
+                    "has_secret": has_secret,
+                    "last_delivery": crate::webhook_ingress::last_delivery(&path),
+                }));
+            }
+        }
+    }
+
+    Json(json!({
+        "ingress_kind": kind.as_str(),
+        "public_base_url": base,
+        "up": up,
+        "endpoints": endpoints,
     }))
 }
 
@@ -11522,7 +15114,11 @@ async fn create_space(
     }
     match state
         .spaces
-        .create_space(body.name.trim(), body.description.as_deref())
+        .create_space(
+            body.name.trim(),
+            body.description.as_deref(),
+            &caller_tenancy(&caller),
+        )
         .await
     {
         Ok(id) => Json(json!({ "id": id })).into_response(),
@@ -11550,7 +15146,7 @@ async fn list_spaces(
             "insufficient permissions: space.read".to_owned(),
         );
     }
-    match state.spaces.list_spaces().await {
+    match state.spaces.list_spaces(caller_doc_filter(&caller)).await {
         Ok(items) => Json(json!({ "spaces": items })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -11606,7 +15202,11 @@ async fn list_documents(
             "insufficient permissions: space.read".to_owned(),
         );
     }
-    match state.spaces.list_documents(&id).await {
+    match state
+        .spaces
+        .list_documents(&id, caller_doc_filter(&caller))
+        .await
+    {
         Ok(documents) => Json(json!({ "space_id": id, "documents": documents })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -11644,7 +15244,7 @@ async fn ingest_document(
     }
     match state
         .spaces
-        .ingest_document(&id, body.title.trim(), &body.content)
+        .ingest_document(&id, body.title.trim(), &body.content, &caller_tenancy(&caller))
         .await
     {
         Ok(document_id) => Json(json!({ "document_id": document_id })).into_response(),
@@ -11686,9 +15286,22 @@ fn default_search_limit() -> usize {
 )]
 async fn search_space(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<SearchBody>,
 ) -> axum::response::Response {
+    // Coarse RBAC: searching a space requires `space.read` (this also denies a
+    // tokenless caller on a bound node). The per-resource tenancy filter below then
+    // ensures the returned chunks only come from documents THIS caller may read.
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.read".to_owned(),
+        );
+    }
     let limit = body.limit.clamp(1, 50);
     // Lazily start the (off-by-default) reranker server so Spaces RAG can neural-
     // rerank. Fire-and-forget: the current search fails open to the vector order
@@ -11703,7 +15316,13 @@ async fn search_space(
     }
     match state
         .spaces
-        .search_ext(&id, &body.query, limit, body.link_expansion)
+        .search_ext(
+            &id,
+            &body.query,
+            limit,
+            body.link_expansion,
+            caller_doc_filter(&caller),
+        )
         .await
     {
         Ok(matches) => Json(json!({ "space_id": id, "matches": matches })).into_response(),
@@ -11731,6 +15350,7 @@ struct CreatePageBody {
 )]
 async fn create_page(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<CreatePageBody>,
 ) -> axum::response::Response {
@@ -11739,9 +15359,10 @@ async fn create_page(
     } else {
         body.title.trim()
     };
+    let tenancy = caller_tenancy(&caller);
     let result = match body.parent_id.as_deref() {
-        Some(parent) => state.spaces.create_child_page(&id, title, parent).await,
-        None => state.spaces.create_page(&id, title).await,
+        Some(parent) => state.spaces.create_child_page(&id, title, parent, &tenancy).await,
+        None => state.spaces.create_page(&id, title, &tenancy).await,
     };
     match result {
         Ok(document_id) => Json(json!({ "id": document_id })).into_response(),
@@ -11770,6 +15391,7 @@ async fn create_page(
 )]
 async fn create_database(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<CreatePageBody>,
 ) -> axum::response::Response {
@@ -11778,7 +15400,11 @@ async fn create_database(
     } else {
         body.title.trim()
     };
-    match state.spaces.create_database(&id, title).await {
+    match state
+        .spaces
+        .create_database(&id, title, &caller_tenancy(&caller))
+        .await
+    {
         Ok(document_id) => Json(json!({ "id": document_id })).into_response(),
         Err(e) => {
             let msg = e.to_string();
@@ -11805,6 +15431,7 @@ async fn create_database(
 )]
 async fn create_whiteboard(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<CreatePageBody>,
 ) -> axum::response::Response {
@@ -11813,7 +15440,11 @@ async fn create_whiteboard(
     } else {
         body.title.trim()
     };
-    match state.spaces.create_whiteboard(&id, title).await {
+    match state
+        .spaces
+        .create_whiteboard(&id, title, &caller_tenancy(&caller))
+        .await
+    {
         Ok(document_id) => Json(json!({ "id": document_id })).into_response(),
         Err(e) => {
             let msg = e.to_string();
@@ -11896,7 +15527,11 @@ async fn create_file(
             format!("file exceeds {MAX_FILE_BYTES} byte limit"),
         );
     }
-    match state.spaces.create_file(&id, title, &bytes, mime).await {
+    match state
+        .spaces
+        .create_file(&id, title, &bytes, mime, &caller_tenancy(&caller))
+        .await
+    {
         Ok(document_id) => Json(json!({
             "id": document_id,
             "mime": mime,
@@ -11938,6 +15573,15 @@ async fn get_file_blob(
             StatusCode::FORBIDDEN,
             "insufficient permissions: space.read".to_owned(),
         );
+    }
+    // Per-resource ACL: a file document's BYTES are its content — gate on the row,
+    // not just on the coarse `space.read` permission.
+    if let Err(resp) = require_resource_read(
+        state.spaces.get_access_meta(&doc_id).await,
+        caller.as_ref(),
+        "file not found",
+    ) {
+        return resp;
     }
     match state.spaces.read_file_blob(&doc_id).await {
         Ok(Some((mime, bytes))) => {
@@ -12052,11 +15696,16 @@ async fn get_document(
             "insufficient permissions: space.read".to_owned(),
         );
     }
-    // TODO (Phase 1 realtime join): per-resource ACL is a SEPARATE mechanism from
-    // the coarse RBAC gate above. Load the document's
-    // owner_user_id/org_id/visibility/team_id and additionally gate on
-    // `crate::identity_verify::can_access(...) != Access::None`. Not enforced in
-    // Phase 0 so the single-tenant flow is unchanged.
+    // Per-resource ACL (fine): `space.read` says the caller may read documents at
+    // all; this says they may read THIS one. Without it, any org member holding
+    // `space.read` could read another member's PRIVATE document.
+    if let Err(resp) = require_resource_read(
+        state.spaces.get_access_meta(&doc_id).await,
+        caller.as_ref(),
+        "document not found",
+    ) {
+        return resp;
+    }
     match state.spaces.get_document(&doc_id).await {
         Ok(Some(doc)) => Json(doc).into_response(),
         Ok(None) => json_error(StatusCode::NOT_FOUND, "document not found".to_owned()),
@@ -12094,6 +15743,15 @@ async fn update_document(
             StatusCode::FORBIDDEN,
             "insufficient permissions: space.write".to_owned(),
         );
+    }
+    // Per-resource ACL: a write needs `Access::Write` on THIS document, so an org
+    // Viewer (read-only) and a non-owner on a private doc are both refused.
+    if let Err(resp) = require_resource_write(
+        state.spaces.get_access_meta(&doc_id).await,
+        caller.as_ref(),
+        "document not found",
+    ) {
+        return resp;
     }
     match state
         .spaces
@@ -12136,6 +15794,14 @@ async fn delete_document(
             "insufficient permissions: space.delete".to_owned(),
         );
     }
+    // Per-resource ACL: deleting is a write on THIS document.
+    if let Err(resp) = require_resource_write(
+        state.spaces.get_access_meta(&doc_id).await,
+        caller.as_ref(),
+        "document not found",
+    ) {
+        return resp;
+    }
     match state.spaces.delete_document(&doc_id).await {
         Ok(removed) => Json(json!({ "success": true, "removed": removed })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -12154,8 +15820,18 @@ async fn delete_document(
 )]
 async fn list_document_versions(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
+    // A version list is document content (titles + timestamps of past states), so
+    // it is gated exactly like reading the document.
+    if let Err(resp) = require_resource_read(
+        state.spaces.get_access_meta(&doc_id).await,
+        caller.as_ref(),
+        "document not found",
+    ) {
+        return resp;
+    }
     match state.spaces.list_document_versions(&doc_id).await {
         Ok(versions) => Json(versions).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -12181,9 +15857,18 @@ struct CreateDocumentVersionBody {
 )]
 async fn create_document_version(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
     body: Option<Json<CreateDocumentVersionBody>>,
 ) -> axum::response::Response {
+    // Snapshotting appends a row to the document's history — a write.
+    if let Err(resp) = require_resource_write(
+        state.spaces.get_access_meta(&doc_id).await,
+        caller.as_ref(),
+        "document not found",
+    ) {
+        return resp;
+    }
     let label = body
         .and_then(|Json(b)| b.label)
         .map(|s| s.trim().to_string())
@@ -12222,11 +15907,27 @@ async fn create_document_version(
 )]
 async fn get_document_version(
     State(state): State<ServerState>,
-    axum::extract::Path((_id, _doc_id, version_id)): axum::extract::Path<(String, String, String)>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    axum::extract::Path((_id, doc_id, version_id)): axum::extract::Path<(String, String, String)>,
 ) -> axum::response::Response {
+    // A version carries the document's FULL source at snapshot time, so it is
+    // gated exactly like reading the document.
+    if let Err(resp) = require_resource_read(
+        state.spaces.get_access_meta(&doc_id).await,
+        caller.as_ref(),
+        "document not found",
+    ) {
+        return resp;
+    }
     match state.spaces.get_document_version(&version_id).await {
-        Ok(Some(ver)) => Json(ver).into_response(),
-        Ok(None) => json_error(StatusCode::NOT_FOUND, "version not found".to_owned()),
+        // The version is looked up by its own id, so the ACL above (keyed on the
+        // PATH doc_id) would be a confused deputy if the two disagreed: a caller
+        // could name a document they own plus a version id belonging to someone
+        // else's document. Serve a version only when it really belongs to the
+        // document that was authorized. `restore_document_version` already made
+        // this check; it is required here for the same reason.
+        Ok(Some(ver)) if ver.document_id == doc_id => Json(ver).into_response(),
+        Ok(_) => json_error(StatusCode::NOT_FOUND, "version not found".to_owned()),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
@@ -12248,8 +15949,17 @@ async fn get_document_version(
 )]
 async fn restore_document_version(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((_id, doc_id, version_id)): axum::extract::Path<(String, String, String)>,
 ) -> axum::response::Response {
+    // Restoring overwrites the document's current content — a write.
+    if let Err(resp) = require_resource_write(
+        state.spaces.get_access_meta(&doc_id).await,
+        caller.as_ref(),
+        "document not found",
+    ) {
+        return resp;
+    }
     // Load the target version first — fail fast if it is gone or belongs to
     // another document.
     let ver = match state.spaces.get_document_version(&version_id).await {
@@ -12295,8 +16005,18 @@ async fn restore_document_version(
 )]
 async fn get_document_backlinks(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
+    // Backlinks carry titles + context snippets of the linking documents, so this
+    // is document content — gated like a read of the document itself.
+    if let Err(resp) = require_resource_read(
+        state.spaces.get_access_meta(&doc_id).await,
+        caller.as_ref(),
+        "document not found",
+    ) {
+        return resp;
+    }
     match state.spaces.get_backlinks(&doc_id).await {
         Ok(backlinks) => Json(json!({ "doc_id": doc_id, "backlinks": backlinks })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -12315,8 +16035,18 @@ async fn get_document_backlinks(
 )]
 async fn get_document_links(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
+    // Outgoing links are extracted from the document's body — reading them is
+    // reading (part of) the document.
+    if let Err(resp) = require_resource_read(
+        state.spaces.get_access_meta(&doc_id).await,
+        caller.as_ref(),
+        "document not found",
+    ) {
+        return resp;
+    }
     match state.spaces.get_outgoing_links(&doc_id).await {
         Ok(links) => Json(json!({ "doc_id": doc_id, "links": links })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -12901,6 +16631,16 @@ async fn composio_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    // Replay window (webhook-unify #5): reject a stale, timestamp-signed delivery
+    // before doing any work. Back-compat: a delivery with no timestamp header (or
+    // an unparseable one) is accepted — only a present, parseable-but-stale one is
+    // refused, so existing unsigned callers are unaffected.
+    if !webhook_timestamp_fresh(&headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "stale webhook timestamp (replay window exceeded)" })),
+        );
+    }
     // Authenticate the raw bytes BEFORE parsing — verify over exactly what was
     // received, never a re-serialized value. Read the signature from any of the
     // common header spellings (Composio/Svix vary by version).
@@ -12931,7 +16671,24 @@ async fn composio_webhook(
         );
     };
     let fired = store.handle_webhook(&payload).await;
+    // Record the delivery for the webhook registry (GET /api/webhooks).
+    crate::webhook_ingress::record_delivery(crate::webhook_ingress::WEBHOOK_PATH);
     (StatusCode::OK, Json(json!({ "ok": true, "fired": fired })))
+}
+
+/// Read a webhook timestamp header (Svix/Composio `webhook-timestamp`, or the
+/// generic `x-timestamp`) and decide whether the delivery is fresh. Delegates the
+/// staleness decision to [`crate::webhook_ingress::timestamp_fresh`] (absent /
+/// unparseable ⇒ fresh, so this never breaks existing unsigned callers).
+fn webhook_timestamp_fresh(headers: &axum::http::HeaderMap) -> bool {
+    let ts = ["webhook-timestamp", "x-timestamp", "x-request-timestamp"]
+        .iter()
+        .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    crate::webhook_ingress::timestamp_fresh(ts, now)
 }
 
 /// `POST /api/workflows/:id/webhook`
@@ -12961,64 +16718,51 @@ async fn workflow_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Ok(workflow) = crate::workflow::store::load_workflow(&id) else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("workflow '{id}' not found") })),
-        );
-    };
-    // Find the workflow's webhook trigger + its per-trigger secret.
-    let trigger_secret = workflow.triggers.iter().find_map(|t| match t {
-        crate::workflow::WorkflowTrigger::Webhook { secret } => Some(secret.clone()),
-        _ => None,
-    });
-    let Some(trigger_secret) = trigger_secret else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "workflow has no webhook trigger" })),
-        );
-    };
-    // Fail closed: a webhook trigger without a configured secret never fires — an
-    // unauthenticated public trigger would be a request-forgery vector.
-    let Some(secret) = trigger_secret.filter(|s| !s.trim().is_empty()) else {
+    // Replay window (webhook-unify #5): reject a stale, timestamp-signed delivery
+    // up front (back-compat: absent/unparseable timestamp ⇒ accepted).
+    if !webhook_timestamp_fresh(&headers) {
         return (
             StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "webhook trigger has no secret configured" })),
+            Json(json!({ "error": "stale webhook timestamp (replay window exceeded)" })),
         );
-    };
+    }
     // Authenticate the raw bytes BEFORE parsing — verify exactly what was received,
     // never a re-serialized value. Accept the common signature-header spellings.
     let signature = ["webhook-signature", "x-signature", "x-hub-signature-256"]
         .iter()
         .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()));
-    if !crate::composio_triggers::verify_workflow_webhook_signature(&secret, &body, signature) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "invalid or missing webhook signature" })),
-        );
-    }
-    // The raw JSON body becomes the run's trigger payload. Validate it parses so a
-    // malformed body fails fast rather than seeding unusable trigger state.
-    let Ok(body_str) = std::str::from_utf8(&body) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "body is not valid UTF-8" })),
-        );
-    };
-    if serde_json::from_str::<serde_json::Value>(body_str).is_err() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "body must be valid JSON" })),
-        );
-    }
-    match crate::composio_triggers::run_workflow_for_trigger(&id, body_str).await {
-        Ok(run_id) => (
+
+    // Delegate to the shared delivery path so the HTTP route and the relay
+    // dispatcher use byte-identical auth + run semantics (webhook-unify): the
+    // per-workflow HMAC secret lives only in Core, so this is the single verifier.
+    use crate::webhook_ingress::WorkflowWebhookOutcome;
+    match crate::webhook_ingress::deliver_workflow_webhook(&id, &body, signature).await {
+        WorkflowWebhookOutcome::Ran(run_id) => (
             StatusCode::OK,
             Json(json!({ "ok": true, "run_id": run_id })),
         ),
-        Err(e) => (
+        WorkflowWebhookOutcome::NotFound => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("workflow '{id}' not found") })),
+        ),
+        WorkflowWebhookOutcome::NoWebhookTrigger => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "workflow has no webhook trigger" })),
+        ),
+        WorkflowWebhookOutcome::NoSecret => (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "webhook trigger has no secret configured" })),
+        ),
+        WorkflowWebhookOutcome::BadSignature => (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "invalid or missing webhook signature" })),
+        ),
+        WorkflowWebhookOutcome::BadBody(msg) => {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": msg })))
+        }
+        WorkflowWebhookOutcome::RunError(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
+            Json(json!({ "error": e })),
         ),
     }
 }
@@ -15260,6 +19004,13 @@ const SUPPORT_REPORTED_PREF_KEYS: &[&str] = &[
 /// never prompt/agent content, never credentials/`auth.json`. Every call (grant
 /// or refusal) is recorded in the local append-only audit log with the actor
 /// (`x-ryu-support-actor` header) stamped.
+#[utoipa::path(
+    get,
+    path = "/api/support-access/diagnostics",
+    tag = "Support",
+    summary = "Collect support diagnostics (grant-gated, audited)",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn support_access_diagnostics(
     State(state): State<ServerState>,
     headers: axum::http::HeaderMap,
@@ -15499,6 +19250,13 @@ async fn collect_recent_redacted_spans(
 /// log of every support-access event (#546, P5). Not gated on the grant: the
 /// user can always read their own record of what support saw, even after the
 /// grant lapses (that's the point — they hold the record).
+#[utoipa::path(
+    get,
+    path = "/api/support-access/audit",
+    tag = "Support",
+    summary = "Read the support-access audit log",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn support_access_audit(
     State(state): State<ServerState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -16368,6 +20126,13 @@ async fn gateway_config_write(
 /// `GatewayManager::refresh`. A no-op that reports `externally_managed: true`
 /// when the gateway is not Core-managed (remote/external), since Core does not
 /// own that process. Always 200 with `{ success, ... }`.
+#[utoipa::path(
+    post,
+    path = "/api/gateway/restart",
+    tag = "Gateway",
+    summary = "Restart the Core-managed gateway sidecar",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn gateway_restart(State(state): State<ServerState>) -> Json<serde_json::Value> {
     match state.gateway.refresh().await {
         Ok(true) => Json(json!({ "success": true })),
@@ -16602,8 +20367,6 @@ async fn gateway_put_config(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(patch): Json<serde_json::Value>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    use crate::sidecar::gateway::{gateway_token, gateway_url};
-
     if enforce_permission(&state, &caller, crate::identity_verify::permissions::GATEWAY_CONFIGURE)
         .await
         .is_err()
@@ -16614,31 +20377,16 @@ async fn gateway_put_config(
         );
     }
 
-    let base = gateway_url();
-    let base = base.trim_end_matches('/');
-    let token = gateway_token();
-
-    let mut req = state
-        .client
-        .put(format!("{base}/v1/config"))
-        .timeout(std::time::Duration::from_millis(5000))
-        .json(&patch);
-    if let Some(t) = token.as_deref() {
-        req = req.bearer_auth(t);
-    }
-
-    match req.send().await {
+    // Reuse the single config-push transport; the proxy relays the gateway's exact
+    // status code, so a caller sees the same result whether it PUT here or the
+    // policy path pushed the patch.
+    match crate::sidecar::gateway::push_config(&state.client, &patch).await {
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             Json(json!({ "reachable": false, "error": e.to_string() })),
         ),
-        Ok(resp) => {
-            let status =
-                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let body = resp
-                .json::<serde_json::Value>()
-                .await
-                .unwrap_or_else(|_| json!({}));
+        Ok((status, body)) => {
+            let status = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             (status, Json(body))
         }
     }
@@ -17764,6 +21512,13 @@ async fn persist_delegate_children(
 
 // ── Scheduled-job handlers (heartbeat) ──────────────────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/heartbeat/jobs",
+    tag = "Core",
+    summary = "List the scheduled jobs",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn list_jobs() -> Json<serde_json::Value> {
     let jobs = crate::scheduler::store::list_jobs();
     Json(json!({ "jobs": jobs }))
@@ -17831,6 +21586,14 @@ async fn create_job(Json(body): Json<CreateJobBody>) -> (StatusCode, Json<serde_
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/heartbeat/jobs/{id}",
+    tag = "Core",
+    summary = "Get one scheduled job",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 async fn get_job(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -17953,6 +21716,7 @@ async fn get_install_status_by_name(
 fn command_exists(program: &str) -> bool {
     Command::new(program)
         .arg("--version")
+        .no_window()
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
@@ -17977,6 +21741,7 @@ fn dependency_status() -> (serde_json::Map<String, serde_json::Value>, bool) {
 fn run_install_command(program: &str, args: &[&str]) -> Result<(), String> {
     let output = Command::new(program)
         .args(args)
+        .no_window()
         .output()
         .map_err(|error| format!("{program} failed to start: {error}"))?;
 
@@ -18307,6 +22072,250 @@ mod remote_auth_tests {
             .expect("non-placeholder tokens are accepted");
 
         assert_eq!(token.as_deref(), Some("strong-random-token"));
+    }
+}
+
+#[cfg(test)]
+mod gateway_policy_notice_tests {
+    use super::{attach_gateway_policy_notice, PolicyApplyOutcome};
+    use serde_json::json;
+
+    /// A remote/externally-managed gateway: the policy flag flipped but the running
+    /// gateway was NOT reconfigured, so the response must carry `externally_managed:
+    /// true` AND the manual-restart notice — the whole point of the item-2 fix
+    /// (Core must stop reporting a security control as ON when it is a no-op).
+    #[test]
+    fn externally_managed_response_carries_the_flag_and_notice() {
+        let mut body = json!({ "success": true });
+        attach_gateway_policy_notice(
+            &mut body,
+            PolicyApplyOutcome {
+                gateway_touched: true,
+                gateway_externally_managed: true,
+            },
+        );
+        assert_eq!(body["externally_managed"], json!(true));
+        assert!(
+            body["notice"]
+                .as_str()
+                .is_some_and(|s| s.to_ascii_lowercase().contains("restart")),
+            "must tell the caller a manual gateway restart is required, got {:?}",
+            body["notice"]
+        );
+    }
+
+    /// A Core-managed gateway that WAS reconfigured: the flag is present and `false`
+    /// (honest positive confirmation), and there is no restart notice.
+    #[test]
+    fn managed_and_reconfigured_response_says_false_with_no_notice() {
+        let mut body = json!({ "success": true });
+        attach_gateway_policy_notice(
+            &mut body,
+            PolicyApplyOutcome {
+                gateway_touched: true,
+                gateway_externally_managed: false,
+            },
+        );
+        assert_eq!(body["externally_managed"], json!(false));
+        assert!(body.get("notice").is_none(), "no restart notice when reconfigured");
+    }
+
+    /// An enable/disable that touched NO gateway policy must not add the fields at
+    /// all — they would be meaningless noise on an ordinary plugin toggle.
+    #[test]
+    fn untouched_gateway_adds_no_fields() {
+        let mut body = json!({ "success": true });
+        attach_gateway_policy_notice(&mut body, PolicyApplyOutcome::default());
+        assert!(body.get("externally_managed").is_none());
+        assert!(body.get("notice").is_none());
+    }
+}
+
+#[cfg(test)]
+mod gateway_policy_patch_tests {
+    use super::{
+        build_firewall_patch, build_routing_patch, policy_requires_respawn, FirewallPolicyBundle,
+    };
+    use serde_json::json;
+
+    /// The firewall toggle is a LIVE config-push, never a respawn; the respawn split
+    /// must classify firewall/routing as push and only compression as respawn. This
+    /// is the "assert the respawn path is NOT taken when the field is hot-swappable"
+    /// guard.
+    #[test]
+    fn only_compression_requires_respawn() {
+        assert!(policy_requires_respawn("compression"));
+        assert!(!policy_requires_respawn("firewall"));
+        assert!(!policy_requires_respawn("routing"));
+        assert!(!policy_requires_respawn("sandbox"));
+        assert!(!policy_requires_respawn("predict"));
+    }
+
+    /// Enabling forces `firewall.enabled = true` while PRESERVING every other field
+    /// of the current config (a toggle must never reset the operator's policy /
+    /// scan settings — the gateway's PUT firewall is full-replacement).
+    #[test]
+    fn firewall_enable_forces_enabled_and_preserves_other_fields() {
+        let current = json!({
+            "enabled": false,
+            "policy": "block",
+            "scan_inbound": true,
+            "redact_pii": false,
+        });
+        let out = build_firewall_patch(current, true, &FirewallPolicyBundle::default());
+        assert_eq!(out["enabled"], json!(true));
+        assert_eq!(out["policy"], json!("block"), "policy preserved");
+        assert_eq!(out["redact_pii"], json!(false), "redact_pii preserved");
+    }
+
+    /// Disabling forces `enabled = false` (the plugin owns the toggle direction).
+    #[test]
+    fn firewall_disable_forces_enabled_false() {
+        let out = build_firewall_patch(json!({ "policy": "warn_and_continue" }), false, &FirewallPolicyBundle::default());
+        assert_eq!(out["enabled"], json!(false));
+        assert_eq!(out["policy"], json!("warn_and_continue"));
+    }
+
+    /// The config-pack: enabling a firewall pattern-pack plugin PUSHES its
+    /// `custom_patterns` on top of the existing set; disabling REMOVES exactly the
+    /// pack's patterns (by name) and leaves any pre-existing operator pattern intact.
+    #[test]
+    fn firewall_config_pack_pushes_on_enable_and_removes_on_disable() {
+        let pack = FirewallPolicyBundle::from_definition(&json!({
+            "service": "gateway",
+            "custom_patterns": [
+                { "name": "widget_id", "regex": "WIDGET-\\d+", "kind": "pii" }
+            ]
+        }));
+        // A config that already carries an unrelated operator pattern.
+        let current = json!({
+            "enabled": true,
+            "custom_patterns": [
+                { "name": "operator_secret", "regex": "OP-\\d+", "kind": "secret" }
+            ]
+        });
+
+        // ENABLE: the pack pattern is added; the operator's own pattern survives.
+        let enabled = build_firewall_patch(current.clone(), true, &pack);
+        let names: Vec<&str> = enabled["custom_patterns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|p| p["name"].as_str())
+            .collect();
+        assert!(names.contains(&"widget_id"), "pack pattern pushed on enable");
+        assert!(names.contains(&"operator_secret"), "operator pattern preserved");
+
+        // DISABLE: the pack pattern is removed by name; the operator's stays.
+        let disabled = build_firewall_patch(enabled, false, &pack);
+        let names: Vec<&str> = disabled["custom_patterns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|p| p["name"].as_str())
+            .collect();
+        assert!(!names.contains(&"widget_id"), "pack pattern removed on disable");
+        assert!(names.contains(&"operator_secret"), "operator pattern still intact");
+        // A pattern-pack plugin must NOT touch the global `enabled` flag — it was
+        // `true` in `current` and stays `true` through both enable and disable, so
+        // removing a narrow pack never disarms the whole firewall.
+        assert_eq!(disabled["enabled"], json!(true), "pack toggle preserves global enabled");
+    }
+
+    /// The global-switch decoupling (the "any one firewall plugin drives the global
+    /// switch" fix): a pattern-pack plugin (non-empty config-pack) NEVER writes
+    /// `firewall.enabled` in EITHER direction — it only contributes/removes its own
+    /// patterns. Only the pure on/off switch owns the global flag.
+    #[test]
+    fn firewall_pattern_pack_never_writes_global_enabled() {
+        let pack = FirewallPolicyBundle::from_definition(&json!({
+            "custom_patterns": [{ "name": "widget_id", "regex": "WIDGET-\\d+", "kind": "pii" }]
+        }));
+
+        // Live config with the firewall ARMED (enabled:true). Disabling the pack must
+        // leave it armed — only its pattern is dropped.
+        let armed = json!({ "enabled": true, "policy": "block" });
+        let out = build_firewall_patch(armed, false, &pack);
+        assert_eq!(out["enabled"], json!(true), "disable-pack keeps firewall armed");
+        assert_eq!(out["policy"], json!("block"), "policy preserved");
+        assert_eq!(
+            out["custom_patterns"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|p| p["name"] == json!("widget_id"))
+                .count(),
+            0,
+            "pack pattern removed"
+        );
+
+        // Live config with the firewall DISARMED (enabled:false). Enabling the pack
+        // must NOT force the whole firewall on — a narrow pack can't arm enforcement.
+        let disarmed = json!({ "enabled": false, "policy": "block" });
+        let out = build_firewall_patch(disarmed, true, &pack);
+        assert_eq!(out["enabled"], json!(false), "enable-pack does not arm firewall");
+        let names: Vec<&str> = out["custom_patterns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|p| p["name"].as_str())
+            .collect();
+        assert!(names.contains(&"widget_id"), "pack pattern added");
+    }
+
+    /// Re-applying the pack is idempotent — enabling twice does not duplicate the
+    /// pack's patterns.
+    #[test]
+    fn firewall_config_pack_reapply_is_idempotent() {
+        let pack = FirewallPolicyBundle::from_definition(&json!({
+            "custom_patterns": [{ "name": "widget_id", "regex": "WIDGET-\\d+", "kind": "pii" }]
+        }));
+        let once = build_firewall_patch(json!({}), true, &pack);
+        let twice = build_firewall_patch(once, true, &pack);
+        let count = twice["custom_patterns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["name"] == json!("widget_id"))
+            .count();
+        assert_eq!(count, 1, "pack pattern must not be duplicated on re-enable");
+    }
+
+    /// The built-in firewall fixture's definition (`service` + `note`, no patterns)
+    /// is a pure on/off switch — no config-pack, so only `enabled` changes.
+    #[test]
+    fn firewall_pure_switch_definition_adds_no_patterns() {
+        let pack = FirewallPolicyBundle::from_definition(&json!({
+            "service": "gateway",
+            "note": "on/off switch"
+        }));
+        let out = build_firewall_patch(json!({}), true, &pack);
+        assert_eq!(out["enabled"], json!(true));
+        assert_eq!(out["custom_patterns"], json!([]), "no pack ⇒ no patterns");
+    }
+
+    /// The routing toggle forces `smart_routing.enabled` while preserving the rest
+    /// of the routing config (model_map, other smart_routing fields).
+    #[test]
+    fn routing_toggle_sets_smart_routing_enabled_and_preserves_rest() {
+        let current = json!({
+            "default_provider": "local",
+            "model_map": { "gemma": { "provider": "local" } },
+            "smart_routing": { "classifier_model": "gemma-mini", "cache_by_session": true }
+        });
+        let out = build_routing_patch(current, true);
+        assert_eq!(out["smart_routing"]["enabled"], json!(true));
+        assert_eq!(
+            out["smart_routing"]["classifier_model"],
+            json!("gemma-mini"),
+            "existing smart_routing fields preserved"
+        );
+        assert_eq!(out["model_map"]["gemma"]["provider"], json!("local"), "model_map preserved");
+
+        // Disable path, starting from a config with no smart_routing block at all.
+        let out = build_routing_patch(json!({ "default_provider": "local" }), false);
+        assert_eq!(out["smart_routing"]["enabled"], json!(false));
+        assert_eq!(out["default_provider"], json!("local"));
     }
 }
 
@@ -18904,6 +22913,366 @@ mod agent_egress_screen_tests {
             assert!(
                 screen_agent_egress_url(url).await.is_err(),
                 "{url} must be blocked by the egress screen"
+            );
+        }
+    }
+}
+
+/// The App route gate ([`require_app_enabled`]) — the extension point that makes a
+/// feature pluginizable without moving its code out of the crate.
+///
+/// Tested against a stand-in router rather than the real `/api/meetings/*` mount,
+/// because the gate is deliberately independent of [`ServerState`]: it takes only a
+/// [`PluginStore`], so it can be exercised end-to-end (real store, real middleware,
+/// real refusal body) without standing up a Core. The real mount wires the exact
+/// same layer — see `meetings_routes`.
+#[cfg(test)]
+mod app_gate_tests {
+    use super::{require_app_enabled, AppGate};
+    use crate::plugins::{
+        builtins::{MEETINGS_PLUGIN_ID, SPACES_PLUGIN_ID},
+        PluginStore,
+    };
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::get,
+        Router,
+    };
+    use tower::ServiceExt;
+
+    /// A stand-in for `meetings_routes` / `spaces_routes`: same gate, same middleware,
+    /// trivial handler. Parameterized over the App, because the gate is generic over
+    /// it — there is ONE `require_app_enabled`, and every gated feature (Meetings
+    /// today, Spaces here, anything tomorrow) is the same three lines with a different
+    /// id. Testing it per-App would be the copy the gate exists to avoid.
+    fn gated_router(store: &PluginStore, app_id: &'static str, label: &'static str) -> Router {
+        Router::new()
+            .route("/api/meetings", get(|| async { "meetings ok" }))
+            .route("/api/spaces", get(|| async { "spaces ok" }))
+            .route_layer(axum::middleware::from_fn_with_state(
+                AppGate::new(store, app_id, label),
+                require_app_enabled,
+            ))
+    }
+
+    /// The Meetings gate (the default subject of these tests).
+    async fn call(store: &PluginStore, path: &str) -> (StatusCode, String) {
+        call_gated(store, MEETINGS_PLUGIN_ID, "Meetings", path).await
+    }
+
+    async fn call_gated(
+        store: &PluginStore,
+        app_id: &'static str,
+        label: &'static str,
+        path: &str,
+    ) -> (StatusCode, String) {
+        let res = gated_router(store, app_id, label)
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("the router is infallible");
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// THE gate: with the App disabled, its routes are refused with a body the
+    /// desktop can act on (`app_disabled` + the id it must enable).
+    #[tokio::test]
+    async fn a_disabled_app_refuses_its_routes_with_an_actionable_503() {
+        let store = PluginStore::open_in_memory().unwrap();
+        // Installed but never enabled — the lifecycle store's install-disabled default.
+        store.insert(MEETINGS_PLUGIN_ID, "1.0.0").await.unwrap();
+
+        let (status, body) = call(&store, "/api/meetings").await;
+
+        // 503, not 404: the route exists and the fix is a config change the caller
+        // can make. A 404 would be indistinguishable from "this Core is too old".
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+
+        let json: serde_json::Value = serde_json::from_str(&body).expect("the refusal is JSON");
+        assert_eq!(json["error"], "app_disabled");
+        assert_eq!(json["app"], MEETINGS_PLUGIN_ID);
+        assert_eq!(json["message"], "Enable the Meetings app");
+    }
+
+    /// Fail-closed: an App with no record at all is not installed, so its routes are
+    /// not live either. Same refusal as a disabled one.
+    #[tokio::test]
+    async fn an_uninstalled_app_refuses_too() {
+        let store = PluginStore::open_in_memory().unwrap();
+
+        let (status, body) = call(&store, "/api/meetings").await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(body.contains("app_disabled"), "{body}");
+    }
+
+    /// The other half: an ENABLED App's routes pass straight through. Without this,
+    /// a gate that refused everything would still pass the test above.
+    #[tokio::test]
+    async fn an_enabled_app_serves_its_routes_normally() {
+        let store = PluginStore::open_in_memory().unwrap();
+        store.insert(MEETINGS_PLUGIN_ID, "1.0.0").await.unwrap();
+        store.set_enabled(MEETINGS_PLUGIN_ID, &[]).await.unwrap();
+
+        let (status, body) = call(&store, "/api/meetings").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, "meetings ok");
+    }
+
+    /// `route_layer`, not `layer`: the gate runs only on MATCHED routes, so an
+    /// unknown path stays a plain 404 instead of being mislabelled "app disabled".
+    #[tokio::test]
+    async fn an_unknown_path_is_still_a_plain_404() {
+        let store = PluginStore::open_in_memory().unwrap();
+        // App disabled — if the gate ran on the fallback, this would 503.
+        store.insert(MEETINGS_PLUGIN_ID, "1.0.0").await.unwrap();
+
+        let (status, body) = call(&store, "/api/not-a-route").await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(!body.contains("app_disabled"), "{body}");
+    }
+
+    /// Spaces is gated by the SAME layer (`spaces_routes` wires this exact
+    /// `AppGate` + `require_app_enabled` pair over `/api/spaces/*`).
+    ///
+    /// This is what makes the Spaces `enabled` bit real rather than decorative: the
+    /// Store renders a live Switch for it (it is not a `SYSTEM_PLUGINS` built-in), and
+    /// the dependency graph refuses to disable it under Meetings/Whiteboard/Canvas —
+    /// both of which would be theatre if flipping the Switch off still served every
+    /// `/api/spaces/*` route.
+    #[tokio::test]
+    async fn the_spaces_app_is_gated_by_the_same_layer() {
+        let store = PluginStore::open_in_memory().unwrap();
+        store.insert(SPACES_PLUGIN_ID, "1.0.0").await.unwrap();
+
+        // Disabled → refused, naming Spaces (not a hardcoded "Meetings").
+        let (status, body) = call_gated(&store, SPACES_PLUGIN_ID, "Spaces", "/api/spaces").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        let json: serde_json::Value = serde_json::from_str(&body).expect("the refusal is JSON");
+        assert_eq!(json["error"], "app_disabled");
+        assert_eq!(json["app"], SPACES_PLUGIN_ID);
+        assert_eq!(json["message"], "Enable the Spaces app");
+
+        // Enabled → straight through.
+        store.set_enabled(SPACES_PLUGIN_ID, &[]).await.unwrap();
+        let (status, body) = call_gated(&store, SPACES_PLUGIN_ID, "Spaces", "/api/spaces").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, "spaces ok");
+    }
+}
+
+#[cfg(test)]
+mod mcp_plugin_governance_tests {
+    use super::*;
+
+    fn stdio_plan(server_name: &str) -> crate::mcp_catalog::InstallPlan {
+        crate::mcp_catalog::InstallPlan {
+            server_name: server_name.to_owned(),
+            entry: crate::mcp_catalog::McpEntryPlan::Stdio {
+                command: "npx".to_owned(),
+                args: vec!["-y".to_owned(), "some-mcp".to_owned()],
+            },
+            description: Some("A test MCP server".to_owned()),
+            version: None,
+            catalog_id: "some-mcp".to_owned(),
+        }
+    }
+
+    #[test]
+    fn synthesize_mcp_manifest_is_governance_only_and_grants_widget_render() {
+        let m = synthesize_mcp_manifest(&stdio_plan("brave-search")).expect("valid id");
+        assert_eq!(m.id, "brave-search");
+        // The plugin id == the server name (external tools are `server__tool`).
+        assert_eq!(m.version, "0.0.0", "absent/non-semver version falls back");
+        assert!(
+            m.runnables.is_empty(),
+            "record is governance-only — declaring runnables would double-list the server's tools"
+        );
+        assert!(
+            m.permission_grants
+                .iter()
+                .any(|g| g == crate::sidecar::mcp::WIDGET_RENDER_GRANT),
+            "the MCP record must hold widget:render so its widgets can promote once recorded"
+        );
+    }
+
+    #[test]
+    fn synthesize_mcp_manifest_rejects_invalid_plugin_id() {
+        // A server name that is not a valid plugin id yields no record (the caller
+        // then skips it, best-effort; the mcp.json entry still works).
+        assert!(synthesize_mcp_manifest(&stdio_plan("bad/name@x")).is_none());
+    }
+
+    #[tokio::test]
+    async fn installed_mcp_server_gets_a_disabled_record_that_uninstall_governs() {
+        // Piece 2: the synthesized manifest flows through the SAME plugin lifecycle
+        // as any plugin — install (DISABLED), then uninstall removes it.
+        let manifest = synthesize_mcp_manifest(&stdio_plan("brave-search")).expect("valid id");
+        let store = crate::plugins::PluginStore::open_in_memory().expect("store");
+
+        crate::plugins::lifecycle::install_app(&store, &manifest)
+            .await
+            .expect("install record");
+        let rec = store
+            .get("brave-search")
+            .await
+            .expect("get")
+            .expect("record exists");
+        assert!(!rec.enabled, "an installed MCP server record is DISABLED");
+
+        // The plugin lifecycle governs it: uninstall removes the record.
+        crate::plugins::lifecycle::uninstall_app(&store, "brave-search", &[manifest.clone()], false)
+            .await
+            .expect("uninstall");
+        assert!(
+            store.get("brave-search").await.expect("get").is_none(),
+            "uninstall (a plugin-lifecycle op) removed the MCP server's record"
+        );
+    }
+
+    fn mcp_json_with(entries: &[(&str, bool)]) -> String {
+        let map: serde_json::Map<String, serde_json::Value> = entries
+            .iter()
+            .map(|(name, enabled)| {
+                (
+                    (*name).to_owned(),
+                    serde_json::json!({
+                        "command": "npx",
+                        "args": ["-y", "some-mcp"],
+                        "enabled": enabled,
+                    }),
+                )
+            })
+            .collect();
+        serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": map })).unwrap()
+    }
+
+    fn read_mcp_enabled(path: &std::path::Path) -> std::collections::BTreeMap<String, bool> {
+        let raw = std::fs::read_to_string(path).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        val.get("mcpServers")
+            .and_then(|v| v.as_object())
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| {
+                        (
+                            k.clone(),
+                            v.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(true),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn mutate_mcp_entry_set_enabled_flips_only_the_target() {
+        // Fix 1 / enable-disable sync: flipping one entry's `enabled` flag (the flag
+        // that actually gates spawn) leaves every other entry untouched.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcp.json");
+        std::fs::write(&path, mcp_json_with(&[("brave-search", false), ("other", true)])).unwrap();
+
+        let changed =
+            mutate_mcp_entry(path.clone(), "brave-search", McpEntryMutation::SetEnabled(true))
+                .await
+                .unwrap();
+        assert!(changed, "flipping a disabled entry to enabled changes the file");
+
+        let state = read_mcp_enabled(&path);
+        assert_eq!(state.get("brave-search"), Some(&true), "target now enabled");
+        assert_eq!(state.get("other"), Some(&true), "sibling untouched");
+
+        // Idempotent: a second SetEnabled(true) is a no-op.
+        let again =
+            mutate_mcp_entry(path.clone(), "brave-search", McpEntryMutation::SetEnabled(true))
+                .await
+                .unwrap();
+        assert!(!again, "setting to the current state is a no-op");
+    }
+
+    #[tokio::test]
+    async fn mutate_mcp_entry_remove_drops_only_the_target() {
+        // Fix 1 / uninstall sync: removing a synth MCP-server record drops its
+        // mcp.json entry (so the server actually stops) while siblings survive.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcp.json");
+        std::fs::write(&path, mcp_json_with(&[("brave-search", true), ("other", true)])).unwrap();
+
+        let changed = mutate_mcp_entry(path.clone(), "brave-search", McpEntryMutation::Remove)
+            .await
+            .unwrap();
+        assert!(changed, "removing a present entry changes the file");
+
+        let state = read_mcp_enabled(&path);
+        assert!(!state.contains_key("brave-search"), "target entry removed");
+        assert!(state.contains_key("other"), "sibling survives the removal");
+    }
+
+    #[tokio::test]
+    async fn mutate_mcp_entry_absent_target_is_noop() {
+        // A missing entry (or missing file) is a benign no-op, never an error —
+        // so the best-effort lifecycle sync never fails an enable/disable/uninstall.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcp.json");
+        std::fs::write(&path, mcp_json_with(&[("other", true)])).unwrap();
+        assert!(!mutate_mcp_entry(path.clone(), "ghost-server", McpEntryMutation::Remove)
+            .await
+            .unwrap());
+
+        let missing = dir.path().join("does-not-exist.json");
+        assert!(
+            !mutate_mcp_entry(missing, "x", McpEntryMutation::SetEnabled(false))
+                .await
+                .unwrap(),
+            "a missing mcp.json is a no-op, not an error"
+        );
+    }
+
+    #[test]
+    fn all_eight_builtin_apps_declare_widget_render_and_a_widget_contribution() {
+        // Migration guard (rule 3): every built-in Ryu App must declare the
+        // widget:render grant AND a contributes.widgets entry, or its widget stops
+        // rendering under the unified grant-gated promotion path. Loads the REAL
+        // embedded fixtures, not a hand-built manifest.
+        let manifests = crate::plugin_manifest::PluginManifestLoader::load();
+        let apps = [
+            "checklist",
+            "smart-intake-form",
+            "data-grid-explorer",
+            "chart-studio",
+            "decision-wizard",
+            "quest-board",
+            "worktree-diff-review",
+            "gateway-budget-dial",
+        ];
+        for id in apps {
+            let m = manifests
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap_or_else(|| panic!("built-in app '{id}' must load"));
+            assert!(
+                m.permission_grants
+                    .iter()
+                    .any(|g| g == crate::sidecar::mcp::WIDGET_RENDER_GRANT),
+                "app '{id}' must declare the widget:render grant or its widget stops rendering"
+            );
+            assert!(
+                m.contributes
+                    .as_ref()
+                    .is_some_and(|c| !c.widgets.is_empty()),
+                "app '{id}' must declare a contributes.widgets entry (the promotion source of record)"
             );
         }
     }

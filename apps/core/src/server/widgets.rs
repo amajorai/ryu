@@ -22,8 +22,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use axum::{
-    extract::{Path, State},
-    http::{header, StatusCode},
+    extract::{Path, Query, State},
+    http::{header, HeaderName, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -130,15 +130,10 @@ impl WidgetInstanceStore {
 }
 
 fn gen_instance_id() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("wgt_{n:x}{c:x}")
+    // Crypto-random (v4). The instance id is now also the capability the public
+    // asset proxy authenticates against (`GET /api/widgets/asset`), so it must be
+    // unguessable — a time+counter id was enumerable.
+    format!("wgt_{}", uuid::Uuid::new_v4().simple())
 }
 
 static STORE: OnceLock<WidgetInstanceStore> = OnceLock::new();
@@ -189,6 +184,14 @@ fn err_reply(status: StatusCode, code: &str, message: impl Into<String>) -> axum
 }
 
 /// `POST /api/widgets/tools/call` — provenance gate then forward to the Gateway.
+#[utoipa::path(
+    post,
+    path = "/api/widgets/tools/call",
+    tag = "Widgets",
+    summary = "provenance gate then forward to the Gateway.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn widget_call_tool(
     State(state): State<ServerState>,
     Json(body): Json<WidgetCallBody>,
@@ -421,6 +424,14 @@ pub struct WidgetFollowUpBody {
 /// then return the provenance-tagged user turn (`source:"widget"`). The desktop
 /// sends the returned turn through the normal chat transport; scanning it here
 /// closes the prompt-injection vector before it enters model context (R4).
+#[utoipa::path(
+    post,
+    path = "/api/widgets/follow-up",
+    tag = "Widgets",
+    summary = "provenance gate + firewall/DLP scan + audit,",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn widget_follow_up(
     State(_state): State<ServerState>,
     Json(body): Json<WidgetFollowUpBody>,
@@ -491,6 +502,14 @@ pub struct WidgetStateBody {
 
 /// `POST /api/widgets/state` — persist a `widgetState` snapshot server-side (D4)
 /// so it survives reload. Best-effort; unknown/expired instances are a no-op.
+#[utoipa::path(
+    post,
+    path = "/api/widgets/state",
+    tag = "Widgets",
+    summary = "persist a `widgetState` snapshot server-side (D4)",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn widget_state(
     State(_state): State<ServerState>,
     Json(body): Json<WidgetStateBody>,
@@ -502,11 +521,409 @@ pub async fn widget_state(
     Json(json!({ "ok": true })).into_response()
 }
 
+// ── GET /api/widgets/asset — governed remote-asset proxy ─────────────────────
+//
+// A widget renders inside a null-origin sandbox whose CSP pins `connect-src
+// 'none'`: it cannot `fetch()`/beacon, and its ONLY egress channel is passive
+// subresources (`<img>`, `@font-face`, `<audio>`/`<video>`) which the mount
+// rewrites to point here. This proxy is therefore the single governed egress
+// lane for a widget's declared remote assets (the img-src analogue of the
+// governed `callTool` lane). It rides the PUBLIC router because a browser
+// subresource load cannot carry the node bearer; auth is in-handler:
+//
+//   1. `instance` → a live minted `WidgetInstance` (the capability + provenance)
+//      → the authoritative `origin_server` (never a client-supplied `server=`).
+//   2. the target host MUST be in that origin server's widget-resource
+//      `resource_domains` allowlist (a forged `template` can only pick another
+//      allowlist ON THE SAME SERVER — it can never widen beyond it).
+//   3. an SSRF guard rejects private/loopback/link-local/metadata targets even
+//      if an allowlist entry names one (DNS-rebinding is a documented residual).
+//   4. a content-type allowlist (image/font/audio/video only) + size cap +
+//      timeout, and every fetch is exec-audited so the Gateway sees the egress.
+
+/// Max bytes proxied for a single asset (fail-closed above this).
+const WIDGET_ASSET_MAX_BYTES: usize = 25 * 1024 * 1024;
+/// Upstream fetch timeout for a proxied asset.
+const WIDGET_ASSET_TIMEOUT: Duration = Duration::from_secs(15);
+
+#[derive(Debug, Deserialize)]
+pub struct WidgetAssetQuery {
+    /// Minted widget instance id — the capability + provenance handle. Resolves
+    /// the authoritative origin server; never client-supplied server identity.
+    #[serde(alias = "instanceId")]
+    instance: String,
+    /// The widget resource uri whose declared `resource_domains` allowlist gates
+    /// this fetch. Resolved on the instance's origin server, so a forged value can
+    /// only select another allowlist on the SAME server.
+    #[serde(default, alias = "templateUri")]
+    template: Option<String>,
+    /// The absolute `https://` asset URL to proxy.
+    url: String,
+}
+
+/// `GET /api/widgets/asset` — the governed remote-asset egress lane (see the
+/// module comment above). Fail-closed at every step.
+#[utoipa::path(
+    get,
+    path = "/api/widgets/asset",
+    tag = "Widgets",
+    summary = "governed remote-asset proxy for a sandboxed widget",
+    params(
+        ("instance" = String, Query, description = "minted widget instance id"),
+        ("template" = Option<String>, Query, description = "widget resource uri"),
+        ("url" = String, Query, description = "absolute https asset url")
+    ),
+    responses((status = 200, description = "asset bytes"))
+)]
+pub async fn widget_asset(
+    State(state): State<ServerState>,
+    Query(q): Query<WidgetAssetQuery>,
+) -> axum::response::Response {
+    // 1. instance → origin server (authoritative provenance; fail-closed).
+    let Some(record) = store().get(&q.instance) else {
+        return err_reply(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "unknown or expired widget instance",
+        );
+    };
+
+    // 2. Parse the target; `https://` only.
+    let Ok(target) = url::Url::parse(&q.url) else {
+        return err_reply(StatusCode::BAD_REQUEST, "invalid_args", "asset url is not a valid URL");
+    };
+    if target.scheme() != "https" {
+        return err_reply(StatusCode::BAD_REQUEST, "invalid_args", "asset url must be https");
+    }
+    let Some(host) = target.host_str().map(str::to_ascii_lowercase) else {
+        return err_reply(StatusCode::BAD_REQUEST, "invalid_args", "asset url has no host");
+    };
+
+    // 3. Authoritative allowlist: the origin server's widget-resource
+    //    `resource_domains`. Empty allowlist (e.g. a built-in that inlines every
+    //    asset) → refuse everything.
+    let allow = widget_asset_allowlist(&state, &record.origin_server, q.template.as_deref()).await;
+    if !allow.iter().any(|h| h == &host) {
+        return err_reply(
+            StatusCode::FORBIDDEN,
+            "denied",
+            format!("host '{host}' is not in the widget's declared resource_domains"),
+        );
+    }
+
+    // 4. SSRF guard: never proxy an internal target, even if allowlisted.
+    if host_is_blocked(&host) {
+        return err_reply(
+            StatusCode::FORBIDDEN,
+            "denied",
+            "asset host resolves to a blocked address range",
+        );
+    }
+
+    // 5. Resolve the host off-runtime and reject if ANY resolved address is
+    //    internal (this closes the DNS-rebinding residual left by the literal
+    //    `host_is_blocked` check in step 4). We then pin the client to exactly
+    //    those addresses so no re-resolution can occur between here and connect.
+    let started = Instant::now();
+    let port = target.port_or_known_default().unwrap_or(443);
+    let resolve_host = host.clone();
+    let resolved: Vec<std::net::SocketAddr> = match tokio::task::spawn_blocking(move || {
+        use std::net::ToSocketAddrs;
+        (resolve_host.as_str(), port)
+            .to_socket_addrs()
+            .map(|it| it.collect::<Vec<_>>())
+    })
+    .await
+    {
+        Ok(Ok(addrs)) => addrs,
+        _ => {
+            audit_asset(&record, &host, 0, started, Some("dns resolution failed".to_owned())).await;
+            return err_reply(StatusCode::BAD_GATEWAY, "server_error", "asset host did not resolve");
+        }
+    };
+    if resolved.is_empty() || resolved.iter().any(|a| ip_is_blocked(&a.ip())) {
+        audit_asset(&record, &host, 0, started, Some("resolves to blocked range".to_owned())).await;
+        return err_reply(
+            StatusCode::FORBIDDEN,
+            "denied",
+            "asset host resolves to a blocked address range",
+        );
+    }
+
+    // 6. Fetch server-side (the ONLY egress lane; Core/Gateway mediate it) with a
+    //    client pinned to the validated IPs AND redirects DISABLED. A remote can no
+    //    longer 3xx-bounce us to an internal host (169.254.169.254, 127.0.0.1,
+    //    a private-LAN IP) after the guards ran — a redirect returns as a 3xx
+    //    status and is rejected by the `is_success()` gate below. Mirrors the
+    //    manifest client at `server/mod.rs` (`redirect::Policy::none()`).
+    let client = match reqwest::Client::builder()
+        .timeout(WIDGET_ASSET_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&host, &resolved)
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            audit_asset(&record, &host, 0, started, Some(format!("client build failed: {e}"))).await;
+            return err_reply(
+                StatusCode::BAD_GATEWAY,
+                "server_error",
+                format!("asset client build failed: {e}"),
+            );
+        }
+    };
+    let resp = match client
+        .get(target.as_str())
+        .header(header::ACCEPT, "image/*,font/*,audio/*,video/*,*/*;q=0.1")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            audit_asset(&record, &host, 0, started, Some(format!("fetch failed: {e}"))).await;
+            return err_reply(
+                StatusCode::BAD_GATEWAY,
+                "server_error",
+                format!("asset fetch failed: {e}"),
+            );
+        }
+    };
+    if !resp.status().is_success() {
+        let status = resp.status();
+        audit_asset(&record, &host, 0, started, Some(format!("upstream {status}"))).await;
+        return err_reply(
+            StatusCode::BAD_GATEWAY,
+            "server_error",
+            format!("asset upstream returned {status}"),
+        );
+    }
+
+    // 7. Content-type allowlist: passive media only — never html/js (a widget can
+    //    never turn this lane into a remote-code loader; script-src is nonce-only
+    //    regardless, so this is belt-and-suspenders).
+    let content_type = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+        .unwrap_or_else(|| "application/octet-stream".to_owned());
+    if !content_type_is_allowed(&content_type) {
+        audit_asset(
+            &record,
+            &host,
+            0,
+            started,
+            Some(format!("blocked content-type {content_type}")),
+        )
+        .await;
+        return err_reply(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "denied",
+            format!("content-type '{content_type}' is not a permitted widget asset type"),
+        );
+    }
+
+    // 8. Size-capped streaming read.
+    let bytes = match read_capped(resp, WIDGET_ASSET_MAX_BYTES).await {
+        Ok(b) => b,
+        Err(msg) => {
+            audit_asset(&record, &host, 0, started, Some(msg.clone())).await;
+            return err_reply(StatusCode::BAD_GATEWAY, "server_error", msg);
+        }
+    };
+    let n = bytes.len();
+    audit_asset(&record, &host, n, started, None).await;
+
+    // 9. Return the bytes with the real content-type. `Access-Control-Allow-Origin:
+    //    *` is REQUIRED: a null-origin frame's cross-origin `@font-face` fetch is
+    //    CORS-gated and silently fails without it (images are no-cors, so ACAO is a
+    //    harmless no-op for them). `nosniff` + a modest cache round it out.
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_owned()),
+            (header::CACHE_CONTROL, "public, max-age=3600".to_owned()),
+            (
+                HeaderName::from_static("x-content-type-options"),
+                "nosniff".to_owned(),
+            ),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+/// Resolve the origin server's widget-resource `resource_domains` allowlist
+/// (lowercased exact hosts). Server-scoped via `widget_resource(server, tpl)`, so
+/// a client-forged `template` can only ever select another allowlist on the same
+/// server. A built-in app (meta `None`) yields an empty allowlist → deny-all.
+async fn widget_asset_allowlist(
+    state: &ServerState,
+    server: &str,
+    template: Option<&str>,
+) -> Vec<String> {
+    let meta = match template {
+        Some(tpl) => state.mcp.widget_resource(server, tpl).await.and_then(|r| r.meta),
+        None => None,
+    };
+    meta.as_ref().map(parse_resource_domains).unwrap_or_default()
+}
+
+/// Parse the `resource_domains` allowlist from a widget resource's `_meta`,
+/// tolerating every spelling in the wild: top-level `resource_domains` /
+/// `resourceDomains`, and the nested `openai/widgetCSP` / `ryu/widgetCSP` /
+/// `ui.csp` objects. Each entry is normalized to a bare lowercase host.
+pub(crate) fn parse_resource_domains(meta: &Value) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut push_from = |v: Option<&Value>| {
+        if let Some(arr) = v.and_then(Value::as_array) {
+            for item in arr {
+                if let Some(h) = item.as_str().and_then(normalize_allow_host) {
+                    if !out.contains(&h) {
+                        out.push(h);
+                    }
+                }
+            }
+        }
+    };
+    push_from(meta.get("resource_domains"));
+    push_from(meta.get("resourceDomains"));
+    for container in ["openai/widgetCSP", "ryu/widgetCSP"] {
+        if let Some(csp) = meta.get(container) {
+            push_from(csp.get("resource_domains"));
+            push_from(csp.get("resourceDomains"));
+        }
+    }
+    if let Some(csp) = meta.get("ui").and_then(|ui| ui.get("csp")) {
+        push_from(csp.get("resource_domains"));
+        push_from(csp.get("resourceDomains"));
+    }
+    out
+}
+
+/// Normalize an allowlist entry (`https://cdn.example.com`, `cdn.example.com`,
+/// `cdn.example.com:443/x`) to its bare lowercase host, or `None`. Wildcards are
+/// rejected (exact-host match only — fail-closed, mirroring the client sanitizer).
+fn normalize_allow_host(entry: &str) -> Option<String> {
+    let e = entry.trim();
+    if e.is_empty() {
+        return None;
+    }
+    let host = if e.contains("://") {
+        url::Url::parse(e).ok()?.host_str()?.to_ascii_lowercase()
+    } else {
+        e.split('/').next()?.split(':').next()?.trim().to_ascii_lowercase()
+    };
+    if host.is_empty() || host.contains('*') || !host.contains('.') {
+        return None;
+    }
+    Some(host)
+}
+
+/// True when a host must never be proxied (SSRF guard): an internal name, or an
+/// IP literal in a private/loopback/link-local/metadata range. DNS names that
+/// *resolve* to such addresses (rebinding) are a documented residual — the
+/// allowlist is the primary boundary.
+fn host_is_blocked(host: &str) -> bool {
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip_is_blocked(&ip);
+    }
+    host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".internal")
+        || host.ends_with(".local")
+}
+
+fn ip_is_blocked(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.octets()[0] == 0
+        }
+        std::net::IpAddr::V6(v6) => {
+            if v6.is_loopback() || v6.is_unspecified() {
+                return true;
+            }
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return ip_is_blocked(&std::net::IpAddr::V4(mapped));
+            }
+            let seg0 = v6.segments()[0];
+            // fc00::/7 unique-local, fe80::/10 link-local.
+            (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Passive-media content types only. `application/octet-stream` is permitted (CDNs
+/// serve fonts/images as it) — safe because the frame's `script-src` is nonce-only,
+/// so a mislabeled script can never execute regardless of what this returns.
+fn content_type_is_allowed(ct: &str) -> bool {
+    let m = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    m.starts_with("image/")
+        || m.starts_with("font/")
+        || m.starts_with("audio/")
+        || m.starts_with("video/")
+        || m == "application/font-woff"
+        || m == "application/font-woff2"
+        || m == "application/vnd.ms-fontobject"
+        || m == "application/octet-stream"
+}
+
+/// Read a response body, failing closed above `max` bytes.
+async fn read_capped(mut resp: reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("asset read error: {e}"))?
+    {
+        if buf.len() + chunk.len() > max {
+            return Err("asset exceeds size cap".to_owned());
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
+}
+
+/// Emit a Gateway exec-audit for a proxied asset fetch so every widget egress is
+/// visible to the moat (the governance property the `connect-src 'none'` lock +
+/// this proxy jointly provide). Best-effort; never blocks the response.
+async fn audit_asset(
+    record: &WidgetInstance,
+    host: &str,
+    bytes: usize,
+    started: Instant,
+    error: Option<String>,
+) {
+    crate::sidecar::gateway::report_exec_audit(
+        "widget-asset",
+        &format!("GET https://{host} ({bytes} bytes)"),
+        started.elapsed().as_millis() as u64,
+        i32::from(error.is_some()),
+        Some(record.conversation_id.clone()),
+        error,
+    )
+    .await;
+}
+
 // ── Widget resource fetch (reload / third-party fallback) ────────────────────
 
 /// `GET /api/apps/ui/:slug` — serve a built-in app's self-contained widget HTML
 /// by slug (the reload / third-party fetch fallback; live widgets embed the HTML
 /// in the stream part).
+#[utoipa::path(
+    get,
+    path = "/api/apps/ui/{slug}",
+    tag = "Plugins",
+    summary = "serve a built-in app's self-contained widget HTML",
+    params(("slug" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn apps_ui_bundle(Path(slug): Path<String>) -> axum::response::Response {
     let uri = format!("ui://widget/{slug}.html");
     match crate::sidecar::mcp::apps::read_resource(&uri) {
@@ -531,6 +948,14 @@ pub struct ResourceReadBody {
 
 /// `POST /api/mcp/resources/read` — resolve a widget resource by uri (used on
 /// session reload to re-resolve `widget.html` from the resource cache).
+#[utoipa::path(
+    post,
+    path = "/api/mcp/resources/read",
+    tag = "MCP",
+    summary = "resolve a widget resource by uri (used on",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn mcp_resources_read(
     State(state): State<ServerState>,
     Json(body): Json<ResourceReadBody>,
@@ -557,5 +982,95 @@ pub async fn mcp_resources_read(
         }))
         .into_response(),
         None => err_reply(StatusCode::NOT_FOUND, "not_found", "unknown widget resource"),
+    }
+}
+
+#[cfg(test)]
+mod asset_proxy_tests {
+    use super::{
+        content_type_is_allowed, host_is_blocked, normalize_allow_host, parse_resource_domains,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn normalize_accepts_public_hosts_rejects_wildcards_and_bare_labels() {
+        assert_eq!(
+            normalize_allow_host("https://cdn.example.com"),
+            Some("cdn.example.com".to_owned())
+        );
+        assert_eq!(
+            normalize_allow_host("cdn.example.com:443/x"),
+            Some("cdn.example.com".to_owned())
+        );
+        assert_eq!(
+            normalize_allow_host("CDN.Example.COM"),
+            Some("cdn.example.com".to_owned())
+        );
+        // Wildcards, single-label hosts, and empties are rejected (fail-closed).
+        assert_eq!(normalize_allow_host("*.example.com"), None);
+        assert_eq!(normalize_allow_host("localhost"), None);
+        assert_eq!(normalize_allow_host("com"), None);
+        assert_eq!(normalize_allow_host("   "), None);
+    }
+
+    #[test]
+    fn ssrf_guard_blocks_private_loopback_linklocal_and_metadata() {
+        // Metadata + private + loopback + link-local IPv4.
+        assert!(host_is_blocked("169.254.169.254")); // cloud metadata
+        assert!(host_is_blocked("127.0.0.1"));
+        assert!(host_is_blocked("10.0.0.5"));
+        assert!(host_is_blocked("192.168.1.1"));
+        assert!(host_is_blocked("172.16.0.1"));
+        assert!(host_is_blocked("0.0.0.0"));
+        // IPv6 loopback + ULA + link-local + IPv4-mapped private.
+        assert!(host_is_blocked("::1"));
+        assert!(host_is_blocked("fc00::1"));
+        assert!(host_is_blocked("fe80::1"));
+        assert!(host_is_blocked("::ffff:10.0.0.1"));
+        // Internal names.
+        assert!(host_is_blocked("localhost"));
+        assert!(host_is_blocked("db.internal"));
+        assert!(host_is_blocked("printer.local"));
+        // A real public host is NOT blocked.
+        assert!(!host_is_blocked("cdn.example.com"));
+        assert!(!host_is_blocked("8.8.8.8"));
+    }
+
+    #[test]
+    fn content_type_allows_media_rejects_html_and_js() {
+        assert!(content_type_is_allowed("image/png"));
+        assert!(content_type_is_allowed("image/svg+xml; charset=utf-8"));
+        assert!(content_type_is_allowed("font/woff2"));
+        assert!(content_type_is_allowed("audio/mpeg"));
+        assert!(content_type_is_allowed("video/mp4"));
+        assert!(content_type_is_allowed("application/octet-stream"));
+        assert!(!content_type_is_allowed("text/html"));
+        assert!(!content_type_is_allowed("application/javascript"));
+        assert!(!content_type_is_allowed("text/javascript; charset=utf-8"));
+    }
+
+    #[test]
+    fn parse_resource_domains_reads_every_spelling() {
+        // Top-level snake + camel.
+        let m = json!({ "resource_domains": ["https://a.example.com"], "resourceDomains": ["b.example.com"] });
+        let hosts = parse_resource_domains(&m);
+        assert!(hosts.contains(&"a.example.com".to_owned()));
+        assert!(hosts.contains(&"b.example.com".to_owned()));
+
+        // Nested openai/ryu widgetCSP + ui.csp.
+        let m2 = json!({
+            "openai/widgetCSP": { "resource_domains": ["c.example.com"] },
+            "ryu/widgetCSP": { "resourceDomains": ["d.example.com"] },
+            "ui": { "csp": { "resource_domains": ["e.example.com"] } },
+        });
+        let hosts2 = parse_resource_domains(&m2);
+        for h in ["c.example.com", "d.example.com", "e.example.com"] {
+            assert!(hosts2.contains(&h.to_owned()), "missing {h}");
+        }
+
+        // Wildcards dropped; no domains → empty (deny-all).
+        let m3 = json!({ "resource_domains": ["*.evil.com"] });
+        assert!(parse_resource_domains(&m3).is_empty());
+        assert!(parse_resource_domains(&json!({})).is_empty());
     }
 }

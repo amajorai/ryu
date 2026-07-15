@@ -1,7 +1,9 @@
 {
   "title": "Tools",
-  "description": "Configured tool integrations (Composio).",
+  "description": "Tool integrations (Composio registry) and governed direct execution.",
   "pages": [
-    "listComposioTools"
+    "listComposioTools",
+    "execTool",
+    "execScan"
   ]
 }

@@ -17,8 +17,9 @@
 //! keeps the shared inbound path in [`super`] unchanged while still letting
 //! replies land in the right channel and thread.
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
@@ -27,7 +28,10 @@ use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, info, warn};
 
-use crate::{config::SlackChannelConfig, state::SharedState};
+use crate::{
+    config::{GroupReplyMode, SlackChannelConfig},
+    state::SharedState,
+};
 
 use super::{
     handle_message,
@@ -38,9 +42,19 @@ use super::{
 /// Slack Web API base. Socket Mode is opened from here; replies post here too.
 const SLACK_API_BASE: &str = "https://slack.com/api";
 
-/// Cooldown before re-opening the Socket Mode connection after it drops or an
-/// open attempt fails, so a transient Slack outage doesn't become a tight loop.
-const RECONNECT_BACKOFF: Duration = Duration::from_secs(3);
+/// First cooldown before re-opening the Socket Mode connection after it drops or
+/// an open attempt fails, so a transient Slack outage doesn't become a tight loop.
+const RECONNECT_BASE_BACKOFF: Duration = Duration::from_secs(3);
+/// Ceiling for the exponential backoff between reconnect attempts.
+const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(60);
+/// How many consecutive failed opens/connects we tolerate before giving up.
+///
+/// Without a cap a permanent failure — an app token missing `connections:write`,
+/// Socket Mode switched off, a revoked token — hammered `apps.connections.open`
+/// forever at a fixed 3s and the operator saw nothing but log spam. Exhausting
+/// the budget now reports a terminal error through the status reporter (so the
+/// bot's dot in the UI shows the real reason) and returns `Err` from `run`.
+const MAX_RECONNECT_ATTEMPTS: u32 = 10;
 
 pub struct SlackChannel {
     model: String,
@@ -58,6 +72,17 @@ pub struct SlackChannel {
     team_id: Option<String>,
     /// Base URL of the Core sidecar, used when `agent_id` or `team_id` is set.
     core_url: String,
+    /// When the bot answers in a CHANNEL (DMs always answer). `Mentions` — the
+    /// admin's default — means it only speaks when @mentioned or when the message
+    /// lands in a thread it is already running.
+    group_reply_mode: GroupReplyMode,
+    /// This bot's own Slack user id, learned once at startup via `auth.test`.
+    /// It is what a channel mention (`<@U…>`) is matched against. Empty when
+    /// `auth.test` failed — the mention gate then fails OPEN (see [`decide_reply`]).
+    bot_user_id: OnceLock<String>,
+    /// Threads the bot is already answering in, so a follow-up in the same thread
+    /// does not need to re-@mention it. Keyed by the packed `chat_id`.
+    active_threads: Mutex<HashSet<String>>,
     /// Reports this bot's live connection status to the control plane. `None`
     /// for env-configured bots (no store id), which then show as `unknown`.
     status: Option<StatusReporter>,
@@ -90,8 +115,38 @@ impl SlackChannel {
             agent_id: cfg.agent_id,
             team_id: cfg.team_id,
             core_url: cfg.core_url,
+            group_reply_mode: cfg.group_reply_mode,
+            bot_user_id: OnceLock::new(),
+            active_threads: Mutex::new(HashSet::new()),
             status,
         })
+    }
+
+    /// Learn this bot's own Slack user id (`auth.test`). Needed to tell "someone
+    /// mentioned *me*" from "someone mentioned anyone".
+    async fn auth_test(&self) -> anyhow::Result<String> {
+        let url = format!("{SLACK_API_BASE}/auth.test");
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&self.bot_token)
+            .send()
+            .await?
+            .error_for_status()?;
+        let body: AuthTestResponse = resp.json().await?;
+        if !body.ok {
+            anyhow::bail!(
+                "slack auth.test returned ok=false: {}",
+                body.error.unwrap_or_default()
+            );
+        }
+        body.user_id
+            .ok_or_else(|| anyhow::anyhow!("slack auth.test returned no user_id"))
+    }
+
+    /// The bot's own user id, or `""` when `auth.test` never succeeded.
+    fn bot_user_id(&self) -> &str {
+        self.bot_user_id.get().map_or("", String::as_str)
     }
 
     /// True when this bot routes through Core's session seam (a single agent or
@@ -203,15 +258,48 @@ impl Channel for SlackChannel {
             reporter.connecting().await;
         }
 
+        // Learn our own user id up front: the mention gate matches against it.
+        // FAIL-OPEN — a bot that can't resolve its id (missing `users:read`-free
+        // `auth.test` access, a revoked token) still connects and answers every
+        // channel message, exactly as it did before this gate existed. Turning a
+        // scope gap into a silent, dead bot would be the worse failure.
+        match self.auth_test().await {
+            Ok(id) => {
+                info!(bot_user_id = %id, "slack: bot identity resolved");
+                let _ = self.bot_user_id.set(id);
+            }
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "slack auth.test failed; the mention gate will fail open (the bot \
+                     answers every channel message it can see)"
+                );
+            }
+        }
+
+        // Consecutive failed opens/connects. Reset the moment a socket comes up.
+        let mut attempts: u32 = 0;
+
         loop {
             let ws_url = match self.open_connection().await {
                 Ok(url) => url,
                 Err(err) => {
-                    warn!(error = %err, "slack apps.connections.open failed, backing off");
+                    attempts += 1;
+                    if attempts >= MAX_RECONNECT_ATTEMPTS {
+                        return self.give_up(attempts, &err).await;
+                    }
+                    let delay = reconnect_delay(attempts);
+                    warn!(
+                        error = %err,
+                        attempt = attempts,
+                        max_attempts = MAX_RECONNECT_ATTEMPTS,
+                        backoff_ms = delay.as_millis() as u64,
+                        "slack apps.connections.open failed, backing off"
+                    );
                     if let Some(reporter) = &self.status {
                         reporter.error(&err.to_string()).await;
                     }
-                    tokio::time::sleep(RECONNECT_BACKOFF).await;
+                    tokio::time::sleep(delay).await;
                     continue;
                 }
             };
@@ -219,6 +307,9 @@ impl Channel for SlackChannel {
             match tokio_tungstenite::connect_async(&ws_url).await {
                 Ok((mut ws, _)) => {
                     debug!("slack socket-mode websocket connected");
+                    // A live socket clears the failure budget: the next outage
+                    // starts its backoff from scratch.
+                    attempts = 0;
                     // The socket is open — the bot is live. Re-asserted below on
                     // each idle timeout so a quiet channel stays fresh.
                     if let Some(reporter) = &self.status {
@@ -259,8 +350,39 @@ impl Channel for SlackChannel {
                             let _ = ws.send(WsMessage::Text(ack)).await;
                         }
 
-                        let Some(inbound) = parse_inbound(&payload) else {
+                        let Some(parsed) = parse_inbound(&payload) else {
                             continue;
+                        };
+
+                        // Honour the admin's group-reply choice. A channel message
+                        // that doesn't address the bot is dropped here, before any
+                        // model call is made.
+                        let in_active_thread = self
+                            .active_threads
+                            .lock()
+                            .is_ok_and(|threads| threads.contains(&parsed.chat_id));
+                        let Some(text) = decide_reply(
+                            &parsed,
+                            self.group_reply_mode,
+                            self.bot_user_id(),
+                            in_active_thread,
+                        ) else {
+                            debug!(
+                                chat_id = %parsed.chat_id,
+                                "slack: message not addressed to the bot, ignoring"
+                            );
+                            continue;
+                        };
+                        // The bot now owns this thread: follow-ups in it continue
+                        // without a re-@mention (matches the hosted connector).
+                        if !parsed.is_dm {
+                            if let Ok(mut threads) = self.active_threads.lock() {
+                                threads.insert(parsed.chat_id.clone());
+                            }
+                        }
+                        let inbound = InboundMessage {
+                            chat_id: parsed.chat_id,
+                            text,
                         };
 
                         // Handle each message on its own task so a slow agent
@@ -316,16 +438,69 @@ impl Channel for SlackChannel {
                     debug!("slack socket-mode websocket closed, reconnecting");
                 }
                 Err(err) => {
-                    warn!(error = %err, "slack websocket connect failed, backing off");
+                    attempts += 1;
+                    if attempts >= MAX_RECONNECT_ATTEMPTS {
+                        return self.give_up(attempts, &err.into()).await;
+                    }
+                    warn!(
+                        error = %err,
+                        attempt = attempts,
+                        max_attempts = MAX_RECONNECT_ATTEMPTS,
+                        "slack websocket connect failed, backing off"
+                    );
                     if let Some(reporter) = &self.status {
                         reporter.error(&err.to_string()).await;
                     }
                 }
             }
 
-            tokio::time::sleep(RECONNECT_BACKOFF).await;
+            tokio::time::sleep(reconnect_delay(attempts)).await;
         }
     }
+}
+
+impl SlackChannel {
+    /// Terminal state: the reconnect budget is spent. Report a real, actionable
+    /// error to the control plane (the bot's status dot) and stop, instead of
+    /// hammering Slack forever on a failure that will never clear by itself.
+    async fn give_up(&self, attempts: u32, err: &anyhow::Error) -> anyhow::Result<()> {
+        let message = format!(
+            "slack: giving up after {attempts} failed connection attempts ({err}). Check that \
+             the app token starts with xapp-, carries the connections:write scope, and that \
+             Socket Mode is enabled for the app."
+        );
+        warn!("{message}");
+        if let Some(reporter) = &self.status {
+            reporter.error(&message).await;
+        }
+        Err(anyhow::anyhow!(message))
+    }
+}
+
+// ─── Reconnect backoff ─────────────────────────────────────────────────────────
+
+/// Exponential backoff with jitter for reconnect attempt `n` (1-based), capped at
+/// [`RECONNECT_MAX_BACKOFF`]. Jitter (0-25% on top) keeps a fleet of bots from
+/// re-opening in lockstep after a Slack outage clears.
+fn reconnect_delay(attempt: u32) -> Duration {
+    let delay = backoff_for(attempt);
+    let spread = delay.as_millis() as u64 / 4;
+    if spread == 0 {
+        return delay;
+    }
+    // Cheap, dependency-free jitter source: the sub-nanos of the wall clock.
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::from(d.subsec_nanos()));
+    delay + Duration::from_millis(nanos % spread)
+}
+
+/// The deterministic (un-jittered) part of [`reconnect_delay`]: base * 2^(n-1),
+/// capped. `attempt` 0 is treated as the first attempt.
+fn backoff_for(attempt: u32) -> Duration {
+    let shift = attempt.saturating_sub(1).min(16);
+    let millis = (RECONNECT_BASE_BACKOFF.as_millis() as u64).saturating_mul(1u64 << shift);
+    Duration::from_millis(millis.min(RECONNECT_MAX_BACKOFF.as_millis() as u64))
 }
 
 // ─── Chat-id packing ───────────────────────────────────────────────────────────
@@ -352,13 +527,25 @@ fn parse_envelope_id(raw: &str) -> Option<String> {
     value["envelope_id"].as_str().map(|s| s.to_string())
 }
 
-/// Parse a Socket Mode frame into an [`InboundMessage`], or `None` if it is not
+/// A user-authored Slack message, before the group-reply gate runs on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SlackInbound {
+    /// The packed `"<channel>:<thread_ts>"` conversation key.
+    chat_id: String,
+    /// The message text exactly as Slack sent it — mentions NOT stripped, because
+    /// the mention gate has to see them.
+    text: String,
+    /// True for a 1:1 DM (`channel_type == "im"`), which always gets a reply.
+    is_dm: bool,
+}
+
+/// Parse a Socket Mode frame into a [`SlackInbound`], or `None` if it is not
 /// a user-authored message event we should respond to.
 ///
 /// We skip non-`events_api` frames (hello/disconnect), non-`message` events, and
 /// any message that carries a `bot_id` or `subtype` (edits, joins, our own
 /// replies) to avoid loops and noise.
-fn parse_inbound(raw: &str) -> Option<InboundMessage> {
+fn parse_inbound(raw: &str) -> Option<SlackInbound> {
     let value: Value = serde_json::from_str(raw).ok()?;
 
     if value["type"].as_str() != Some("events_api") {
@@ -392,10 +579,82 @@ fn parse_inbound(raw: &str) -> Option<InboundMessage> {
         .or_else(|| event["ts"].as_str())
         .unwrap_or_default();
 
-    Some(InboundMessage {
+    Some(SlackInbound {
         chat_id: make_chat_id(channel, thread_ts),
         text: text.to_string(),
+        is_dm: event.get("channel_type").and_then(Value::as_str) == Some("im"),
     })
+}
+
+// ─── Group-reply gate ──────────────────────────────────────────────────────────
+
+/// `<@U123>` / `<@U123|name>` — the raw form a Slack mention takes in `text`.
+/// True when `text` @mentions `bot_user_id`.
+///
+/// An empty `bot_user_id` is never a match: without the guard the check would
+/// degrade to "mentions anyone".
+fn mentions_bot(text: &str, bot_user_id: &str) -> bool {
+    if bot_user_id.is_empty() {
+        return false;
+    }
+    text.contains(&format!("<@{bot_user_id}"))
+}
+
+/// Strip every `<@U…>` / `<@U…|name>` mention so the agent sees a clean prompt.
+fn strip_mentions(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("<@") {
+        out.push_str(&rest[..start]);
+        let Some(end) = rest[start..].find('>') else {
+            rest = &rest[start..];
+            break;
+        };
+        out.push(' ');
+        rest = &rest[start + end + 1..];
+    }
+    out.push_str(rest);
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Decide whether to answer `inbound`, and with what text.
+///
+/// DMs always answer. CHANNEL messages are gated by `mode`: in `Mentions` — the
+/// admin's default, and what the setup form has always shown — the bot only
+/// answers when it is @mentioned or when the message lands in a thread it is
+/// already running. In `All` it answers everything.
+///
+/// Fails OPEN when `bot_user_id` is empty (`auth.test` failed at startup): the
+/// gate cannot be evaluated, so the bot behaves as it did before the gate existed
+/// rather than going silent.
+///
+/// Returns the text to route, or `None` to ignore the message.
+fn decide_reply(
+    inbound: &SlackInbound,
+    mode: GroupReplyMode,
+    bot_user_id: &str,
+    in_active_thread: bool,
+) -> Option<String> {
+    if inbound.is_dm {
+        let text = strip_mentions(&inbound.text);
+        return Some(if text.is_empty() {
+            inbound.text.clone()
+        } else {
+            text
+        });
+    }
+
+    let gate_evaluable = !bot_user_id.is_empty();
+    let addressed = mentions_bot(&inbound.text, bot_user_id) || in_active_thread;
+    if mode == GroupReplyMode::Mentions && gate_evaluable && !addressed {
+        return None;
+    }
+
+    let text = strip_mentions(&inbound.text);
+    if text.is_empty() {
+        return None;
+    }
+    Some(text)
 }
 
 // ─── Slack Web API response types (only the fields we use) ─────────────────────
@@ -405,6 +664,15 @@ struct ConnectionsOpenResponse {
     ok: bool,
     #[serde(default)]
     url: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthTestResponse {
+    ok: bool,
+    #[serde(default)]
+    user_id: Option<String>,
     #[serde(default)]
     error: Option<String>,
 }
@@ -642,5 +910,168 @@ mod tests {
         let id_a = parse_inbound(&thread_a).unwrap().chat_id;
         let id_b = parse_inbound(&thread_b).unwrap().chat_id;
         assert_ne!(id_a, id_b);
+    }
+
+    // ─── Group-reply gate (group_reply_mode was previously dropped on the floor:
+    // the adapter answered EVERY channel message regardless of the admin's
+    // choice in the setup form) ────────────────────────────────────────────────
+
+    fn channel_msg(text: &str) -> SlackInbound {
+        SlackInbound {
+            chat_id: "C1:1.0".to_string(),
+            text: text.to_string(),
+            is_dm: false,
+        }
+    }
+
+    fn dm(text: &str) -> SlackInbound {
+        SlackInbound {
+            chat_id: "D1:1.0".to_string(),
+            text: text.to_string(),
+            is_dm: true,
+        }
+    }
+
+    #[test]
+    fn parse_inbound_flags_a_dm_via_channel_type() {
+        let raw = json!({
+            "type": "events_api",
+            "payload": {
+                "event": {
+                    "type": "message",
+                    "channel_type": "im",
+                    "channel": "D1",
+                    "text": "hi",
+                    "ts": "1.1"
+                }
+            }
+        })
+        .to_string();
+        assert!(parse_inbound(&raw).unwrap().is_dm);
+    }
+
+    /// THE BITE: in `Mentions` mode an un-addressed channel message is now
+    /// dropped. Before this gate existed the adapter routed it to the agent.
+    #[test]
+    fn mentions_mode_ignores_unaddressed_channel_message() {
+        let msg = channel_msg("just chatting with my colleague");
+        assert!(decide_reply(&msg, GroupReplyMode::Mentions, "UBOT", false).is_none());
+    }
+
+    #[test]
+    fn mentions_mode_answers_when_mentioned_and_strips_the_mention() {
+        let msg = channel_msg("<@UBOT> what's   up");
+        let routed = decide_reply(&msg, GroupReplyMode::Mentions, "UBOT", false).unwrap();
+        assert_eq!(routed, "what's up");
+
+        // The `<@U…|name>` form Slack also emits.
+        let piped = channel_msg("<@UBOT|ryu> hi");
+        assert_eq!(
+            decide_reply(&piped, GroupReplyMode::Mentions, "UBOT", false).unwrap(),
+            "hi"
+        );
+    }
+
+    /// A mention of SOMEONE ELSE is not a mention of the bot.
+    #[test]
+    fn mentions_mode_ignores_a_mention_of_another_user() {
+        let msg = channel_msg("<@USOMEONE> can you look at this?");
+        assert!(decide_reply(&msg, GroupReplyMode::Mentions, "UBOT", false).is_none());
+    }
+
+    /// Once the bot is in a thread, follow-ups continue without a re-mention.
+    #[test]
+    fn mentions_mode_continues_an_active_thread_without_a_mention() {
+        let msg = channel_msg("and what about tuesday?");
+        let routed = decide_reply(&msg, GroupReplyMode::Mentions, "UBOT", true).unwrap();
+        assert_eq!(routed, "and what about tuesday?");
+    }
+
+    #[test]
+    fn all_mode_answers_every_channel_message() {
+        let msg = channel_msg("just chatting");
+        assert_eq!(
+            decide_reply(&msg, GroupReplyMode::All, "UBOT", false).unwrap(),
+            "just chatting"
+        );
+    }
+
+    #[test]
+    fn dms_always_answer_regardless_of_mode() {
+        let msg = dm("hello");
+        assert_eq!(
+            decide_reply(&msg, GroupReplyMode::Mentions, "UBOT", false).unwrap(),
+            "hello"
+        );
+    }
+
+    /// Fail-open: `auth.test` failed, so the gate cannot be evaluated. A scope gap
+    /// must not silently turn an over-chatty bot into a dead one.
+    #[test]
+    fn unknown_bot_id_fails_open_in_mentions_mode() {
+        let msg = channel_msg("just chatting");
+        assert_eq!(
+            decide_reply(&msg, GroupReplyMode::Mentions, "", false).unwrap(),
+            "just chatting"
+        );
+        // ...and an empty bot id never matches a bare mention of anyone.
+        assert!(!mentions_bot("<@USOMEONE> hey", ""));
+    }
+
+    /// A message that is ONLY a mention carries no prompt — nothing to route.
+    #[test]
+    fn mention_only_message_is_dropped() {
+        let msg = channel_msg("<@UBOT>");
+        assert!(decide_reply(&msg, GroupReplyMode::Mentions, "UBOT", false).is_none());
+    }
+
+    // ─── Reconnect backoff (was a fixed 3s with no cap, no jitter and no attempt
+    // counter: a permanently-failing apps.connections.open hot-looped forever) ──
+
+    #[test]
+    fn backoff_grows_exponentially_and_is_capped() {
+        assert_eq!(backoff_for(1), RECONNECT_BASE_BACKOFF);
+        assert_eq!(backoff_for(2), Duration::from_secs(6));
+        assert_eq!(backoff_for(3), Duration::from_secs(12));
+        assert_eq!(backoff_for(4), Duration::from_secs(24));
+        assert_eq!(backoff_for(5), Duration::from_secs(48));
+        // Capped from here on — never unbounded, never a tight loop.
+        assert_eq!(backoff_for(6), RECONNECT_MAX_BACKOFF);
+        assert_eq!(backoff_for(MAX_RECONNECT_ATTEMPTS), RECONNECT_MAX_BACKOFF);
+        assert_eq!(backoff_for(u32::MAX), RECONNECT_MAX_BACKOFF);
+    }
+
+    #[test]
+    fn backoff_is_never_shorter_than_the_base_and_jitter_stays_bounded() {
+        for attempt in 1..=MAX_RECONNECT_ATTEMPTS {
+            let base = backoff_for(attempt);
+            let delay = reconnect_delay(attempt);
+            assert!(delay >= base, "jitter must never shorten the backoff");
+            // Jitter adds at most 25% on top, so a fleet never re-opens in lockstep
+            // yet the delay stays predictable.
+            assert!(delay <= base + base / 4 + Duration::from_millis(1));
+            assert!(delay >= RECONNECT_BASE_BACKOFF);
+        }
+    }
+
+    /// The attempt budget is finite — that is what turns a permanent failure
+    /// (an app token without `connections:write`) into a reported error instead
+    /// of an infinite retry loop.
+    #[test]
+    fn reconnect_budget_is_bounded() {
+        assert!(MAX_RECONNECT_ATTEMPTS > 0);
+        let total: Duration = (1..MAX_RECONNECT_ATTEMPTS).map(backoff_for).sum();
+        // Generous enough to ride out a real outage, finite enough to surface a
+        // permanent misconfiguration to the operator.
+        assert!(total >= Duration::from_secs(60), "budget too eager to give up");
+        assert!(total <= Duration::from_secs(15 * 60), "budget never terminates");
+    }
+
+    #[test]
+    fn strip_mentions_collapses_whitespace_and_keeps_stray_text() {
+        assert_eq!(strip_mentions("<@U1> hey   there"), "hey there");
+        assert_eq!(strip_mentions("no mentions"), "no mentions");
+        // An unterminated mention is left alone rather than eating the message.
+        assert_eq!(strip_mentions("<@U1 unterminated"), "<@U1 unterminated");
     }
 }

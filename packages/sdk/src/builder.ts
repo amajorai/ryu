@@ -11,9 +11,11 @@
  */
 
 import type {
+	AppDependency,
 	CompanionSurface,
 	PluginManifest,
 	RunnableMeta,
+	Surface,
 } from "./manifest.ts";
 import { PluginManifestSchema, RunnableMetaSchema } from "./manifest.ts";
 import type { AppToolSpec, DefineAppOptions } from "./runnable/app.ts";
@@ -148,6 +150,9 @@ export class PluginBuilder {
 	private readonly _runnables: RunnableMeta[] = [];
 	private readonly _grants: string[] = [];
 	private _companion: CompanionSurface | undefined = undefined;
+	private readonly _dependencies: AppDependency[] = [];
+	private readonly _requiredGrants: string[] = [];
+	private readonly _targets: Surface[] = [];
 
 	/** Set the reverse-domain app id (e.g. `"com.example.my-app"`). */
 	id(value: string): this {
@@ -186,10 +191,51 @@ export class PluginBuilder {
 	}
 
 	/**
+	 * Declare a **plugin-to-plugin dependency**: `id` must be installed and is
+	 * auto-enabled (in dependency order) before this plugin enables.
+	 *
+	 * `minVersion` is a MINIMUM — a bare `"1.2.0"` means `">=1.2.0"`, so an
+	 * installed `2.0.0` satisfies it (comparator syntax like `">=1.2, <2"` is
+	 * honoured verbatim).
+	 */
+	dependsOn(id: string, minVersion?: string): this {
+		this._dependencies.push(
+			minVersion ? { id, min_version: minVersion } : { id }
+		);
+		return this;
+	}
+
+	/**
+	 * Declare a permission grant implied by this plugin's dependencies
+	 * (`requires.grants`). Declaration only — the Gateway remains the sole
+	 * authority on what a grant allows. Use {@link PluginBuilder.grant} for the
+	 * grants this plugin needs in its own right.
+	 */
+	requiredGrant(permission: string): this {
+		this._requiredGrants.push(permission);
+		return this;
+	}
+
+	/**
+	 * Restrict this plugin to a host surface (`"desktop"`, `"island"`, …).
+	 * Declaring NO target is the default and means **every** surface.
+	 */
+	target(surface: Surface): this {
+		this._targets.push(surface);
+		return this;
+	}
+
+	/**
 	 * Validate and return the assembled `PluginManifest`. Throws an `Error` with
 	 * the failing field name and message when validation fails.
 	 */
 	build(): PluginManifest {
+		// `requires` is omitted entirely when nothing was declared, so a manifest
+		// with no dependencies serialises with no `requires` key — matching Core's
+		// `Option<Requires>` + `skip_serializing_if`.
+		const hasRequires =
+			this._dependencies.length > 0 || this._requiredGrants.length > 0;
+
 		const raw = {
 			id: this._id,
 			name: this._name,
@@ -197,6 +243,15 @@ export class PluginBuilder {
 			runnables: this._runnables,
 			permission_grants: this._grants,
 			companion: this._companion,
+			targets: this._targets,
+			...(hasRequires
+				? {
+						requires: {
+							apps: this._dependencies,
+							grants: this._requiredGrants,
+						},
+					}
+				: {}),
 		};
 
 		const result = PluginManifestSchema.safeParse(raw);
@@ -248,6 +303,9 @@ export class AppBuilder {
 	private readonly _grants: string[] = [];
 	private readonly _activationEvents: string[] = [];
 	private readonly _tools: AppToolSpec[] = [];
+	private readonly _dependencies: AppDependency[] = [];
+	private readonly _requiredGrants: string[] = [];
+	private readonly _targets: Surface[] = [];
 
 	/** Set the reverse-domain app id (e.g. `"com.example.checklist"`). */
 	id(value: string): this {
@@ -316,10 +374,36 @@ export class AppBuilder {
 	}
 
 	/**
+	 * Declare a **plugin-to-plugin dependency** (auto-enabled, in dependency order,
+	 * before this app). `minVersion` is a MINIMUM (`"1.2.0"` = `">=1.2.0"`).
+	 */
+	dependsOn(id: string, minVersion?: string): this {
+		this._dependencies.push(
+			minVersion ? { id, min_version: minVersion } : { id }
+		);
+		return this;
+	}
+
+	/** Declare a grant implied by this app's dependencies (`requires.grants`). */
+	requiredGrant(permission: string): this {
+		this._requiredGrants.push(permission);
+		return this;
+	}
+
+	/** Restrict this app to a host surface. No target = every surface. */
+	target(surface: Surface): this {
+		this._targets.push(surface);
+		return this;
+	}
+
+	/**
 	 * Validate and return the assembled `PluginManifest`. Throws an `Error` naming
 	 * the failing field when validation fails.
 	 */
 	build(): PluginManifest {
+		const hasRequires =
+			this._dependencies.length > 0 || this._requiredGrants.length > 0;
+
 		const options: DefineAppOptions = {
 			id: this._id,
 			title: this._title,
@@ -334,6 +418,15 @@ export class AppBuilder {
 			...(this._activationEvents.length > 0
 				? { activationEvents: this._activationEvents }
 				: {}),
+			...(hasRequires
+				? {
+						requires: {
+							apps: this._dependencies,
+							grants: this._requiredGrants,
+						},
+					}
+				: {}),
+			...(this._targets.length > 0 ? { targets: this._targets } : {}),
 		};
 		return defineApp(options);
 	}

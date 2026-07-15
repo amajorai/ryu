@@ -18,13 +18,43 @@ export interface ApiTarget {
 	url: string;
 }
 
-/** Build request headers, attaching the bearer token when present. */
+/**
+ * The request header naming the CALLING SURFACE so Core can filter its plugin
+ * list/catalog/contributions to what actually runs there. The value is one of
+ * Core's kebab-case `Surface` tokens (`gateway|core|desktop|island|mobile|
+ * extension|web|cli`); a request WITHOUT it gets an UNFILTERED list. Kept here
+ * (the base module) because every domain call routes through {@link makeHeaders}.
+ */
+export const SURFACE_HEADER = "X-Ryu-Surface";
+
+/**
+ * Surface-injected source of the calling surface's kebab-case token (see
+ * {@link SURFACE_HEADER}). This one shared client serves BOTH native and tui, so
+ * it must NOT hardcode a surface — each app wires it at entry (native →
+ * `"mobile"`, tui → `"cli"`). Defaults to "no surface" so an unwired consumer
+ * behaves exactly as before (unfiltered), never asserting a wrong surface.
+ */
+let surfaceProvider: () => string | null = () => null;
+
+/** Wire the surface-token getter (mirrors {@link setBuyerTokenProvider}). */
+export function setSurfaceProvider(fn: () => string | null): void {
+	surfaceProvider = fn;
+}
+
+/** Build request headers, attaching the bearer token and surface when present. */
 export function makeHeaders(token: string | null): Record<string, string> {
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
 	};
 	if (token) {
 		headers.Authorization = `Bearer ${token}`;
+	}
+	// Every core-client call flows through here, so setting the provider once at
+	// app entry makes ALL requests (incl. the direct-fetch fetchApps) carry the
+	// surface filter — no per-call plumbing.
+	const surface = surfaceProvider();
+	if (surface) {
+		headers[SURFACE_HEADER] = surface;
 	}
 	return headers;
 }

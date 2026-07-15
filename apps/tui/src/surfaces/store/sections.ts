@@ -7,8 +7,12 @@
 import type { ApiTarget } from "@ryuhq/core-client/client";
 import { featureListLoader, type ListRow } from "../../core/featureList.ts";
 
-/** One entry in the store tab-row. Order matches apps/desktop StorePage. */
+/** One entry in the store tab-row. Order matches apps/desktop StorePage.
+ *  `plugins` = the REAL plugin.json lifecycle surface (`/api/plugins`, PluginsTab);
+ *  `apps` = the SIDECAR catalog (`/api/catalog`, AppsTab), labelled "Sidecars" so
+ *  it stops claiming to be plugins. These are two distinct Core registries. */
 export type StoreSection =
+	| "plugins"
 	| "apps"
 	| "models"
 	| "skills"
@@ -22,9 +26,11 @@ export interface SectionMeta {
 	label: string;
 }
 
-// Desktop order: Plugins, Models, Skills, MCP, Agents, Engines, Fine-tune.
+// Desktop order: Plugins first, then Models, Skills, MCP, Agents, Engines, Fine-tune.
+// "Sidecars" (the runtime binary catalog) is TUI-specific and sits after Plugins.
 export const STORE_SECTIONS: SectionMeta[] = [
-	{ id: "apps", label: "Plugins" },
+	{ id: "plugins", label: "Plugins" },
+	{ id: "apps", label: "Sidecars" },
 	{ id: "models", label: "Models" },
 	{ id: "skills", label: "Skills" },
 	{ id: "mcp", label: "MCP" },
@@ -35,10 +41,12 @@ export const STORE_SECTIONS: SectionMeta[] = [
 
 // Maps a path segment to the section it lands on. Covers both the /store/<section>
 // deep links and the standalone paths Integrate points at this surface
-// (/models, /skills, /engines, /finetune).
+// (/models, /skills, /engines, /finetune). `plugins` -> the real plugin surface;
+// `sidecars`/`apps` -> the sidecar catalog.
 const SECTION_BY_SEGMENT: Record<string, StoreSection> = {
-	store: "apps",
-	plugins: "apps",
+	store: "plugins",
+	plugins: "plugins",
+	sidecars: "apps",
 	apps: "apps",
 	models: "models",
 	skills: "skills",
@@ -60,7 +68,7 @@ export function sectionFromPath(path: string): StoreSection {
 			return match;
 		}
 	}
-	return "apps";
+	return "plugins";
 }
 
 /** A searchable store realm: a section id + the loader that fetches its catalog.
@@ -74,8 +82,22 @@ export interface SearchRealm {
 
 export const SEARCH_REALMS: SearchRealm[] = [
 	{
-		id: "apps",
+		id: "plugins",
 		label: "Plugins",
+		load: featureListLoader({
+			// The REAL plugin registry: GET /api/plugins -> { apps: AppInfo[] }. The
+			// tui set X-Ryu-Surface=cli at entry, so this is surface-filtered by Core.
+			path: "/api/plugins",
+			containerKeys: ["apps"],
+			titleKeys: ["name", "id"],
+			subtitleKeys: ["id"],
+			badgeKeys: ["version"],
+			idKeys: ["id"],
+		}),
+	},
+	{
+		id: "apps",
+		label: "Sidecars",
 		load: featureListLoader({
 			path: "/api/catalog",
 			containerKeys: ["sidecars"],

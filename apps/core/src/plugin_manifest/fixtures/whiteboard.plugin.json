@@ -14,6 +14,14 @@
 			}
 		}
 	],
+	"requires": {
+		"apps": [
+			{
+				"id": "com.ryu.spaces"
+			}
+		],
+		"grants": ["spaces:docs"]
+	},
 	"permission_grants": ["spaces:docs", "hook:side-model"],
 	"companion": {
 		"label": "Whiteboard",

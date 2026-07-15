@@ -135,6 +135,14 @@ pub struct SpeakRequest {
 /// omitted (or `"outetts"`) runs the built-in OuteTTS `llama-tts` path; any other
 /// engine id is proxied to the universal Ryu TTS sidecar's `/generate`. Nothing
 /// is hardcoded — the available engines are whatever the sidecar registry serves.
+#[utoipa::path(
+    post,
+    path = "/api/voice/speak",
+    tag = "Voice",
+    summary = "synthesize speech from text, returning a `audio/wav",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn speak(
     State(state): State<ServerState>,
     Json(req): Json<SpeakRequest>,
@@ -251,6 +259,13 @@ async fn synth_via_sidecar(
 /// sidecar's `/engines` catalog when it is reachable (so the set is whatever the
 /// sidecar registry serves — nothing hardcoded). When the sidecar is down, only
 /// the built-in is returned.
+#[utoipa::path(
+    get,
+    path = "/api/voice/tts-engines",
+    tag = "Voice",
+    summary = "list available TTS engines for the desktop",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn tts_engines(State(state): State<ServerState>) -> impl IntoResponse {
     let builtin = json!({
         "id": "outetts",
@@ -284,6 +299,13 @@ pub async fn tts_engines(State(state): State<ServerState>) -> impl IntoResponse 
 /// Distinct from the raw HF `pipeline_tag=text-to-speech` browse in the Models
 /// tab: these are the models Core can actually install + run. Empty when the Ryu
 /// TTS sidecar is not running.
+#[utoipa::path(
+    get,
+    path = "/api/voice/tts-models",
+    tag = "Voice",
+    summary = "the curated, installable TTS model catalog (the",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn tts_models(State(state): State<ServerState>) -> impl IntoResponse {
     let models = match crate::sidecar::providers::ryutts::list_models(&state.client).await {
         Ok(Value::Array(rows)) => rows,
@@ -310,6 +332,14 @@ pub struct InstallTtsModelRequest {
 /// `snapshot_download`. The download is registered with the DownloadCenter (a
 /// spinner entry, since HF reports no byte total here) so it shows in the global
 /// download overlay. Idempotent — a cache hit returns immediately.
+#[utoipa::path(
+    post,
+    path = "/api/voice/tts-models/install",
+    tag = "Voice",
+    summary = "download a curated model into the",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn tts_models_install(
     State(state): State<ServerState>,
     Json(req): Json<InstallTtsModelRequest>,
@@ -515,6 +545,14 @@ async fn transcribe_via_gateway(
 
 /// Transcribe an uploaded audio file. Routes to the in-process parakeet engine
 /// (default) or the whisper.cpp voice server (`?engine=whisper`, HTTP proxy).
+#[utoipa::path(
+    post,
+    path = "/api/voice/transcribe",
+    tag = "Voice",
+    summary = "Transcribe an uploaded audio file",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn transcribe(
     State(state): State<ServerState>,
     Query(query): Query<TranscribeQuery>,

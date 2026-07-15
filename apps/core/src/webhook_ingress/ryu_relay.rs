@@ -91,8 +91,21 @@ fn relay_state_path() -> std::path::PathBuf {
 /// A parsed SSE frame from the relay subscribe stream (Contract 5).
 #[derive(Debug, Clone, PartialEq)]
 pub enum RelayFrame {
-    /// A webhook delivery to dispatch in-process.
+    /// A **composio** webhook delivery, already parsed + verified server-side
+    /// (trust-relay). Dispatched straight to the composio store, unchanged.
     Webhook { delivery_id: String, payload: Value },
+    /// A **generic** inbound delivery to route by `path` (webhook-unify): the
+    /// server forwards the original request path, the pre-extracted signature
+    /// header, and the *raw* body so Core can re-verify the per-target HMAC and
+    /// dispatch to the matching handler (workflow webhook, composio, or a future
+    /// channel). This is what makes a per-workflow webhook reachable over the
+    /// default RyuRelay ingress, not just composio.
+    Inbound {
+        delivery_id: String,
+        path: String,
+        signature: Option<String>,
+        body: String,
+    },
     /// A keep-alive ping — ignored.
     Ping,
 }
@@ -107,6 +120,19 @@ enum WireFrame {
         delivery_id: String,
         #[serde(default)]
         payload: Value,
+    },
+    /// The generic path-routed frame (webhook-unify). `path` is the inbound
+    /// request path (e.g. `/api/workflows/<id>/webhook`), `signature` the
+    /// pre-extracted signature-header value, `body` the raw request body.
+    #[serde(rename = "webhook.inbound")]
+    Inbound {
+        #[serde(default)]
+        delivery_id: String,
+        path: String,
+        #[serde(default)]
+        signature: Option<String>,
+        #[serde(default)]
+        body: String,
     },
     #[serde(rename = "ping")]
     Ping,
@@ -124,6 +150,17 @@ pub fn parse_frame(data: &str) -> Option<RelayFrame> {
         } => RelayFrame::Webhook {
             delivery_id,
             payload,
+        },
+        WireFrame::Inbound {
+            delivery_id,
+            path,
+            signature,
+            body,
+        } => RelayFrame::Inbound {
+            delivery_id,
+            path,
+            signature,
+            body,
         },
         WireFrame::Ping => RelayFrame::Ping,
     })
@@ -177,6 +214,30 @@ fn persist_relay_token(relay_token: &str, node: &str) {
 struct RegisterResponse {
     relay_token: String,
     public_url: String,
+}
+
+/// Read this node's persisted relay token (`~/.ryu/relay.json`), if it has
+/// registered with the relay at least once.
+fn persisted_relay_token() -> Option<String> {
+    let raw = std::fs::read_to_string(relay_state_path()).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v.get("relay_token")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .filter(|t| !t.trim().is_empty())
+}
+
+/// The reachable public URL a third party POSTs to so an inbound webhook at
+/// `path` reaches THIS node over the RyuRelay ingress:
+/// `<relay_base>/api/composio-relay/inbound/<relay_token>/<path>`. `None` until
+/// the node has registered with the relay (no persisted token yet). This is how a
+/// per-workflow webhook becomes discoverable under the default (RyuRelay) ingress,
+/// where there is no path-forwarding origin base.
+pub fn relay_inbound_url(path: &str) -> Option<String> {
+    let token = persisted_relay_token()?;
+    let base = relay_base();
+    let trimmed = path.trim_start_matches('/');
+    Some(format!("{base}/api/composio-relay/inbound/{token}/{trimmed}"))
 }
 
 /// Register this node with the relay server, returning `(relay_token, public_url)`.
@@ -359,10 +420,40 @@ async fn dispatch_frame(data: &str, seen: &mut SeenDeliveries) {
                 Some(store) => {
                     let fired = store.handle_webhook(&payload).await;
                     tracing::info!("ryu-relay: dispatched webhook, fired {fired} agent run(s)");
+                    // Reflect the relay-delivered firing in the webhook registry.
+                    super::record_delivery(super::WEBHOOK_PATH);
                 }
                 None => tracing::warn!(
                     "ryu-relay: composio-triggers store not initialised; dropping webhook"
                 ),
+            }
+        }
+        // The generic path-routed frame (webhook-unify): re-verify + dispatch by
+        // path so a per-workflow webhook is reachable over the default relay, not
+        // just composio. Dedup by delivery_id first (the relay is at-least-once and
+        // the handlers have no idempotency — same HIGH concern as the composio arm).
+        Some(RelayFrame::Inbound {
+            delivery_id,
+            path,
+            signature,
+            body,
+        }) => {
+            if !seen.insert(&delivery_id) {
+                tracing::debug!("ryu-relay: skipping duplicate delivery {delivery_id}");
+                return;
+            }
+            let outcome =
+                super::deliver_inbound(&path, body.as_bytes(), signature.as_deref()).await;
+            match outcome {
+                super::InboundOutcome::Delivered { detail } => {
+                    tracing::info!("ryu-relay: delivered inbound to {path}: {detail}");
+                }
+                super::InboundOutcome::Rejected(reason) => {
+                    tracing::warn!("ryu-relay: rejected inbound to {path}: {reason}");
+                }
+                super::InboundOutcome::Unhandled => {
+                    tracing::warn!("ryu-relay: no handler for inbound path {path}; dropping");
+                }
             }
         }
         Some(RelayFrame::Ping) | None => {}

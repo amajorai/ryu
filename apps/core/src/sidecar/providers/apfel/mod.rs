@@ -37,6 +37,7 @@ use std::sync::Arc;
 use anyhow::Context;
 
 use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
+use crate::win_process::NoWindow;
 
 /// host:port `apfel --serve` binds (fixed; apfel exposes no `--port` flag).
 const APFEL_ADDR: &str = "127.0.0.1:11434";
@@ -189,6 +190,7 @@ impl Sidecar for ApfelManager {
             // Apple FM's weights are part of the OS and are never removed here.
             match tokio::process::Command::new("brew")
                 .args(["uninstall", "apfel"])
+                .no_window()
                 .status()
                 .await
             {

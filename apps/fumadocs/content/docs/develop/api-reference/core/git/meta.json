@@ -1,0 +1,13 @@
+{
+  "title": "Git",
+  "description": "Git API endpoints.",
+  "pages": [
+    "git_branches",
+    "git_checkout",
+    "git_commit_push",
+    "git_create_branch",
+    "git_status",
+    "list_directory",
+    "create_project_folder"
+  ]
+}

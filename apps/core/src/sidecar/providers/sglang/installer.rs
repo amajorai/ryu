@@ -8,12 +8,18 @@ use anyhow::{bail, Context, Result};
 use tokio::process::Command;
 
 use crate::sidecar::download_manager::VersionStore;
+use crate::win_process::NoWindow;
 
 /// Locate a usable Python interpreter (python3 or python) and verify it is ≥ 3.9.
 /// Returns the command name that works on this system.
 pub async fn python_cmd() -> Result<String> {
     for candidate in ["python3", "python"] {
-        if let Ok(output) = Command::new(candidate).args(["--version"]).output().await {
+        if let Ok(output) = Command::new(candidate)
+            .args(["--version"])
+            .no_window()
+            .output()
+            .await
+        {
             if output.status.success() {
                 let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 // "Python 3.11.2" → "3.11.2"
@@ -62,6 +68,7 @@ pub async fn ensure_installed() -> Result<()> {
 
     let status = Command::new(&python)
         .args(["-m", "pip", "install", "sglang"])
+        .no_window()
         .status()
         .await
         .context("running `pip install sglang`")?;
@@ -73,6 +80,7 @@ pub async fn ensure_installed() -> Result<()> {
     // Query the installed version.
     let version = Command::new(&python)
         .args(["-m", "pip", "show", "sglang"])
+        .no_window()
         .output()
         .await
         .ok()

@@ -297,11 +297,19 @@ pub trait Sandbox: Send + Sync {
 /// Variants are added here as backends land. The registry never silently falls
 /// back to an unknown backend — `select_backend` returns an error instead so
 /// callers surface the misconfiguration.
+///
+/// There is deliberately NO `Subprocess` variant. A "spawn the command on the
+/// host with a restricted environment" backend has no isolation boundary at all,
+/// which contradicts this module's default-deny posture
+/// ([`SandboxCapabilities::default`] denies FS and network), and every real need
+/// is already covered: `wasmtime` (built-in, no daemon), `docker`,
+/// `microsandbox`, `opensandbox`, `daytona`. The variant used to exist and
+/// `build_command_backend` always returned "not implemented yet" for it, so
+/// `RYU_SANDBOX_BACKEND=subprocess` silently disabled every sandboxed exec on the
+/// node. `"subprocess"` now parses to [`SandboxBackend::Custom`] and hits the one
+/// honest `unknown sandbox backend` error, like any other unrecognised name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SandboxBackend {
-    /// Subprocess sandbox: spawn a child process with a restricted environment.
-    /// Available on all platforms; lowest isolation, useful for trusted code.
-    Subprocess,
     /// wasmtime backend: run a WASM/WASI module with strict capability limits.
     /// The default secure backend when available.
     Wasmtime,
@@ -315,7 +323,6 @@ impl SandboxBackend {
     /// Parse a backend name string into the enum.
     pub fn from_name(name: &str) -> Result<Self> {
         match name {
-            "subprocess" => Ok(Self::Subprocess),
             "wasmtime" => Ok(Self::Wasmtime),
             "docker" => Ok(Self::Docker),
             "" => Err(anyhow!("sandbox backend name must not be empty")),
@@ -326,7 +333,6 @@ impl SandboxBackend {
     /// Canonical string name for this backend.
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Subprocess => "subprocess",
             Self::Wasmtime => "wasmtime",
             Self::Docker => "docker",
             Self::Custom(name) => name.as_str(),
@@ -336,10 +342,10 @@ impl SandboxBackend {
 
 /// Select the most suitable available backend, given a preferred name.
 ///
-/// - If `preferred` is `Some`, parse and return it (error on unknown names that
-///   are not `Custom`-compatible is handled by the caller building the backend).
-/// - If `preferred` is `None`, return the platform default (`wasmtime` when
-///   available, `subprocess` as universal fallback).
+/// - If `preferred` is `Some`, parse and return it. An unrecognised name becomes
+///   a [`SandboxBackend::Custom`], which the caller then rejects when it tries to
+///   build it — so a typo surfaces as a real error, never as a silent swap.
+/// - If `preferred` is `None`, return the platform default ([`default_backend`]).
 ///
 /// This function never silently falls back from a *named* backend to another.
 pub fn select_backend(preferred: Option<&str>) -> Result<SandboxBackend> {
@@ -349,11 +355,14 @@ pub fn select_backend(preferred: Option<&str>) -> Result<SandboxBackend> {
     }
 }
 
-/// Platform default backend: `wasmtime` is preferred; `subprocess` is the
-/// universal fallback (available everywhere, no external daemon required).
+/// The default backend: `wasmtime`. It is the only backend built INTO Core (no
+/// daemon, no external CLI), so it is the one default that always resolves.
 ///
-/// The actual availability check (is wasmtime on PATH?) happens when the
-/// backend is constructed, not here. This function only names the preference.
+/// There is no lower-isolation fallback below it by design — degrading to a
+/// weaker sandbox on a machine where the strong one is missing would silently
+/// downgrade the security posture. If wasmtime is not compiled in, construction
+/// fails loudly and the operator picks a backend explicitly (the swappable
+/// default is the config knob, not a hidden fallback chain).
 pub fn default_backend() -> SandboxBackend {
     SandboxBackend::Wasmtime
 }
@@ -475,9 +484,9 @@ impl SandboxBackendStore {
 /// as opposed to the wasmtime backend, which runs a WASM module).
 ///
 /// Returns `Err` for [`SandboxBackend::Wasmtime`] (use the wasmtime path with a
-/// WASM module instead), for [`SandboxBackend::Subprocess`] (no host-process
-/// backend is built yet), and for unknown `Custom` names. Recognised command
-/// backends: `docker`, `microsandbox`, `opensandbox`, `daytona`.
+/// WASM module instead) and for unknown `Custom` names — including
+/// `"subprocess"`, which is not a backend (see [`SandboxBackend`]). Recognised
+/// command backends: `docker`, `microsandbox`, `opensandbox`, `daytona`.
 ///
 /// The CLI wrappers (`docker`/`microsandbox`/`opensandbox`) and the remote HTTP
 /// backend (`daytona`) all construct without I/O and never install/provision
@@ -497,7 +506,6 @@ pub fn build_command_backend(backend: &SandboxBackend) -> Result<Box<dyn Sandbox
         SandboxBackend::Wasmtime => Err(anyhow!(
             "wasmtime is not a command backend — pass a WASM module via `wasm_b64`"
         )),
-        SandboxBackend::Subprocess => Err(anyhow!("the subprocess backend is not implemented yet")),
         SandboxBackend::Custom(other) => Err(anyhow!("unknown sandbox backend '{other}'")),
     }
 }
@@ -641,10 +649,6 @@ mod tests {
     #[test]
     fn backend_from_known_names() {
         assert_eq!(
-            SandboxBackend::from_name("subprocess").unwrap(),
-            SandboxBackend::Subprocess
-        );
-        assert_eq!(
             SandboxBackend::from_name("wasmtime").unwrap(),
             SandboxBackend::Wasmtime
         );
@@ -652,6 +656,28 @@ mod tests {
             SandboxBackend::from_name("docker").unwrap(),
             SandboxBackend::Docker
         );
+    }
+
+    #[test]
+    fn subprocess_is_not_a_backend() {
+        // "subprocess" was a selectable variant whose builder ALWAYS errored with
+        // "not implemented yet", so `RYU_SANDBOX_BACKEND=subprocess` silently
+        // disabled every sandboxed exec on the node. It is not a backend: it now
+        // parses as an unrecognised custom name and fails loudly at build time,
+        // with the same honest message any other typo gets.
+        let parsed = SandboxBackend::from_name("subprocess").unwrap();
+        assert_eq!(parsed, SandboxBackend::Custom("subprocess".to_owned()));
+        // `Box<dyn Sandbox>` is not `Debug`, so unwrap the error side by hand.
+        let err = match build_command_backend(&parsed) {
+            Ok(_) => panic!("subprocess must not build a backend"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("unknown sandbox backend"),
+            "expected the honest unknown-backend error, got: {err}"
+        );
+        // It was never in the selectable set, and must not creep back in.
+        assert!(!KNOWN_BACKENDS.contains(&"subprocess"));
     }
 
     #[test]
@@ -669,7 +695,6 @@ mod tests {
     #[test]
     fn backend_as_str_roundtrips() {
         for (variant, expected) in [
-            (SandboxBackend::Subprocess, "subprocess"),
             (SandboxBackend::Wasmtime, "wasmtime"),
             (SandboxBackend::Docker, "docker"),
         ] {
@@ -688,8 +713,8 @@ mod tests {
     #[test]
     fn select_backend_named_preference() {
         assert_eq!(
-            select_backend(Some("subprocess")).unwrap(),
-            SandboxBackend::Subprocess
+            select_backend(Some("wasmtime")).unwrap(),
+            SandboxBackend::Wasmtime
         );
         assert_eq!(
             select_backend(Some("docker")).unwrap(),
@@ -747,7 +772,6 @@ mod tests {
     #[test]
     fn build_command_backend_rejects_wasmtime_and_unknown() {
         assert!(build_command_backend(&SandboxBackend::Wasmtime).is_err());
-        assert!(build_command_backend(&SandboxBackend::Subprocess).is_err());
         assert!(build_command_backend(&SandboxBackend::from_name("nope").unwrap()).is_err());
     }
 

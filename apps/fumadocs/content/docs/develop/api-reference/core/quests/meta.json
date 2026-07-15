@@ -1,0 +1,19 @@
+{
+  "title": "Quests",
+  "description": "Quests API endpoints.",
+  "pages": [
+    "list_quests",
+    "create_quest",
+    "get_detection_config",
+    "set_detection_config",
+    "quest_events",
+    "get_quest",
+    "delete_quest",
+    "update_quest",
+    "complete_quest",
+    "dismiss_quest",
+    "judge_quest",
+    "accept_suggestion",
+    "dismiss_suggestion"
+  ]
+}

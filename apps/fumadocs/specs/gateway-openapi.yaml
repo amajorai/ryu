@@ -32,9 +32,11 @@ tags:
   - name: Config
     description: Runtime gateway configuration (admin).
   - name: Tools
-    description: Configured tool integrations (Composio).
+    description: Tool integrations (Composio registry) and governed direct execution.
+  - name: Security
+    description: Firewall guardrail checks over caller-supplied text.
   - name: Health
-    description: Liveness and provider status.
+    description: Liveness, provider status, and observability metrics.
 paths:
   /v1/chat/completions:
     post:
@@ -94,6 +96,48 @@ paths:
               schema:
                 type: string
                 description: "SSE stream of chat.completion.chunk objects (one per `data:` line)."
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/cursor/chat/completions:
+    post:
+      tags: [Inference]
+      summary: Create a chat completion (Cursor alias)
+      description: |
+        Labelled alias for `POST /v1/chat/completions`. Cursor's "Override OpenAI
+        Base URL" already emits the OpenAI `/v1/chat/completions` shape, so point
+        Cursor at `<gateway>/v1/cursor` for the same governed pipeline.
+      operationId: createCursorChatCompletion
+      parameters:
+        - $ref: "#/components/parameters/UserIdHeader"
+        - $ref: "#/components/parameters/AgentIdHeader"
+        - name: x-ryu-slot-chat-provider
+          in: header
+          required: false
+          schema: { type: string }
+        - name: x-ryu-slot-chat-model
+          in: header
+          required: false
+          schema: { type: string }
+        - name: x-ryu-session-id
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionRequest"
+      responses:
+        "200":
+          description: A chat completion (or an SSE stream when `stream` is true).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatCompletionResponse"
+            text/event-stream:
+              schema:
+                type: string
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /v1/images/generations:
@@ -171,6 +215,53 @@ paths:
                   text: { type: string }
                 required: [text]
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/videos/generations:
+    post:
+      tags: [Inference]
+      summary: Submit a video generation job
+      description: >-
+        Job-based video generation (cloud runs can take minutes). Returns `202`
+        with `{ id, status }`; poll `GET /v1/videos/generations/{id}` for the
+        result. Honors `x-ryu-slot-video-provider` / `x-ryu-slot-video-model`
+        per-agent slot overrides.
+      operationId: createVideoGeneration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "202":
+          description: Job accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  status: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/videos/generations/{id}:
+    get:
+      tags: [Inference]
+      summary: Poll a video generation job
+      operationId: getVideoGeneration
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Current job status and, when succeeded, media payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/modalities:
     get:
       tags: [Models]
@@ -230,6 +321,94 @@ paths:
                         name: { type: string }
                         type: { type: string, const: composio }
                         description: { type: string }
+  /v1/exec/tool:
+    post:
+      tags: [Tools]
+      summary: Governed direct tool or code execution
+      description: >-
+        The gateway governance front for direct tool/code execution (#475).
+        `kind` defaults to `tool` (forward to Core MCP `tools/call`); `execute`
+        and `resume` forward to Core's PTC sandbox endpoints. Requires a
+        trusted-forwarder or master API key; disabled when mesh mode is on.
+        `agent_id` is required for Core's fail-closed agent scoping.
+      operationId: execTool
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  enum: [tool, execute, resume]
+                  default: tool
+                tool_id: { type: string }
+                arguments: { type: object, additionalProperties: true }
+                code: { type: string }
+                execution_id: { type: string }
+                action: { type: string }
+                content: { type: object, additionalProperties: true }
+                request_id: { type: string }
+                agent_id: { type: string }
+                user_id: { type: string }
+                session_id: { type: string }
+                widget:
+                  type: object
+                  properties:
+                    instance_id: { type: string }
+                    origin_server: { type: string }
+      responses:
+        "200":
+          description: Execution outcome from Core (governed forward).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  result: { type: object, additionalProperties: true }
+                  error: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/exec/scan:
+    post:
+      tags: [Tools]
+      summary: Pre-exec command governance scan
+      description: >-
+        COMMAND-SCAN: scans a `backend` + `command` pair against the hardline
+        blocklist and risk patterns. Returns `{ decision, reason, findings }`.
+        Trusted-forwarder or master key only. Mode follows `RYU_EXEC_APPROVAL_MODE`.
+      operationId: execScan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                backend: { type: string }
+                command: { type: string }
+                session_id: { type: string }
+                agent: { type: string }
+              required: [backend, command]
+      responses:
+        "200":
+          description: Scan verdict.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  decision:
+                    type: string
+                    enum: [allow, deny, review]
+                  reason: { type: string }
+                  findings:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /v1/evals:
     get:
       tags: [Evals]
@@ -482,6 +661,109 @@ paths:
                   current_count: { type: integer }
                   max_count: { type: integer }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /sandbox/tick:
+    post:
+      tags: [Audit]
+      summary: Meter one sandbox heartbeat
+      description: |
+        Core→Gateway control call (trusted-forwarder or master key only). Core
+        posts one tick per sandbox run per heartbeat interval; the gateway accrues
+        the marked-up cost, debits the org wallet, and returns a
+        continue/warn/kill verdict. Not part of the standard OpenAI-compatible
+        client surface — see [Loopback and internal routes](/docs/gateway/loopback-routes).
+      operationId: sandboxTick
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SandboxTickRequest"
+      responses:
+        "200":
+          description: Accrual snapshot and verdict for this tick.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SandboxTickResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/firewall/check:
+    post:
+      tags: [Security]
+      summary: Run firewall guardrails over caller text
+      description: >-
+        Scans `text` for the requested guardrail names (e.g. `pii`, `jailbreak`,
+        `toxicity`). Returns `{ allowed, reason }`. Read-only over caller data;
+        ungated like governance endpoints. Used by Core workflow Guardrails nodes.
+      operationId: firewallCheck
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string }
+                checks:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Verdict.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  allowed: { type: boolean }
+                  reason: { type: string, nullable: true }
+  /v1/metrics:
+    get:
+      tags: [Health]
+      summary: Gateway metrics snapshot
+      operationId: getMetrics
+      security: []
+      responses:
+        "200":
+          description: Prometheus-style or JSON metrics (implementation-defined).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/concurrency:
+    get:
+      tags: [Health]
+      summary: Local-engine admission queue depth
+      description: Layer-2 observability for the local engine admission queue.
+      operationId: getConcurrency
+      security: []
+      responses:
+        "200":
+          description: Queue depth snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/savings:
+    get:
+      tags: [Health]
+      summary: Community savings aggregate
+      description: |
+        Public, ungated anonymous aggregate of compression and cache savings
+        (no per-provider maps, quota, or keys). Core's opt-in community-stats
+        beacon reads this endpoint. Alias: `GET /savings`.
+      operationId: getCommunitySavings
+      security: []
+      responses:
+        "200":
+          description: Aggregate savings counters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommunitySavings"
   /v1/config:
     get:
       tags: [Config]
@@ -519,6 +801,55 @@ paths:
                 properties:
                   ok: { type: boolean }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /health:
+    get:
+      tags: [Health]
+      summary: (Alias) Health check
+      description: Alias for `GET /v1/health`.
+      operationId: health_alias
+      security: []
+      responses:
+        "200":
+          description: Gateway status and configured providers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, examples: [ok] }
+                  version: { type: string }
+                  providers: { type: array, items: { type: string } }
+                  auth_required: { type: boolean }
+  /metrics:
+    get:
+      tags: [Health]
+      summary: (Alias) Gateway metrics snapshot
+      description: Alias for `GET /v1/metrics`.
+      operationId: getMetrics_alias
+      security: []
+      responses:
+        "200":
+          description: Prometheus-style or JSON metrics (implementation-defined).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /savings:
+    get:
+      tags: [Health]
+      summary: (Alias) Community savings aggregate
+      description: Alias for `GET /v1/savings`.
+      operationId: getCommunitySavings_alias
+      security: []
+      responses:
+        "200":
+          description: Aggregate savings counters.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /v1/health:
     get:
       tags: [Health]
@@ -792,6 +1123,69 @@ components:
         completion_tokens: { type: integer }
         cost_usd: { type: number, format: double }
         error: { type: string }
+    CommunitySavings:
+      type: object
+      description: Anonymous aggregate compression and cache savings counters.
+      properties:
+        requests: { type: integer, format: int64 }
+        input_tokens: { type: integer, format: int64 }
+        output_tokens: { type: integer, format: int64 }
+        tokens_saved: { type: integer, format: int64 }
+        cache_hit_rate: { type: number, format: double }
+      required: [requests, input_tokens, output_tokens, tokens_saved, cache_hit_rate]
+    SandboxSpec:
+      type: object
+      description: Provisioned sandbox resources being billed for this tick.
+      properties:
+        vcpu: { type: integer, minimum: 0 }
+        mem_gib: { type: integer, minimum: 0 }
+        storage_gib: { type: integer, minimum: 0 }
+        gpu:
+          type: string
+          enum: [none, t4, a10, a100, h100]
+        gpu_count: { type: integer, minimum: 0, default: 0 }
+        os:
+          type: string
+          enum: [linux, windows]
+      required: [vcpu, mem_gib, storage_gib, gpu, os]
+    SandboxTickRequest:
+      type: object
+      properties:
+        run_id: { type: string, description: Sandbox run identifier; the accrual key. }
+        org_id:
+          type: string
+          nullable: true
+          description: Org whose wallet is debited. Omitted when Core cannot resolve an org.
+        spec: { $ref: "#/components/schemas/SandboxSpec" }
+        elapsed_seconds_delta:
+          type: integer
+          minimum: 0
+          description: Seconds elapsed since Core's previous tick for this run.
+        tick_index:
+          type: integer
+          minimum: 0
+          description: Monotonic tick counter from 0; guards against double-accrual on retry.
+        per_run_budget_micro_usd:
+          type: integer
+          minimum: 0
+          default: 0
+          description: Per-run execution cap in micro-USD. `0` means no cap.
+      required: [run_id, spec, elapsed_seconds_delta, tick_index]
+    SandboxVerdict:
+      type: string
+      enum: [continue, warn, kill_budget, kill_balance]
+    SandboxTickResponse:
+      type: object
+      properties:
+        accrued_micro_usd:
+          type: integer
+          description: Cumulative billed (marked-up) micro-USD accrued for this run.
+        balance_micro_usd:
+          type: integer
+          nullable: true
+          description: Authoritative wallet balance after the debit, or null when unknown.
+        verdict: { $ref: "#/components/schemas/SandboxVerdict" }
+      required: [accrued_micro_usd, verdict]
     GatewayConfig:
       type: object
       description: Firewall, budgets, providers, auth, and routing config. Secrets are redacted on read.

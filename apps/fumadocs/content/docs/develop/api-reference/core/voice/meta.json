@@ -1,0 +1,12 @@
+{
+  "title": "Voice",
+  "description": "Voice API endpoints.",
+  "pages": [
+    "speak",
+    "transcribe",
+    "tts_engines",
+    "tts_models",
+    "tts_models_install",
+    "voice_ws"
+  ]
+}

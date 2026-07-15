@@ -8,6 +8,8 @@ use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
+use crate::win_process::NoWindow;
+
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
 fn shadow_dir() -> PathBuf {
@@ -63,7 +65,8 @@ impl ShadowProcess {
             .args(["start", "--port", &self.port.to_string()])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(false);
+            .kill_on_drop(false)
+            .no_window();
         Self::apply_llm_env(&mut command);
 
         let mut child = command.spawn()?;
@@ -210,6 +213,7 @@ impl ShadowProcess {
         {
             let _ = std::process::Command::new("taskkill")
                 .args(["/F", "/PID", &pid.to_string()])
+                .no_window()
                 .output();
         }
     }

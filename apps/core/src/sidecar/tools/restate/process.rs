@@ -8,6 +8,8 @@ use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
+use crate::win_process::NoWindow;
+
 /// HTTP/gRPC port Restate binds by default.
 pub const RESTATE_HTTP_PORT: u16 = 8080;
 /// Admin (management) port Restate exposes by default.
@@ -57,6 +59,7 @@ impl RestateProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false)
+            .no_window()
             .spawn()?;
 
         // Write PID file so we can recover from a crash on next start.
@@ -168,6 +171,7 @@ impl RestateProcess {
         {
             let _ = std::process::Command::new("taskkill")
                 .args(["/F", "/PID", &pid.to_string()])
+                .no_window()
                 .output();
         }
     }

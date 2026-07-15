@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
+use crate::win_process::NoWindow;
+
 // ── Platform helpers ──────────────────────────────────────────────────────────
 
 pub(crate) fn ryu_dir() -> PathBuf {
@@ -836,6 +838,7 @@ impl BuildDependency for GitDep {
     fn check(&self) -> Result<String> {
         let out = std::process::Command::new("git")
             .arg("--version")
+            .no_window()
             .output()
             .context("git not found in PATH")?;
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
@@ -864,6 +867,7 @@ impl BuildDependency for GitDep {
                     "--accept-source-agreements",
                     "--accept-package-agreements",
                 ])
+                .no_window()
                 .status()
                 .context("winget install failed")?;
             if !status.success() {
@@ -878,6 +882,7 @@ impl BuildDependency for GitDep {
         {
             let status = std::process::Command::new("brew")
                 .args(["install", "git"])
+                .no_window()
                 .status()
                 .context("brew install failed")?;
             if !status.success() {
@@ -890,6 +895,7 @@ impl BuildDependency for GitDep {
             let status = std::process::Command::new("sh")
                 .arg("-c")
                 .arg("apt-get install -y git || dnf install -y git || yum install -y git")
+                .no_window()
                 .status()
                 .context("package manager install failed")?;
             if !status.success() {
@@ -917,6 +923,7 @@ impl BuildDependency for RustDep {
     fn check(&self) -> Result<String> {
         let out = std::process::Command::new("cargo")
             .arg("--version")
+            .no_window()
             .output()
             .context("cargo not found in PATH — is Rust installed?")?;
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
@@ -934,6 +941,7 @@ impl BuildDependency for RustDep {
                     "-Command",
                     "Invoke-WebRequest -Uri 'https://win.rustup.rs/x86_64' -OutFile \"$env:TEMP\\rustup-init.exe\"; & \"$env:TEMP\\rustup-init.exe\" -y --default-toolchain stable; Remove-Item \"$env:TEMP\\rustup-init.exe\""
                 ])
+                .no_window()
                 .status()
                 .context("powershell rustup install failed")?;
             if !status.success() {
@@ -946,6 +954,7 @@ impl BuildDependency for RustDep {
             let status = std::process::Command::new("sh")
                 .arg("-c")
                 .arg("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
+                .no_window()
                 .status()
                 .context("rustup install failed")?;
             if !status.success() {

@@ -157,7 +157,8 @@ The regular OpenAI-compat chat path cannot govern either, because it would subst
 own provider key and flip the request off the user's subscription billing.
 
 For those agents the gateway runs a **transparent reverse proxy** in the agent's native wire format,
-`apps/gateway/src/passthrough/mod.rs`. The agent is pointed at the proxy through a base-URL env var.
+`apps/gateway/src/passthrough/mod.rs`. See also [Loopback and internal routes](/docs/gateway/loopback-routes)
+for the full list of non-standard-client endpoints. The agent is pointed at the proxy through a base-URL env var.
 The proxy accepts the native request, applies request-side DLP, forwards it upstream with the
 caller's own `Authorization` header (and `ChatGPT-Account-ID` for Codex) unchanged, then streams the
 response back through response-side DLP and audit. Because the format is never translated, the

@@ -26,10 +26,22 @@ use crate::sidecar::providers::llamacpp::{
 };
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 
-/// Loopback port the embeddings server binds to. Distinct from the chat engine's
-/// 8080 so both run together.
-pub const EMBED_PORT: u16 = 8081;
-const EMBED_ADDR: &str = "127.0.0.1:8081";
+/// Canonical (release) loopback port the embeddings server binds to. Distinct
+/// from the chat engine's 8080 so both run together. The concrete port is
+/// profile-aware — see [`embed_port`].
+pub const EMBED_PORT_BASE: u16 = 8081;
+
+/// Profile-aware embeddings port (release 8081, dev 9081, …). The RAG client that
+/// dials this resolves the SAME port via the `RYU_EMBED_BASE_URL` env default that
+/// `profile::apply_env_defaults` seeds, so spawn and client never diverge.
+pub fn embed_port() -> u16 {
+    crate::profile::port(EMBED_PORT_BASE)
+}
+
+/// Loopback `host:port` the embeddings server binds to (profile-aware).
+fn embed_addr() -> String {
+    format!("127.0.0.1:{}", embed_port())
+}
 
 /// Lifecycle manager for the dedicated llama.cpp embeddings sidecar.
 pub struct LlamaCppEmbedManager {
@@ -76,7 +88,7 @@ impl LlamaCppEmbedManager {
     /// `true` if an embeddings server already answers on the port.
     async fn server_reachable(client: &reqwest::Client) -> bool {
         client
-            .get(format!("http://{EMBED_ADDR}/health"))
+            .get(format!("http://{}/health", embed_addr()))
             .send()
             .await
             .map(|r| r.status().is_success())
@@ -106,13 +118,14 @@ impl Sidecar for LlamaCppEmbedManager {
         let client = self.client.clone();
         let downloads = self.downloads.clone();
         Box::pin(async move {
+            let addr = embed_addr();
             // Adopt an already-running embeddings server (e.g. user-managed) rather
             // than spawning a competing process that would fail to bind the port.
             if Self::server_reachable(&client).await {
                 adopted_external.store(true, Ordering::Relaxed);
                 running.store(true, Ordering::Relaxed);
                 tracing::info!(
-                    "embeddings server already running on {EMBED_ADDR} — adopting existing server"
+                    "embeddings server already running on {addr} — adopting existing server"
                 );
                 return Ok(());
             }
@@ -146,10 +159,10 @@ impl Sidecar for LlamaCppEmbedManager {
                 model_path.display()
             );
 
-            tracing::info!("llamacpp-embed sidecar starting on {EMBED_ADDR}");
+            tracing::info!("llamacpp-embed sidecar starting on {addr}");
             let mut proc = LlamaCppProcess::new(Self::binary_path());
             let opts = LlamaCppStartOptions {
-                port: EMBED_PORT,
+                port: embed_port(),
                 model_path: Some(model_path),
                 // The embedding model is text-only — no vision adapter.
                 mmproj_path: None,
@@ -174,7 +187,7 @@ impl Sidecar for LlamaCppEmbedManager {
             // a few seconds even for the small nomic GGUF).
             tokio::time::timeout(std::time::Duration::from_secs(120), async {
                 loop {
-                    if tokio::net::TcpStream::connect(EMBED_ADDR).await.is_ok() {
+                    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -184,7 +197,7 @@ impl Sidecar for LlamaCppEmbedManager {
             .context("llamacpp-embed did not start within 120s")?;
 
             running.store(true, Ordering::Relaxed);
-            tracing::info!("llamacpp-embed sidecar started on {EMBED_ADDR}");
+            tracing::info!("llamacpp-embed sidecar started on {addr}");
             Ok(())
         })
     }
@@ -217,7 +230,7 @@ impl Sidecar for LlamaCppEmbedManager {
                 return HealthStatus::Unhealthy("embeddings process not running".into());
             }
             match client
-                .get(format!("http://{EMBED_ADDR}/health"))
+                .get(format!("http://{}/health", embed_addr()))
                 .send()
                 .await
             {

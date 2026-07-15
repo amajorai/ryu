@@ -428,6 +428,243 @@ pub async fn uninstall_sidecar(url: &str, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ── Plugin lifecycle (`/api/plugins`) ────────────────────────────────────────
+//
+// The CLI is the canonical `cli` surface: every plugin call carries
+// `X-Ryu-Surface: cli` so Core filters `GET /api/plugins` (and its catalog) to
+// plugins that target the terminal. Wire shapes mirror
+// `packages/core-client/src/plugins.ts` (the sibling TS client) verbatim.
+
+/// The surface token Core matches `X-Ryu-Surface` against. The CLI is the
+/// canonical `cli` surface (see AGENTS.md §Surface audit).
+pub const CLI_SURFACE: &str = "cli";
+
+/// Fetch plugins from `GET /api/plugins`, filtered to the `cli` surface.
+/// Returns installed AND available-but-not-installed rows (`installed` marks
+/// which) so the Plugins tab can drive install off the same list.
+pub async fn fetch_plugins(
+    api_url: &str,
+    token: Option<&str>,
+) -> anyhow::Result<Vec<crate::app::PluginRecord>> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let mut req = client
+        .get(format!("{api_url}/api/plugins"))
+        .header("X-Ryu-Surface", CLI_SURFACE);
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {t}"));
+    }
+    let resp = req.send().await?.error_for_status()?;
+    let json: serde_json::Value = resp.json().await?;
+    let plugins: Vec<crate::app::PluginRecord> =
+        serde_json::from_value(json["apps"].clone()).unwrap_or_default();
+    Ok(plugins)
+}
+
+/// Turn a non-2xx plugin lifecycle response into a readable one-line message,
+/// mirroring the desktop `describeDependencyError` / `AppLifecycleError`
+/// mapping. Reads the typed 409 refusals (`blocked_by_dependents`, `built_in`,
+/// `load_bearing`) so the UI names exactly what to do — never string-parses a
+/// prose message.
+async fn plugin_error_message(resp: reqwest::Response, action: &str) -> anyhow::Error {
+    let status = resp.status();
+    let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+
+    // Typed dependency refusal (409): name the blocking dependents.
+    if let Some(dep) = body.get("dependency_error") {
+        let code = dep.get("code").and_then(|v| v.as_str()).unwrap_or("");
+        if code == "blocked_by_dependents" {
+            let dependents = dep
+                .get("dependents")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            return anyhow::anyhow!(
+                "cannot {action}: needed by {dependents} — disable them first (or use cascade: C)"
+            );
+        }
+        let msg = body
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("dependency conflict");
+        return anyhow::anyhow!("cannot {action}: {msg}");
+    }
+
+    // `built_in`/`protected` (409): compiled-in default — only disable works.
+    // `load_bearing` (409): engine/durable plugin — refuse without a force flag.
+    let code = body.get("code").and_then(|v| v.as_str()).unwrap_or("");
+    match code {
+        "built_in" | "protected" => {
+            anyhow::anyhow!("cannot {action}: built-in plugin — disable it instead")
+        }
+        "load_bearing" => {
+            anyhow::anyhow!("cannot {action}: load-bearing (engine/durable) plugin")
+        }
+        _ => {
+            let msg = body
+                .get("message")
+                .and_then(|v| v.as_str())
+                .or_else(|| body.get("error").and_then(|v| v.as_str()))
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("{action} failed ({status})"));
+            anyhow::anyhow!("{msg}")
+        }
+    }
+}
+
+/// Extract the `notice` string when Core reports `externally_managed: true`
+/// (a gateway-policy plugin toggled against a remote/unmanaged gateway — the
+/// change did NOT reach the gateway; a manual restart is required).
+fn externally_managed_notice(body: &serde_json::Value) -> Option<String> {
+    if body.get("externally_managed").and_then(|v| v.as_bool()) == Some(true) {
+        return Some(
+            body.get("notice")
+                .and_then(|v| v.as_str())
+                .unwrap_or("gateway not updated — restart it manually")
+                .to_string(),
+        );
+    }
+    None
+}
+
+/// POST `/api/plugins/:id/enable`. On success returns an optional notice
+/// (present only for externally-managed gateway plugins).
+pub async fn enable_plugin(
+    api_url: &str,
+    token: Option<&str>,
+    id: &str,
+) -> anyhow::Result<Option<String>> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let mut req = client
+        .post(format!("{api_url}/api/plugins/{id}/enable"))
+        .header("X-Ryu-Surface", CLI_SURFACE);
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {t}"));
+    }
+    let resp = req.send().await?;
+    if !resp.status().is_success() {
+        return Err(plugin_error_message(resp, "enable").await);
+    }
+    let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+    Ok(externally_managed_notice(&body))
+}
+
+/// POST `/api/plugins/:id/disable`. `cascade` disables the whole dependent
+/// chain instead of refusing when other enabled plugins depend on this one.
+pub async fn disable_plugin(
+    api_url: &str,
+    token: Option<&str>,
+    id: &str,
+    cascade: bool,
+) -> anyhow::Result<Option<String>> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let path = if cascade {
+        format!("{api_url}/api/plugins/{id}/disable?cascade=true")
+    } else {
+        format!("{api_url}/api/plugins/{id}/disable")
+    };
+    let mut req = client.post(path).header("X-Ryu-Surface", CLI_SURFACE);
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {t}"));
+    }
+    let resp = req.send().await?;
+    if !resp.status().is_success() {
+        return Err(plugin_error_message(resp, "disable").await);
+    }
+    let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+    Ok(externally_managed_notice(&body))
+}
+
+/// The success outcome of `POST /api/plugins/:id/uninstall`. Mirrors Core's
+/// handler body `{ success, removed, disabled, externally_managed?, notice? }`.
+#[derive(Debug, Clone, Default)]
+pub struct PluginUninstallOutcome {
+    /// Plugins disabled as part of the uninstall (the target + cascaded
+    /// dependents). Cascaded dependents stay installed-but-disabled.
+    pub disabled: Vec<String>,
+    /// Restart-the-gateway notice, present only for externally-managed plugins.
+    pub notice: Option<String>,
+}
+
+/// POST `/api/plugins/:id/uninstall`. `cascade` disables enabled dependents
+/// first; without it a dependent chain refuses with a typed 409.
+pub async fn uninstall_plugin(
+    api_url: &str,
+    token: Option<&str>,
+    id: &str,
+    cascade: bool,
+) -> anyhow::Result<PluginUninstallOutcome> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let path = if cascade {
+        format!("{api_url}/api/plugins/{id}/uninstall?cascade=true")
+    } else {
+        format!("{api_url}/api/plugins/{id}/uninstall")
+    };
+    let mut req = client.post(path).header("X-Ryu-Surface", CLI_SURFACE);
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {t}"));
+    }
+    let resp = req.send().await?;
+    if !resp.status().is_success() {
+        return Err(plugin_error_message(resp, "uninstall").await);
+    }
+    let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+    let disabled = body
+        .get("disabled")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(PluginUninstallOutcome {
+        disabled,
+        notice: externally_managed_notice(&body),
+    })
+}
+
+/// POST `/api/plugins/:id/install` — record an available plugin as installed
+/// (disabled). The plugin must already be discoverable in `GET /api/plugins`
+/// (an `installed:false` row).
+pub async fn install_plugin(
+    api_url: &str,
+    token: Option<&str>,
+    id: &str,
+) -> anyhow::Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let mut req = client
+        .post(format!("{api_url}/api/plugins/{id}/install"))
+        .header("X-Ryu-Surface", CLI_SURFACE);
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {t}"));
+    }
+    let resp = req.send().await?;
+    if !resp.status().is_success() {
+        return Err(plugin_error_message(resp, "install").await);
+    }
+    Ok(())
+}
+
 /// Fetch the gateway status from Core's `GET /api/gateway/status`.
 /// On success, stores the result in `app.gateway_status`.
 /// On any error (Core unreachable, gateway down), clears the field — the UI

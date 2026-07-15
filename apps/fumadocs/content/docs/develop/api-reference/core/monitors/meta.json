@@ -1,0 +1,19 @@
+{
+  "title": "Monitors",
+  "description": "Monitors API endpoints.",
+  "pages": [
+    "list_monitors",
+    "create_monitor",
+    "list_all_alerts",
+    "alerts_stream",
+    "ack_alert",
+    "register_push_token",
+    "remove_push_token",
+    "get_monitor",
+    "delete_monitor",
+    "update_monitor",
+    "list_monitor_alerts",
+    "run_monitor",
+    "list_snapshots"
+  ]
+}

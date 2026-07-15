@@ -322,11 +322,15 @@ pub struct AuthConfigPatch {
 }
 
 /// Partial config update accepted by `PUT /v1/config`.
-/// `firewall` and `budgets` are hot-swapped live. `routing` and `tools` are
-/// persisted and take effect on the next gateway restart (neither is
-/// live-swappable; the request path reads the startup snapshot).
-/// `auth.api_keys` is hot-swapped live. Provider credentials and master_key
-/// require an environment-variable change.
+/// `firewall`, `budgets`, and `auth.api_keys` are hot-swapped live. `routing` is
+/// **partially** hot-swapped: its `smart_routing` sub-config (the classifier
+/// on/off switch + rules) live-swaps the global smart router
+/// ([`crate::state::AppState::update_smart_router`]) with no restart, while
+/// `model_map` / `fallback_chain` / `provider_tiers` live in the [`ModelRouter`]
+/// startup snapshot and still take effect on the next gateway restart. `tools` is
+/// persisted and takes effect on the next restart (the request path reads the
+/// startup snapshot). Provider credentials and master_key require an
+/// environment-variable change.
 #[derive(Deserialize)]
 pub struct ConfigPatch {
     pub firewall: Option<FirewallConfig>,
@@ -469,6 +473,24 @@ pub async fn put_config(
     if let Some(custom) = &patch.custom_evaluators {
         crate::evaluators::validate_custom_evaluators(custom)
             .map_err(GatewayError::BadRequest)?;
+
+        // Compile + import-validate any WASM policy modules OFF the request path so
+        // a malformed / oversized / forbidden-import module is rejected HERE at
+        // declaration (the "enabling loads+validates the module" contract), not
+        // discovered at first request. The hardened host is the same one the
+        // pipeline uses, so this also warms its compiled-module cache.
+        if custom
+            .iter()
+            .any(|e| matches!(e.impl_, crate::evaluators::EvaluatorImpl::Wasm { .. }))
+        {
+            let host = state.wasm_host().ok_or_else(|| {
+                GatewayError::Internal(anyhow::anyhow!(
+                    "WASM policy host unavailable; cannot validate module"
+                ))
+            })?;
+            crate::wasm_policy::validate_wasm_evaluators(host, custom)
+                .map_err(GatewayError::BadRequest)?;
+        }
     }
 
     // Normalize any incoming org/agent overlays up front (FIX 2): strip the
@@ -544,11 +566,9 @@ pub async fn put_config(
         })?;
     }
 
-    // Now apply live hot-swappable changes (firewall, budgets, auth).
-    // Routing is not live-swappable (the ModelRouter holds a snapshot of
-    // RoutingConfig at startup); it takes effect on the next gateway restart.
-    // `update_firewall_config` also updates the resolver's node base and
-    // invalidates its scanner cache.
+    // Now apply live hot-swappable changes (firewall, budgets, auth, and the
+    // smart-routing sub-config). `update_firewall_config` also updates the
+    // resolver's node base and invalidates its scanner cache.
     if let Some(fw) = patch.firewall {
         state.update_firewall_config(fw);
     }
@@ -557,6 +577,13 @@ pub async fn put_config(
     }
     if let Some(auth_patch) = patch.auth {
         state.update_auth_config(auth_patch.api_keys);
+    }
+    // Routing: hot-swap the smart router live (classifier on/off + rules). The
+    // ModelRouter model_map / fallback / tiers stay on the startup snapshot and
+    // still take effect on the next restart, but the smart-routing TOGGLE — the
+    // one a Core policy plugin flips — now lands without a respawn.
+    if let Some(routing) = patch.routing {
+        state.update_smart_router(routing.smart_routing);
     }
 
     // Apply the standalone overlay-store replacements (§6) live, using the

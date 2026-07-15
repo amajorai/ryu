@@ -12,8 +12,21 @@
 //! set the bearer header, so the node-admittance token rides `?token=` (or an
 //! `Authorization: Bearer` for non-browser clients). If `RYU_TOKEN` is configured
 //! the upgrade is rejected unless it matches; unconfigured (loopback dev) allows.
-//! Voice mode is the single local user, so there is no per-resource access
-//! decision here (unlike `realtime_ws`'s room ACL).
+//!
+//! Because it is on the PUBLIC router it never receives `attach_verified_caller`,
+//! so — exactly like `realtime_ws` — it resolves the user identity IN the handler
+//! from `?jwt=` via the shared [`crate::server::verified_caller_from_token`].
+//!
+//! ## Per-conversation ACL
+//!
+//! The `start` frame carries a CLIENT-SUPPLIED `conversation_id` that flows
+//! straight into the chat path (history as context, turns appended). That made this
+//! route an exact re-open of the `POST /api/chat/stream` bypass the conversation
+//! ACL closed: a user could name someone else's conversation id and have that
+//! thread read back and written to. It is now gated by
+//! [`crate::server::gate_and_claim_conversation`] — the SAME create-or-use gate
+//! `chat_stream` uses — before the session is built. An unbound personal node is
+//! unaffected (the gate is a no-op there).
 //!
 //! ## Concurrency / barge-in
 //!
@@ -45,19 +58,26 @@ use crate::voice::session::{
 };
 
 /// Query params on the upgrade URL. `token` is the node-admittance `RYU_TOKEN`
-/// (also accepted via `Authorization: Bearer`); `jwt` is accepted for parity with
-/// the other WS routes but unused here (voice mode is the local user).
+/// (also accepted via `Authorization: Bearer`); `jwt` is the user identity, used
+/// here to gate the client-supplied `conversation_id` (browsers cannot set custom
+/// headers on a WS upgrade, so it rides the query string — same as `realtime_ws`).
 #[derive(Debug, Default, Deserialize)]
 pub struct VoiceQuery {
     #[serde(default)]
     token: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)]
     jwt: Option<String>,
 }
 
 /// `GET /api/voice/ws` — upgrade to the voice-mode socket. Node admittance is
 /// resolved here (pre-upgrade); the session opens once the `start` frame arrives.
+#[utoipa::path(
+    get,
+    path = "/api/voice/ws",
+    tag = "Voice",
+    summary = "upgrade to the voice-mode socket. Node admittance is",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn voice_ws(
     ws: WebSocketUpgrade,
     State(state): State<ServerState>,
@@ -84,7 +104,24 @@ pub async fn voice_ws(
         }
     }
 
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+    // ── User identity (Phase 0 verify path, reused — mirrors `realtime_ws`) ───
+    // This route is on the PUBLIC router, so `attach_verified_caller` never runs on
+    // it; resolve the caller here instead. Any failure is anonymous (`None`), never
+    // an error — on an unbound node that is the normal single-user flow, and on a
+    // bound node the conversation gate below denies it.
+    let jwt = query
+        .jwt
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .or_else(|| super::header_str(&headers, "x-ryu-user-jwt"));
+    let caller = match jwt {
+        Some(token) => super::verified_caller_from_token(&token).await,
+        None => None,
+    };
+
+    ws.on_upgrade(move |socket| handle_socket(socket, state, caller))
 }
 
 /// Extract a bearer token from the `Authorization` header.
@@ -124,7 +161,11 @@ fn pcm_from_bytes(bytes: &[u8]) -> Vec<i16> {
 }
 
 /// Per-connection driver: handshake on `start`, then the concurrent send/recv pump.
-async fn handle_socket(socket: WebSocket, state: ServerState) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: ServerState,
+    caller: Option<crate::identity_verify::VerifiedCaller>,
+) {
     use futures_util::{SinkExt, StreamExt};
 
     let (mut ws_tx, mut ws_rx) = socket.split();
@@ -166,9 +207,32 @@ async fn handle_socket(socket: WebSocket, state: ServerState) {
     };
 
     let session_id = format!("vs_{}", uuid::Uuid::new_v4().simple());
+    // Ephemeral sessions get a stable id so ChatEnd + persistence have a key. A
+    // client-supplied id is a REUSE of an existing conversation and must be gated;
+    // a minted `voice_…` id is brand new and cannot collide with anyone's row.
+    let conversation_id =
+        conversation_id.unwrap_or_else(|| format!("voice_{session_id}"));
+
+    // ── THE GATE ─────────────────────────────────────────────────────────────
+    // The same create-or-use gate `chat_stream` uses: an EXISTING row gets the full
+    // write check (this is what closes the bypass — user B naming user A's
+    // conversation id and having A's history streamed back as context and B's turns
+    // appended into A's thread); a NEW id is claimed for this caller so nobody else
+    // can take it. No-op on an unbound personal node.
+    if let Err(_resp) =
+        super::gate_and_claim_conversation(&state, &caller, &conversation_id).await
+    {
+        let _ = ws_tx
+            .send(error_frame(
+                "forbidden",
+                "you do not have access to that conversation",
+            ))
+            .await;
+        return;
+    }
+
     let cfg = VoiceConfig {
-        // Ephemeral sessions get a stable id so ChatEnd + persistence have a key.
-        conversation_id: conversation_id.unwrap_or_else(|| format!("voice_{session_id}")),
+        conversation_id,
         agent_id,
         stt_engine,
         tts_engine,

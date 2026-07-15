@@ -92,6 +92,13 @@ async fn resolve_notes_prompt(state: &ServerState) -> String {
 }
 
 /// `GET /api/meetings/templates` — the built-in notes templates for the picker.
+#[utoipa::path(
+    get,
+    path = "/api/meetings/templates",
+    tag = "Meetings",
+    summary = "the built-in notes templates for the picker.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_templates() -> Json<serde_json::Value> {
     Json(templates::catalog_json())
 }
@@ -140,6 +147,13 @@ async fn diarize_if_enabled(state: &ServerState, id: &str) {
 // ---- meetings CRUD --------------------------------------------------------
 
 /// `GET /api/meetings` — list all meetings, newest first.
+#[utoipa::path(
+    get,
+    path = "/api/meetings",
+    tag = "Meetings",
+    summary = "list all meetings, newest first.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_meetings(State(state): State<ServerState>) -> Json<serde_json::Value> {
     match state.meetings.list().await {
         Ok(meetings) => Json(json!({ "meetings": meetings })),
@@ -159,6 +173,14 @@ pub struct StartBody {
 }
 
 /// `POST /api/meetings` — start a meeting (and best-effort begin Shadow capture).
+#[utoipa::path(
+    post,
+    path = "/api/meetings",
+    tag = "Meetings",
+    summary = "start a meeting (and best-effort begin Shadow capture).",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn create_meeting(
     State(state): State<ServerState>,
     Json(body): Json<StartBody>,
@@ -177,6 +199,14 @@ pub async fn create_meeting(
 }
 
 /// `GET /api/meetings/:id` — one meeting (without the transcript body).
+#[utoipa::path(
+    get,
+    path = "/api/meetings/{id}",
+    tag = "Meetings",
+    summary = "one meeting (without the transcript body).",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_meeting(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -199,6 +229,15 @@ pub struct RenameBody {
 
 /// `POST /api/meetings/:id/title` — manually rename a meeting. Marks the title
 /// user-chosen so the transcript auto-namer leaves it alone.
+#[utoipa::path(
+    post,
+    path = "/api/meetings/{id}/title",
+    tag = "Meetings",
+    summary = "manually rename a meeting. Marks the title",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn rename_meeting(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -222,6 +261,14 @@ pub async fn rename_meeting(
 }
 
 /// `DELETE /api/meetings/:id` — remove a meeting and its transcript.
+#[utoipa::path(
+    delete,
+    path = "/api/meetings/{id}",
+    tag = "Meetings",
+    summary = "remove a meeting and its transcript.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn delete_meeting(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -249,6 +296,15 @@ pub struct ChunkQuery {
 
 /// `POST /api/meetings/:id/chunk` — ingest one captured WAV chunk (multipart
 /// `file` field), transcribe it, and append it to the live transcript.
+#[utoipa::path(
+    post,
+    path = "/api/meetings/{id}/chunk",
+    tag = "Meetings",
+    summary = "ingest one captured WAV chunk (multipart",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn ingest_chunk(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -302,6 +358,14 @@ pub async fn ingest_chunk(
 }
 
 /// `GET /api/meetings/:id/transcript` — the full transcript (segments + text).
+#[utoipa::path(
+    get,
+    path = "/api/meetings/{id}/transcript",
+    tag = "Meetings",
+    summary = "the full transcript (segments + text).",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_transcript(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -330,6 +394,15 @@ pub async fn get_transcript(
 /// and save the notes into the "Meetings" Space so they're editable + searchable
 /// through the existing Spaces UI (best-effort; a Space failure doesn't fail the
 /// finalize — the notes still live on the meeting record).
+#[utoipa::path(
+    post,
+    path = "/api/meetings/{id}/finalize",
+    tag = "Meetings",
+    summary = "stop capture, generate notes, mark done,",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn finalize_meeting(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -382,6 +455,14 @@ async fn finalize_and_save(state: &ServerState, id: &str) -> (StatusCode, Json<s
 /// `POST /api/meetings/import` — create a meeting from an uploaded audio file
 /// (WAV v1), transcribe it window-by-window through the same pipeline as a live
 /// recording, then finalize (notes + optional diarization + Space save).
+#[utoipa::path(
+    post,
+    path = "/api/meetings/import",
+    tag = "Meetings",
+    summary = "create a meeting from an uploaded audio file",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn import_meeting(
     State(state): State<ServerState>,
     mut multipart: Multipart,
@@ -465,7 +546,12 @@ async fn save_notes_to_space(state: &ServerState, meeting: &Meeting) -> Option<(
     let space_id = ensure_meetings_space(state).await?;
     match state
         .spaces
-        .ingest_document(&space_id, &meeting.title, &markdown)
+        .ingest_document(
+            &space_id,
+            &meeting.title,
+            &markdown,
+            &crate::server::spaces::background_tenancy(),
+        )
         .await
     {
         Ok(doc_id) => Some((space_id, doc_id)),
@@ -479,7 +565,11 @@ async fn save_notes_to_space(state: &ServerState, meeting: &Meeting) -> Option<(
 /// Find the "Meetings" space, creating it on first use. Returns its id, or `None`
 /// if the spaces store is unavailable.
 async fn ensure_meetings_space(state: &ServerState) -> Option<String> {
-    match state.spaces.list_spaces().await {
+    match state
+        .spaces
+        .list_spaces(crate::server::spaces::DocFilter::unrestricted())
+        .await
+    {
         Ok(spaces) => {
             if let Some(space) = spaces.iter().find(|s| s.name == MEETINGS_SPACE_NAME) {
                 return Some(space.id.clone());
@@ -489,7 +579,11 @@ async fn ensure_meetings_space(state: &ServerState) -> Option<String> {
     }
     match state
         .spaces
-        .create_space(MEETINGS_SPACE_NAME, Some("Auto-saved meeting notes"))
+        .create_space(
+            MEETINGS_SPACE_NAME,
+            Some("Auto-saved meeting notes"),
+            &crate::server::spaces::background_tenancy(),
+        )
         .await
     {
         Ok(id) => Some(id),
@@ -539,6 +633,13 @@ fn build_notes_markdown(meeting: &Meeting, notes: &MeetingNotes, transcript: &st
 
 /// `GET /api/meetings/stream` — SSE feed of meeting events (detected / started /
 /// segment / status / finalized).
+#[utoipa::path(
+    get,
+    path = "/api/meetings/stream",
+    tag = "Meetings",
+    summary = "SSE feed of meeting events (detected / started /",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn meetings_stream(
     State(state): State<ServerState>,
 ) -> axum::response::sse::Sse<
@@ -577,6 +678,14 @@ pub struct DetectBody {
 /// that decides whether it's a meeting: it filters against the configured
 /// meeting-app list, debounces, then broadcasts a `detected` event so the island
 /// can prompt to start notes.
+#[utoipa::path(
+    post,
+    path = "/api/meetings/detect",
+    tag = "Meetings",
+    summary = "Shadow's mic-in-use detection hook. Shadow",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn detect(
     State(state): State<ServerState>,
     Json(body): Json<DetectBody>,
@@ -623,6 +732,13 @@ pub async fn detect(
 }
 
 /// `GET /api/meetings/detection-config` — the detection toggle + meeting-app list.
+#[utoipa::path(
+    get,
+    path = "/api/meetings/detection-config",
+    tag = "Meetings",
+    summary = "the detection toggle + meeting-app list.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_detection_config(State(state): State<ServerState>) -> Json<serde_json::Value> {
     let enabled = state
         .preferences
@@ -653,6 +769,14 @@ pub struct DetectionConfigBody {
 }
 
 /// `PUT /api/meetings/detection-config` — update the toggle and/or app list.
+#[utoipa::path(
+    put,
+    path = "/api/meetings/detection-config",
+    tag = "Meetings",
+    summary = "update the toggle and/or app list.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn put_detection_config(
     State(state): State<ServerState>,
     Json(body): Json<DetectionConfigBody>,

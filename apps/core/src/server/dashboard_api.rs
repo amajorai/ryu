@@ -29,6 +29,13 @@ fn now() -> String {
 // ── Dashboards ───────────────────────────────────────────────────────────────
 
 /// `GET /api/dashboards` — list all dashboards.
+#[utoipa::path(
+    get,
+    path = "/api/dashboards",
+    tag = "Dashboards",
+    summary = "list all dashboards.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_dashboards(State(state): State<ServerState>) -> Json<Value> {
     match state.dashboards.store.list_dashboards().await {
         Ok(dashboards) => Json(json!({ "dashboards": dashboards })),
@@ -43,6 +50,14 @@ pub struct DashboardBody {
 }
 
 /// `POST /api/dashboards` — create a dashboard.
+#[utoipa::path(
+    post,
+    path = "/api/dashboards",
+    tag = "Dashboards",
+    summary = "create a dashboard.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn create_dashboard(
     State(state): State<ServerState>,
     Json(body): Json<DashboardBody>,
@@ -71,6 +86,14 @@ pub async fn create_dashboard(
 }
 
 /// `GET /api/dashboards/:id` — a dashboard with its widgets.
+#[utoipa::path(
+    get,
+    path = "/api/dashboards/{id}",
+    tag = "Dashboards",
+    summary = "a dashboard with its widgets.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_dashboard(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -98,6 +121,15 @@ pub async fn get_dashboard(
 }
 
 /// `PUT /api/dashboards/:id` — rename a dashboard.
+#[utoipa::path(
+    put,
+    path = "/api/dashboards/{id}",
+    tag = "Dashboards",
+    summary = "rename a dashboard.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn update_dashboard(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -132,6 +164,14 @@ pub async fn update_dashboard(
 }
 
 /// `DELETE /api/dashboards/:id` — remove a dashboard and its widgets.
+#[utoipa::path(
+    delete,
+    path = "/api/dashboards/{id}",
+    tag = "Dashboards",
+    summary = "remove a dashboard and its widgets.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn delete_dashboard(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -149,6 +189,14 @@ pub async fn delete_dashboard(
 // ── Widgets ──────────────────────────────────────────────────────────────────
 
 /// `GET /api/dashboards/:id/widgets` — the widgets on a dashboard.
+#[utoipa::path(
+    get,
+    path = "/api/dashboards/{id}/widgets",
+    tag = "Dashboards",
+    summary = "the widgets on a dashboard.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_widgets(State(state): State<ServerState>, Path(id): Path<String>) -> Json<Value> {
     match state.dashboards.store.list_widgets(&id).await {
         Ok(widgets) => Json(json!({ "widgets": widgets })),
@@ -169,6 +217,15 @@ pub struct WidgetBody {
 }
 
 /// `POST /api/dashboards/:id/widgets` — add a widget.
+#[utoipa::path(
+    post,
+    path = "/api/dashboards/{id}/widgets",
+    tag = "Dashboards",
+    summary = "add a widget.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn create_widget(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -223,6 +280,16 @@ pub async fn create_widget(
 }
 
 /// `PUT /api/dashboards/:id/widgets/:wid` — edit a widget (partial patch).
+#[utoipa::path(
+    put,
+    path = "/api/dashboards/{id}/widgets/{wid}",
+    tag = "Dashboards",
+    summary = "edit a widget (partial patch).",
+    params(("id" = String, Path)),
+    params(("wid" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn update_widget(
     State(state): State<ServerState>,
     Path((id, wid)): Path<(String, String)>,
@@ -275,6 +342,15 @@ pub async fn update_widget(
 }
 
 /// `DELETE /api/dashboards/:id/widgets/:wid` — remove a widget.
+#[utoipa::path(
+    delete,
+    path = "/api/dashboards/{id}/widgets/{wid}",
+    tag = "Dashboards",
+    summary = "remove a widget.",
+    params(("id" = String, Path)),
+    params(("wid" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn delete_widget(
     State(state): State<ServerState>,
     Path((id, wid)): Path<(String, String)>,
@@ -295,6 +371,16 @@ pub async fn delete_widget(
 }
 
 /// `PUT /api/dashboards/:id/widgets/:wid/layout` — persist drag/resize only.
+#[utoipa::path(
+    put,
+    path = "/api/dashboards/{id}/widgets/{wid}/layout",
+    tag = "Dashboards",
+    summary = "persist drag/resize only.",
+    params(("id" = String, Path)),
+    params(("wid" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn update_widget_layout(
     State(state): State<ServerState>,
     Path((id, wid)): Path<(String, String)>,
@@ -316,6 +402,16 @@ pub async fn update_widget_layout(
 }
 
 /// `POST /api/dashboards/:id/widgets/:wid/refresh` — resolve the source now.
+#[utoipa::path(
+    post,
+    path = "/api/dashboards/{id}/widgets/{wid}/refresh",
+    tag = "Dashboards",
+    summary = "resolve the source now.",
+    params(("id" = String, Path)),
+    params(("wid" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn refresh_widget(
     State(state): State<ServerState>,
     Path((id, wid)): Path<(String, String)>,
@@ -351,6 +447,13 @@ pub async fn refresh_widget(
 
 /// `GET /api/dashboards/catalog` — the widget kinds + curated source names the
 /// builder UI offers (the constrained catalog, surfaced for the desktop pickers).
+#[utoipa::path(
+    get,
+    path = "/api/dashboards/catalog",
+    tag = "Dashboards",
+    summary = "the widget kinds + curated source names the",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn catalog() -> Json<Value> {
     Json(json!({
         "widget_kinds": [
@@ -366,6 +469,13 @@ pub async fn catalog() -> Json<Value> {
 
 /// `GET /api/dashboards/events` — SSE feed of live widget values + definition
 /// changes. Mirrors `quests_api::quest_events`.
+#[utoipa::path(
+    get,
+    path = "/api/dashboards/events",
+    tag = "Dashboards",
+    summary = "SSE feed of live widget values + definition",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn dashboard_events(
     State(state): State<ServerState>,
 ) -> axum::response::sse::Sse<

@@ -6,6 +6,8 @@ use std::sync::{
 
 use anyhow::Result;
 
+use crate::win_process::NoWindow;
+
 /// Shared process lifecycle handle used by all sidecar managers.
 ///
 /// Wraps an optional child process and an atomic running flag so that
@@ -29,6 +31,7 @@ impl ProcessHandle {
     pub async fn start(&self, binary: &Path) -> Result<()> {
         let child = tokio::process::Command::new(binary)
             .kill_on_drop(true)
+            .no_window()
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn {}: {e}", binary.display()))?;
         *self.child.lock().unwrap() = Some(child);
@@ -41,6 +44,7 @@ impl ProcessHandle {
         let child = tokio::process::Command::new(binary)
             .args(args)
             .kill_on_drop(true)
+            .no_window()
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn {}: {e}", binary.display()))?;
         *self.child.lock().unwrap() = Some(child);
@@ -73,7 +77,7 @@ impl ProcessHandle {
         env: &[(String, String)],
     ) -> Result<()> {
         let mut command = tokio::process::Command::new(program);
-        command.args(args).kill_on_drop(true);
+        command.args(args).kill_on_drop(true).no_window();
         for (key, value) in env {
             command.env(key, value);
         }
@@ -101,7 +105,7 @@ impl ProcessHandle {
         env: &[(String, String)],
     ) -> Result<()> {
         let mut command = tokio::process::Command::new(program);
-        command.args(args).kill_on_drop(true);
+        command.args(args).kill_on_drop(true).no_window();
         command.env_clear();
         for (key, value) in crate::sidecar::env_scrub::scrub_child_env(std::env::vars(), &[]) {
             command.env(key, value);

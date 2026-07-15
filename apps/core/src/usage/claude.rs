@@ -17,6 +17,10 @@ use serde::Deserialize;
 use super::{
     http_client, read_file, reason_for_status, UsageSnapshot, UsageUnavailable, UsageWindow,
 };
+// Only the macOS Keychain probe below spawns a process; the trait is a no-op
+// elsewhere, so gate the import to match and keep non-macOS builds warning-free.
+#[cfg(target_os = "macos")]
+use crate::win_process::NoWindow;
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 /// Header value the usage endpoint expects (mirrors the `claude` CLI).
@@ -101,6 +105,7 @@ fn read_keychain() -> Option<String> {
     const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
     let output = std::process::Command::new("security")
         .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"])
+        .no_window()
         .output()
         .ok()?;
     if !output.status.success() {

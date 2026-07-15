@@ -119,11 +119,13 @@ pub fn supported_on_node(name: &str) -> bool {
 /// the probe fails safe to `false` if `sw_vers` is unavailable or unparseable.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn macos_at_least_26() -> bool {
+    use crate::win_process::NoWindow;
     use std::sync::OnceLock;
     static CACHED: OnceLock<bool> = OnceLock::new();
     *CACHED.get_or_init(|| {
         std::process::Command::new("sw_vers")
             .arg("-productVersion")
+            .no_window()
             .output()
             .ok()
             .filter(|o| o.status.success())

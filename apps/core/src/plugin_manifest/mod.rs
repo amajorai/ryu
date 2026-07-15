@@ -170,6 +170,26 @@ pub struct PluginManifest {
     #[serde(default)]
     pub engines: Option<EnginesReq>,
 
+    /// **Plugin-to-plugin dependencies** — the other plugins this one needs (the
+    /// npm-shaped edge that lets the app decompose into a kernel + features).
+    /// Resolved into a topological enable order by [`crate::plugins::graph`].
+    ///
+    /// Absent = **no dependencies** (every manifest predating this field).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requires: Option<Requires>,
+
+    /// Host surfaces this plugin runs on (desktop / island / mobile / …).
+    ///
+    /// **Empty or absent = runs on EVERY surface.** This is the backward-compatible
+    /// default and must never be read as "runs nowhere" — every manifest that
+    /// predates this field declares no targets and must keep surfacing everywhere.
+    /// Filtering happens ONLY when this list is explicitly non-empty, and only at
+    /// the read/surface boundary (see [`PluginManifest::supports_surface`]) — never
+    /// in the storage layer, so an unsupported-target plugin stays installable and
+    /// inspectable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<Surface>,
+
     /// Optional declarative **external runtime** the plugin needs (e.g. a Python
     /// venv + pip deps + assets, like the TTS sidecar). The provisioner lives in
     /// [`crate::sidecar::external_runtime`]; this is the declaration (#449).
@@ -293,6 +313,20 @@ impl PluginManifest {
         } else {
             self.capabilities.clone()
         }
+    }
+
+    /// The plugin-to-plugin dependency edges this manifest declares. Empty when
+    /// `requires` is absent (no dependencies) — the common case.
+    pub fn dependencies(&self) -> &[AppDependency] {
+        self.requires.as_ref().map_or(&[], |r| r.apps.as_slice())
+    }
+
+    /// Whether this plugin should be surfaced on `surface`.
+    ///
+    /// **An empty `targets` list means every surface** — the backward-compatible
+    /// default. Filtering applies only when `targets` is explicitly non-empty.
+    pub fn supports_surface(&self, surface: Surface) -> bool {
+        self.targets.is_empty() || self.targets.contains(&surface)
     }
 }
 
@@ -529,6 +563,136 @@ pub struct EnginesReq {
     pub ryu: String,
 }
 
+/// `requires` block — the plugin's **plugin-to-plugin** dependencies.
+///
+/// This is the npm-shaped edge that lets the app decompose into a minimal kernel
+/// plus features: a plugin declares the other plugins it needs, and the lifecycle
+/// (see [`crate::plugins::graph`]) resolves them into a topological enable order.
+///
+/// Distinct from [`EnginesReq`], which constrains plugin→**Core** (the engine
+/// version). `requires` constrains plugin→**plugin**.
+///
+/// Absent (the default, and the case for every manifest that predates this field)
+/// means *no dependencies* — the plugin enables standalone exactly as before.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct Requires {
+    /// Other plugins that must be installed (and are auto-enabled, in dependency
+    /// order) before this one can enable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<AppDependency>,
+
+    /// Permission grants implied by the dependencies. Declaration only — the
+    /// Gateway remains the sole authority on what a grant *allows* (Core decides
+    /// what runs; the Gateway decides what is permitted).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grants: Vec<String>,
+}
+
+/// A single plugin-to-plugin dependency edge.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AppDependency {
+    /// The `id` of the plugin this one depends on.
+    pub id: String,
+
+    /// Optional **minimum** version the dependency must satisfy.
+    ///
+    /// A bare version (`"1.2.0"`) is a *minimum*, i.e. `">=1.2.0"` — deliberately
+    /// NOT semver's default caret (`^1.2.0`), which would reject `2.0.0`. Explicit
+    /// comparator syntax (`">=1.2, <2"`, `"^1.2"`, `"~1.2"`) is honoured verbatim.
+    /// See [`parse_min_version`], the single parser both validation and resolution
+    /// use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_version: Option<String>,
+}
+
+/// A host surface a plugin can declare support for via `targets`.
+///
+/// `core` is the headless node (a Core running with no UI at all).
+///
+/// An **empty/absent** `targets` list means the plugin runs on *every* surface —
+/// that is the backward-compatible default and MUST NOT be read as "hidden".
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum Surface {
+    /// The Ryu Gateway.
+    Gateway,
+    /// A headless Core node (no UI).
+    Core,
+    /// The Tauri desktop app.
+    Desktop,
+    /// The Electron dynamic-island companion.
+    Island,
+    /// The Expo/React-Native mobile app.
+    Mobile,
+    /// The browser extension.
+    Extension,
+    /// The Next.js web app.
+    Web,
+    /// The terminal client.
+    Cli,
+}
+
+impl Surface {
+    /// Stable kebab-case identifier — the exact token used on the wire (in a
+    /// manifest's `targets` and in the `x-ryu-surface` request header).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Surface::Gateway => "gateway",
+            Surface::Core => "core",
+            Surface::Desktop => "desktop",
+            Surface::Island => "island",
+            Surface::Mobile => "mobile",
+            Surface::Extension => "extension",
+            Surface::Web => "web",
+            Surface::Cli => "cli",
+        }
+    }
+
+    /// Parse a surface token (e.g. the `x-ryu-surface` header). Case-insensitive.
+    /// Returns `None` for an unknown surface, which callers MUST treat as
+    /// "unknown caller → do not filter" rather than "filter everything out".
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "gateway" => Some(Surface::Gateway),
+            "core" => Some(Surface::Core),
+            "desktop" => Some(Surface::Desktop),
+            "island" => Some(Surface::Island),
+            "mobile" => Some(Surface::Mobile),
+            "extension" => Some(Surface::Extension),
+            "web" => Some(Surface::Web),
+            "cli" => Some(Surface::Cli),
+            _ => None,
+        }
+    }
+}
+
+/// Parse a dependency `min_version` into a [`semver::VersionReq`].
+///
+/// **The single definition** of the min-version semantics, used by both the
+/// manifest shape-validation (which rejects a malformed requirement at load) and
+/// the graph resolver (which checks satisfiability against the installed set).
+///
+/// A bare version is a **minimum**, not a caret range:
+/// `"1.2.0"` → `">=1.2.0"` (so an installed `2.0.0` satisfies it). This differs
+/// from [`semver::VersionReq::parse`], whose bare form means `^1.2.0` and would
+/// reject `2.0.0`. Anything that is not a bare version (`"^1.2"`, `">=1.0, <2"`,
+/// `"*"`) is passed through to `VersionReq` verbatim.
+pub fn parse_min_version(raw: &str) -> Result<semver::VersionReq, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("min_version must not be empty".to_string());
+    }
+    // A bare, fully-qualified version means ">= that version".
+    if let Ok(v) = semver::Version::parse(trimmed) {
+        return semver::VersionReq::parse(&format!(">={v}"))
+            .map_err(|e| format!("invalid min_version '{raw}': {e}"));
+    }
+    // Otherwise it is comparator syntax — honour it as written.
+    semver::VersionReq::parse(trimmed).map_err(|e| format!("invalid min_version '{raw}': {e}"))
+}
+
 /// The trust/distribution tier of a plugin.
 ///
 /// - [`PluginTier::Core`] — a first-party, default-on plugin shipped with Ryu
@@ -675,7 +839,49 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // seeds neither, so it has a dedicated seed block). Replaces the built-in
     // whiteboard editor.
     include_str!("fixtures/whiteboard.plugin.json"),
+    // The Canvas app — a full-page Companion (`ui_format:"html"`, Path B) that owns
+    // its Space documents via `spaces:docs` and runs generation nodes through the
+    // window.ryu media/agent bridge (`media:generate` / `media:transcribe` /
+    // `hook:run-agent` / `hook:side-model`) + reads catalogs via `core:list_agents`.
+    // Ships default-on with a UI bundle + those grants seeded in `main.rs`. Replaces
+    // the built-in creative-canvas board.
+    include_str!("fixtures/canvas.plugin.json"),
+    // The Fine-tuning app — a full-page Companion (`ui_format:"html"`, Path B) that
+    // drives Core's fine-tune orchestration + durable job store via the
+    // `finetune:runs` bridge and OWNS its Unsloth training sidecar (a
+    // manifest-declared Python process, `sidecar:process`). Ships default-on with a
+    // UI bundle + those grants seeded in `main.rs`. Replaces the built-in
+    // fine-tuning page.
+    include_str!("fixtures/finetune.plugin.json"),
+    // Spaces + Meetings — the first REAL plugin→plugin dependency edge.
+    //
+    // Both are "governance shells" (zero runnables, like ghost/shadow): the code
+    // stays in-crate (`server/spaces.rs`, `server/meetings_api.rs`) and the record
+    // is what governs it — install/enable/disable + the route gate. Declaring a
+    // runnable here would register a PHANTOM tool with no implementation.
+    //
+    // Order matters only for readability: `plugins::seed` resolves the topological
+    // order from `requires`, so the dependency is seeded before its dependent no
+    // matter how these are listed.
+    include_str!("fixtures/spaces.plugin.json"),
+    // Meetings `requires` Spaces because it genuinely writes its notes into the
+    // "Meetings" Space (`server/meetings_api.rs::save_notes_to_space` →
+    // `state.spaces.ingest_document` / `create_space`). Disabling Spaces under it
+    // would leave that write path pointing at a disabled capability, which is
+    // exactly what `plugins::graph` now refuses.
+    include_str!("fixtures/meetings.plugin.json"),
 ];
+
+/// The Canvas app's plugin id (its Space documents are `kind = app:<this>`). Shared
+/// by the default-on seed (`main.rs`), the legacy file-store migration
+/// (`server/canvas_migrate.rs`), and the desktop create/route flow.
+pub const CANVAS_PLUGIN_ID: &str = "com.ryu.canvas";
+
+/// The Canvas app's prebuilt, self-contained UI bundle (a `vite-plugin-singlefile`
+/// build of `packages/canvas-app`, all JS/CSS inlined). Seeded as the plugin's
+/// `ui_code` on a fresh install. Rebuild with `bun run --cwd packages/canvas-app
+/// build` and copy `dist/index.html` to `fixtures/canvas.ui.html` to refresh it.
+pub const CANVAS_UI_HTML: &str = include_str!("fixtures/canvas.ui.html");
 
 /// The Whiteboard app's plugin id (its Space documents are `kind = app:<this>`).
 /// Shared by the default-on seed (`main.rs`), the legacy-kind migration
@@ -689,6 +895,19 @@ pub const WHITEBOARD_PLUGIN_ID: &str = "com.ryu.whiteboard";
 /// with `bun run --cwd packages/whiteboard-app build` and copy `dist/index.html`
 /// to `fixtures/whiteboard.ui.html` to refresh it.
 pub const WHITEBOARD_UI_HTML: &str = include_str!("fixtures/whiteboard.ui.html");
+
+/// The Fine-tuning app's plugin id. Shared by the default-on seed (`main.rs`), the
+/// manifest-sidecar ensure in `server/finetune.rs`, and the desktop "Fine-tune this
+/// model" open path.
+pub const FINETUNE_PLUGIN_ID: &str = "com.ryu.finetune";
+
+/// The Fine-tuning app's prebuilt, self-contained UI bundle (a
+/// `vite-plugin-singlefile` build of `packages/finetune-app`, all JS/CSS inlined).
+/// Seeded as the plugin's `ui_code` on a fresh install so the default-on companion
+/// has a UI without going through `ryu pack`. Rebuild with `bun run --cwd
+/// packages/finetune-app build` and copy `dist/index.html` to
+/// `fixtures/finetune.ui.html` to refresh it.
+pub const FINETUNE_UI_HTML: &str = include_str!("fixtures/finetune.ui.html");
 
 /// Loader that merges built-in manifests with user-installed ones from
 /// `~/.ryu/plugins/*/plugin.json` (the path is overridable via `RYU_PLUGINS_DIR`,
@@ -793,6 +1012,22 @@ impl PluginManifestLoader {
         manifests
     }
 
+    /// Parse ONLY the compiled-in built-in manifests, ignoring `~/.ryu/plugins`.
+    ///
+    /// Test-only. [`Self::load`] scans the real user plugins directory, so a test
+    /// that asserts something about "the built-ins" via `load()` would also be
+    /// asserting it about whatever the developer happens to have installed
+    /// locally — a spurious failure waiting to happen. This keeps built-in
+    /// assertions hermetic.
+    #[cfg(test)]
+    pub(crate) fn load_builtins() -> Vec<PluginManifest> {
+        let mut seen_ids: HashSet<String> = HashSet::new();
+        BUILTIN_MANIFESTS
+            .iter()
+            .filter_map(|raw| Self::parse_and_validate(raw, "<built-in>", &mut seen_ids).ok())
+            .collect()
+    }
+
     fn parse_and_validate(
         raw: &str,
         source: &str,
@@ -833,6 +1068,45 @@ impl PluginManifestLoader {
                     "app '{}' requires Ryu engine '{}' but this Core is '{core}' (source: {source})",
                     manifest.id, engines.ryu
                 ));
+            }
+        }
+
+        // Dependency SHAPE gate (`requires.apps`). This is deliberately per-manifest
+        // only — self-dependency, a malformed `min_version`, and duplicate edges are
+        // all decidable from this manifest alone. Whether a declared dependency
+        // EXISTS, is version-SATISFIABLE, and is ACYCLIC are cross-manifest
+        // questions that this function structurally cannot answer (it sees one
+        // manifest and a `seen_ids` set, never the other 36); those resolve later
+        // against the full installed set in `crate::plugins::graph`.
+        {
+            let mut seen_deps: HashSet<&str> = HashSet::new();
+            for dep in manifest.dependencies() {
+                validate_plugin_id(&dep.id).map_err(|e| {
+                    format!(
+                        "app '{}' declares dependency with invalid id: {e} (source: {source})",
+                        manifest.id
+                    )
+                })?;
+                if dep.id == manifest.id {
+                    return Err(format!(
+                        "app '{}' cannot depend on itself (source: {source})",
+                        manifest.id
+                    ));
+                }
+                if !seen_deps.insert(dep.id.as_str()) {
+                    return Err(format!(
+                        "app '{}' declares duplicate dependency '{}' (source: {source})",
+                        manifest.id, dep.id
+                    ));
+                }
+                if let Some(min) = &dep.min_version {
+                    parse_min_version(min).map_err(|e| {
+                        format!(
+                            "app '{}' dependency '{}': {e} (source: {source})",
+                            manifest.id, dep.id
+                        )
+                    })?;
+                }
             }
         }
 
@@ -906,6 +1180,57 @@ mod tests {
     /// The multi-kind fixture lives in `apps/core/tests/manifest_fixtures/` so it
     /// doubles as the integration-test input and the in-module round-trip fixture.
     const MULTI_KIND_JSON: &str = include_str!("../../tests/manifest_fixtures/multi_kind.ryu.json");
+
+    /// The three companion apps exist as TWO copies of one manifest: the package
+    /// source (`packages/<x>-app/plugin.json`, what the app team edits) and the
+    /// fixture Core actually compiles in via `include_str!`
+    /// (`src/plugin_manifest/fixtures/<x>.plugin.json`). Editing only the package
+    /// copy is a **dead edit** — Core never reads it — and silently diverges the
+    /// two. This test is the guard: the pair must stay byte-identical.
+    ///
+    /// Read at runtime (not `include_str!`) and skipped when `packages/` is absent,
+    /// so the OSS Core mirror — which ships `apps/core` without `packages/` — still
+    /// builds and tests green.
+    #[test]
+    fn companion_fixtures_match_their_package_manifests() {
+        let core = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = core.join("..").join("..");
+        let mut checked = 0;
+
+        for (pkg, fixture) in [
+            ("canvas-app", "canvas.plugin.json"),
+            ("whiteboard-app", "whiteboard.plugin.json"),
+            ("finetune-app", "finetune.plugin.json"),
+        ] {
+            let pkg_path = repo_root.join("packages").join(pkg).join("plugin.json");
+            let Ok(pkg_json) = std::fs::read_to_string(&pkg_path) else {
+                // OSS mirror (no `packages/`) — nothing to compare against.
+                continue;
+            };
+            let fixture_path = core
+                .join("src")
+                .join("plugin_manifest")
+                .join("fixtures")
+                .join(fixture);
+            let fixture_json = std::fs::read_to_string(&fixture_path)
+                .unwrap_or_else(|e| panic!("fixture {} unreadable: {e}", fixture_path.display()));
+
+            assert_eq!(
+                fixture_json,
+                pkg_json,
+                "'{}' and '{}' have diverged. Core loads the FIXTURE (include_str!), so an edit \
+                 to the package copy alone does nothing. Apply the change to both.",
+                fixture_path.display(),
+                pkg_path.display()
+            );
+            checked += 1;
+        }
+
+        assert!(
+            checked == 0 || checked == 3,
+            "expected all three companion manifests (or none, on the OSS mirror), found {checked}"
+        );
+    }
 
     #[test]
     fn sample_fixture_deserializes_into_app_manifest() {
@@ -1492,5 +1817,274 @@ mod tests {
                 .any(|m| m.id == "com.test.legacy-plugin"),
             "legacy RYU_APPS_DIR should still be honoured"
         );
+    }
+
+    // ── requires / targets ────────────────────────────────────────────────────
+
+    /// Parse a manifest through the real validation funnel (the same one the
+    /// loader uses for built-ins and disk manifests).
+    fn parse(raw: &str) -> Result<PluginManifest, String> {
+        let mut seen = HashSet::new();
+        PluginManifestLoader::parse_and_validate(raw, "<test>", &mut seen)
+    }
+
+    const NO_DEPS: &str = r#"{
+        "id": "legacy.plugin",
+        "name": "Legacy Plugin",
+        "version": "1.0.0",
+        "runnables": []
+    }"#;
+
+    /// BACKWARD COMPAT — the single most important test here. A manifest with
+    /// neither `requires` nor `targets` (i.e. all 37 shipped fixtures) must still
+    /// parse, and must mean "no dependencies, runs on EVERY surface". An absent
+    /// `targets` must never be read as "hidden", or every existing plugin vanishes.
+    #[test]
+    fn manifest_without_requires_or_targets_means_no_deps_all_surfaces() {
+        let m = parse(NO_DEPS).expect("a manifest with no requires/targets must parse");
+
+        assert!(m.requires.is_none());
+        assert!(m.dependencies().is_empty(), "absent requires = no deps");
+
+        assert!(m.targets.is_empty());
+        for surface in [
+            Surface::Gateway,
+            Surface::Core,
+            Surface::Desktop,
+            Surface::Island,
+            Surface::Mobile,
+            Surface::Extension,
+            Surface::Web,
+            Surface::Cli,
+        ] {
+            assert!(
+                m.supports_surface(surface),
+                "empty targets must mean EVERY surface, not none ({surface:?})"
+            );
+        }
+    }
+
+    /// Every shipped built-in must still load with the new fields present on the
+    /// struct — the concrete guarantee that these fields break no existing plugin.
+    ///
+    /// The guarantee is precisely about manifests that declare **nothing**: absent
+    /// `requires` = no dependencies, absent/empty `targets` = every surface. It is
+    /// NOT "no built-in may ever declare them" — a built-in that *does* (Meetings
+    /// requires Spaces; anything with explicit `targets`) is the feature working as
+    /// designed. So each assertion is scoped to the undeclared case, which is the
+    /// one that must never change behaviour.
+    #[test]
+    fn builtins_that_declare_nothing_keep_their_old_permissive_behaviour() {
+        // `load_builtins`, not `load`: the latter also scans the developer's real
+        // ~/.ryu/plugins, which would make this assertion depend on what they
+        // happen to have installed.
+        let manifests = PluginManifestLoader::load_builtins();
+        assert!(!manifests.is_empty(), "built-ins must load");
+        for m in &manifests {
+            if m.requires.is_none() {
+                assert!(
+                    m.dependencies().is_empty(),
+                    "built-in '{}' declares no `requires`, so it must have no dependencies",
+                    m.id
+                );
+            }
+            if m.targets.is_empty() {
+                for surface in [
+                    Surface::Gateway,
+                    Surface::Core,
+                    Surface::Desktop,
+                    Surface::Island,
+                    Surface::Mobile,
+                    Surface::Extension,
+                    Surface::Web,
+                    Surface::Cli,
+                ] {
+                    assert!(
+                        m.supports_surface(surface),
+                        "built-in '{}' declares no `targets`, so it must surface on \
+                         EVERY host ({surface:?})",
+                        m.id
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn requires_and_targets_round_trip() {
+        let raw = r#"{
+            "id": "meetings",
+            "name": "Meetings",
+            "version": "1.0.0",
+            "runnables": [],
+            "requires": {
+                "apps": [
+                    { "id": "spaces", "min_version": "1.2.0" },
+                    { "id": "voice" }
+                ],
+                "grants": ["spaces:docs"]
+            },
+            "targets": ["desktop", "island"]
+        }"#;
+        let m = parse(raw).expect("requires/targets must parse");
+
+        let deps = m.dependencies();
+        assert_eq!(deps.len(), 2);
+        assert_eq!(deps[0].id, "spaces");
+        assert_eq!(deps[0].min_version.as_deref(), Some("1.2.0"));
+        assert_eq!(deps[1].id, "voice");
+        assert!(deps[1].min_version.is_none(), "min_version is optional");
+        assert_eq!(
+            m.requires.as_ref().unwrap().grants,
+            vec!["spaces:docs".to_owned()]
+        );
+
+        assert_eq!(m.targets, vec![Surface::Desktop, Surface::Island]);
+
+        // Serialising and re-parsing preserves both (the manifest is signed
+        // verbatim, so the round-trip must be lossless).
+        let json = serde_json::to_string(&m).unwrap();
+        let back: PluginManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, m);
+    }
+
+    /// The omitted fields must not appear in the serialised form — an existing
+    /// manifest must re-serialise byte-identically, so its signature still verifies.
+    #[test]
+    fn absent_requires_and_targets_are_not_serialised() {
+        let m = parse(NO_DEPS).unwrap();
+        let json = serde_json::to_value(&m).unwrap();
+        assert!(json.get("requires").is_none(), "absent requires must be omitted");
+        assert!(json.get("targets").is_none(), "empty targets must be omitted");
+    }
+
+    // ── explicit targets: filtering ───────────────────────────────────────────
+
+    #[test]
+    fn explicit_targets_are_respected() {
+        let raw = r#"{
+            "id": "desktop.only",
+            "name": "Desktop Only",
+            "version": "1.0.0",
+            "runnables": [],
+            "targets": ["desktop"]
+        }"#;
+        let m = parse(raw).unwrap();
+        assert!(m.supports_surface(Surface::Desktop));
+        assert!(!m.supports_surface(Surface::Mobile));
+        assert!(!m.supports_surface(Surface::Cli));
+        assert!(!m.supports_surface(Surface::Core));
+    }
+
+    #[test]
+    fn unknown_surface_is_rejected() {
+        let raw = r#"{
+            "id": "bad.surface",
+            "name": "Bad Surface",
+            "version": "1.0.0",
+            "runnables": [],
+            "targets": ["toaster"]
+        }"#;
+        assert!(parse(raw).is_err(), "an unknown surface must be rejected");
+    }
+
+    #[test]
+    fn surface_tokens_round_trip_through_parse() {
+        for s in [
+            Surface::Gateway,
+            Surface::Core,
+            Surface::Desktop,
+            Surface::Island,
+            Surface::Mobile,
+            Surface::Extension,
+            Surface::Web,
+            Surface::Cli,
+        ] {
+            assert_eq!(Surface::parse(s.as_str()), Some(s));
+            // The wire token must match the serde (kebab-case) encoding exactly.
+            let json = serde_json::to_string(&s).unwrap();
+            assert_eq!(json, format!("\"{}\"", s.as_str()));
+        }
+        assert_eq!(Surface::parse("DESKTOP"), Some(Surface::Desktop));
+        assert_eq!(Surface::parse("nonsense"), None);
+    }
+
+    // ── requires: shape validation ────────────────────────────────────────────
+
+    #[test]
+    fn self_dependency_is_rejected_at_load() {
+        let raw = r#"{
+            "id": "narcissus",
+            "name": "Narcissus",
+            "version": "1.0.0",
+            "runnables": [],
+            "requires": { "apps": [{ "id": "narcissus" }] }
+        }"#;
+        let err = parse(raw).expect_err("a self-dependency must be rejected");
+        assert!(err.contains("cannot depend on itself"), "got: {err}");
+    }
+
+    #[test]
+    fn malformed_min_version_is_rejected_at_load() {
+        let raw = r#"{
+            "id": "app",
+            "name": "App",
+            "version": "1.0.0",
+            "runnables": [],
+            "requires": { "apps": [{ "id": "lib", "min_version": "not-a-version" }] }
+        }"#;
+        let err = parse(raw).expect_err("a malformed min_version must be rejected");
+        assert!(err.contains("min_version"), "got: {err}");
+    }
+
+    #[test]
+    fn duplicate_dependency_is_rejected_at_load() {
+        let raw = r#"{
+            "id": "app",
+            "name": "App",
+            "version": "1.0.0",
+            "runnables": [],
+            "requires": { "apps": [{ "id": "lib" }, { "id": "lib" }] }
+        }"#;
+        let err = parse(raw).expect_err("a duplicate dependency must be rejected");
+        assert!(err.contains("duplicate dependency"), "got: {err}");
+    }
+
+    // ── min_version semantics ─────────────────────────────────────────────────
+
+    /// The load-bearing semver decision: a bare `min_version` is a MINIMUM, not
+    /// semver's default caret range. `VersionReq::parse("1.2.0")` means `^1.2.0`
+    /// and would REJECT 2.0.0; `parse_min_version` must accept it.
+    #[test]
+    fn bare_min_version_is_a_minimum_not_a_caret() {
+        let req = parse_min_version("1.2.0").unwrap();
+        assert!(req.matches(&semver::Version::parse("1.2.0").unwrap()), "exact");
+        assert!(req.matches(&semver::Version::parse("1.9.9").unwrap()), "minor");
+        assert!(
+            req.matches(&semver::Version::parse("2.0.0").unwrap()),
+            "a bare min_version must accept a NEWER MAJOR — this is the whole point"
+        );
+        assert!(
+            !req.matches(&semver::Version::parse("1.1.0").unwrap()),
+            "below the minimum is still rejected"
+        );
+    }
+
+    #[test]
+    fn explicit_comparators_are_honoured_verbatim() {
+        // The caret escape hatch still pins the major when asked for explicitly.
+        let caret = parse_min_version("^1.2.0").unwrap();
+        assert!(caret.matches(&semver::Version::parse("1.9.0").unwrap()));
+        assert!(!caret.matches(&semver::Version::parse("2.0.0").unwrap()));
+
+        let range = parse_min_version(">=1.0, <2").unwrap();
+        assert!(range.matches(&semver::Version::parse("1.5.0").unwrap()));
+        assert!(!range.matches(&semver::Version::parse("2.0.0").unwrap()));
+    }
+
+    #[test]
+    fn invalid_min_version_strings_are_errors() {
+        assert!(parse_min_version("not-a-version").is_err());
+        assert!(parse_min_version("").is_err());
     }
 }

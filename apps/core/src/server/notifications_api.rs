@@ -76,6 +76,13 @@ fn resolve_viewer(
 /// `GET /api/notifications?user_id=..&limit=..` — a member's inbox, newest first.
 /// The feed served is always the verified caller's own (an org-bound node rejects
 /// an unauthenticated or mismatched request).
+#[utoipa::path(
+    get,
+    path = "/api/notifications",
+    tag = "Notifications",
+    summary = "a member's inbox, newest first.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_notifications(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
@@ -106,6 +113,15 @@ pub async fn list_notifications(
 /// the verified caller is authorized against `row.user_id` BEFORE any mutation
 /// (mirrors [`ack_notification`]), so a cross-member id cannot flip another
 /// recipient's inbox row.
+#[utoipa::path(
+    post,
+    path = "/api/notifications/{id}/read",
+    tag = "Notifications",
+    summary = "mark a notification read.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn read_notification(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
@@ -141,6 +157,15 @@ pub async fn read_notification(
 /// unauthenticated or cross-member ack, so a gate cannot be resumed by a
 /// non-target). The verified actor — not the stored row id — is what
 /// [`crate::workflow::notify_user::ack_gate`] records.
+#[utoipa::path(
+    post,
+    path = "/api/notifications/{id}/ack",
+    tag = "Notifications",
+    summary = "acknowledge a notification. When it is a",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn ack_notification(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
@@ -188,6 +213,13 @@ pub async fn ack_notification(
 /// one member. The filter key is the verified caller (an org-bound node rejects an
 /// unauthenticated or mismatched subscribe); events addressed to a different
 /// member are dropped, broadcasts are forwarded.
+#[utoipa::path(
+    get,
+    path = "/api/notifications/stream",
+    tag = "Notifications",
+    summary = "SSE feed of live notifications for",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn notifications_stream(
     Extension(caller): Extension<Option<VerifiedCaller>>,
     Query(q): Query<ListQuery>,

@@ -1802,7 +1802,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-core"
-version = "0.0.2"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1818,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-permissions"
-version = "0.0.2"
+version = "0.0.4"
 
 [[package]]
 name = "gif"
@@ -4294,7 +4294,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "ryu-core"
-version = "0.0.2"
+version = "0.0.4"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-tokio",
@@ -5422,6 +5422,10 @@ version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8fa9be0de6cf49e536ce1851f987bd21a43b771b09473c3549a6c853db37c1c"
 dependencies = [
+ "futures-core",
+ "futures-util",
+ "pin-project",
+ "pin-project-lite",
  "tower-layer",
  "tower-service",
  "tracing",

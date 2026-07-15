@@ -10,6 +10,7 @@ use anyhow::{bail, Context, Result};
 use tokio::process::Command;
 
 use crate::catalog::registry;
+use crate::win_process::NoWindow;
 use crate::sidecar::download_manager::VersionStore;
 
 /// Pip package that provides the `mlx_lm` module (`python -m mlx_lm server`).
@@ -32,7 +33,12 @@ pub fn ensure_supported() -> Result<()> {
 /// Returns the command name that works on this system.
 pub async fn python_cmd() -> Result<String> {
     for candidate in ["python3", "python"] {
-        if let Ok(output) = Command::new(candidate).args(["--version"]).output().await {
+        if let Ok(output) = Command::new(candidate)
+            .args(["--version"])
+            .no_window()
+            .output()
+            .await
+        {
             if output.status.success() {
                 let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 // "Python 3.11.2" → "3.11.2"
@@ -83,6 +89,7 @@ pub async fn ensure_installed() -> Result<()> {
 
     let status = Command::new(&python)
         .args(["-m", "pip", "install", PIP_PACKAGE])
+        .no_window()
         .status()
         .await
         .context("running `pip install mlx-lm`")?;
@@ -94,6 +101,7 @@ pub async fn ensure_installed() -> Result<()> {
     // Query the installed version.
     let version = Command::new(&python)
         .args(["-m", "pip", "show", PIP_PACKAGE])
+        .no_window()
         .output()
         .await
         .ok()

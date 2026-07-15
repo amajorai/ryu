@@ -1,0 +1,13 @@
+{
+  "title": "Approvals",
+  "description": "Approvals API endpoints.",
+  "pages": [
+    "list_approvals",
+    "approval_events",
+    "get_mode",
+    "set_mode",
+    "get_approval",
+    "approve_approval",
+    "reject_approval"
+  ]
+}

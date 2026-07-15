@@ -40,10 +40,12 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::win_process::NoWindow;
+
 // The declaration types live in `plugin_manifest::schema` (so the manifest can
 // carry them without depending on `sidecar`); re-exported here so callers of the
 // provisioner have one import.
-pub use crate::plugin_manifest::schema::{AssetSpec, ExternalRuntimeConfig};
+pub use crate::plugin_manifest::schema::{AssetSpec, ExternalRuntimeConfig, SourceArchiveSpec};
 
 /// The kind of external runtime a plugin declares. Open-ended (a `String`) so a
 /// future `"node"`/`"deno"` runtime is a data change, not a code change —
@@ -260,6 +262,100 @@ fn asset_dest(ryu_dir: &Path, dest_under_ryu: &str, url: &str) -> Result<PathBuf
     Ok(ryu_dir.join(rel).join(filename))
 }
 
+/// Marker file whose presence means the source tree is already extracted into the
+/// runtime dir (idempotency: a re-provision skips the download + extract).
+const SOURCE_MARKER: &str = "pyproject.toml";
+
+/// Fetch and extract the runtime's declared [`SourceArchiveSpec`] into `dir` (its
+/// package root) BEFORE the venv/pip step, so an editable install (`pip install -e
+/// .`) finds `pyproject.toml`. No-op when `cfg.source` is `None`.
+///
+/// Idempotent: skips when `dir/pyproject.toml` already exists. The archive is
+/// fetched through the shared [`crate::downloads::DownloadCenter`] (SSRF-screened,
+/// https-only, checksum-verified) and extracted whole-tree with the same extractors
+/// the binary-sidecar path uses. Fails closed on any error.
+async fn fetch_and_extract_source(
+    cfg: &ExternalRuntimeConfig,
+    dir: &Path,
+    downloads: &crate::downloads::DownloadCenter,
+) -> Result<(), ProvisionError> {
+    let Some(source) = &cfg.source else {
+        return Ok(());
+    };
+    if dir.join(SOURCE_MARKER).exists() {
+        tracing::info!(
+            "external-runtime source already extracted, skipping: {}",
+            dir.display()
+        );
+        return Ok(());
+    }
+
+    // SSRF-screen the (plugin-controlled) URL, then require https.
+    let parsed = crate::server::screen_agent_egress_url(&source.url)
+        .await
+        .map_err(|e| ProvisionError::AssetFetch {
+            source: source.url.clone(),
+            reason: e.to_string(),
+        })?;
+    if parsed.scheme() != "https" {
+        return Err(ProvisionError::AssetFetch {
+            source: source.url.clone(),
+            reason: format!("source URL must use https, got '{}'", parsed.scheme()),
+        });
+    }
+
+    // Download the archive to a temp path under `dir`, then extract it whole-tree.
+    let sha = source.sha256.clone().filter(|s| !s.is_empty());
+    let archive_path = dir.join(".source-archive");
+    downloads
+        .download_blocking(crate::downloads::DownloadSpec {
+            kind: crate::downloads::DownloadKind::Other,
+            label: format!("plugin runtime source: {}", source.url),
+            url: source.url.clone(),
+            dest: archive_path.clone(),
+            sha256: sha,
+            version_record: None,
+        })
+        .await
+        .map_err(|e| ProvisionError::AssetFetch {
+            source: source.url.clone(),
+            reason: e.to_string(),
+        })?;
+
+    let fmt = source.format.clone();
+    let dest = dir.to_owned();
+    let archive = archive_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let data = std::fs::read(&archive).map_err(|e| format!("reading source archive: {e}"))?;
+        use crate::sidecar::download_manager::{extract_tar_gz_to_dir, extract_zip_to_dir};
+        match fmt.as_str() {
+            "tar.gz" => extract_tar_gz_to_dir(&data, &dest, None).map_err(|e| e.to_string())?,
+            "zip" => extract_zip_to_dir(&data, &dest, None).map_err(|e| e.to_string())?,
+            other => return Err(format!("unsupported source format '{other}' (need tar.gz|zip)")),
+        };
+        Ok(())
+    })
+    .await
+    .map_err(|e| ProvisionError::AssetFetch {
+        source: source.url.clone(),
+        reason: format!("extraction task panicked: {e}"),
+    })?
+    .map_err(|reason| ProvisionError::AssetFetch {
+        source: source.url.clone(),
+        reason,
+    })?;
+
+    let _ = tokio::fs::remove_file(&archive_path).await;
+    if !dir.join(SOURCE_MARKER).exists() {
+        return Err(ProvisionError::AssetFetch {
+            source: source.url.clone(),
+            reason: format!("archive did not contain a '{SOURCE_MARKER}' at its root"),
+        });
+    }
+    tracing::info!("external-runtime source extracted into {}", dir.display());
+    Ok(())
+}
+
 /// Fetch every declared asset into `<ryu_dir>/<dest_under_ryu>/<file>` via the
 /// shared [`crate::downloads::DownloadCenter`] (streaming `.part` + resume +
 /// checksum). Runs BEFORE the venv/pip step. Fails closed on the first error.
@@ -351,12 +447,16 @@ pub async fn provision(
         return Err(ProvisionError::UnsupportedKind(cfg.kind.clone()));
     }
 
-    // Fetch declared assets first (before pip/run), into `~/.ryu`.
-    fetch_assets(cfg, &crate::paths::ryu_dir(), downloads).await?;
-
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(ProvisionError::Mkdir)?;
+
+    // Extract the plugin's source tree into `dir` first (before venv/pip), so a
+    // `pip install -e ".[extra]"` finds the package's `pyproject.toml` at the root.
+    fetch_and_extract_source(cfg, dir, downloads).await?;
+
+    // Fetch declared single-file assets (models, etc.) into `~/.ryu`.
+    fetch_assets(cfg, &crate::paths::ryu_dir(), downloads).await?;
 
     let python = venv_python(dir);
     if !python.exists() {
@@ -389,6 +489,7 @@ async fn run(program: &str, args: &[String], cwd: &Path) -> Result<(), Provision
     let output = tokio::process::Command::new(program)
         .args(args)
         .current_dir(cwd)
+        .no_window()
         .output()
         .await
         .map_err(|e| ProvisionError::Spawn {
@@ -424,6 +525,15 @@ mod tests {
             }],
             port: Some(8085),
             health_path: Some("/health".to_owned()),
+            source: Some(SourceArchiveSpec {
+                url: "https://example.com/pkg.tar.gz".to_owned(),
+                sha256: None,
+                format: "tar.gz".to_owned(),
+            }),
+            env: std::collections::BTreeMap::from([(
+                "HF_HOME".to_owned(),
+                "${RYU_DIR}/models/hf".to_owned(),
+            )]),
         };
         let json = serde_json::to_string(&cfg).expect("serialise");
         let back: ExternalRuntimeConfig = serde_json::from_str(&json).expect("deserialise");
@@ -489,6 +599,47 @@ mod tests {
         };
         let args = pip_install_args(&cfg);
         assert_eq!(args, vec!["-m", "pip", "install", "fastapi", "uvicorn"]);
+    }
+
+    #[tokio::test]
+    async fn source_extraction_is_noop_without_source() {
+        // No `source` declared → returns Ok and touches nothing (no network).
+        let cfg = ExternalRuntimeConfig {
+            kind: "python".to_owned(),
+            entry: "x".to_owned(),
+            ..Default::default()
+        };
+        let downloads = crate::downloads::DownloadCenter::with_default_client();
+        let tmp = std::env::temp_dir().join(format!("ryu-src-noop-{}", std::process::id()));
+        fetch_and_extract_source(&cfg, &tmp, &downloads)
+            .await
+            .expect("no-op with no source");
+    }
+
+    #[tokio::test]
+    async fn source_extraction_skips_when_marker_present() {
+        // An already-extracted source (marker present) short-circuits BEFORE any
+        // download/SSRF work, so a bogus URL is never touched.
+        let dir = std::env::temp_dir().join(format!("ryu-src-skip-{}", std::process::id()));
+        tokio::fs::create_dir_all(&dir).await.expect("mkdir");
+        tokio::fs::write(dir.join(SOURCE_MARKER), b"[project]\n")
+            .await
+            .expect("write marker");
+        let cfg = ExternalRuntimeConfig {
+            kind: "python".to_owned(),
+            entry: "x".to_owned(),
+            source: Some(SourceArchiveSpec {
+                url: "https://never.invalid/should-not-fetch.tar.gz".to_owned(),
+                sha256: None,
+                format: "tar.gz".to_owned(),
+            }),
+            ..Default::default()
+        };
+        let downloads = crate::downloads::DownloadCenter::with_default_client();
+        fetch_and_extract_source(&cfg, &dir, &downloads)
+            .await
+            .expect("skips when marker present");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     #[tokio::test]

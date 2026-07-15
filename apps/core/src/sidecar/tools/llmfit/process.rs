@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+use crate::win_process::NoWindow;
+
 pub struct LlmFitProcess {
     binary_path: PathBuf,
 }
@@ -24,6 +26,7 @@ impl LlmFitProcess {
             move || {
                 std::process::Command::new(&binary_path)
                     .arg("--version")
+                    .no_window()
                     .output()
             }
         })

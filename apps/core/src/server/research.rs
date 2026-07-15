@@ -36,6 +36,13 @@ fn research_client() -> reqwest::Client {
 /// `GET /api/research/status` — report install/run state and the sidecar's
 /// experiment catalog. `running` is `false` (and `experiments` empty) when the
 /// sidecar is not answering; never force-starts it.
+#[utoipa::path(
+    get,
+    path = "/api/research/status",
+    tag = "Research",
+    summary = "report install/run state and the sidecar's",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn research_status() -> impl IntoResponse {
     let client = research_client();
     let installed = research::is_installed();
@@ -69,6 +76,14 @@ pub async fn research_status() -> impl IntoResponse {
 /// `POST /api/research/workspace` — init a new experiment workspace. Lazily
 /// starts the (off-by-default) sidecar so the flow works once installed, then
 /// proxies to the sidecar's `POST /workspace/init`.
+#[utoipa::path(
+    post,
+    path = "/api/research/workspace",
+    tag = "Research",
+    summary = "init a new experiment workspace. Lazily",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn research_init_workspace(
     State(state): State<super::ServerState>,
     Json(body): Json<Value>,
@@ -80,6 +95,14 @@ pub async fn research_init_workspace(
 }
 
 /// `GET /api/research/workspace/:id/ledger` — proxy the sidecar's ledger read.
+#[utoipa::path(
+    get,
+    path = "/api/research/workspace/{id}/ledger",
+    tag = "Research",
+    summary = "proxy the sidecar's ledger read.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn research_ledger(Path(id): Path<String>) -> impl IntoResponse {
     proxy_get(&format!("/workspace/{id}/ledger")).await
 }

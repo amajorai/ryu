@@ -2,8 +2,16 @@
   "title": "Nodes",
   "description": "Node initialization.",
   "pages": [
+    "list_connections",
+    "list_identities",
+    "create_connection",
+    "poll_connection",
+    "delete_connection",
+    "import_connection",
+    "begin_login",
     "mesh_status",
     "node_init",
+    "system_status",
     "webhook_ingress_get_backend",
     "webhook_ingress_set_backend",
     "webhook_ingress_status"

@@ -2,7 +2,7 @@
 
 Ryu follows an open-core model (the Vercel / Supabase shape): the orchestration and control
 infrastructure is open-sourced and self-hostable so contributors and enterprise operators can
-audit, extend, and deploy it themselves; the UX and identity moat is closed.
+audit, extend, and deploy it themselves; the UX and identity layer is closed.
 
 ## Tier mapping
 
@@ -11,7 +11,7 @@ Every unit in the monorepo carries its own `LICENSE` file and maps to one of the
 | Path | Tier | License | Why |
 |---|---|---|---|
 | `apps/core` | OSS — self-hostable | Apache-2.0 | Orchestration engine: sessions, memory, tools, workflows, sub-agents, sidecars. Open-sourcing builds trust; zero-egress self-hosting. Max adoption → permissive. |
-| `apps/gateway` | OSS — self-hostable | **AGPL-3.0** | LLM gateway: routing, firewall, PII/DLP, budgets, evals, audit. The shared layer a team adopts and an enterprise buys — and the layer Ryu sells as a managed service. AGPL keeps it OSI-open while obligating SaaS forks to share their modifications (copyleft on the moat). |
+| `apps/gateway` | OSS — self-hostable | **AGPL-3.0** | LLM gateway: routing, firewall, PII/DLP, budgets, evals, audit. The shared layer a team adopts and an enterprise buys — and the layer Ryu sells as a managed service. AGPL keeps it OSI-open while obligating SaaS forks to share their modifications (copyleft on the control layer). |
 | `apps/cli` | OSS — self-hostable | Apache-2.0 | Thin Core client; drives adoption. |
 | `apps/ghost` + `crates/ghost-{core,eyes,hands}` | OSS — self-hostable | Apache-2.0 | Desktop-automation MCP server + its crates. Dual-use; open for auditability. Shadow depends on the ghost crates, so they open by consequence. |
 | `apps/shadow` + `crates/shadow-core` | OSS — self-hostable | Apache-2.0 | Screen/audio capture + semantic search. Dual-use; open-sourcing a screen recorder is a trust asset. |
@@ -20,24 +20,24 @@ Every unit in the monorepo carries its own `LICENSE` file and maps to one of the
 | `packages/client` | OSS | Apache-2.0 | TS client for the open Core API; no internal deps. |
 | `crates/ryu-sdk{,-ffi,-napi}` | OSS | Apache-2.0 | SDK kernel + FFI/Node-API bindings. |
 | `apps/raycast` | OSS | MIT | Already MIT; fenced out of the workspace with its own toolchain. |
-| `apps/desktop` | Closed — proprietary | Proprietary | The primary UX moat: making agents as easy as installing an app on desktop. |
+| `apps/desktop` | Closed — proprietary | Proprietary | The primary UX surface: making agents as easy as installing an app on desktop. |
 | `apps/web` | Closed — proprietary | Proprietary | Marketing, auth flows, dashboard/billing, Notion blog/help/changelog. |
 | `apps/server` | Closed — proprietary | Proprietary | Identity and content plane: Better Auth, OAuth/2FA, billing (Polar), Notion-backed content. |
-| `apps/native` | Closed — proprietary | Proprietary | Expo/React Native mobile app — UX moat. |
+| `apps/native` | Closed — proprietary | Proprietary | Expo/React Native mobile app. |
 | `apps/island` | Closed — proprietary | Proprietary | Dynamic-island companion overlay — differentiated UX surface. |
 | `apps/command` | Closed — proprietary | Proprietary | "Golden Gate" command launcher — differentiated UX surface. |
 | `apps/storyboard` | Closed — proprietary | Proprietary | Internal screen + design-system explorer. |
 | `apps/extension` | Closed — proprietary | Proprietary | Browser extension. Kept closed for now (depends on the closed `@ryu/ui`); could open later for adoption after decoupling. |
 | `packages/ui` | Closed — proprietary | Proprietary | Shared design system, shared by closed desktop/extension/island/command. |
 | `packages/command` | Closed — proprietary | Proprietary | Shared command palette + ChatView. |
-| `packages/{auth,db,api,email,settings,env,config}` | Closed — proprietary | Proprietary | Identity / persistence / config moat. |
+| `packages/{auth,db,api,email,settings,env,config}` | Closed — proprietary | Proprietary | Identity / persistence / config layer. |
 
 > **The closed apps are thin GUIs over the open engine.** Everything that touches your
 > data or makes a decision is open and auditable: orchestration (`apps/core`), model
 > governance (`apps/gateway`), and on-device capture (the open `shadow` sidecar). The
 > desktop and Island are windows onto `ryu-core` — they talk to it over local HTTP and
 > render the result; the substance is open, the shell is just UI. Closed-ness here is a
-> UX/brand moat, not a place where logic hides.
+> UX/brand layer, not a place where logic hides.
 >
 > **The audit's recommendation vs. the current call.** The 2026-06-17 strategic audit
 > (an internal strategic audit) recommended opening

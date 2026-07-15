@@ -33,7 +33,16 @@ const KEY_LEN: usize = 32;
 
 /// OS keychain coordinates for the master key.
 const KEYRING_SERVICE: &str = "ryu";
+/// Base keychain account for the master key. The *resolved* account is
+/// profile-suffixed via [`keyring_account`] so a dev stack and a release stack
+/// never share the DB-encryption key on one machine.
 const KEYRING_ACCOUNT: &str = "master-key";
+
+/// The profile-scoped keychain account: `"master-key"` on release (byte-identical
+/// to today), `"master-key-<profile>"` otherwise (e.g. `"master-key-dev"`).
+fn keyring_account() -> String {
+    format!("{KEYRING_ACCOUNT}{}", crate::profile::suffix())
+}
 
 /// Env override carrying a base64-encoded 32-byte master key (for
 /// servers/containers/CI, or operator-controlled key injection).
@@ -221,7 +230,7 @@ struct OsKeychain;
 
 impl Keychain for OsKeychain {
     fn get(&self) -> KeychainState {
-        let entry = match keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT) {
+        let entry = match keyring::Entry::new(KEYRING_SERVICE, &keyring_account()) {
             Ok(entry) => entry,
             Err(e) => {
                 tracing::warn!("keychain unavailable ({e}); falling back to file key");
@@ -246,7 +255,7 @@ impl Keychain for OsKeychain {
     }
 
     fn store(&self, key: &[u8; KEY_LEN]) -> bool {
-        match keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT) {
+        match keyring::Entry::new(KEYRING_SERVICE, &keyring_account()) {
             Ok(entry) => match entry.set_password(&b64().encode(key)) {
                 Ok(()) => true,
                 Err(e) => {

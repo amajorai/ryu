@@ -2,6 +2,9 @@
   "title": "Auth",
   "description": "Device authorization flow.",
   "pages": [
+    "auth_accounts_list",
+    "auth_accounts_remove",
+    "auth_accounts_switch",
     "auth_login",
     "auth_logout",
     "auth_status"

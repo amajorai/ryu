@@ -14,9 +14,20 @@
 //! **Backend (scope-review HIGH #2/#3):** the v1 default is a **Deno
 //! subprocess** — real process isolation, killable, deny-by-default
 //! permissions, `Send` futures (so enum-dispatch, no `async-trait`/`dyn`, per
-//! scope-review HIGH #1/#8). The in-process `rquickjs` backend is gated behind
-//! the off-by-default `tool-exec-quickjs` feature and is **not** built for the
-//! default surface. The [`CodeExecutor`] enum keeps the choice reversible.
+//! scope-review HIGH #1/#8). The [`CodeExecutor`] enum is the swappable registry
+//! (AGENTS.md §"nothing hardcoded"): the second real backend, `securexec`, plugs
+//! in behind its own feature flag and is selected by [`CodeExecutor::default_backend`]
+//! with no code change here.
+//!
+//! **Only backends that can actually RUN are offered.** Two placeholder backends
+//! (`rquickjs`, `just-bash`) used to sit in this enum; both were stubs whose
+//! `execute` unconditionally returned "not yet wired" and whose `*_available()`
+//! was a hardcoded `false`. They were unreachable in the default build (Deno wins
+//! in `default_backend`), so they were not a user-facing lie — but a
+//! `--no-default-features --features tool-exec-quickjs` build produced a Core
+//! whose PTC path could never execute anything. A registry that lists a backend
+//! that cannot run is not a swappable default, it is a trap; they are removed.
+//! The seam they were supposed to demonstrate is the enum itself, which stays.
 //!
 //! **Bounds (security HIGH, non-negotiable):** the sandbox has **no network and
 //! no filesystem**; each run carries a wall-clock deadline, a memory cap, and a
@@ -47,14 +58,8 @@ mod deno_backend;
 #[cfg(feature = "tool-exec-deno")]
 pub(crate) use deno_backend::{run_eval_js, EvalJsOutcome};
 
-#[cfg(feature = "tool-exec-quickjs")]
-mod rquickjs_backend;
-
 #[cfg(feature = "tool-exec-securexec")]
 mod securexec_backend;
-
-#[cfg(feature = "tool-exec-justbash")]
-mod justbash_backend;
 
 // `detect_elicitation`/`tool_path_to_id` are re-exported as part of the public
 // Contract 4 surface (P3 imports them); not used inside Core yet.
@@ -83,20 +88,12 @@ pub const MAX_PARKED: usize = 64;
 /// How long a parked execution may wait for `resume` before it is evicted.
 pub const PARKED_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-/// The backend label string ("deno" | "quickjs" | "wasmtime-qjs").
+/// The Deno backend label (the default; used for audit).
 pub const BACKEND_DENO: &str = "deno";
-
-/// The rquickjs backend label (gated behind `tool-exec-quickjs`).
-#[cfg(feature = "tool-exec-quickjs")]
-pub const BACKEND_QUICKJS: &str = "quickjs";
 
 /// The secure-exec backend label (gated behind `tool-exec-securexec`).
 #[cfg(feature = "tool-exec-securexec")]
 pub const BACKEND_SECUREXEC: &str = securexec_backend::BACKEND_SECUREXEC;
-
-/// The just-bash backend label (gated behind `tool-exec-justbash`).
-#[cfg(feature = "tool-exec-justbash")]
-pub const BACKEND_JUSTBASH: &str = justbash_backend::BACKEND_JUSTBASH;
 
 /// A single tool call the sandbox program made (`tools.<server>.<tool>(args)`).
 #[derive(Debug, Clone)]
@@ -189,78 +186,50 @@ impl ExecOutcome {
 /// Heterogeneous code backends, closed-enum match-dispatched (no `dyn`/
 /// `async-trait` on the default Deno-first path). `backend()` reports the label
 /// for audit.
+///
+/// This enum IS the swappable-backend registry. Every variant is a backend that
+/// can really execute a program on a machine that satisfies its preconditions —
+/// nothing is listed here that is guaranteed to fail.
 pub enum CodeExecutor {
+    /// Deno subprocess (the default): real process isolation, deny-by-default
+    /// permissions, killable. Runnable when the `deno` binary is on `PATH`.
     #[cfg(feature = "tool-exec-deno")]
     Deno(deno_backend::DenoExecutor),
-    /// In-process rquickjs backend (gated behind `tool-exec-quickjs`; a stub
-    /// until the native build + Windows smoke probe land — see
-    /// [`rquickjs_backend`]).
-    #[cfg(feature = "tool-exec-quickjs")]
-    Quickjs(rquickjs_backend::QuickjsExecutor),
-    /// secure-exec V8-isolate backend (gated behind `tool-exec-securexec`; a stub
-    /// until the Node/Bun runtime + tool-bridge harness land).
+    /// secure-exec V8-isolate backend (gated behind `tool-exec-securexec`).
+    /// Runnable on Linux with `bun` on `PATH` + `RYU_SECUREXEC_DIR` set.
     #[cfg(feature = "tool-exec-securexec")]
     SecureExec(securexec_backend::SecureExecExecutor),
-    /// just-bash in-memory bash backend (gated behind `tool-exec-justbash`; a
-    /// stub until the Node runtime + tool bridge land).
-    #[cfg(feature = "tool-exec-justbash")]
-    JustBash(justbash_backend::JustBashExecutor),
     /// Always-present fallback so the type is non-empty even with no backend
     /// feature; it reports unavailability instead of running anything.
     Unavailable,
 }
 
 impl CodeExecutor {
-    /// The backend label ("deno" | "quickjs" | "wasmtime-qjs" | "none").
+    /// The backend label ("deno" | "securexec" | "none").
     pub fn backend(&self) -> &'static str {
         match self {
             #[cfg(feature = "tool-exec-deno")]
             CodeExecutor::Deno(_) => BACKEND_DENO,
-            #[cfg(feature = "tool-exec-quickjs")]
-            CodeExecutor::Quickjs(_) => BACKEND_QUICKJS,
             #[cfg(feature = "tool-exec-securexec")]
             CodeExecutor::SecureExec(_) => BACKEND_SECUREXEC,
-            #[cfg(feature = "tool-exec-justbash")]
-            CodeExecutor::JustBash(_) => BACKEND_JUSTBASH,
             CodeExecutor::Unavailable => "none",
         }
     }
 
-    /// Construct the default executor for this build. Deno wins when both
-    /// backend features are on (it is the spec's v1 default); rquickjs is only
-    /// selected when Deno is not compiled in.
+    /// Construct the default executor for this build. Deno wins whenever it is
+    /// compiled in (the spec's v1 default); `securexec` is selected only when
+    /// Deno is not. With no backend feature at all this is
+    /// [`CodeExecutor::Unavailable`], which reports the miss instead of pretending.
     pub fn default_backend() -> Self {
         #[cfg(feature = "tool-exec-deno")]
         {
             CodeExecutor::Deno(deno_backend::DenoExecutor::new())
         }
-        #[cfg(all(not(feature = "tool-exec-deno"), feature = "tool-exec-quickjs"))]
-        {
-            CodeExecutor::Quickjs(rquickjs_backend::QuickjsExecutor::new())
-        }
-        #[cfg(all(
-            not(feature = "tool-exec-deno"),
-            not(feature = "tool-exec-quickjs"),
-            feature = "tool-exec-securexec"
-        ))]
+        #[cfg(all(not(feature = "tool-exec-deno"), feature = "tool-exec-securexec"))]
         {
             CodeExecutor::SecureExec(securexec_backend::SecureExecExecutor::new())
         }
-        #[cfg(all(
-            not(feature = "tool-exec-deno"),
-            not(feature = "tool-exec-quickjs"),
-            not(feature = "tool-exec-securexec"),
-            feature = "tool-exec-justbash"
-        ))]
-        {
-            CodeExecutor::JustBash(justbash_backend::JustBashExecutor::new())
-        }
-        #[cfg(not(any(
-            feature = "tool-exec-deno",
-            feature = "tool-exec-quickjs",
-            feature = "tool-exec-securexec",
-            feature = "tool-exec-justbash"
-        )))]
+        #[cfg(not(any(feature = "tool-exec-deno", feature = "tool-exec-securexec")))]
         {
             CodeExecutor::Unavailable
         }
@@ -276,33 +245,11 @@ pub fn is_available() -> bool {
     {
         deno_backend::deno_on_path()
     }
-    #[cfg(all(not(feature = "tool-exec-deno"), feature = "tool-exec-quickjs"))]
-    {
-        rquickjs_backend::quickjs_available()
-    }
-    #[cfg(all(
-        not(feature = "tool-exec-deno"),
-        not(feature = "tool-exec-quickjs"),
-        feature = "tool-exec-securexec"
-    ))]
+    #[cfg(all(not(feature = "tool-exec-deno"), feature = "tool-exec-securexec"))]
     {
         securexec_backend::securexec_available()
     }
-    #[cfg(all(
-        not(feature = "tool-exec-deno"),
-        not(feature = "tool-exec-quickjs"),
-        not(feature = "tool-exec-securexec"),
-        feature = "tool-exec-justbash"
-    ))]
-    {
-        justbash_backend::justbash_available()
-    }
-    #[cfg(not(any(
-        feature = "tool-exec-deno",
-        feature = "tool-exec-quickjs",
-        feature = "tool-exec-securexec",
-        feature = "tool-exec-justbash"
-    )))]
+    #[cfg(not(any(feature = "tool-exec-deno", feature = "tool-exec-securexec")))]
     {
         false
     }
@@ -394,12 +341,8 @@ pub async fn execute_code(
     let outcome = match executor {
         #[cfg(feature = "tool-exec-deno")]
         CodeExecutor::Deno(exec) => exec.execute(&code, invoker, agent_id).await,
-        #[cfg(feature = "tool-exec-quickjs")]
-        CodeExecutor::Quickjs(exec) => exec.execute(&code, invoker, agent_id).await,
         #[cfg(feature = "tool-exec-securexec")]
         CodeExecutor::SecureExec(exec) => exec.execute(&code, invoker, agent_id).await,
-        #[cfg(feature = "tool-exec-justbash")]
-        CodeExecutor::JustBash(exec) => exec.execute(&code, invoker, agent_id).await,
         CodeExecutor::Unavailable => {
             ExecOutcome::error("no code-execution backend is built (enable feature tool-exec-deno)")
         }
@@ -444,16 +387,247 @@ pub async fn run_sandboxed(
     match executor {
         #[cfg(feature = "tool-exec-deno")]
         CodeExecutor::Deno(exec) => exec.execute(&program, invoker, agent_id).await,
-        #[cfg(feature = "tool-exec-quickjs")]
-        CodeExecutor::Quickjs(exec) => exec.execute(&program, invoker, agent_id).await,
         #[cfg(feature = "tool-exec-securexec")]
         CodeExecutor::SecureExec(exec) => exec.execute(&program, invoker, agent_id).await,
-        #[cfg(feature = "tool-exec-justbash")]
-        CodeExecutor::JustBash(exec) => exec.execute(&program, invoker, agent_id).await,
         CodeExecutor::Unavailable => {
             ExecOutcome::error("no code-execution backend is built (enable feature tool-exec-deno)")
         }
     }
+}
+
+// ── Plugin tool backends (plugin-tools, M3) ──────────────────────────────────
+//
+// A plugin's `kind:"tool"` Runnable can ship NET-NEW behavior (not just alias an
+// existing tool) via two swappable config backends — the "nothing hardcoded, the
+// tool backend is a swappable config kind" seam:
+//   - `inline_deno` runs the tool body in the SAME Deno sandbox as a turn hook,
+//     with the SAME grant model (`host.*` gated by the plugin's grants);
+//   - `http` proxies the call to a declared URL under Gateway egress governance.
+// The dispatch that selects between them lives in `sidecar/mcp` (it owns the
+// registry + the plugin grant set); this module owns the two execution shapes.
+
+/// Grant a plugin must hold for an `inline_deno` tool to execute.
+pub const GRANT_TOOL_EXECUTE: &str = "tool:execute";
+
+/// Grant prefix authorizing an `http` tool's egress to a domain:
+/// `tool:http-egress:<domain>` (or the wildcard `tool:http-egress:*`).
+pub const GRANT_HTTP_EGRESS_PREFIX: &str = "tool:http-egress:";
+
+/// Wrap a plugin tool's `inline_deno` body into a sandbox program.
+///
+/// Mirrors the turn-hook substrate (`crate::plugin_host::build_hook_program`) but
+/// injects `input` (the call arguments) instead of `ctx`. The `host` facade is
+/// identical, so the same [`crate::plugin_host::PluginHookBridge`] serves both:
+/// `host.sideModel` / `host.runAgent` / `host.storage.*` / `host.log`, each gated
+/// by the plugin's grants. `code` is the SDK-serialized body — it references
+/// `input` + `host` and `return`s the tool result, which the sandbox reports as
+/// the program's final value.
+pub fn build_inline_tool_program(input: &Value, code: &str) -> String {
+    let input_json = serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string());
+    format!(
+        r#"const input = {input};
+const host = {{
+  sideModel: (a) => tools.host.sideModel(a ?? {{}}),
+  runAgent: (a) => tools.host.runAgent(a ?? {{}}),
+  storage: {{
+    get: (k, ns) => tools.host.storage_get({{ key: String(k), namespace: ns }}),
+    set: (k, v, ns) => tools.host.storage_set({{ key: String(k), value: typeof v === "string" ? v : JSON.stringify(v), namespace: ns }}),
+    delete: (k, ns) => tools.host.storage_delete({{ key: String(k), namespace: ns }}),
+    keys: (ns) => tools.host.storage_keys({{ namespace: ns }}),
+  }},
+  log: (...a) => console.log(...a),
+}};
+{code}
+"#,
+        input = input_json,
+        code = code,
+    )
+}
+
+/// Extract the egress domain (host) from an `http` tool's URL, for the
+/// `tool:http-egress:<domain>` grant check. `None` for a URL with no host.
+pub fn http_egress_domain(url: &str) -> Option<String> {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+}
+
+/// True for a loopback / link-local / private / CGNAT / 0.0.0.0-8 IPv4 — the SSRF
+/// sinks (cloud metadata `169.254.169.254`, `127.0.0.1`, internal LAN) a plugin
+/// granted a *public* domain must never reach.
+fn is_internal_v4(v4: &std::net::Ipv4Addr) -> bool {
+    let o = v4.octets();
+    v4.is_loopback()
+        || v4.is_private()
+        || v4.is_link_local()
+        || o[0] == 0 // 0.0.0.0/8
+        || (o[0] == 100 && (64..128).contains(&o[1])) // 100.64.0.0/10 CGNAT
+}
+
+fn is_internal_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => is_internal_v4(v4),
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
+                || v6.to_ipv4_mapped().is_some_and(|v4| is_internal_v4(&v4))
+        }
+    }
+}
+
+/// SSRF guard for the `http` plugin tool: reject a `url` whose host is — or
+/// resolves to — an internal address, so a grant for a *public* domain can't be
+/// turned into a request to an internal service via DNS. Skipped only when the
+/// granted host literal is itself internal (an explicit, install-validated intent
+/// to reach `localhost`/a private host). Rebinding-resistant: rejects if ANY
+/// resolved address is internal.
+async fn http_ssrf_guard(url: &str, granted_host: &str) -> Result<(), String> {
+    // Explicit grant for a literal internal host / localhost ⇒ deliberate, allow.
+    if granted_host.eq_ignore_ascii_case("localhost") {
+        return Ok(());
+    }
+    if let Ok(lit) = granted_host.parse::<std::net::IpAddr>() {
+        if is_internal_ip(&lit) {
+            return Ok(());
+        }
+    }
+    let parsed =
+        reqwest::Url::parse(url).map_err(|e| format!("http tool: could not parse url: {e}"))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "http tool: url has no host".to_string())?
+        .to_owned();
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return if is_internal_ip(&ip) {
+            Err(format!("http egress to internal address '{ip}' is blocked"))
+        } else {
+            Ok(())
+        };
+    }
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addrs = tokio::net::lookup_host((host.as_str(), port))
+        .await
+        .map_err(|e| format!("http tool: dns resolve failed for '{host}': {e}"))?;
+    for a in addrs {
+        if is_internal_ip(&a.ip()) {
+            return Err(format!(
+                "http egress: host '{host}' resolves to internal address {} — blocked (SSRF guard)",
+                a.ip()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Proxy a plugin `http` tool call to `url`, Gateway-governed and egress-grant-gated.
+///
+/// Order matters. The **egress-grant check runs first** (deterministic — no
+/// network, no gateway), so an ungranted domain is refused identically whether or
+/// not the gateway is reachable. Then the SAME governance the PTC path uses gates
+/// the call: a fail-closed budget check and the opt-in firewall/DLP scan, with a
+/// post-call audit. Only then does Core make the outbound request.
+///
+/// `grants` is the owning plugin's grant set (resolved by the dispatcher from the
+/// enabled manifest); it must contain `tool:http-egress:<domain>` (or the `*`
+/// wildcard). This tool reaches an EXTERNAL service — it never reads local user
+/// data — so it needs no ACL principal.
+pub async fn run_http_tool(
+    url: &str,
+    method: &str,
+    args: Value,
+    grants: &std::collections::HashSet<String>,
+    agent_id: &str,
+    session_id: Option<&str>,
+) -> Result<Value, String> {
+    // 1. Egress-grant check FIRST (deterministic refusal, before any I/O).
+    let domain = http_egress_domain(url)
+        .ok_or_else(|| format!("http tool: could not parse a host from url '{url}'"))?;
+    let needed = format!("{GRANT_HTTP_EGRESS_PREFIX}{domain}");
+    let wildcard = format!("{GRANT_HTTP_EGRESS_PREFIX}*");
+    if !(grants.contains(&needed) || grants.contains(&wildcard)) {
+        return Err(format!(
+            "http egress to '{domain}' is not granted (needs '{needed}')"
+        ));
+    }
+
+    // 1b. SSRF guard: the granted domain must not be — or resolve to — an internal
+    //     address, unless it was explicitly granted as one. Blocks the metadata /
+    //     loopback / LAN sinks a public-domain grant could otherwise reach via DNS.
+    http_ssrf_guard(url, &domain).await?;
+
+    // 2. Gateway governance: fail-closed budget + opt-in firewall/DLP scan.
+    use crate::sidecar::gateway::{
+        check_exec_budget, check_exec_scan, report_exec_audit, ExecBudgetOutcome, ExecScanOutcome,
+    };
+    let backend = "tool_http";
+    if let ExecBudgetOutcome::Deny(reason) = check_exec_budget(backend, "tool_http").await {
+        return Err(format!("gateway denied http egress: {reason}"));
+    }
+    let scan_content = format!("{method} {url}\n{args}");
+    match check_exec_scan(backend, &scan_content, session_id, Some(agent_id)).await {
+        ExecScanOutcome::Allow => {}
+        ExecScanOutcome::Deny(reason) | ExecScanOutcome::ApprovalRequired(reason) => {
+            report_exec_audit(
+                backend,
+                "tool_http",
+                0,
+                1,
+                session_id.map(str::to_owned),
+                Some(format!("scan denied: {reason}")),
+            )
+            .await;
+            return Err(format!("gateway denied http egress: {reason}"));
+        }
+    }
+
+    // 3. Perform the request. Body is the tool args as JSON for methods that carry
+    //    one; GET/HEAD send none. Response is `{ status, body }` (JSON if parseable).
+    let started = std::time::Instant::now();
+    let m = reqwest::Method::from_bytes(method.as_bytes())
+        .map_err(|_| format!("http tool: invalid method '{method}'"))?;
+    // Redirects DISABLED: a 3xx is returned to the caller as-is. Following it would
+    // re-issue the request to the `Location` host WITHOUT re-running the egress-grant
+    // + SSRF checks above — the classic allowlist bypass (granted public domain →
+    // 302 → 127.0.0.1 / 169.254.169.254). The guarded first hop is the only hop.
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("http tool: client build failed: {e}"))?;
+    let mut req = client
+        .request(m.clone(), url)
+        .timeout(std::time::Duration::from_secs(30));
+    if !matches!(m, reqwest::Method::GET | reqwest::Method::HEAD) {
+        req = req.json(&args);
+    }
+    let (result, exit_code, audit_err) = match req.send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let text = resp.text().await.unwrap_or_default();
+            let body: Value = serde_json::from_str(&text).unwrap_or(Value::String(text));
+            let exit = i32::from(status >= 400);
+            (
+                Ok(serde_json::json!({ "status": status, "body": body })),
+                exit,
+                None,
+            )
+        }
+        Err(e) => (
+            Err(format!("http tool request failed: {e}")),
+            1,
+            Some(e.to_string()),
+        ),
+    };
+    report_exec_audit(
+        backend,
+        "tool_http",
+        started.elapsed().as_millis() as u64,
+        exit_code,
+        session_id.map(str::to_owned),
+        audit_err,
+    )
+    .await;
+    result
 }
 
 /// Continue a paused execution after the user completed the auth/consent step
@@ -553,33 +727,11 @@ pub async fn resume_execution_opt(
         {
             deno_backend::resume_parked(&execution_id, agent_id, decision, content).await
         }
-        #[cfg(all(not(feature = "tool-exec-deno"), feature = "tool-exec-quickjs"))]
-        {
-            rquickjs_backend::resume_parked(&execution_id, agent_id, decision, content).await
-        }
-        #[cfg(all(
-            not(feature = "tool-exec-deno"),
-            not(feature = "tool-exec-quickjs"),
-            feature = "tool-exec-securexec"
-        ))]
+        #[cfg(all(not(feature = "tool-exec-deno"), feature = "tool-exec-securexec"))]
         {
             securexec_backend::resume_parked(&execution_id, agent_id, decision, content).await
         }
-        #[cfg(all(
-            not(feature = "tool-exec-deno"),
-            not(feature = "tool-exec-quickjs"),
-            not(feature = "tool-exec-securexec"),
-            feature = "tool-exec-justbash"
-        ))]
-        {
-            justbash_backend::resume_parked(&execution_id, agent_id, decision, content).await
-        }
-        #[cfg(not(any(
-            feature = "tool-exec-deno",
-            feature = "tool-exec-quickjs",
-            feature = "tool-exec-securexec",
-            feature = "tool-exec-justbash"
-        )))]
+        #[cfg(not(any(feature = "tool-exec-deno", feature = "tool-exec-securexec")))]
         {
             let _ = (&execution_id, agent_id, decision, content);
             None
@@ -762,6 +914,58 @@ mod tests {
         assert!(
             resolved.is_none(),
             "flagship ryu must default to no restriction"
+        );
+    }
+
+    #[test]
+    fn ssrf_guard_classifies_internal_addresses() {
+        use std::net::IpAddr;
+        for s in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "192.168.0.5",
+            "172.16.9.9",
+            "169.254.169.254", // cloud metadata
+            "100.64.0.1",      // CGNAT
+            "0.0.0.0",
+            "::1",
+            "fe80::1",
+            "fc00::1",
+            "::ffff:127.0.0.1", // v4-mapped loopback
+        ] {
+            assert!(
+                is_internal_ip(&s.parse::<IpAddr>().unwrap()),
+                "{s} must be classified internal"
+            );
+        }
+        for s in ["8.8.8.8", "1.1.1.1", "93.184.216.34", "2606:2800:220:1::1"] {
+            assert!(
+                !is_internal_ip(&s.parse::<IpAddr>().unwrap()),
+                "{s} must be classified public"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn ssrf_guard_blocks_ip_literal_and_exempts_explicit_grant() {
+        // A URL whose host is an internal IP literal is blocked when the grant was
+        // for a public domain...
+        assert!(
+            http_ssrf_guard("http://169.254.169.254/latest/meta-data/", "example.com")
+                .await
+                .is_err()
+        );
+        // ...but allowed when the plugin explicitly holds a grant for that literal
+        // internal host (deliberate, install-validated intent).
+        assert!(
+            http_ssrf_guard("http://127.0.0.1:9000/health", "127.0.0.1")
+                .await
+                .is_ok()
+        );
+        assert!(
+            http_ssrf_guard("http://localhost:9000/health", "localhost")
+                .await
+                .is_ok()
         );
     }
 }

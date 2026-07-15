@@ -19,6 +19,7 @@ use tokio::process::Command;
 
 use crate::catalog::registry;
 use crate::sidecar::download_manager::VersionStore;
+use crate::win_process::NoWindow;
 
 /// Version-store key recording that apfel is present on this node.
 pub const VERSION_KEY: &str = "apfel";
@@ -42,6 +43,7 @@ pub fn ensure_supported() -> Result<()> {
 pub async fn is_installed() -> bool {
     Command::new("apfel")
         .arg("--version")
+        .no_window()
         .output()
         .await
         .map(|o| o.status.success())
@@ -71,6 +73,7 @@ pub async fn ensure_installed() -> Result<()> {
     // and is apfel's documented install path (`brew install apfel`).
     let brew_ok = Command::new("brew")
         .arg("--version")
+        .no_window()
         .output()
         .await
         .map(|o| o.status.success())
@@ -85,6 +88,7 @@ pub async fn ensure_installed() -> Result<()> {
     tracing::info!("installing apfel via `brew install apfel`");
     let status = Command::new("brew")
         .args(["install", "apfel"])
+        .no_window()
         .status()
         .await
         .context("running `brew install apfel`")?;
@@ -106,6 +110,7 @@ pub async fn ensure_installed() -> Result<()> {
 async fn record_version() {
     let version = Command::new("apfel")
         .arg("--version")
+        .no_window()
         .output()
         .await
         .ok()

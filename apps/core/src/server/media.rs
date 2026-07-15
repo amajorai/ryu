@@ -190,6 +190,14 @@ fn is_safe_filename(name: &str) -> bool {
 /// `POST /api/media/upload` — store raw request-body bytes as a local media
 /// object. The original filename comes from the `x-filename` header (or `?name=`)
 /// and the content-type from the `content-type` header. Returns the MediaObject.
+#[utoipa::path(
+    post,
+    path = "/api/media/upload",
+    tag = "Media",
+    summary = "store raw request-body bytes as a local media",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn upload_media(
     State(state): State<super::ServerState>,
     Query(params): Query<HashMap<String, String>>,
@@ -218,6 +226,14 @@ pub async fn upload_media(
 
 /// `GET /api/media/:file` — serve a stored media object with a long immutable
 /// cache (content-addressed by uuid).
+#[utoipa::path(
+    get,
+    path = "/api/media/{file}",
+    tag = "Media",
+    summary = "serve a stored media object with a long immutable",
+    params(("file" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn serve_media(
     State(state): State<super::ServerState>,
     Path(file): Path<String>,
@@ -348,6 +364,14 @@ async fn proxy(endpoint: &str, body: Value) -> (StatusCode, Json<Value>) {
 
 /// `POST /api/images/generate` — text-to-image via sd-server's OpenAI-compatible
 /// `/v1/images/generations`. Requires at least `{ "prompt": "..." }`.
+#[utoipa::path(
+    post,
+    path = "/api/images/generate",
+    tag = "Media",
+    summary = "text-to-image via sd-server's OpenAI-compatible",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn generate_image(
     State(state): State<super::ServerState>,
     Json(mut body): Json<Value>,
@@ -387,6 +411,14 @@ pub async fn generate_image(
 /// `/sdcpp/v1/vid_gen`. Requires at least `{ "prompt": "..." }`. Video models
 /// (Wan / LTX) are large and GPU-preferred; point `RYU_SD_MODEL` at a video model
 /// and use the CUDA sd-server build for usable speed.
+#[utoipa::path(
+    post,
+    path = "/api/video/generate",
+    tag = "Media",
+    summary = "text/image-to-video via sd-server's native",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn generate_video(Json(body): Json<Value>) -> impl IntoResponse {
     if body
         .get("prompt")
@@ -412,6 +444,14 @@ pub async fn generate_video(Json(body): Json<Value>) -> impl IntoResponse {
 /// `POST /api/video/generate` with a cloud provider. Passes through to the
 /// Gateway's `GET /v1/videos/generations/:id`; returns the job envelope with
 /// current `status` and, once succeeded, the media `data`.
+#[utoipa::path(
+    get,
+    path = "/api/video/jobs/{id}",
+    tag = "Media",
+    summary = "poll a cloud video-generation job submitted via",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn poll_video_job(Path(id): Path<String>) -> impl IntoResponse {
     use crate::sidecar::gateway::{gateway_token, gateway_url};
     let base = gateway_url();

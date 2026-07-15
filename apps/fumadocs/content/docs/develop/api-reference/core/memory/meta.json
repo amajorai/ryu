@@ -1,0 +1,9 @@
+{
+  "title": "Memory",
+  "description": "Memory API endpoints.",
+  "pages": [
+    "list_memory",
+    "get_memory",
+    "update_memory"
+  ]
+}

@@ -166,6 +166,10 @@ impl RegistryToolInvoker {
                 self.user_id.as_deref(),
                 &self.identity_profile_ids,
                 None,
+                // No host conversation reaches the PTC sandbox today, so on an
+                // ORG-BOUND node the conversation-reading tools fail closed here
+                // (`ToolPrincipal::Unresolved`). Unbound nodes are unaffected.
+                None,
             )
             .await
         {

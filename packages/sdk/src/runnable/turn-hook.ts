@@ -16,8 +16,12 @@
 import type {
 	Contributes,
 	PluginManifest,
+	RunnableMeta,
+	Surface,
 	TurnHookContribution,
 } from "../manifest.ts";
+import type { DefineAppRequires } from "./app.ts";
+import { inlineToolRunnable, type ToolRunnable } from "./tool.ts";
 
 /** The context a `post_assistant_turn` hook receives. */
 export interface HookContext {
@@ -112,10 +116,27 @@ export interface DefinePluginOptions {
 	id: string;
 	/** Display name. */
 	name: string;
+	/**
+	 * Plugin-to-plugin dependencies. Core auto-enables them (in dependency order)
+	 * before this plugin, and refuses to disable one while this plugin needs it.
+	 * Omit for the common case — the key is then absent from the emitted manifest.
+	 */
+	requires?: DefineAppRequires;
 	/** Declarative settings tabs (model pickers, fields), passed verbatim. */
 	settingsTabs?: Record<string, unknown>[];
 	/** Declarative slash commands, passed verbatim. */
 	slashCommands?: Record<string, unknown>[];
+	/**
+	 * Host surfaces this plugin runs on. **Omitted/empty = every surface** (the
+	 * backward-compatible default); it never means "hidden".
+	 */
+	targets?: Surface[];
+	/**
+	 * Inline tools the plugin ships — each a {@link ToolRunnable} from `defineTool`
+	 * whose `run` body is bundled as Core's `inline_deno` backend (registered as
+	 * `app__<tool.id>`). Shipping any tool auto-adds the `tool:execute` grant.
+	 */
+	tools?: ToolRunnable[];
 	/** Turn hooks the plugin contributes. */
 	turnHooks?: TurnHookContribution[];
 	/** Semver version (e.g. `"1.0.0"`). */
@@ -137,13 +158,33 @@ export function definePlugin(options: DefinePluginOptions): PluginManifest {
 		// resolved `Contributes` type (zod default applied), so set it explicitly.
 		widgets: [],
 	};
+	// Ship each inline tool as a `kind:"tool"` runnable (Core's `inline_deno`
+	// backend). Shipping tools requires the `tool:execute` grant; add it once.
+	const tools = options.tools ?? [];
+	const runnables: RunnableMeta[] = tools.map((t) => inlineToolRunnable(t));
+	const grants = new Set(options.grants ?? []);
+	if (tools.length > 0) {
+		grants.add("tool:execute");
+	}
 	return {
 		id: options.id,
 		name: options.name,
 		version: options.version,
-		runnables: [],
-		permission_grants: options.grants ?? [],
+		runnables,
+		permission_grants: [...grants],
 		activation_events: options.activationEvents ?? ["*"],
 		contributes,
+		// Empty = EVERY surface (Core's backward-compatible default), never "hidden".
+		targets: options.targets ?? [],
+		// Absent (not `{apps:[],grants:[]}`) when undeclared, matching Core's
+		// `Option<Requires>` + `skip_serializing_if = "Option::is_none"`.
+		...(options.requires
+			? {
+					requires: {
+						apps: options.requires.apps ?? [],
+						grants: options.requires.grants ?? [],
+					},
+				}
+			: {}),
 	};
 }

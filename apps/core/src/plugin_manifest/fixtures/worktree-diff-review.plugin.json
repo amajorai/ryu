@@ -38,5 +38,5 @@
       }
     ]
   },
-  "permission_grants": ["chat.sendFollowUp"]
+  "permission_grants": ["chat.sendFollowUp", "widget:render"]
 }

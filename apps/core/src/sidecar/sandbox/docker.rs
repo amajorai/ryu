@@ -70,6 +70,7 @@ use tokio::time::timeout;
 
 use super::{ExecOutput, ExecSpec, Sandbox, SandboxCapabilities, WorkspaceId};
 use crate::sidecar::BoxFuture;
+use crate::win_process::NoWindow;
 
 // ── Configuration knobs (all swappable, nothing hardcoded) ───────────────────
 
@@ -135,6 +136,7 @@ pub async fn detect() -> DetectResult {
             .arg("version")
             .arg("--format")
             .arg("{{.Server.Version}}")
+            .no_window()
             .output(),
     )
     .await;
@@ -248,6 +250,7 @@ impl Sandbox for DockerSandbox {
             }
             cmd.stdout(std::process::Stdio::piped());
             cmd.stderr(std::process::Stdio::piped());
+            cmd.no_window();
 
             let run = async move {
                 if let Some(stdin_bytes) = spec.stdin.clone() {
@@ -314,6 +317,7 @@ impl Sandbox for DockerSandbox {
             cmd.arg(&image);
             cmd.arg("sleep");
             cmd.arg("infinity");
+            cmd.no_window();
 
             let output = cmd
                 .output()
@@ -364,6 +368,7 @@ impl Sandbox for DockerSandbox {
             }
             cmd.stdout(std::process::Stdio::piped());
             cmd.stderr(std::process::Stdio::piped());
+            cmd.no_window();
 
             let run = async move {
                 if let Some(stdin_bytes) = spec.stdin.clone() {
@@ -416,6 +421,7 @@ impl Sandbox for DockerSandbox {
                 .arg("rm")
                 .arg("-f")
                 .arg(&container_id)
+                .no_window()
                 .output()
                 .await
                 .map_err(|e| anyhow!("docker rm failed: {e}"))?;

@@ -17,11 +17,25 @@ use crate::learning;
 use super::ServerState;
 
 /// `GET /api/learn/config` — resolved, secret-free learning config.
+#[utoipa::path(
+    get,
+    path = "/api/learn/config",
+    tag = "Learning",
+    summary = "resolved, secret-free learning config.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn config(State(state): State<ServerState>) -> impl IntoResponse {
     Json(learning::resolve_config(&state).await)
 }
 
 /// `GET /api/experience/list` — most-recent captured turns (cap 200).
+#[utoipa::path(
+    get,
+    path = "/api/experience/list",
+    tag = "Learning",
+    summary = "most-recent captured turns (cap 200).",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list(State(state): State<ServerState>) -> Response {
     match state.experience.list(200).await {
         Ok(rows) => {
@@ -48,6 +62,14 @@ pub async fn list(State(state): State<ServerState>) -> Response {
 }
 
 /// `POST /api/learn/sweep` — capture new turns from the conversation store.
+#[utoipa::path(
+    post,
+    path = "/api/learn/sweep",
+    tag = "Learning",
+    summary = "capture new turns from the conversation store.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn sweep(State(state): State<ServerState>) -> Response {
     match learning::sweep_into_buffer(&state).await {
         Ok(added) => Json(json!({ "captured": added })).into_response(),
@@ -56,6 +78,14 @@ pub async fn sweep(State(state): State<ServerState>) -> Response {
 }
 
 /// `POST /api/learn/score` — PRM-score unscored samples (cap 256/call).
+#[utoipa::path(
+    post,
+    path = "/api/learn/score",
+    tag = "Learning",
+    summary = "PRM-score unscored samples (cap 256/call).",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn score(State(state): State<ServerState>) -> Response {
     match learning::score_buffer(&state, 256).await {
         Ok(scored) => Json(json!({ "scored": scored })).into_response(),
@@ -67,10 +97,29 @@ pub async fn score(State(state): State<ServerState>) -> Response {
 /// Body: `{ "conversation_id": "...", "force": false }`. `force` is set only by a
 /// deliberate per-conversation user action; without it the call is a no-op when
 /// the global learning opt-in is off (consent gate).
-pub async fn synthesize(State(state): State<ServerState>, Json(body): Json<Value>) -> Response {
+#[utoipa::path(
+    post,
+    path = "/api/learn/synthesize",
+    tag = "Learning",
+    summary = "distill + activate a skill from a conversation.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+pub async fn synthesize(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Json(body): Json<Value>,
+) -> Response {
     let Some(cid) = body.get("conversation_id").and_then(Value::as_str) else {
         return bad_request("missing `conversation_id`");
     };
+    // Per-resource ACL: this DISTILLS a client-supplied conversation's content into
+    // a skill (and the skill text is then readable by its author), so it is a READ of
+    // that conversation by any other name. Gate it like every other by-id
+    // conversation route. No-op on an unbound personal node.
+    if let Err(resp) = super::require_conversation_read_by_id(&state, &caller, cid).await {
+        return resp;
+    }
     let force = body.get("force").and_then(Value::as_bool).unwrap_or(false);
     match learning::synthesize_skill(&state, cid, force).await {
         Ok(outcome) => Json(outcome).into_response(),
@@ -81,6 +130,14 @@ pub async fn synthesize(State(state): State<ServerState>, Json(body): Json<Value
 /// `POST /api/learn/cycle` — sweep + score + assemble the reward-filtered SFT
 /// dataset. Dry run by default; `{ "execute": true }` is reserved for dispatching
 /// the fine-tune (not wired in the scaffold; needs a GPU + the original base).
+#[utoipa::path(
+    post,
+    path = "/api/learn/cycle",
+    tag = "Learning",
+    summary = "sweep + score + assemble the reward-filtered SFT",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn cycle(State(state): State<ServerState>, Json(body): Json<Value>) -> Response {
     let execute = body
         .get("execute")
@@ -95,6 +152,14 @@ pub async fn cycle(State(state): State<ServerState>, Json(body): Json<Value>) ->
 /// `POST /api/learn/exclude` — per-conversation opt-out. Body:
 /// `{ "conversation_id": "...", "excluded": true }`. Sets the pref AND flips any
 /// already-buffered rows so an excluded chat is dropped from training retroactively.
+#[utoipa::path(
+    post,
+    path = "/api/learn/exclude",
+    tag = "Learning",
+    summary = "per-conversation opt-out. Body:",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn exclude(State(state): State<ServerState>, Json(body): Json<Value>) -> Response {
     let Some(cid) = body.get("conversation_id").and_then(Value::as_str) else {
         return bad_request("missing `conversation_id`");

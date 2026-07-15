@@ -3,6 +3,7 @@
   "description": "Liveness, version, and updates.",
   "pages": [
     "health",
+    "serve_openapi",
     "system_info_handler",
     "update_apply",
     "update_check",

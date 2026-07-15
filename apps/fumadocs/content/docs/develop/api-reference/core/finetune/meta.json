@@ -1,0 +1,14 @@
+{
+  "title": "Finetune",
+  "description": "Finetune API endpoints.",
+  "pages": [
+    "list_adapters",
+    "capability",
+    "list",
+    "merge",
+    "start",
+    "get",
+    "cancel",
+    "stream"
+  ]
+}

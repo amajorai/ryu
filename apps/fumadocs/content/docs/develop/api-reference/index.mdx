@@ -19,9 +19,12 @@ several languages, and a live "try it" playground.
 - The **Gateway** spec is hand-authored at `apps/fumadocs/specs/gateway-openapi.yaml`
   (its surface is a stable, OpenAI-compatible superset).
 - The **Core** spec is generated from Core's Axum handlers with
-  [`utoipa`](https://docs.rs/utoipa) - run `bun run generate:openapi` in
+  [`utoipa`](https://docs.rs/utoipa) — run `bun run generate:openapi` in
   `apps/core` (or fetch `GET /api/openapi.json` from a running Core), which writes
-  `apps/fumadocs/specs/core-openapi.json`.
+  `apps/fumadocs/specs/core-openapi.json` and adds deprecated `/api/apps` alias
+  paths via `scripts/postprocess-core-openapi.py`. Copy the result to
+  `crates/ryu-sdk/specs/core-openapi.json` and `apps/web/public/openapi.json` to
+  keep SDK conformance tests and agent discovery in sync.
 
 The reference pages themselves are produced from those specs by
 `bun run generate:docs` (Fumadocs OpenAPI), so they never drift from the schema.

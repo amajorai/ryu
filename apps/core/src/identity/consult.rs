@@ -34,14 +34,21 @@
 //!   url/domain arg, or whose host is not a bound connection, simply proceeds.
 //! - **Composio is skipped** (`composio__…` ids): it owns its own connection-required
 //!   path (`mcp::composio::detect_elicitation`); running both would collide.
-//! - **Credential consumption is a remaining seam.** v1's only live
-//!   [`CredentialSource`](super::CredentialSource) is `ManualImport`; the
-//!   `BrowserTool`/`Composio` capture backends are stubs (spec §5/§12), so there is
-//!   no real consumer yet that knows how to splice a cookie into a specific tool's
-//!   request. This seam therefore *reads + audits* the credential at the boundary
-//!   (proving the governed path) but does not arg-splice it; a browser-tool
-//!   consumer is the follow-up. The read still matters: it exercises the
-//!   `identity.read` grant + audit on every authenticated tool hit.
+//! - **Credential capture is manual-only.** The only *registered* backend is
+//!   [`ManualImport`](super::ManualImport) — the user pastes the cookie/token and
+//!   Core seals it. There is deliberately no `browser-tool` backend (Core ships no
+//!   browser engine, so a session-capture source would be a stub) and no
+//!   `composio` **vault** backend (Composio keeps its secrets server-side, so
+//!   there is no blob to seal — and its tools are skipped here anyway, see above).
+//!   Both were registered once; a backend that is *selectable* but cannot run is a
+//!   trap, so both were deregistered. See [`crate::identity::source`] for the
+//!   removal and the honest path back (the browser extension's `chrome.cookies`).
+//! - **Consumption is per-tool.** [`INJECTION_CAPABLE_TOOLS`] lists the tools that
+//!   know how to splice a credential into their own outbound request (today:
+//!   `web_fetch`). Every other authenticated tool still has its credential
+//!   read+audited at this boundary (exercising the `identity.read` grant) but the
+//!   secret is dropped rather than handed over, keeping the blast radius to known
+//!   consumers.
 //! - **Fail-closed read → proceed without the credential.** If the grant read is
 //!   denied (e.g. an unreachable dev gateway), the tool call proceeds *without* the
 //!   credential rather than hard-failing — the tool then returns its own auth error

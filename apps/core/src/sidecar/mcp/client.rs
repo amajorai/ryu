@@ -15,6 +15,8 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
+use crate::win_process::NoWindow;
+
 /// The MCP protocol version this client speaks during `initialize`.
 const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 
@@ -123,7 +125,8 @@ impl McpConnection {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true);
+            .kill_on_drop(true)
+            .no_window();
         // Env-scrub (security): an MCP stdio server has no business inheriting
         // Core's full env (provider keys, gateway/credits tokens). `env_clear`
         // first is load-bearing (a bare `Command` inherits the parent env);

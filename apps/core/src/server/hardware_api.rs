@@ -186,6 +186,14 @@ fn ws_scheme(host: &str) -> &'static str {
 }
 
 /// `POST /api/hardware/pair` — register a device from a pairing nonce. **Public**.
+#[utoipa::path(
+    post,
+    path = "/api/hardware/pair",
+    tag = "Hardware",
+    summary = "register a device from a pairing nonce. **Public**.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn pair_device(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -209,6 +217,13 @@ pub async fn pair_device(
 }
 
 /// `GET /api/hardware/devices` — list paired devices with presence + battery.
+#[utoipa::path(
+    get,
+    path = "/api/hardware/devices",
+    tag = "Hardware",
+    summary = "list paired devices with presence + battery.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_devices(
     State(state): State<ServerState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -225,6 +240,15 @@ pub async fn list_devices(
 }
 
 /// `PATCH /api/hardware/devices/:id` — update a device's name / prefs.
+#[utoipa::path(
+    patch,
+    path = "/api/hardware/devices/{id}",
+    tag = "Hardware",
+    summary = "update a device's name / prefs.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn update_device(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -250,6 +274,14 @@ pub async fn update_device(
 }
 
 /// `DELETE /api/hardware/devices/:id` — revoke a device (delete it + its token).
+#[utoipa::path(
+    delete,
+    path = "/api/hardware/devices/{id}",
+    tag = "Hardware",
+    summary = "revoke a device (delete it + its token).",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn delete_device(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -403,6 +435,14 @@ async fn device_authorized(state: &ServerState, device_id: &str, headers: &Heade
 /// `GET /api/hardware/display/:device_id` — the display manifest. Returns the
 /// content hash (`rev`), the poll interval, the screen geometry, and the image URL
 /// the device should fetch. The device skips re-downloading when `rev` is unchanged.
+#[utoipa::path(
+    get,
+    path = "/api/hardware/display/{device_id}",
+    tag = "Hardware",
+    summary = "the display manifest. Returns the",
+    params(("device_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn display_manifest(
     State(state): State<ServerState>,
     Path(device_id): Path<String>,
@@ -472,6 +512,14 @@ pub struct ImageQuery {
 /// `GET /api/hardware/display/:device_id/image?rev=` — the rendered image bytes
 /// (packed 1-bit for e-ink, RGB565, or PNG). Returns `304` when the device's `rev`
 /// matches the freshly-rendered content hash.
+#[utoipa::path(
+    get,
+    path = "/api/hardware/display/{device_id}/image",
+    tag = "Hardware",
+    summary = "the rendered image bytes",
+    params(("device_id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn display_image(
     State(state): State<ServerState>,
     Path(device_id): Path<String>,
@@ -509,6 +557,14 @@ pub async fn display_image(
 
 /// `GET /api/hardware/devices/:id/dashboard` — the device's dashboard config
 /// (the binding + the bound dashboard's widgets).
+#[utoipa::path(
+    get,
+    path = "/api/hardware/devices/{id}/dashboard",
+    tag = "Hardware",
+    summary = "the device's dashboard config",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_device_dashboard(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -577,6 +633,15 @@ pub struct DeviceDashboardUpdate {
 /// replace its widget selection + layout. Reuses the dashboard store so the same
 /// widgets the desktop builder authors render on the device. Pushes a `display`
 /// nudge so a connected device re-polls immediately.
+#[utoipa::path(
+    put,
+    path = "/api/hardware/devices/{id}/dashboard",
+    tag = "Hardware",
+    summary = "set the device's poll interval and/or",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn set_device_dashboard(
     State(state): State<ServerState>,
     Path(id): Path<String>,

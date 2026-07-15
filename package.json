@@ -66,7 +66,11 @@
     "clean:rust": "cargo clean --manifest-path apps/desktop/src-tauri/Cargo.toml; cargo clean --manifest-path apps/core/Cargo.toml; cargo clean --manifest-path apps/cli/Cargo.toml; cargo clean --manifest-path apps/gateway/Cargo.toml; cargo clean --manifest-path apps/predict/Cargo.toml; cargo clean --manifest-path apps/predict-spike/Cargo.toml; cargo clean --manifest-path apps/web/src-tauri/Cargo.toml; cargo clean --manifest-path crates/ghost-core/Cargo.toml; cargo clean --manifest-path crates/ghost-eyes/Cargo.toml; cargo clean --manifest-path crates/ghost-hands/Cargo.toml; cargo clean --manifest-path crates/shadow-core/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-ffi/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-napi/Cargo.toml; cargo clean --manifest-path crates/ryu-sdk-uniffi/Cargo.toml",
     "check": "ultracite check",
     "fix": "ultracite fix",
-    "prepare": "husky"
+    "prepare": "husky",
+    "env:export": "node scripts/env-sync.mjs export",
+    "env:export:file": "node scripts/env-sync.mjs export --file --no-clipboard",
+    "env:import": "node scripts/env-sync.mjs import",
+    "env:import:file": "node scripts/env-sync.mjs import --file --force"
   },
   "dependencies": {
     "@ryu/env": "workspace:*",

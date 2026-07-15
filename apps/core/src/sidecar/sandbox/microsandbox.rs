@@ -50,6 +50,7 @@ use tokio::time::timeout;
 
 use super::{ExecOutput, ExecSpec, Sandbox, SandboxCapabilities, WorkspaceId};
 use crate::sidecar::BoxFuture;
+use crate::win_process::NoWindow;
 
 // ── Configuration knobs (all swappable, nothing hardcoded) ───────────────────
 
@@ -98,7 +99,11 @@ pub async fn detect() -> DetectResult {
     let binary = binary();
     let deadline = detect_timeout();
 
-    let probe = timeout(deadline, Command::new(&binary).arg("--version").output()).await;
+    let probe = timeout(
+        deadline,
+        Command::new(&binary).arg("--version").no_window().output(),
+    )
+    .await;
 
     match probe {
         Err(_elapsed) => {
@@ -164,6 +169,7 @@ async fn run_command(
     }
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
+    cmd.no_window();
 
     let run = async move {
         if let Some(bytes) = stdin {
@@ -216,6 +222,7 @@ impl Sandbox for MicrosandboxSandbox {
             for arg in &spec.args {
                 cmd.arg(arg);
             }
+            cmd.no_window();
 
             let output = run_command(cmd, spec.stdin, spec.timeout_secs, "run").await?;
             Ok(ExecOutput {
@@ -240,6 +247,7 @@ impl Sandbox for MicrosandboxSandbox {
                 cmd.arg(flag);
             }
             cmd.arg(image());
+            cmd.no_window();
 
             let output = cmd
                 .output()
@@ -257,6 +265,7 @@ impl Sandbox for MicrosandboxSandbox {
             let _ = Command::new(binary())
                 .arg("start")
                 .arg(&name)
+                .no_window()
                 .output()
                 .await;
 
@@ -272,6 +281,7 @@ impl Sandbox for MicrosandboxSandbox {
             for arg in &spec.args {
                 cmd.arg(arg);
             }
+            cmd.no_window();
 
             let output = run_command(cmd, spec.stdin, spec.timeout_secs, "exec").await?;
             Ok(ExecOutput {
@@ -286,11 +296,17 @@ impl Sandbox for MicrosandboxSandbox {
         let name = id.0.clone();
         Box::pin(async move {
             // Best-effort stop, then remove.
-            let _ = Command::new(binary()).arg("stop").arg(&name).output().await;
+            let _ = Command::new(binary())
+                .arg("stop")
+                .arg(&name)
+                .no_window()
+                .output()
+                .await;
 
             let output = Command::new(binary())
                 .arg("rm")
                 .arg(&name)
+                .no_window()
                 .output()
                 .await
                 .map_err(|e| anyhow!("msb rm failed: {e}"))?;

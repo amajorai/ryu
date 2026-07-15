@@ -28,6 +28,8 @@ target/
 .env.submit
 .env.submit.backup-*
 !.env.submit.example
+ryu-env.bundle.b64
+*.env.bundle.b64
 
 # IDEs and editors
 .vscode/*

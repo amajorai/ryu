@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use dashmap::DashMap;
 
@@ -26,6 +26,7 @@ use crate::{
     semantic_cache::SemanticCache,
     skills::SkillsRegistry,
     tools::ToolSearchClient,
+    wasm_policy::WasmPolicyHost,
 };
 
 pub struct AppState {
@@ -34,8 +35,17 @@ pub struct AppState {
     pub router: ModelRouter,
     /// Classifier-driven model routing (custom routing instructions). Inert
     /// unless `config.routing.smart_routing` is active; holds a per-session
-    /// decision cache. Like `router`, it is a startup snapshot of the config.
-    pub smart_router: SmartRouter,
+    /// decision cache.
+    ///
+    /// `RwLock<Arc<…>>` so `PUT /v1/config { routing: { smart_routing … } }` can
+    /// **hot-swap** the smart router without a gateway restart — the same live-swap
+    /// discipline as `firewall`/`budget`, but Arc-wrapped because
+    /// [`SmartRouter::resolve`] is async and is held across an `.await` on the
+    /// request path (a read guard cannot be). Callers clone the `Arc` out under a
+    /// brief read lock (see [`Self::smart_router`]) and keep it across the await.
+    /// Only `routing.smart_routing` swaps here; the [`Self::router`] model-map /
+    /// fallback / tiers remain a startup snapshot (restart-only).
+    pub smart_router: RwLock<Arc<SmartRouter>>,
     /// Per-agent smart-routing override cache (the "both" config scope: global
     /// `smart_router` is the default, an agent may override it). Keyed by a stable
     /// hash of the override [`SmartRoutingConfig`] JSON that Core injects as the
@@ -107,6 +117,13 @@ pub struct AppState {
     /// `rgw_` bearer to its org + budget + policy and caches the result. `None`
     /// ⇒ the dynamic per-token auth path is inert and single-org behavior holds.
     pub resolve_cache: Option<ResolveCache>,
+    /// The hardened wasmtime host for untrusted WASM **policy** plugins
+    /// (`EvaluatorImpl::Wasm`). Lazily built on first use — a gateway with no wasm
+    /// policy declared pays nothing (no engine init, no epoch ticker thread).
+    /// `Some(host)` once initialised; the inner `Option` is `None` only if engine
+    /// construction failed, in which case wasm evaluation fails closed. See
+    /// [`Self::wasm_host`].
+    wasm_host: OnceLock<Option<Arc<WasmPolicyHost>>>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -116,7 +133,7 @@ impl AppState {
         let quota = Arc::new(ProviderQuotas::new());
         let providers = ProviderRegistry::new(&config.providers, Arc::clone(&quota));
         let router = ModelRouter::new(config.routing.clone());
-        let smart_router = SmartRouter::new(config.routing.smart_routing.clone());
+        let smart_router = Arc::new(SmartRouter::new(config.routing.smart_routing.clone()));
         let firewall = FirewallScanner::new(config.firewall.clone());
         let resolver = FirewallResolver::new(config.firewall.clone());
         // Reload standalone org/agent overlays persisted to gateway.toml (FIX 4)
@@ -172,7 +189,7 @@ impl AppState {
             config,
             providers,
             router,
-            smart_router,
+            smart_router: RwLock::new(smart_router),
             per_agent_routers: DashMap::new(),
             firewall: RwLock::new(firewall),
             resolver,
@@ -197,7 +214,25 @@ impl AppState {
             http,
             policy: RwLock::new(EffectivePolicy::default()),
             jobs: MediaJobStore::new(),
+            wasm_host: OnceLock::new(),
         }
+    }
+
+    /// The lazily-constructed WASM policy host. Returns `None` only if the wasmtime
+    /// engine could not be built (wasm evaluation then fails closed for security
+    /// policies). Construction — including the epoch ticker thread — happens at most
+    /// once, on the first request that references a `Wasm` evaluator; a gateway
+    /// without any wasm policy never pays for it.
+    pub fn wasm_host(&self) -> Option<&Arc<WasmPolicyHost>> {
+        self.wasm_host
+            .get_or_init(|| match WasmPolicyHost::new() {
+                Ok(h) => Some(Arc::new(h)),
+                Err(e) => {
+                    tracing::error!("failed to build WASM policy host: {e}");
+                    None
+                }
+            })
+            .as_ref()
     }
 
     /// Snapshot the current effective policy. Cheap clone; recovers from a
@@ -210,6 +245,34 @@ impl AppState {
     pub fn set_policy(&self, policy: EffectivePolicy) {
         if let Ok(mut guard) = self.policy.write() {
             *guard = policy;
+        }
+    }
+
+    /// Clone the current global smart router out under a brief read lock. The
+    /// returned `Arc` holds no lock, so the async request path
+    /// ([`crate::pipeline::apply_smart_routing`]) can keep it across the classifier
+    /// `.await`. Recovers from a poisoned lock by returning the inner value.
+    pub fn smart_router(&self) -> std::sync::Arc<crate::router::smart::SmartRouter> {
+        match self.smart_router.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    /// Hot-swap the global smart router with one built from a new
+    /// [`crate::config::SmartRoutingConfig`]. Called by `PUT /v1/config` when the
+    /// patch carries `routing`, so a smart-routing toggle (or an updated ruleset)
+    /// takes effect on the request path with **no gateway restart** — the same
+    /// live-swap discipline as [`Self::update_firewall_config`].
+    ///
+    /// Rebuilding drops the per-session decision cache (like the firewall scanner
+    /// swap resets its compiled state); this is intentional and cheap. Only
+    /// `smart_routing` swaps here — `model_map` / `fallback_chain` / `provider_tiers`
+    /// live in [`Self::router`] (a startup snapshot) and remain restart-only.
+    pub fn update_smart_router(&self, cfg: crate::config::SmartRoutingConfig) {
+        let next = std::sync::Arc::new(crate::router::smart::SmartRouter::new(cfg));
+        if let Ok(mut guard) = self.smart_router.write() {
+            *guard = next;
         }
     }
 
@@ -330,11 +393,22 @@ impl AppState {
     /// `AuditLogger` and `EvalsRunner` instances so tests can inspect them
     /// after the fact. All other fields are set to their defaults.
     #[cfg(test)]
+    pub fn new_for_test_default() -> Self {
+        let audit = AuditLogger::new(&crate::config::AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = EvalsRunner::new(crate::config::EvalsConfig::default());
+        Self::new_for_test(GatewayConfig::default(), audit, evals)
+    }
+
+    #[cfg(test)]
     pub fn new_for_test(config: GatewayConfig, audit: AuditLogger, evals: EvalsRunner) -> Self {
         let quota = Arc::new(ProviderQuotas::new());
         let providers = ProviderRegistry::new(&config.providers, Arc::clone(&quota));
         let router = ModelRouter::new(config.routing.clone());
-        let smart_router = SmartRouter::new(config.routing.smart_routing.clone());
+        let smart_router = Arc::new(SmartRouter::new(config.routing.smart_routing.clone()));
         let firewall = FirewallScanner::new(config.firewall.clone());
         let resolver = FirewallResolver::new(config.firewall.clone());
         // Reload standalone org/agent overlays persisted to gateway.toml (FIX 4)
@@ -359,7 +433,7 @@ impl AppState {
             config,
             providers,
             router,
-            smart_router,
+            smart_router: RwLock::new(smart_router),
             per_agent_routers: DashMap::new(),
             firewall: RwLock::new(firewall),
             resolver,
@@ -384,6 +458,54 @@ impl AppState {
             http,
             policy: RwLock::new(EffectivePolicy::default()),
             jobs: MediaJobStore::new(),
+            wasm_host: OnceLock::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod smart_router_swap_tests {
+    use super::AppState;
+    use crate::config::{RouteStrategy, SmartRoutingConfig, SmartRule};
+
+    /// The routing toggle must take effect on the request path with NO restart:
+    /// after `update_smart_router` the gate the pipeline reads
+    /// (`state.smart_router().is_active()`, checked in `apply_smart_routing`) must
+    /// flip live. This is the gateway-side proof that `PUT /v1/config { routing }`
+    /// hot-swaps smart routing instead of requiring a respawn.
+    #[test]
+    fn update_smart_router_flips_the_request_path_gate_live() {
+        // Default config → smart routing disabled → the request path is inert.
+        let state = AppState::new_for_test_default();
+        assert!(
+            !state.smart_router().is_active(),
+            "default smart routing must be inactive (fail-open)"
+        );
+
+        // Push an ENABLED smart-routing config (a classifier + one rule) — exactly
+        // what `PUT /v1/config { routing: { smart_routing } }` would apply live.
+        let cfg = SmartRoutingConfig {
+            strategy: RouteStrategy::Llm,
+            enabled: true,
+            classifier_model: "gemma-classifier".to_string(),
+            rules: vec![SmartRule {
+                description: "writing or refactoring code".to_string(),
+                model: "claude-sonnet-4-5".to_string(),
+            }],
+            ..Default::default()
+        };
+        state.update_smart_router(cfg);
+
+        assert!(
+            state.smart_router().is_active(),
+            "the request-path gate must see the new routing flag with no restart"
+        );
+
+        // And a subsequent disable swaps it back off, still live.
+        state.update_smart_router(SmartRoutingConfig::default());
+        assert!(
+            !state.smart_router().is_active(),
+            "disabling smart routing hot-swaps back to inert"
+        );
     }
 }

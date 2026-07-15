@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::agents::{AgentStore, PersonaSlot};
 use crate::registry::ProviderRegistry;
-use crate::server::conversations::{ConversationStore, MessageSearchHit};
+use crate::server::conversations::{ConversationStore, MessageSearchHit, Tenancy};
 use crate::server::memory::{
     MemoryCategory, MemoryScope, MemoryStore, NewMemory, DEFAULT_LONG_TERM_LIMIT,
     DEFAULT_SHORT_TERM_LIMIT, LOCAL_USER,
@@ -584,7 +584,7 @@ fn ui_tool_widget(w: &crate::sidecar::adapters::acp::ToolWidgetEvent) -> Vec<u8>
             "widget": {
                 "html": w.widget_html,
                 "mimeType": w.widget_mime,
-                "csp": { "resource_domains": [] },
+                "csp": { "resource_domains": w.resource_domains },
             },
             "toolInput": w.tool_input,
             "toolOutput": w.tool_output,
@@ -1935,10 +1935,20 @@ async fn backfill_memory_facts(memory: &MemoryStore, retrieval: &RetrievalStore)
             return;
         }
     };
+    let node_org = crate::sidecar::control_plane::registered_org().map(|o| o.id);
     for fact in facts {
         if indexed.contains(&fact.id) {
             continue;
         }
+        // Denormalize the fact's own owner onto its retrieval chunk so the
+        // per-caller filter can gate it. A legacy `'local'`/None owner → shared
+        // (the retrieval memory-owner backfill re-stamps it on the next open).
+        let owner = match (node_org.as_deref(), fact.owner_user_id.as_deref()) {
+            (Some(org), Some(uid)) if uid != crate::server::memory::LOCAL_USER => {
+                crate::server::retrieval::RetrievalOwner::owned(Some(uid), Some(org), None)
+            }
+            _ => crate::server::retrieval::RetrievalOwner::shared(),
+        };
         if let Err(e) = retrieval
             .index_memory_chunk(
                 &fact.id,
@@ -1947,6 +1957,7 @@ async fn backfill_memory_facts(memory: &MemoryStore, retrieval: &RetrievalStore)
                 fact.scope_id.as_deref(),
                 fact.category.as_str(),
                 fact.importance,
+                owner,
             )
             .await
         {
@@ -1991,6 +2002,21 @@ async fn run_auto_recall(
     // just-recorded fact is searchable this turn. Bounded + fail-open.
     backfill_memory_facts(memory, &cfg.retrieval).await;
 
+    // Per-caller tenancy: auto-recall is the BUSIEST memory read path (every chat
+    // turn), so it must apply the same owner filter as `/api/retrieval/search`, or a
+    // bound-node member's turn would inject a colleague's private user-scope memory
+    // into the model context. The memory principal is the HOST CONVERSATION'S OWNER
+    // (already stamped by `gate_and_claim_conversation`). Unbound node → `node_bound`
+    // false → no filter (byte-identical). `node`/`project`-scope facts stay shared.
+    let node_bound = crate::sidecar::control_plane::registered_org().is_some();
+    let (caller_user_id, caller_org_id) = match current_conversation_id {
+        Some(cid) => match conversations.get_access_meta(cid).await {
+            Ok(Some(t)) => (t.owner_user_id, t.org_id),
+            _ => (None, None),
+        },
+        None => (None, None),
+    };
+
     // Memory + Space half, gated by the agent's readable levels + Space allowlist
     // and the active project. Fetch more than top_k so dropping the recency-injected
     // facts still leaves room for the ones the recency window MISSED.
@@ -2007,6 +2033,9 @@ async fn run_auto_recall(
                 Some(cfg.read_levels.clone())
             },
             project_id: project_id.map(str::to_string),
+            node_bound,
+            caller_user_id: caller_user_id.clone(),
+            caller_org_id: caller_org_id.clone(),
             ..RetrievalOptions::default()
         };
         match cfg.retrieval.retrieve(query, &opts).await {
@@ -2018,17 +2047,66 @@ async fn run_auto_recall(
         }
     };
 
+    // The past-chat half must scope to the caller's readable conversations on a
+    // bound node — exactly like `/api/conversations/search` (server/mod.rs) — or a
+    // member's turn would fold a colleague's PRIVATE conversation snippets into the
+    // model context via `search_messages(.., None)` ("search ALL conversations").
+    // Unbound node → `None` (every conversation, byte-identical AND no per-turn id
+    // scan). Bound node → the caller's visible id set; failure or an empty set means
+    // no chat hits (fail closed), never a node-wide dump.
+    let visible_convo_ids: Option<Vec<String>> = if node_bound {
+        match conversations
+            .visible_conversation_ids(
+                caller_user_id.as_deref(),
+                caller_org_id.as_deref(),
+                node_bound,
+            )
+            .await
+        {
+            Ok(ids) => Some(ids),
+            Err(e) => {
+                tracing::warn!("auto-recall: visible-id resolve failed (no chat hits): {e:#}");
+                Some(Vec::new())
+            }
+        }
+    } else {
+        None
+    };
+    let chat_filter = visible_convo_ids.as_deref();
+    // An EMPTY visible set on a bound node (anonymous caller, or a resolve error)
+    // must yield NO chat hits — but `MessageIndex::search`/`MessageFtsIndex::search`
+    // treat `Some(empty)` identically to `None` (= unfiltered), so passing it through
+    // would dump the whole node at the index layer. Short-circuit before searching,
+    // exactly as the sibling callers do (search_conversations.rs, the REST
+    // /api/conversations/search), so the guard is structural — not solely the
+    // `hit_allowed` post-filter below.
+    let visible_empty = visible_convo_ids.as_ref().is_some_and(Vec::is_empty);
+    // Belt and braces on a bound node: post-filter every hit against the same id set
+    // so a stale index row (e.g. orphaned by a re-tenanted conversation) can never
+    // leak a snippet even if the index-side filter were bypassed.
+    let chat_allowed: Option<std::collections::HashSet<&str>> =
+        visible_convo_ids.as_ref().map(|ids| ids.iter().map(String::as_str).collect());
+    let hit_allowed = |cid: &str| chat_allowed.as_ref().is_none_or(|set| set.contains(cid));
+
     // Past-chat half (current conversation excluded). `search_messages` returns
     // `Ok(None)` when no message index is wired — treat as no hits.
-    let mut chat_hits = match conversations.search_messages(query, cfg.top_k, None).await {
-        Ok(Some(hits)) => hits
-            .into_iter()
-            .filter(|h| Some(h.conversation_id.as_str()) != current_conversation_id)
-            .collect::<Vec<_>>(),
-        Ok(None) => Vec::new(),
-        Err(e) => {
-            tracing::warn!("auto-recall: chat search failed (skipping): {e:#}");
-            Vec::new()
+    let mut chat_hits = if visible_empty {
+        Vec::new()
+    } else {
+        match conversations
+            .search_messages(query, cfg.top_k, chat_filter)
+            .await
+        {
+            Ok(Some(hits)) => hits
+                .into_iter()
+                .filter(|h| Some(h.conversation_id.as_str()) != current_conversation_id)
+                .filter(|h| hit_allowed(h.conversation_id.as_str()))
+                .collect::<Vec<_>>(),
+            Ok(None) => Vec::new(),
+            Err(e) => {
+                tracing::warn!("auto-recall: chat search failed (skipping): {e:#}");
+                Vec::new()
+            }
         }
     };
 
@@ -2038,9 +2116,9 @@ async fn run_auto_recall(
     // both surface the same message). The current conversation is excluded, same as
     // the semantic half. Fully fail-open. `assemble_recall_block` still caps the
     // TOTAL injected lines at `top_k`.
-    if cfg.fts_enabled {
+    if cfg.fts_enabled && !visible_empty {
         match conversations
-            .fts_search_messages(query, cfg.top_k, None)
+            .fts_search_messages(query, cfg.top_k, chat_filter)
             .await
         {
             Ok(Some(hits)) => {
@@ -2048,6 +2126,9 @@ async fn run_auto_recall(
                     chat_hits.iter().map(|h| h.message_id.clone()).collect();
                 for hit in hits {
                     if Some(hit.conversation_id.as_str()) == current_conversation_id {
+                        continue;
+                    }
+                    if !hit_allowed(hit.conversation_id.as_str()) {
                         continue;
                     }
                     if seen.insert(hit.message_id.clone()) {
@@ -2181,13 +2262,18 @@ pub async fn run_team_reply_text(
     // multi-participant group thread records who spoke.
     if !user_text.trim().is_empty() {
         if let Err(e) = conversations
-            .append_message(
+            .append_message_as(
                 &conversation_id,
                 "user",
                 &user_text,
                 None,
                 None,
                 author_name.as_deref(),
+                // The row already exists (created + stamped upstream by
+                // `chat_stream`/`gate_and_claim_conversation`, or genuinely
+                // untenanted bot ingress). The choke point COALESCEs, so this
+                // can never wipe a claimed owner.
+                Tenancy::Unattributed,
             )
             .await
         {
@@ -2294,13 +2380,14 @@ pub async fn run_team_reply_text(
     // Persist exactly one combined assistant turn attributed to the team.
     if !combined.is_empty() {
         if let Err(e) = conversations
-            .append_message(
+            .append_message_as(
                 &conversation_id,
                 "assistant",
                 &combined,
                 Some(&team.id),
                 None,
                 None,
+                Tenancy::Unattributed, // row exists; owner preserved by COALESCE
             )
             .await
         {
@@ -2817,13 +2904,14 @@ pub async fn route_team_chat_stream(
         if let Some(ref conv_id) = conversation_id {
             if !user_text.is_empty() {
                 if let Err(e) = conversations
-                    .append_message(
+                    .append_message_as(
                         conv_id,
                         "user",
                         &user_text,
                         None,
                         req.author_user_id.as_deref(),
                         req.author_name.as_deref(),
+                        Tenancy::Unattributed, // row exists; owner preserved by COALESCE
                     )
                     .await
                 {
@@ -2967,7 +3055,7 @@ pub async fn route_team_chat_stream(
             if let Some(ref conv_id) = conversation_id {
                 if !combined.trim().is_empty() {
                     if let Err(e) = conversations
-                        .append_message(conv_id, "assistant", combined.trim_end(), Some(&team_id), None, None)
+                        .append_message_as(conv_id, "assistant", combined.trim_end(), Some(&team_id), None, None, Tenancy::Unattributed)
                         .await
                     {
                         tracing::warn!("failed to persist team assistant message: {e:#}");
@@ -3037,7 +3125,7 @@ pub async fn route_chat_stream(
         if let Some(conversation_id) = req.conversation_id.clone() {
             if !user_text.is_empty() {
                 if let Err(e) = conversations
-                    .append_message(
+                    .append_message_as(
                         &conversation_id,
                         "user",
                         &user_text,
@@ -3048,6 +3136,12 @@ pub async fn route_chat_stream(
                         req.author_user_id.as_deref(),
                         // Unverified sender display name for group/channel chats.
                         req.author_name.as_deref(),
+                        // Tenancy is stamped UPSTREAM, before this ever runs:
+                        // `chat_stream` gates + claims the conversation
+                        // (`gate_and_claim_conversation`) so the row already carries
+                        // its owner. The choke point COALESCEs, so passing
+                        // `Unattributed` here preserves that owner and never wipes it.
+                        Tenancy::Unattributed,
                     )
                     .await
                 {
@@ -3067,7 +3161,12 @@ pub async fn route_chat_stream(
     let effective_agent_id: Option<String> = if let Some(ref target) = req.target_agent_id {
         // Auto-register the target as a participant in this conversation.
         if let Some(ref conv_id) = req.conversation_id {
-            if let Err(e) = conversations.add_participant(conv_id, target).await {
+            // The conversation row already exists and is stamped by
+            // `gate_and_claim_conversation` upstream; COALESCE preserves its owner.
+            if let Err(e) = conversations
+                .add_participant(conv_id, target, Tenancy::Unattributed)
+                .await
+            {
                 tracing::warn!("failed to add participant {target}: {e:#}");
             }
         }
@@ -3092,7 +3191,10 @@ pub async fn route_chat_stream(
         // Register the resolved agent as a participant so the conversation reflects
         // which agent actually handled the turn (mirrors the target_agent_id path).
         if let Some(ref conv_id) = req.conversation_id {
-            if let Err(e) = conversations.add_participant(conv_id, &resolved).await {
+            if let Err(e) = conversations
+                .add_participant(conv_id, &resolved, Tenancy::Unattributed)
+                .await
+            {
                 tracing::warn!("agent-auto: failed to add resolved participant {resolved}: {e:#}");
             }
         }
@@ -3239,7 +3341,11 @@ pub async fn route_chat_stream(
             req.cwd.as_deref(),
             effective_agent_id.as_deref(),
         );
-        if let Err(e) = memory.record_full(LOCAL_USER, &scope, new).await {
+        // Attribute to the local owner on a bound node (no HTTP caller on the chat
+        // path) so the captured fact is recallable by its owner; LOCAL_USER on an
+        // unbound node keeps the single-user path byte-identical.
+        let owner = crate::server::background_memory_user_id();
+        if let Err(e) = memory.record_full(&owner, &scope, new).await {
             tracing::warn!("failed to record long-term memory: {e:#}");
         }
     }
@@ -3765,13 +3871,14 @@ async fn persist_assistant_reply(
     };
     if !reply.is_empty() {
         if let Err(e) = store
-            .append_message(
+            .append_message_as(
                 &conversation_id,
                 "assistant",
                 &reply,
                 agent_id.as_deref(),
                 None,
                 None,
+                Tenancy::Unattributed, // row exists; owner preserved by COALESCE
             )
             .await
         {
@@ -5008,13 +5115,14 @@ async fn route_acp_stream(
                         if persisted_msg_id.is_none() {
                             // First chunk — insert the row with whatever we have so far.
                             match persist_store
-                                .append_message(
+                                .append_message_as(
                                     conv_id,
                                     "assistant",
                                     &reply,
                                     persist_agent_id.as_deref(),
                                     None,
                                     None,
+                                    Tenancy::Unattributed, // row exists (stamped by chat_stream)
                                 )
                                 .await
                             {
@@ -5305,13 +5413,14 @@ async fn route_acp_stream(
                             let _ = persist_store.update_message_content(mid, &reply).await;
                         } else if !reply.is_empty() || !acc.is_empty() {
                             match persist_store
-                                .append_message(
+                                .append_message_as(
                                     conv_id,
                                     "assistant",
                                     &reply,
                                     persist_agent_id.as_deref(),
                                     None,
                                     None,
+                                    Tenancy::Unattributed, // row exists (stamped by chat_stream)
                                 )
                                 .await
                             {
@@ -5368,13 +5477,14 @@ async fn route_acp_stream(
                 // still needs a row so its structured parts (and thus the cowork
                 // context) survive a reload.
                 match persist_store
-                    .append_message(
+                    .append_message_as(
                         conv_id,
                         "assistant",
                         &reply,
                         persist_agent_id.as_deref(),
                         None,
                         None,
+                        Tenancy::Unattributed, // row exists (stamped by chat_stream)
                     )
                     .await
                 {

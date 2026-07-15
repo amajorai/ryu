@@ -1,0 +1,12 @@
+{
+  "title": "Media",
+  "description": "Media API endpoints.",
+  "pages": [
+    "search",
+    "generate_image",
+    "upload_media",
+    "serve_media",
+    "generate_video",
+    "poll_video_job"
+  ]
+}

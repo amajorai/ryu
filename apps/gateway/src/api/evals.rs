@@ -536,6 +536,14 @@ fn score_offline_deterministic(
             detail: format!("builtin detector '{detector}' not wired for offline scoring"),
             executed: false,
         }),
+        EvaluatorImpl::Wasm { .. } => Some(EvaluatorScore {
+            id: id.to_string(),
+            category: category.to_string(),
+            score: 0.0,
+            pass: false,
+            detail: "wasm policy evaluators run inline only (offline scoring not wired)".to_string(),
+            executed: false,
+        }),
         EvaluatorImpl::LlmJudge { .. } => None,
     }
 }

@@ -43,6 +43,7 @@ use tokio::time::timeout;
 
 use super::{ExecOutput, ExecSpec, Sandbox, SandboxCapabilities, WorkspaceId};
 use crate::sidecar::BoxFuture;
+use crate::win_process::NoWindow;
 
 // ── Configuration knobs ──────────────────────────────────────────────────────
 
@@ -90,7 +91,11 @@ pub async fn detect() -> DetectResult {
     let binary = binary();
     let deadline = detect_timeout();
 
-    let probe = timeout(deadline, Command::new(&binary).arg("--version").output()).await;
+    let probe = timeout(
+        deadline,
+        Command::new(&binary).arg("--version").no_window().output(),
+    )
+    .await;
 
     match probe {
         Err(_elapsed) => {
@@ -138,6 +143,7 @@ async fn create_sandbox(_caps: &SandboxCapabilities) -> Result<String> {
         .arg(lifetime())
         .arg("-o")
         .arg("json")
+        .no_window()
         .output()
         .await
         .map_err(|e| anyhow!("osb sandbox create failed: {e}"))?;
@@ -201,6 +207,7 @@ async fn run_in(id: &str, spec: &ExecSpec) -> Result<ExecOutput> {
     }
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
+    cmd.no_window();
 
     let stdin = spec.stdin.clone();
     let run = async move {
@@ -247,6 +254,7 @@ async fn delete_sandbox(id: &str) {
         .arg("sandbox")
         .arg("delete")
         .arg(id)
+        .no_window()
         .output()
         .await;
 }

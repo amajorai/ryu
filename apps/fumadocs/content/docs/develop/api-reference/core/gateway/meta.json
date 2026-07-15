@@ -2,11 +2,14 @@
   "title": "Gateway",
   "description": "Gateway config/status/audit (proxied).",
   "pages": [
+    "engine_concurrency",
     "gateway_audit",
     "gateway_get_config",
     "gateway_put_config",
     "gateway_run_evals",
+    "gateway_get_evaluators",
     "gateway_set_provider",
+    "gateway_restart",
     "gateway_status"
   ]
 }

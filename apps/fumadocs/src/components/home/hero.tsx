@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { RyuLogo } from "@/components/ryu-logo";
+import { AlphaBadge, isAlphaRealm } from "@/components/realm-alpha-badge";
 
 type Realm = {
   slug: string;
@@ -339,7 +340,10 @@ function RealmCard({ realm }: { realm: Realm }) {
       </div>
       <div className="flex flex-col gap-1">
         <h3 className="font-heading font-medium text-fd-foreground text-lg">
-          {realm.title}
+          <span className="inline-flex items-center gap-2">
+            {realm.title}
+            {isAlphaRealm(realm.slug) ? <AlphaBadge /> : null}
+          </span>
         </h3>
         <p className="text-fd-muted-foreground text-sm leading-relaxed">
           {realm.description}

@@ -24,6 +24,10 @@ const GRANT_STORAGE: &str = "storage:kv";
 const GRANT_RUN_AGENT: &str = "hook:run-agent";
 /// Grant required to call `host.spaces_*` (own Space documents).
 const GRANT_SPACES: &str = "spaces:docs";
+/// Grant required to call `host.finetune_*` (drive fine-tune runs). Owned by the
+/// `com.ryu.finetune` app; Core still owns the orchestration + job store, the app
+/// reaches it through this governed bridge.
+const GRANT_FINETUNE: &str = "finetune:runs";
 
 /// Bridges sandbox `host.*` calls for one plugin hook run.
 pub struct PluginHookBridge {
@@ -55,6 +59,13 @@ impl PluginHookBridge {
             | "spaces_update_doc"
             | "spaces_list_docs"
             | "spaces_delete_doc" => self.spaces(method, args).await,
+            "finetune_capability"
+            | "finetune_start"
+            | "finetune_list"
+            | "finetune_get"
+            | "finetune_cancel"
+            | "finetune_adapters"
+            | "finetune_merge" => self.finetune(method, args).await,
             other => err(format!("unknown host capability '{other}'")),
         }
     }
@@ -305,6 +316,66 @@ impl PluginHookBridge {
         }
     }
 
+    /// `host.finetune_*` — the `com.ryu.finetune` app drives fine-tune runs. Core
+    /// owns the orchestration, GPU gate, durable job store, and adapter→GGUF merge
+    /// (`crate::server::finetune`); the app reaches them through this governed
+    /// bridge (host holds the node token; the frame never does). Every arm delegates
+    /// to the SAME shared value fns the `/api/finetune/*` HTTP handlers use, so the
+    /// two surfaces never drift. Live progress is streamed separately over the
+    /// plugin-host streaming endpoint (`finetune.stream`), not here.
+    async fn finetune(&self, method: &str, args: Value) -> InvokeOutcome {
+        if !self.grants.contains(GRANT_FINETUNE) {
+            return err(format!(
+                "capability '{GRANT_FINETUNE}' not granted to plugin '{}'",
+                self.plugin_id
+            ));
+        }
+        use crate::server::finetune as ft;
+        let id = args
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        match method {
+            "finetune_capability" => ok(ft::capability_value(&self.state).await),
+            "finetune_adapters" => {
+                ok(json!({ "adapters": crate::finetune::adapters::load_present() }))
+            }
+            "finetune_list" => match ft::list_value(&self.state).await {
+                Ok(v) => ok(v),
+                Err(e) => err(e),
+            },
+            "finetune_start" => match ft::dispatch(&self.state, args).await {
+                Ok(v) => ok(v),
+                Err((_, body)) => err(status_error(&body)),
+            },
+            "finetune_merge" => match ft::merge_value(&self.state, args).await {
+                Ok(v) => ok(v),
+                Err((_, body)) => err(status_error(&body)),
+            },
+            "finetune_get" => {
+                if id.is_empty() {
+                    return err("host.finetune.get requires a non-empty 'id'".to_string());
+                }
+                match ft::get_value(&self.state, &id).await {
+                    Ok(v) => ok(v),
+                    Err((_, body)) => err(status_error(&body)),
+                }
+            }
+            "finetune_cancel" => {
+                if id.is_empty() {
+                    return err("host.finetune.cancel requires a non-empty 'id'".to_string());
+                }
+                match ft::cancel_value(&self.state, &id).await {
+                    Ok(v) => ok(v),
+                    Err((_, body)) => err(status_error(&body)),
+                }
+            }
+            _ => err(format!("unknown finetune method '{method}'")),
+        }
+    }
+
     /// Resolve the side-model id, swappable and never hardcoded to a remote
     /// provider: explicit `model` → preference `model_pref_key` → env
     /// `RYU_DEFAULT_LLM_MODEL` → the bundled local default.
@@ -363,6 +434,16 @@ fn ok(value: Value) -> InvokeOutcome {
     })
 }
 
+/// Flatten a `(StatusCode, Value)` error body from a shared finetune value fn into
+/// a single message string for the bridge's `err` outcome. Prefers the `error`
+/// field the handlers set; falls back to the whole JSON.
+fn status_error(body: &Value) -> String {
+    body.get("error")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| body.to_string())
+}
+
 /// A host error the hook can catch (rejects the awaited call).
 fn err(message: String) -> InvokeOutcome {
     InvokeOutcome::Result(ToolInvokeResult {
@@ -389,6 +470,15 @@ mod tests {
         assert_eq!(GRANT_STORAGE, "storage:kv");
         assert_eq!(GRANT_RUN_AGENT, "hook:run-agent");
         assert_eq!(GRANT_SPACES, "spaces:docs");
+        assert_eq!(GRANT_FINETUNE, "finetune:runs");
+    }
+
+    #[test]
+    fn finetune_gate_requires_grant() {
+        let g = grants(&["spaces:docs"]);
+        assert!(!g.contains(GRANT_FINETUNE));
+        let g = grants(&["finetune:runs"]);
+        assert!(g.contains(GRANT_FINETUNE));
     }
 
     #[test]

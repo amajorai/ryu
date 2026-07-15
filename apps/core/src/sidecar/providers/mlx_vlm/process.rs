@@ -15,6 +15,8 @@ use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
+use crate::win_process::NoWindow;
+
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 /// MLX-VLM's loopback port. 8084 is the next free slot in the 808x block
 /// (8080 = llama.cpp, 8081 = embeddings, 8082 = mlx-lm, 8083 = stable-diffusion).
@@ -72,6 +74,7 @@ impl MlxVlmProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false)
+            .no_window()
             .spawn()
             .context("spawning mlx-vlm server")?;
 

@@ -1,0 +1,14 @@
+{
+  "title": "Recipes",
+  "description": "Recipes API endpoints.",
+  "pages": [
+    "list_recipes",
+    "save_recipe",
+    "record_start",
+    "record_status",
+    "record_stop",
+    "get_recipe",
+    "delete_recipe",
+    "run_recipe"
+  ]
+}

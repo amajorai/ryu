@@ -7,6 +7,12 @@
     "skills_catalog_list",
     "skills_catalog_detail",
     "skills_catalog_install",
-    "skills_install_from_source"
+    "skills_install_from_source",
+    "skills_updates",
+    "update_skill_handler",
+    "get_skill_source",
+    "list_skill_versions_handler",
+    "get_skill_version_handler",
+    "restore_skill_version_handler"
   ]
 }

@@ -3,6 +3,7 @@
   "description": "Per-run git worktrees.",
   "pages": [
     "worktree_apply_handler",
-    "worktree_diff_handler"
+    "worktree_diff_handler",
+    "worktree_status_handler"
   ]
 }

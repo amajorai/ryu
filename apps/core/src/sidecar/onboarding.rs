@@ -6,6 +6,7 @@ use tokio::sync::RwLock;
 
 use crate::registry::ModelRegistry;
 use crate::sidecar::adapters::acp::binary_in_path;
+use crate::win_process::NoWindow;
 use crate::sidecar::providers::llamacpp::LlamaCppDownloader;
 use crate::sidecar::providers::outetts::OuteTtsDownloader;
 use crate::sidecar::providers::whispercpp::WhisperCppDownloader;
@@ -262,6 +263,7 @@ impl SetupManager {
             .args(&args)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
+            .no_window()
             .status()
             .await;
 
@@ -334,6 +336,7 @@ impl SetupManager {
             .current_dir(&pi_dir)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
+            .no_window()
             .status()
             .await;
 

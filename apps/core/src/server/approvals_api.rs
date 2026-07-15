@@ -33,6 +33,13 @@ fn parse_status(s: &str) -> Option<ApprovalStatus> {
 }
 
 /// `GET /api/approvals?status=pending` — list approval requests, newest first.
+#[utoipa::path(
+    get,
+    path = "/api/approvals",
+    tag = "Approvals",
+    summary = "list approval requests, newest first.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_approvals(
     State(state): State<ServerState>,
     Query(q): Query<ListQuery>,
@@ -45,6 +52,14 @@ pub async fn list_approvals(
 }
 
 /// `GET /api/approvals/:id` — fetch a single request.
+#[utoipa::path(
+    get,
+    path = "/api/approvals/{id}",
+    tag = "Approvals",
+    summary = "fetch a single request.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_approval(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -89,6 +104,15 @@ async fn decide(
 }
 
 /// `POST /api/approvals/:id/approve` — approve a request (runs its action).
+#[utoipa::path(
+    post,
+    path = "/api/approvals/{id}/approve",
+    tag = "Approvals",
+    summary = "approve a request (runs its action).",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn approve_approval(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -99,6 +123,15 @@ pub async fn approve_approval(
 }
 
 /// `POST /api/approvals/:id/reject` — reject a request (fails a workflow gate).
+#[utoipa::path(
+    post,
+    path = "/api/approvals/{id}/reject",
+    tag = "Approvals",
+    summary = "reject a request (fails a workflow gate).",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn reject_approval(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -110,6 +143,13 @@ pub async fn reject_approval(
 
 /// `GET /api/approvals/mode` — the global approval mode (Layer B): `off` /
 /// `smart` / `manual`. `off` is the default (gates nothing).
+#[utoipa::path(
+    get,
+    path = "/api/approvals/mode",
+    tag = "Approvals",
+    summary = "the global approval mode (Layer B): `off` /",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_mode(State(state): State<ServerState>) -> Json<serde_json::Value> {
     let mode = state.approvals.approval_mode().await;
     Json(json!({ "mode": mode.as_str() }))
@@ -122,6 +162,14 @@ pub struct SetModeBody {
 }
 
 /// `PUT /api/approvals/mode` — set the global approval mode.
+#[utoipa::path(
+    put,
+    path = "/api/approvals/mode",
+    tag = "Approvals",
+    summary = "set the global approval mode.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn set_mode(
     State(state): State<ServerState>,
     Json(body): Json<SetModeBody>,
@@ -145,6 +193,13 @@ pub async fn set_mode(
 }
 
 /// `GET /api/approvals/events` — SSE feed of approval events (created / decided).
+#[utoipa::path(
+    get,
+    path = "/api/approvals/events",
+    tag = "Approvals",
+    summary = "SSE feed of approval events (created / decided).",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn approval_events(
     State(state): State<ServerState>,
 ) -> axum::response::sse::Sse<

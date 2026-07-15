@@ -15,6 +15,8 @@ use std::{path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
+use crate::win_process::NoWindow;
+
 /// Default context length used for the estimate when the caller doesn't pin one.
 /// KV-cache (and thus fit/speed) scales with context, so a representative value
 /// keeps the estimate honest without the caller having to know the model's max.
@@ -162,6 +164,7 @@ async fn run_plan(bin: &PathBuf, name: &str, context: u32, quant: Option<&str>) 
             if let Some(q) = quant.as_deref() {
                 cmd.arg("--quant").arg(q);
             }
+            cmd.no_window();
             cmd.output()
         }),
     )

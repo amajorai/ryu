@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::win_process::NoWindow;
+
 use uuid::Uuid;
 
 /// A live per-run worktree. Created by [`create_worktree`] and cleaned up when
@@ -69,6 +71,7 @@ fn branch_exists(repo_path: &Path, branch: &str) -> bool {
         .args(["show-ref", "--verify", "--quiet"])
         .arg(format!("refs/heads/{branch}"))
         .current_dir(repo_path)
+        .no_window()
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -100,6 +103,7 @@ pub fn create_worktree_in(
     let base_hash = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(repo_path)
+        .no_window()
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -117,6 +121,7 @@ pub fn create_worktree_in(
         .arg(&worktree_path)
         .arg("HEAD")
         .current_dir(repo_path)
+        .no_window()
         .output()
         .map_err(|e| anyhow::anyhow!("git worktree add: {e}"))?;
 
@@ -149,6 +154,7 @@ fn remove_worktree_sync(repo_root: &Path, worktree_path: &Path, branch: &str) {
         .args(["worktree", "remove", "--force"])
         .arg(worktree_path)
         .current_dir(repo_root)
+        .no_window()
         .output();
 
     match rm {
@@ -165,6 +171,7 @@ fn remove_worktree_sync(repo_root: &Path, worktree_path: &Path, branch: &str) {
     let prune = Command::new("git")
         .args(["worktree", "prune"])
         .current_dir(repo_root)
+        .no_window()
         .output();
     if let Err(e) = prune {
         tracing::warn!("git worktree prune exec error: {e}");
@@ -173,6 +180,7 @@ fn remove_worktree_sync(repo_root: &Path, worktree_path: &Path, branch: &str) {
     let del_branch = Command::new("git")
         .args(["branch", "-D", branch])
         .current_dir(repo_root)
+        .no_window()
         .output();
 
     match del_branch {
@@ -194,6 +202,7 @@ pub fn is_git_repo(path: &Path) -> bool {
         .args(["-C"])
         .arg(path)
         .args(["rev-parse", "--is-inside-work-tree"])
+        .no_window()
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -205,6 +214,7 @@ pub fn find_git_root(path: &Path) -> Option<PathBuf> {
         .args(["-C"])
         .arg(path)
         .args(["rev-parse", "--show-toplevel"])
+        .no_window()
         .output()
         .ok()?;
     if output.status.success() {
@@ -284,6 +294,7 @@ pub fn worktree_diff(worktree_path: &Path, base_ref: &str) -> WorktreeDiff {
     let _ = Command::new("git")
         .args(["add", "-A"])
         .current_dir(cwd)
+        .no_window()
         .output();
 
     // 1. Unified diff: the full change set — committed commits on this branch
@@ -370,6 +381,7 @@ fn run_git_output(cwd: &str, args: &[&str]) -> Option<String> {
     let out = Command::new("git")
         .args(args)
         .current_dir(cwd)
+        .no_window()
         .output()
         .ok()?;
     if out.status.success() {
@@ -454,12 +466,14 @@ pub fn apply_worktree(
     let _ = Command::new("git")
         .args(["add", "-A"])
         .current_dir(wt)
+        .no_window()
         .output();
 
     // Check if there is anything to commit.
     let status = Command::new("git")
         .args(["status", "--porcelain"])
         .current_dir(wt)
+        .no_window()
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -469,6 +483,7 @@ pub fn apply_worktree(
         let commit_out = Command::new("git")
             .args(["commit", "-m", message])
             .current_dir(wt)
+            .no_window()
             .output();
 
         if let Ok(out) = commit_out {
@@ -484,6 +499,7 @@ pub fn apply_worktree(
         Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
             .current_dir(repo)
+            .no_window()
             .output()
             .ok()
             .filter(|o| o.status.success())
@@ -497,6 +513,7 @@ pub fn apply_worktree(
             let merge_out = Command::new("git")
                 .args(["merge", "--no-ff", &guard.branch, "-m", message])
                 .current_dir(repo)
+                .no_window()
                 .output();
 
             match merge_out {
@@ -504,6 +521,7 @@ pub fn apply_worktree(
                     let commit_sha = Command::new("git")
                         .args(["rev-parse", "HEAD"])
                         .current_dir(repo)
+                        .no_window()
                         .output()
                         .ok()
                         .filter(|o| o.status.success())
@@ -523,6 +541,7 @@ pub fn apply_worktree(
                     let conflicted = Command::new("git")
                         .args(["diff", "--name-only", "--diff-filter=U"])
                         .current_dir(repo)
+                        .no_window()
                         .output()
                         .ok()
                         .filter(|o| o.status.success())
@@ -539,6 +558,7 @@ pub fn apply_worktree(
                     let _ = Command::new("git")
                         .args(["merge", "--abort"])
                         .current_dir(repo)
+                        .no_window()
                         .output();
 
                     Err(ConflictError {
@@ -559,6 +579,7 @@ pub fn apply_worktree(
             let push_out = Command::new("git")
                 .args(["push", "-u", "origin", &guard.branch])
                 .current_dir(wt)
+                .no_window()
                 .output();
 
             if let Ok(ref out) = push_out {
@@ -584,6 +605,7 @@ pub fn apply_worktree(
                     "",
                 ])
                 .current_dir(repo)
+                .no_window()
                 .output();
 
             match gh_out {

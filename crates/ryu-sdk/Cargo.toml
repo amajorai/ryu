@@ -1,6 +1,6 @@
 [package]
 name = "ryu-sdk"
-version = "0.0.2"
+version = "0.0.4"
 edition = "2021"
 description = "Ryu developer SDK core — the shared Rust kernel (manifest model, gateway egress rules, gateway-mandatory model client) that every language binding builds on."
 license = "Apache-2.0"

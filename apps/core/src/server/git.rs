@@ -11,6 +11,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
+use crate::win_process::NoWindow;
+
 #[derive(Deserialize)]
 pub struct GitStatusQuery {
     cwd: Option<String>,
@@ -45,6 +47,13 @@ fn default_include_unstaged() -> bool {
 /// Returns `{is_repo:false}` (HTTP 200) for any non-repo or missing folder so
 /// the desktop header can distinguish "not a repo" from "Core unreachable."
 /// Tracks ahead/behind relative to the upstream branch when one is configured.
+#[utoipa::path(
+    get,
+    path = "/api/git/status",
+    tag = "Git",
+    summary = "API endpoint",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn git_status(Query(params): Query<HashMap<String, String>>) -> axum::response::Response {
     let cwd = match params.get("cwd").filter(|s| !s.is_empty()) {
         Some(c) => c.clone(),
@@ -111,6 +120,7 @@ fn run_git(cwd: &str, args: &[&str]) -> Option<String> {
     let out = Command::new("git")
         .args(args)
         .current_dir(cwd)
+        .no_window()
         .output()
         .ok()?;
     if out.status.success() {
@@ -185,6 +195,13 @@ struct GitBranches {
 /// Lists local branches plus the currently checked-out one so the desktop's
 /// composer branch selector can offer a switch. Returns `{is_repo:false}` (HTTP
 /// 200) for any non-repo or missing folder, matching `git_status` semantics.
+#[utoipa::path(
+    get,
+    path = "/api/git/branches",
+    tag = "Git",
+    summary = "API endpoint",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn git_branches(
     Query(params): Query<HashMap<String, String>>,
 ) -> axum::response::Response {
@@ -247,6 +264,14 @@ fn list_branches(cwd: &str) -> GitBranches {
 /// The branch is validated against the actual branch list to reject typos and
 /// argument injection. On failure the raw git stderr is returned (HTTP 409) so
 /// the desktop can surface it (e.g. uncommitted-changes conflicts).
+#[utoipa::path(
+    post,
+    path = "/api/git/checkout",
+    tag = "Git",
+    summary = "{ cwd, branch }",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn git_checkout(Json(body): Json<GitCheckoutBody>) -> axum::response::Response {
     if body.cwd.is_empty() || body.branch.is_empty() {
         return (
@@ -300,6 +325,7 @@ fn checkout_branch(cwd: &str, branch: &str) -> Result<String, String> {
     let out = Command::new("git")
         .args(["switch", branch])
         .current_dir(cwd)
+        .no_window()
         .output()
         .map_err(|e| format!("failed to run git: {e}"))?;
 
@@ -317,6 +343,14 @@ fn checkout_branch(cwd: &str, branch: &str) -> Result<String, String> {
 /// server-side: `git switch -c` refuses to carry a dirty index into a new branch
 /// only on conflict, so we guard explicitly and return the raw git stderr (HTTP
 /// 409) on any failure (e.g. the branch already exists) for the desktop to show.
+#[utoipa::path(
+    post,
+    path = "/api/git/create-branch",
+    tag = "Git",
+    summary = "{ cwd, branch }",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn git_create_branch(Json(body): Json<GitCheckoutBody>) -> axum::response::Response {
     if body.cwd.is_empty() || body.branch.is_empty() {
         return (
@@ -374,6 +408,7 @@ fn create_branch(cwd: &str, branch: &str) -> Result<String, String> {
     let out = Command::new("git")
         .args(["switch", "-c", name])
         .current_dir(cwd)
+        .no_window()
         .output()
         .map_err(|e| format!("failed to run git: {e}"))?;
 
@@ -390,6 +425,14 @@ fn create_branch(cwd: &str, branch: &str) -> Result<String, String> {
 /// Gateway is not on the raw-git path). Returns `{ success, committed, pushed,
 /// commit, error? }` so the desktop pinned-summary popover can report exactly
 /// what happened.
+#[utoipa::path(
+    post,
+    path = "/api/git/commit-push",
+    tag = "Git",
+    summary = "{ cwd, message?, action?, include_unstaged? }",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn git_commit_push(Json(body): Json<GitCommitPushBody>) -> axum::response::Response {
     if body.cwd.is_empty() {
         return (
@@ -474,6 +517,7 @@ fn run_git_action(
         let add = Command::new("git")
             .args(["add", "-A"])
             .current_dir(cwd)
+            .no_window()
             .output()
             .map_err(|e| format!("failed to run git: {e}"))?;
         if !add.status.success() {
@@ -500,6 +544,7 @@ fn run_git_action(
         let commit = Command::new("git")
             .args(["commit", "-m", message])
             .current_dir(cwd)
+            .no_window()
             .output()
             .map_err(|e| format!("failed to run git: {e}"))?;
         if has_staged && commit.status.success() {
@@ -516,6 +561,7 @@ fn run_git_action(
         let push = Command::new("git")
             .args(["push"])
             .current_dir(cwd)
+            .no_window()
             .output()
             .map_err(|e| format!("failed to run git: {e}"))?;
         if !push.status.success() {
@@ -550,6 +596,14 @@ pub struct NewFolderBody {
 /// `name` is validated to a single path segment — no separators, `..`, or control
 /// characters — so it can never escape the Ryu projects root. Returns HTTP 409
 /// when a folder of that name already exists (so the picker asks for another).
+#[utoipa::path(
+    post,
+    path = "/api/workspace/new-folder",
+    tag = "Git",
+    summary = "{ name }",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn create_project_folder(Json(body): Json<NewFolderBody>) -> axum::response::Response {
     let name = body.name.trim().to_string();
     if let Err(msg) = validate_folder_name(&name) {
@@ -598,6 +652,13 @@ pub struct ListDirQuery {
 /// contents. `~` is expanded; a missing/blank path defaults to the home directory.
 /// Returns `{ path, parent, home, entries: [{ name, path }] }` (directories only,
 /// sorted, hidden entries excluded).
+#[utoipa::path(
+    get,
+    path = "/api/workspace/list",
+    tag = "Git",
+    summary = "list the sub-directories of a folder ON",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_directory(Query(q): Query<ListDirQuery>) -> axum::response::Response {
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"));
     let raw = q.path.unwrap_or_default();

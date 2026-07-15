@@ -47,6 +47,13 @@ use crate::meetings::MeetingSource;
 /// `GET /api/hardware/ws` — upgrade to the RHP WebSocket. The Bearer device token
 /// rides on the upgrade request headers; it is captured here and verified inside
 /// the socket task once `hello` names the device.
+#[utoipa::path(
+    get,
+    path = "/api/hardware/ws",
+    tag = "Hardware",
+    summary = "upgrade to the RHP WebSocket. The Bearer device token",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn hardware_ws(
     ws: WebSocketUpgrade,
     State(state): State<ServerState>,

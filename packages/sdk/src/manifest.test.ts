@@ -439,3 +439,172 @@ describe("AppBuilder", () => {
 		).toThrow(/id/);
 	});
 });
+
+// ── requires / targets (plugin-to-plugin dependencies + surface gating) ───────
+//
+// These pin the SDK schema to Core's `PluginManifest.requires` / `.targets`
+// (`apps/core/src/plugin_manifest/mod.rs`). The load-bearing property is that zod
+// `z.object()` STRIPS unknown keys: without these fields in the schema, `ryu pack`
+// / `ryu publish` (which return `PluginManifestSchema.safeParse(...).data`) would
+// silently delete a plugin's dependencies BEFORE the manifest is signed. So every
+// case below asserts the field SURVIVES the parse, not merely that it parses.
+
+describe("requires / targets", () => {
+	it("keeps a manifest with NEITHER requires nor targets valid (all 37 shipped plugins)", () => {
+		const parsed = PluginManifestSchema.safeParse({
+			id: "com.example.legacy",
+			name: "Legacy",
+			version: "1.0.0",
+			runnables: [],
+		});
+
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			return;
+		}
+		// Absent `requires` = NO dependencies (never an empty-object default, so the
+		// key stays off the wire exactly like Core's `Option<Requires>`).
+		expect(parsed.data.requires).toBeUndefined();
+		// Absent `targets` = EVERY surface. It must never be read as "hidden", or
+		// every manifest predating the field would vanish from every listing.
+		expect(parsed.data.targets).toEqual([]);
+	});
+
+	it("round-trips `requires` through the schema without stripping it", () => {
+		const manifest = new PluginBuilder()
+			.id("com.example.meetings")
+			.name("Meetings")
+			.version("1.0.0")
+			.dependsOn("com.ryu.spaces", "1.2.0")
+			.dependsOn("com.ryu.voice")
+			.requiredGrant("spaces:docs")
+			.build();
+
+		// Survives the builder…
+		expect(manifest.requires?.apps).toEqual([
+			{ id: "com.ryu.spaces", min_version: "1.2.0" },
+			{ id: "com.ryu.voice" },
+		]);
+		expect(manifest.requires?.grants).toEqual(["spaces:docs"]);
+
+		// …and the JSON round-trip the CLI applies before signing.
+		const parsed = PluginManifestSchema.safeParse(
+			JSON.parse(JSON.stringify(manifest))
+		);
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			return;
+		}
+		expect(parsed.data.requires?.apps).toHaveLength(2);
+		// snake_case on the wire — Core's `AppDependency.min_version` declares no
+		// serde rename, so a camelCase `minVersion` here would be silently dropped.
+		expect(parsed.data.requires?.apps[0]?.min_version).toBe("1.2.0");
+		expect(parsed.data.requires?.apps[1]?.min_version).toBeUndefined();
+		expect(parsed.data.requires?.grants).toEqual(["spaces:docs"]);
+	});
+
+	it("defaults the two `requires` members so a partial block parses", () => {
+		const parsed = PluginManifestSchema.safeParse({
+			id: "com.example.partial",
+			name: "Partial",
+			version: "1.0.0",
+			runnables: [],
+			requires: { apps: [{ id: "com.ryu.spaces" }] },
+		});
+
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			return;
+		}
+		expect(parsed.data.requires?.grants).toEqual([]);
+	});
+
+	it("round-trips `targets` through the schema without stripping it", () => {
+		const manifest = new PluginBuilder()
+			.id("com.example.desktop-only")
+			.name("Desktop Only")
+			.version("1.0.0")
+			.target("desktop")
+			.target("island")
+			.build();
+
+		expect(manifest.targets).toEqual(["desktop", "island"]);
+
+		const parsed = PluginManifestSchema.safeParse(
+			JSON.parse(JSON.stringify(manifest))
+		);
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			return;
+		}
+		expect(parsed.data.targets).toEqual(["desktop", "island"]);
+	});
+
+	it("accepts every one of Core's eight kebab-case surface tokens", () => {
+		const parsed = PluginManifestSchema.safeParse({
+			id: "com.example.everywhere",
+			name: "Everywhere",
+			version: "1.0.0",
+			runnables: [],
+			targets: [
+				"gateway",
+				"core",
+				"desktop",
+				"island",
+				"mobile",
+				"extension",
+				"web",
+				"cli",
+			],
+		});
+
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) {
+			return;
+		}
+		expect(parsed.data.targets).toHaveLength(8);
+	});
+
+	it("rejects a surface token Core's Surface enum does not define", () => {
+		const parsed = PluginManifestSchema.safeParse({
+			id: "com.example.bad-target",
+			name: "Bad Target",
+			version: "1.0.0",
+			runnables: [],
+			// Core's `Surface` is kebab-case and has no `tauri` variant, so serde
+			// would reject the whole manifest at load. Catch it at authoring time.
+			targets: ["tauri"],
+		});
+
+		expect(parsed.success).toBe(false);
+	});
+
+	it("carries requires + targets through defineApp (Ryu Apps)", () => {
+		const manifest = defineApp({
+			id: "com.example.dep-app",
+			title: "Dep App",
+			version: "1.0.0",
+			slug: "dep-app",
+			uiEntry: "src/dep-app.tsx",
+			tools: [{ name: "render", description: "Render" }],
+			requires: { apps: [{ id: "com.ryu.spaces", min_version: "1.0.0" }] },
+			targets: ["desktop"],
+		});
+
+		expect(manifest.requires?.apps[0]?.id).toBe("com.ryu.spaces");
+		expect(manifest.requires?.grants).toEqual([]);
+		expect(manifest.targets).toEqual(["desktop"]);
+
+		// An app that declares neither keeps the no-dependency / all-surface default.
+		const plain = defineApp({
+			id: "com.example.plain-app",
+			title: "Plain App",
+			version: "1.0.0",
+			slug: "plain-app",
+			uiEntry: "src/plain-app.tsx",
+			tools: [{ name: "render", description: "Render" }],
+		});
+		expect(plain.requires).toBeUndefined();
+		expect(plain.targets).toEqual([]);
+	});
+});

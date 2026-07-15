@@ -46,6 +46,133 @@ use tokio::sync::RwLock as TokioRwLock;
 use client::{McpStdioCommand, McpTool};
 
 use crate::plugin_manifest::PluginManifest;
+use crate::server::conversations::{ConversationStore, Tenancy};
+
+/// The **server-derived principal an in-process agent tool call runs on behalf of**
+/// — the thing that makes the conversation ACL bite on the agent plane.
+///
+/// An agent turn has no HTTP request and therefore no `VerifiedCaller`, which is why
+/// the `threads` / `search_conversations` tools were completely ungated: on an
+/// org-bound node Bob could tell his agent "search my past conversations" and it
+/// would print Alice's chats into Bob's thread, defeating the HTTP gate in one hop.
+///
+/// But an agent turn ALWAYS runs on behalf of some **host conversation**, and that
+/// conversation now carries an owner (see the [`Tenancy`] choke point). That owner is
+/// the tool call's principal. **An agent must never be able to read what its
+/// principal cannot read.**
+///
+/// Deliberately DISTINCT from the `user_id: Option<&str>` argument that already flows
+/// through [`McpRegistry::call_tool_with_identity`]. That one is fed from
+/// `body.user_id` on the HTTP tool-exec callback (`call_mcp_tool`) — **client-supplied
+/// and therefore spoofable**. It is fine for Composio entity selection and audit (its
+/// actual purpose); it must never become an authorization principal, which is why this
+/// is a separate, server-derived type that cannot be confused with it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolPrincipal {
+    /// Node UNBOUND (personal): no tenancy enforcement. There is exactly one
+    /// principal and `RYU_TOKEN` is the boundary — byte-identical to the pre-gate
+    /// behaviour, mirroring `enforce_permission`'s unbound rule.
+    Unrestricted,
+    /// Node ORG-BOUND, principal resolved from the host conversation's owner.
+    Owned {
+        user_id: String,
+        org_id: Option<String>,
+    },
+    /// Node ORG-BOUND but no principal resolves (no host conversation — an ephemeral
+    /// un-pooled ACP instance, a workflow/monitor/quest system call, the
+    /// openai-compat tool-exec callback — or a host conversation that is itself
+    /// untenanted). **FAIL CLOSED**: never fall back to "see everything".
+    Unresolved,
+}
+
+impl ToolPrincipal {
+    /// Resolve the principal for one tool call, **fresh at dispatch time** — never
+    /// cached when the MCP bridge is built (the bridge is built once per ACP
+    /// instance and reused across turns, so a cached caller would go stale, and a
+    /// tenancy claim landing after the build would be missed).
+    pub async fn resolve(store: &ConversationStore, host_conversation_id: Option<&str>) -> Self {
+        Self::resolve_at(
+            store,
+            host_conversation_id,
+            crate::sidecar::control_plane::registered_org()
+                .map(|o| o.id)
+                .as_deref(),
+        )
+        .await
+    }
+
+    /// [`Self::resolve`] with THIS node's org binding passed in — the pure form the
+    /// unit tests drive (they cannot register an org). Mirrors
+    /// `server::require_resource_read_at`.
+    pub async fn resolve_at(
+        store: &ConversationStore,
+        host_conversation_id: Option<&str>,
+        node_org: Option<&str>,
+    ) -> Self {
+        if node_org.is_none() {
+            return Self::Unrestricted;
+        }
+        let Some(cid) = host_conversation_id.filter(|s| !s.is_empty()) else {
+            return Self::Unresolved;
+        };
+        match store.get_access_meta(cid).await {
+            Ok(Some(meta)) => match meta.owner_user_id {
+                Some(user_id) => Self::Owned {
+                    user_id,
+                    org_id: meta.org_id,
+                },
+                None => Self::Unresolved,
+            },
+            _ => Self::Unresolved,
+        }
+    }
+
+    /// The `(user_id, org_id, node_bound)` triple
+    /// [`ConversationStore::visible_conversation_ids`] takes — i.e. the SAME
+    /// `TENANCY_VISIBLE_PREDICATE` the HTTP plane filters with, so the two planes can
+    /// never drift apart. `Unresolved` yields `(None, None, true)`: bound node,
+    /// anonymous ⇒ the predicate matches nothing.
+    pub fn filter_args(&self) -> (Option<&str>, Option<&str>, bool) {
+        match self {
+            Self::Unrestricted => (None, None, false),
+            Self::Owned { user_id, org_id } => (Some(user_id.as_str()), org_id.as_deref(), true),
+            Self::Unresolved => (None, None, true),
+        }
+    }
+
+    /// Bound node with no resolvable principal ⇒ the tool must refuse.
+    pub fn is_unresolved(&self) -> bool {
+        matches!(self, Self::Unresolved)
+    }
+
+    /// The [`Tenancy`] a conversation CREATED by this tool call is born with. This is
+    /// the coupling that stops a coordinator locking itself out of the worker threads
+    /// its own agent created (`create_thread` / `fork_thread`).
+    pub fn tenancy(&self) -> Tenancy {
+        match self {
+            Self::Owned { user_id, org_id } => Tenancy::Owned {
+                user_id: user_id.clone(),
+                org_id: org_id.clone(),
+            },
+            Self::Unrestricted | Self::Unresolved => Tenancy::Unattributed,
+        }
+    }
+
+    /// Whether this principal OWNS `conversation_id` — the WRITE gate for the mutating
+    /// thread tools. Deliberately **strict owner-match**, not `can_access`: an
+    /// org-visible thread must NOT be writable by a colleague's agent. Fail-closed
+    /// beats a role model the store cannot see.
+    pub async fn owns(&self, store: &ConversationStore, conversation_id: &str) -> bool {
+        match self {
+            Self::Unrestricted => true,
+            Self::Unresolved => false,
+            Self::Owned { user_id, .. } => matches!(
+                store.get_access_meta(conversation_id).await,
+                Ok(Some(meta)) if meta.owner_user_id.as_deref() == Some(user_id.as_str())
+            ),
+        }
+    }
+}
 
 tokio::task_local! {
     /// Set while a tool-use hook runs, so a hook that itself triggers a tool call
@@ -321,6 +448,85 @@ impl WidgetBinding {
     }
 }
 
+/// The permission grant a plugin must declare (and be enabled) for a tool it
+/// contributes to auto-promote a sandboxed widget into chat.
+///
+/// This is the explicit consent that closes the implicit-trust gap: before, ANY
+/// enabled MCP server whose tool advertised an `outputTemplate` had its widget
+/// promoted with no per-app opt-in. Now the owning plugin manifest must hold
+/// this grant. Built-in Ryu Apps declare it in their fixtures; a third-party MCP
+/// server must have been granted it. Validated the same way as any other grant
+/// (it is on the Gateway's grant allowlist), and gated the same way the app-tool
+/// backend resolver gates on `permission_grants` for enabled plugins.
+pub const WIDGET_RENDER_GRANT: &str = "widget:render";
+
+/// The `category` a synthesized MCP-server plugin record carries (set by
+/// `synthesize_mcp_manifest`). It is the SINGLE marker that distinguishes a
+/// governance record standing in for an installed MCP server from an ordinary
+/// plugin, and it gates security-relevant behaviour in several places:
+///
+/// - the widget-promotion **fail-CLOSED** join (a recorded-but-undeclared widget
+///   tool of an enabled MCP server is denied, not fail-open — see
+///   [`McpRegistry::widget_contribution`]);
+/// - the `mcp.json` enable/disable/remove sync on the plugin lifecycle
+///   (`activate_plugin` / `deactivate_plugin` / the uninstall handler).
+///
+/// One const, referenced everywhere: a typo in any one site would silently
+/// fail-open a widget or strand the spawn toggle, so there is exactly one string.
+/// No built-in fixture sets a `category`, so `Some(MCP_SERVER_CATEGORY)` is an
+/// unambiguous discriminator for synth MCP records.
+pub const MCP_SERVER_CATEGORY: &str = "MCP Server";
+
+/// The outcome of the unified widget-promotion decision.
+///
+/// DEDUP: the single source of record for *whether* a tool may render a widget
+/// is the plugin manifest `contributes.widgets[]` allowlist joined to the live
+/// enabled/grant state (see [`McpRegistry::resolve_widget_promotion`]). The
+/// binding DETAIL (template uri, labels) is fed in from the `_meta`/in-process
+/// apps discovery via [`McpRegistry::widget_binding`] — one decision path, with
+/// discovery feeding it, never a parallel promotion path.
+pub enum WidgetPromotion {
+    /// Promote — carries the resolved binding detail.
+    Allow(WidgetBinding),
+    /// An enabled plugin declares this widget but lacks the `widget:render`
+    /// grant. The tool's result is delivered as text only.
+    DeniedNoGrant { plugin_id: String },
+    /// A plugin declares this widget but its lifecycle record is disabled.
+    DeniedDisabled { plugin_id: String },
+    /// An enabled **MCP-server** plugin record owns this tool's server
+    /// namespace, but the tool_id is NOT declared in that record's
+    /// `contributes.widgets`. A recorded server that never declared/consented to
+    /// this specific widget is fail-CLOSED (text only) — closing the
+    /// implicit-trust hole where any enabled MCP server whose tool advertised an
+    /// `outputTemplate` had its HTML auto-promoted with no per-widget consent.
+    DeniedUndeclared { plugin_id: String },
+    /// The tool renders no widget at all.
+    None,
+}
+
+/// The manifest-side state of a tool's widget contribution, resolved from the
+/// enabled/grant state of the plugin that declares it in `contributes.widgets`.
+enum WidgetContributionState {
+    /// An enabled plugin declares this tool_id and holds the `widget:render` grant.
+    EnabledGranted,
+    /// An enabled plugin declares this tool_id but does NOT hold the grant.
+    EnabledUngranted { plugin_id: String },
+    /// A plugin declares this tool_id but its record is disabled.
+    Disabled { plugin_id: String },
+    /// An enabled **synth MCP-server** record (`category == MCP_SERVER_CATEGORY`,
+    /// `id == server`) owns this tool's server namespace, but no
+    /// `contributes.widgets` entry declares the tool_id. Recorded governance +
+    /// undeclared widget ⇒ fail CLOSED (the widget:render gate is meaningful for
+    /// the actor it targets — an installed third-party MCP server).
+    RecordedUndeclared { plugin_id: String },
+    /// No plugin declares this tool_id AND no synth MCP record owns its server.
+    /// Either a genuinely record-less legacy external MCP server (fail-open
+    /// delegate / back-compat), a manifest present but not yet recorded (protects
+    /// built-ins from a missing-record anomaly), or the governance context is not
+    /// wired (tests / CLI / bare registry). All fail OPEN.
+    Unrecorded,
+}
+
 /// A prewarmed widget HTML resource resolved from an MCP server's
 /// `resources/read` (or the in-process apps provider), cached per server.
 #[derive(Debug, Clone, Serialize)]
@@ -369,6 +575,21 @@ const APP_TOOL_SERVER: &str = "app";
 
 /// Id prefix for app-registered tools (`APP_TOOL_SERVER` + `TOOL_ID_SEP`).
 const APP_TOOL_PREFIX: &str = "app__";
+
+/// A plugin app tool resolved to its dispatch-ready backend + the owning plugin's
+/// grant set. Produced by [`McpRegistry::resolve_app_tool_backend`] from the LIVE
+/// enabled-manifest set — mirroring `plugin_host::collect_enabled_hooks`, which
+/// likewise sources grants from `manifest.permission_grants` filtered to enabled
+/// plugins (so it diverges from `record.approved_grants` only under per-grant
+/// revocation, an accepted minimum-viable match-hooks choice).
+struct ResolvedAppTool {
+    /// How this tool runs (`alias` re-enter | `inline_deno` sandbox | `http` proxy).
+    backend: crate::plugin_manifest::schema::ToolBackend,
+    /// The owning plugin's granted capabilities (gates `host.*` + http egress).
+    grants: std::collections::HashSet<String>,
+    /// The owning plugin id (sandbox storage owner + audit attribution).
+    plugin_id: String,
+}
 
 /// The config-driven MCP server registry. Cheap to clone-share via `Arc`.
 ///
@@ -1045,6 +1266,187 @@ impl McpRegistry {
             .and_then(|t| t.widget)
     }
 
+    /// Resolve the unified widget-promotion decision for `tool_id` (D-dedup + the
+    /// `widget:render` grant gate).
+    ///
+    /// This is the SINGLE promotion decision path both emit planes share (via
+    /// [`crate::sidecar::adapters::mcp_bridge::build_widget_event`]). It composes
+    /// two things that used to run as separate concerns:
+    ///
+    /// 1. **Detail** — the binding (template uri, labels, `widget_accessible`) is
+    ///    resolved from the in-process apps provider or the live `_meta`
+    ///    discovery via [`Self::widget_binding`]. No binding ⇒ no widget.
+    /// 2. **Decision** — whether the tool may promote is decided ONLY by the
+    ///    plugin manifest `contributes.widgets[]` allowlist joined to the owning
+    ///    plugin's enabled + `widget:render` grant state (see
+    ///    [`Self::widget_contribution`]). The `_meta`/apps discovery no longer
+    ///    *authorises* promotion on its own; it only supplies the detail the
+    ///    manifest decision consumes.
+    pub async fn resolve_widget_promotion(&self, tool_id: &str) -> WidgetPromotion {
+        let Some(binding) = self.widget_binding(tool_id).await else {
+            return WidgetPromotion::None;
+        };
+        match self.widget_contribution(tool_id).await {
+            WidgetContributionState::EnabledGranted | WidgetContributionState::Unrecorded => {
+                WidgetPromotion::Allow(binding)
+            }
+            WidgetContributionState::EnabledUngranted { plugin_id } => {
+                WidgetPromotion::DeniedNoGrant { plugin_id }
+            }
+            WidgetContributionState::Disabled { plugin_id } => {
+                WidgetPromotion::DeniedDisabled { plugin_id }
+            }
+            WidgetContributionState::RecordedUndeclared { plugin_id } => {
+                WidgetPromotion::DeniedUndeclared { plugin_id }
+            }
+        }
+    }
+
+    /// [`Self::resolve_widget_promotion`] reduced to the binding, logging a clear
+    /// reason when promotion is refused for lack of grant / a disabled owner.
+    /// `None` ⇒ deliver the tool result as text only (no widget side-channel).
+    pub async fn widget_promotion_or_log(&self, tool_id: &str) -> Option<WidgetBinding> {
+        match self.resolve_widget_promotion(tool_id).await {
+            WidgetPromotion::Allow(binding) => Some(binding),
+            WidgetPromotion::DeniedNoGrant { plugin_id } => {
+                tracing::info!(
+                    tool_id,
+                    plugin_id,
+                    grant = WIDGET_RENDER_GRANT,
+                    "widget promotion refused: the owning plugin is enabled but does not hold \
+                     the `widget:render` grant; delivering the tool result as text only"
+                );
+                None
+            }
+            WidgetPromotion::DeniedDisabled { plugin_id } => {
+                tracing::debug!(
+                    tool_id,
+                    plugin_id,
+                    "widget promotion refused: the owning plugin is disabled"
+                );
+                None
+            }
+            WidgetPromotion::DeniedUndeclared { plugin_id } => {
+                tracing::info!(
+                    tool_id,
+                    plugin_id,
+                    "widget promotion refused: an enabled MCP-server plugin record owns this \
+                     tool's server but never declared the tool in `contributes.widgets`, so \
+                     there is no per-widget consent; delivering the tool result as text only"
+                );
+                None
+            }
+            WidgetPromotion::None => None,
+        }
+    }
+
+    /// Resolve the manifest-side widget-contribution state for `tool_id`.
+    ///
+    /// The join to the owning plugin is by `contributes.widgets[].tool_id` (the
+    /// runtime `server__tool` id), NEVER by server name — a built-in app's server
+    /// namespace differs from its plugin id (server `app.form` ↔ plugin
+    /// `smart-intake-form`). The grant source is `manifest.permission_grants`
+    /// filtered to plugins whose lifecycle record is enabled, mirroring
+    /// [`Self::resolve_app_tool_backend`] / `plugin_host::collect_enabled_hooks`.
+    ///
+    /// Fails OPEN ([`WidgetContributionState::Unrecorded`]) when the governance
+    /// context is not wired, or when neither a declaring manifest NOR a synth
+    /// MCP-server record owns the tool — so genuinely record-less legacy external
+    /// servers keep rendering and no missing-record anomaly can dark a built-in.
+    /// Fails CLOSED ([`WidgetContributionState::RecordedUndeclared`]) when an
+    /// enabled synth MCP-server record owns the tool's server but never declared
+    /// the widget: an installed third-party server cannot auto-promote a widget it
+    /// did not consent to (goal (c)).
+    async fn widget_contribution(&self, tool_id: &str) -> WidgetContributionState {
+        let (Some(manifests), Some(store)) = (
+            self.self_build_manifests.as_ref(),
+            self.self_build_app_store.as_ref(),
+        ) else {
+            // No governance context (tests / CLI / bare registry) → fail-open.
+            return WidgetContributionState::Unrecorded;
+        };
+
+        // The tool's server namespace (`<server>__<tool>`) — used for the
+        // fail-CLOSED join against a synth MCP-server record when no manifest
+        // declares the tool_id.
+        let server = Self::split_tool_id(tool_id).map(|(s, _)| s.to_owned());
+
+        // Snapshot under the read lock and drop it before touching the store
+        // (never hold across .await). Two things resolved in one pass:
+        //   * `declared`   — the installed manifest that declares this tool_id in
+        //                    contributes.widgets, plus whether it holds the grant.
+        //   * `synth_owner`— an installed SYNTH MCP-server record (category ==
+        //                    MCP_SERVER_CATEGORY) whose id == the tool's server.
+        let (declared, synth_owner) = {
+            let guard = manifests.read().await;
+            let declared = guard.iter().find_map(|m| {
+                let contributes = m.contributes.as_ref()?;
+                contributes
+                    .widgets
+                    .iter()
+                    .any(|w| w.tool_id == tool_id)
+                    .then(|| {
+                        let has_grant = m
+                            .permission_grants
+                            .iter()
+                            .any(|g| g == WIDGET_RENDER_GRANT);
+                        (m.id.clone(), has_grant)
+                    })
+            });
+            let synth_owner = server.as_ref().and_then(|srv| {
+                guard
+                    .iter()
+                    .find(|m| {
+                        m.id == *srv && m.category.as_deref() == Some(MCP_SERVER_CATEGORY)
+                    })
+                    .map(|m| m.id.clone())
+            });
+            (declared, synth_owner)
+        };
+
+        // A manifest explicitly declares this widget: honour its enabled + grant
+        // state (the normal path for the 8 built-ins and any plugin that authored
+        // a contributes.widgets entry).
+        if let Some((plugin_id, has_grant)) = declared {
+            return match store.get(&plugin_id).await {
+                Ok(Some(rec)) if rec.enabled => {
+                    if has_grant {
+                        WidgetContributionState::EnabledGranted
+                    } else {
+                        WidgetContributionState::EnabledUngranted { plugin_id }
+                    }
+                }
+                Ok(Some(_)) => WidgetContributionState::Disabled { plugin_id },
+                // Manifest present but no lifecycle record yet (e.g. a seed
+                // anomaly), or a store read error — fail OPEN rather than dark a
+                // widget on the chat path. The manifest existing is enough signal
+                // that this is ours.
+                Ok(None) | Err(_) => WidgetContributionState::Unrecorded,
+            };
+        }
+
+        // Undeclared. If a synth MCP-server record owns this tool's server, fail
+        // CLOSED: the server is governed but never declared/consented to THIS
+        // widget, so its sandboxed HTML must NOT auto-promote (goal (c) — the
+        // widget:render gate is meaningful for the installed third-party server it
+        // targets, not a no-op). Only a genuinely record-less server (no synth
+        // owner) keeps the fail-open lane.
+        if let Some(plugin_id) = synth_owner {
+            return match store.get(&plugin_id).await {
+                Ok(Some(rec)) if rec.enabled => {
+                    WidgetContributionState::RecordedUndeclared { plugin_id }
+                }
+                Ok(Some(_)) => WidgetContributionState::Disabled { plugin_id },
+                // Record row missing / store error: the server is not actually
+                // governed yet, so fall back to the legacy fail-open lane rather
+                // than dark a widget on an anomaly.
+                Ok(None) | Err(_) => WidgetContributionState::Unrecorded,
+            };
+        }
+
+        WidgetContributionState::Unrecorded
+    }
+
     /// Resolve (and cache) a widget HTML resource for `server` by its `uri`.
     ///
     /// The in-process apps provider serves its bundled HTML directly; a config
@@ -1289,8 +1691,16 @@ impl McpRegistry {
         // *agent* tool calls (the chat/ACP/PTC planes call `call_tool_with_identity`
         // directly), not for autonomous internal engine operations, which cannot
         // consume an `approval_pending` result and would stall under manual mode.
-        self.call_tool_with_identity_no_gate(tool_id, arguments, allowlist, user_id, &[], None)
-            .await
+        // `host_conversation_id = None`: these callers (workflows, monitors, quests,
+        // recipes) are autonomous engine operations with no host conversation, so on
+        // an ORG-BOUND node they resolve to `ToolPrincipal::Unresolved` and the
+        // conversation-reading tools refuse. On an unbound node they resolve to
+        // `Unrestricted` — byte-identical to before. (Verified: no such caller
+        // invokes a `threads__*` / `search_conversations__*` tool today.)
+        self.call_tool_with_identity_no_gate(
+            tool_id, arguments, allowlist, user_id, &[], None, None,
+        )
+        .await
     }
 
     /// Invoke a tool with the caller's bound Identity Vault profiles (epic #517,
@@ -1314,6 +1724,11 @@ impl McpRegistry {
     /// approval engine runs the tool on approve via
     /// [`call_tool_with_identity_no_gate`](Self::call_tool_with_identity_no_gate).
     /// Default mode `off` ⇒ the gate never fires ⇒ behavior is identical to before.
+    ///
+    /// `host_conversation_id` is the **server-derived** conversation this agent turn
+    /// runs on behalf of (the ACP bridge's `permission_scope_id`). It is lowered to a
+    /// [`ToolPrincipal`] at dispatch time and is the ONLY authorization principal on
+    /// the agent plane — never `user_id`, which is client-supplied and spoofable.
     pub async fn call_tool_with_identity(
         &self,
         tool_id: &str,
@@ -1322,6 +1737,7 @@ impl McpRegistry {
         user_id: Option<&str>,
         profile_ids: &[String],
         session_id: Option<String>,
+        host_conversation_id: Option<&str>,
     ) -> Result<Value> {
         if let Some(err) = crate::approvals::gate_tool_call(
             tool_id,
@@ -1330,6 +1746,7 @@ impl McpRegistry {
             user_id,
             profile_ids,
             session_id.clone(),
+            host_conversation_id,
         )
         .await
         {
@@ -1359,6 +1776,7 @@ impl McpRegistry {
                 user_id,
                 profile_ids,
                 session_id,
+                host_conversation_id,
             )
             .await;
 
@@ -1382,6 +1800,7 @@ impl McpRegistry {
         user_id: Option<&str>,
         profile_ids: &[String],
         session_id: Option<String>,
+        host_conversation_id: Option<&str>,
     ) -> Result<Value> {
         // Identity Vault consult (epic #517): for a bound agent, a tool call
         // targeting a NEEDS_AUTH domain returns the elicitation envelope as its
@@ -1451,6 +1870,93 @@ impl McpRegistry {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
             }
+
+            // Backend dispatch (plugin-tools, M3): a plugin tool may ship NEW
+            // behavior, not just alias. Resolve the owning enabled plugin's backend
+            // + grant set from the live manifests. `None` (no self-build wiring, or
+            // no enabled owner) → the legacy alias re-enter below, so this is purely
+            // additive. `Alias` also falls through to that same legacy path.
+            if let Some(resolved) = self.resolve_app_tool_backend(tool_id).await {
+                use crate::plugin_manifest::schema::ToolBackend;
+                match resolved.backend {
+                    ToolBackend::InlineDeno { code } => {
+                        // Grant-gated (same model as a turn hook): the plugin must
+                        // hold `tool:execute`.
+                        if !resolved.grants.contains(crate::tool_exec::GRANT_TOOL_EXECUTE) {
+                            return Err(anyhow!(
+                                "inline tool '{tool_id}' requires the '{}' grant",
+                                crate::tool_exec::GRANT_TOOL_EXECUTE
+                            ));
+                        }
+                        // Run in the Deno sandbox via the SAME host bridge a hook
+                        // uses — the `Bridge` invoker, NEVER the `Registry` invoker.
+                        // This is what keeps a plugin tool off the MCP registry: it
+                        // cannot call `threads__*`/memory/`search_conversations` and
+                        // so cannot bypass the ORG-BOUND ACL principal gates.
+                        let Some(state) = crate::learning::global_state() else {
+                            return Err(anyhow!(
+                                "inline tool '{tool_id}' unavailable: server state not initialized"
+                            ));
+                        };
+                        let bridge = std::sync::Arc::new(crate::plugin_host::PluginHookBridge::new(
+                            resolved.plugin_id.clone(),
+                            resolved.grants.clone(),
+                            state,
+                        ));
+                        let invoker =
+                            std::sync::Arc::new(crate::tool_exec::SandboxToolInvoker::bridge(bridge));
+                        let program =
+                            crate::tool_exec::build_inline_tool_program(&arguments, &code);
+                        // Box the sandbox future: `run_sandboxed` → the `Bridge`
+                        // invoker can transitively re-enter tool dispatch, so this
+                        // edge must be boxed to keep the async future finite-sized.
+                        let outcome = Box::pin(crate::tool_exec::run_sandboxed(
+                            program,
+                            invoker,
+                            &resolved.plugin_id,
+                        ))
+                        .await;
+                        return match outcome {
+                            crate::tool_exec::ExecOutcome::Completed {
+                                result,
+                                is_error,
+                                error,
+                                ..
+                            } => {
+                                if is_error {
+                                    Err(anyhow!(
+                                        "inline tool '{tool_id}' failed: {}",
+                                        error.unwrap_or_default()
+                                    ))
+                                } else {
+                                    Ok(result.unwrap_or(Value::Null))
+                                }
+                            }
+                            crate::tool_exec::ExecOutcome::Paused { .. } => Err(anyhow!(
+                                "inline tool '{tool_id}' paused (unsupported for tools)"
+                            )),
+                        };
+                    }
+                    ToolBackend::Http { url, method } => {
+                        // Gateway-governed egress; the domain grant is checked first
+                        // (deterministic refusal) inside `run_http_tool`.
+                        return crate::tool_exec::run_http_tool(
+                            &url,
+                            &method,
+                            arguments,
+                            &resolved.grants,
+                            &resolved.plugin_id,
+                            session_id.as_deref(),
+                        )
+                        .await
+                        .map_err(|e| anyhow!(e));
+                    }
+                    // Alias: fall through to the legacy re-enter (target is `slug`,
+                    // which equals the split `tool` — byte-identical to before).
+                    ToolBackend::Alias { .. } => {}
+                }
+            }
+
             // Guard against an app tool aliasing another app tool (loop / privilege
             // chain) or an empty target.
             if tool.is_empty() || tool.starts_with(APP_TOOL_PREFIX) {
@@ -1471,6 +1977,7 @@ impl McpRegistry {
                 user_id,
                 &[],
                 None,
+                host_conversation_id,
             ))
             .await;
         }
@@ -1639,7 +2146,21 @@ impl McpRegistry {
                     "count": 0
                 }));
             };
-            return search_conversations::dispatch(tool, arguments, store).await;
+            // The agent plane's authorization principal (see `ToolPrincipal`).
+            let principal = ToolPrincipal::resolve(store, host_conversation_id).await;
+            if principal.is_unresolved() {
+                // BOUND node + no resolvable principal ⇒ fail closed. Agents already
+                // degrade gracefully on the `available: false` envelope, so this is
+                // not a new failure mode.
+                return Ok(serde_json::json!({
+                    "ok": false,
+                    "available": false,
+                    "error": "conversation search is not available: this agent turn has no identifiable owner on a shared node",
+                    "results": [],
+                    "count": 0
+                }));
+            }
+            return search_conversations::dispatch(tool, arguments, store, &principal).await;
         }
 
         // Built-in coordinator-threads provider (Codex-style cross-thread
@@ -1661,7 +2182,16 @@ impl McpRegistry {
                     "error": "coordinator threads are not available on this node"
                 }));
             };
-            return threads::dispatch(tool, arguments, store).await;
+            // The agent plane's authorization principal (see `ToolPrincipal`).
+            let principal = ToolPrincipal::resolve(store, host_conversation_id).await;
+            if principal.is_unresolved() {
+                return Ok(serde_json::json!({
+                    "ok": false,
+                    "available": false,
+                    "error": "coordinator threads are not available: this agent turn has no identifiable owner on a shared node"
+                }));
+            }
+            return threads::dispatch(tool, arguments, store, &principal).await;
         }
 
         // Built-in delegation provider (ephemeral parallel sub-agent fan-out).
@@ -1875,6 +2405,70 @@ impl McpRegistry {
         if let Ok(mut tools) = self.app_tools.lock() {
             tools.retain(|t| t.id != id);
         }
+    }
+
+    /// Resolve the dispatch backend + grants for an `app__<slug>` tool id by
+    /// scanning the LIVE enabled-plugin manifests (the same source
+    /// `plugin_host::collect_enabled_hooks` reads). Returns `None` when the
+    /// registry has no self-build wiring (bare/test registries) or no enabled
+    /// plugin owns this id — the dispatcher then falls back to the legacy alias
+    /// behavior, so this is purely additive.
+    ///
+    /// Never holds the `app_tools` mutex (or any std lock) across the `.await`s.
+    async fn resolve_app_tool_backend(&self, tool_id: &str) -> Option<ResolvedAppTool> {
+        let manifests = self.self_build_manifests.as_ref()?;
+        let store = self.self_build_app_store.as_ref()?;
+
+        // Only enabled plugins may own a live tool (matches the hook collector).
+        let enabled: std::collections::HashSet<String> = store
+            .list()
+            .await
+            .ok()?
+            .into_iter()
+            .filter(|r| r.enabled)
+            .map(|r| r.id)
+            .collect();
+        if enabled.is_empty() {
+            return None;
+        }
+
+        let guard = manifests.read().await;
+        for manifest in guard.iter() {
+            if !enabled.contains(&manifest.id) {
+                continue;
+            }
+            for entry in &manifest.runnables {
+                if entry.kind != crate::runnable::RunnableKind::Tool {
+                    continue;
+                }
+                let Some(cfg) = entry
+                    .config
+                    .as_ref()
+                    .and_then(|v| {
+                        serde_json::from_value::<crate::plugin_manifest::schema::ToolConfig>(
+                            v.clone(),
+                        )
+                        .ok()
+                    })
+                else {
+                    continue;
+                };
+                if format!("{APP_TOOL_PREFIX}{}", cfg.slug) != tool_id {
+                    continue;
+                }
+                // A malformed backend was already rejected at manifest validation;
+                // if it somehow fails here, skip (dispatcher falls back to alias).
+                let backend = cfg.resolve_backend().ok()?;
+                let grants: std::collections::HashSet<String> =
+                    manifest.permission_grants.iter().cloned().collect();
+                return Some(ResolvedAppTool {
+                    backend,
+                    grants,
+                    plugin_id: manifest.id.clone(),
+                });
+            }
+        }
+        None
     }
 
     /// Number of registered servers (for diagnostics/tests).
@@ -2320,6 +2914,389 @@ mod tests {
             .await
             .expect_err("unregistered app tool must be uncallable");
         assert!(err.to_string().contains("unknown app tool"), "got: {err}");
+    }
+
+    // ── plugin-tools: net-new tool backends (inline_deno + http) ────────────────
+
+    use crate::plugin_manifest::schema::{RunnableEntry as PmRunnableEntry, ToolBackend};
+    use crate::plugin_manifest::PluginManifest;
+    use crate::runnable::RunnableKind;
+
+    /// Build a registry wired with a single enabled plugin whose manifest carries
+    /// the given tool runnables + grants — the same `with_self_build` seam prod
+    /// uses (`main.rs`), so dispatch can resolve each tool's backend live.
+    async fn registry_with_plugin(
+        plugin_id: &str,
+        grants: Vec<&str>,
+        runnables: Vec<PmRunnableEntry>,
+    ) -> McpRegistry {
+        let store = std::sync::Arc::new(crate::plugins::PluginStore::open_in_memory().unwrap());
+        store.insert(plugin_id, "1.0.0").await.unwrap();
+        let approved: Vec<String> = grants.iter().map(|s| s.to_string()).collect();
+        store.set_enabled(plugin_id, &approved).await.unwrap();
+
+        let manifest = PluginManifest {
+            id: plugin_id.to_owned(),
+            name: "Test Plugin".to_owned(),
+            version: "1.0.0".to_owned(),
+            runnables,
+            permission_grants: approved,
+            companion: None,
+            ..Default::default()
+        };
+        let manifests = std::sync::Arc::new(TokioRwLock::new(vec![manifest]));
+        McpRegistry::empty().with_self_build(manifests, store)
+    }
+
+    fn tool_entry(id: &str, cfg: serde_json::Value) -> PmRunnableEntry {
+        PmRunnableEntry {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            kind: RunnableKind::Tool,
+            config: Some(cfg),
+        }
+    }
+
+    #[tokio::test]
+    async fn plugin_inline_deno_tool_is_discoverable_and_resolves_not_alias() {
+        // A plugin ships an inline_deno tool (NEW behavior, not an alias).
+        let reg = registry_with_plugin(
+            "com.test.tools",
+            vec!["tool:execute"],
+            vec![tool_entry(
+                "weather",
+                serde_json::json!({
+                    "slug": "weather",
+                    "backend": "inline_deno",
+                    "code": "return await ((input, host) => ({ city: input.city, ok: true }))(input, host);",
+                    "description": "Look up weather",
+                }),
+            )],
+        )
+        .await;
+        // Discovery: register it the way the server Tool handler does, then confirm
+        // it shows up in the flat tool listing that backs `/api/tools/search`.
+        reg.register_app_tool(
+            "app__weather".into(),
+            "weather".into(),
+            Some("Look up weather".into()),
+        );
+        let all = reg.list_all_tools().await;
+        assert!(
+            all.iter().any(|t| t.id == "app__weather"),
+            "inline_deno tool must be discoverable via the tool listing"
+        );
+
+        // It resolves to the inline_deno backend — NOT an alias.
+        let resolved = reg
+            .resolve_app_tool_backend("app__weather")
+            .await
+            .expect("enabled plugin owns app__weather");
+        assert!(
+            matches!(resolved.backend, ToolBackend::InlineDeno { .. }),
+            "must resolve to inline_deno, not alias"
+        );
+        assert!(resolved.grants.contains("tool:execute"));
+
+        // Calling it takes the inline sandbox path, never the alias re-enter. With
+        // no `deno` binary + no global ServerState in the test harness it fails on
+        // the runtime, but the message proves it is NOT the alias path (which would
+        // say "unknown MCP server: weather").
+        let err = reg
+            .call_tool("app__weather", serde_json::json!({ "city": "SG" }), None)
+            .await
+            .err();
+        if let Some(e) = err {
+            let msg = e.to_string();
+            assert!(
+                !msg.contains("unknown MCP server"),
+                "inline tool must NOT fall through the alias path, got: {msg}"
+            );
+            assert!(
+                msg.contains("inline tool"),
+                "expected an inline-runtime error, got: {msg}"
+            );
+        }
+        // If a real Deno backend + ServerState were present the call would succeed;
+        // that path is exercised only when `tool_exec::is_available()`.
+    }
+
+    #[tokio::test]
+    async fn plugin_http_tool_ungranted_domain_is_refused() {
+        // A plugin ships an http tool but holds NO egress grant for its domain.
+        let reg = registry_with_plugin(
+            "com.test.http",
+            vec!["tool:execute"], // note: no tool:http-egress:api.example.com
+            vec![tool_entry(
+                "quote",
+                serde_json::json!({
+                    "slug": "quote",
+                    "backend": "http",
+                    "url": "https://api.example.com/quote",
+                }),
+            )],
+        )
+        .await;
+        reg.register_app_tool("app__quote".into(), "quote".into(), None);
+
+        let err = reg
+            .call_tool("app__quote", serde_json::json!({ "q": "hi" }), None)
+            .await
+            .expect_err("ungranted http egress domain must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not granted") && msg.contains("api.example.com"),
+            "expected a deterministic egress-grant refusal, got: {msg}"
+        );
+        assert!(
+            msg.contains("tool:http-egress:api.example.com"),
+            "refusal must name the required grant, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn plugin_inline_deno_tool_requires_tool_execute_grant() {
+        // Same inline tool, but the plugin lacks `tool:execute` → refused before
+        // any sandbox spawn (deterministic, no deno needed).
+        let reg = registry_with_plugin(
+            "com.test.nogrant",
+            vec![], // no grants
+            vec![tool_entry(
+                "weather",
+                serde_json::json!({
+                    "slug": "weather",
+                    "backend": "inline_deno",
+                    "code": "return await ((input, host) => ({ ok: true }))(input, host);",
+                }),
+            )],
+        )
+        .await;
+        reg.register_app_tool("app__weather".into(), "weather".into(), None);
+
+        let err = reg
+            .call_tool("app__weather", serde_json::json!({}), None)
+            .await
+            .expect_err("inline tool without tool:execute must be refused");
+        assert!(
+            err.to_string().contains("tool:execute"),
+            "refusal must name the required grant, got: {err}"
+        );
+    }
+
+    // ── Unified widget promotion: dedup + the `widget:render` grant gate ──────
+
+    /// A plugin manifest that declares `tool_id` in `contributes.widgets` with the
+    /// given permission grants. The grant gate reads `permission_grants` (NOT the
+    /// record's approved_grants), mirroring the app-tool backend resolver.
+    fn widget_manifest(id: &str, tool_id: &str, grants: &[&str]) -> PluginManifest {
+        PluginManifest {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            version: "1.0.0".to_owned(),
+            contributes: Some(crate::plugin_manifest::Contributes {
+                widgets: vec![crate::plugin_manifest::WidgetContribution {
+                    tool_id: tool_id.to_owned(),
+                    uri: "ui://widget/checklist.html".to_owned(),
+                    ui_entry: None,
+                    mime: "text/html+skybridge".to_owned(),
+                    default_display_mode: "inline".to_owned(),
+                }],
+                ..Default::default()
+            }),
+            permission_grants: grants.iter().map(|g| (*g).to_owned()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// A registry with `manifest` wired as the self-build governance context and a
+    /// lifecycle record for `record_id` in the given enabled state. The record is
+    /// enabled with EMPTY approved_grants on purpose — so a passing grant test
+    /// proves the gate reads `manifest.permission_grants`, not the record.
+    async fn registry_with_governance(
+        manifest: PluginManifest,
+        record_id: &str,
+        enabled: bool,
+    ) -> McpRegistry {
+        let store = crate::plugins::PluginStore::open_in_memory().expect("in-memory store");
+        store.insert(record_id, "1.0.0").await.expect("insert record");
+        if enabled {
+            store.set_enabled(record_id, &[]).await.expect("enable record");
+        }
+        let manifests = std::sync::Arc::new(TokioRwLock::new(vec![manifest]));
+        McpRegistry::empty().with_self_build(manifests, std::sync::Arc::new(store))
+    }
+
+    #[tokio::test]
+    async fn builtin_widget_promotes_via_unified_manifest_path() {
+        // checklist__render binds through apps::tools(); with an enabled checklist
+        // plugin record whose manifest holds widget:render, the unified resolver
+        // promotes it — contributes.widgets is the source of record.
+        let manifest = widget_manifest("checklist", "checklist__render", &[WIDGET_RENDER_GRANT]);
+        let reg = registry_with_governance(manifest, "checklist", true).await;
+        assert!(
+            matches!(
+                reg.resolve_widget_promotion("checklist__render").await,
+                WidgetPromotion::Allow(_)
+            ),
+            "enabled + granted built-in app widget must promote via contributes.widgets"
+        );
+    }
+
+    #[tokio::test]
+    async fn widget_without_grant_is_refused() {
+        // Same enabled record, but the manifest does NOT declare widget:render.
+        let manifest =
+            widget_manifest("checklist", "checklist__render", &["chat.sendFollowUp"]);
+        let reg = registry_with_governance(manifest, "checklist", true).await;
+        assert!(
+            matches!(
+                reg.resolve_widget_promotion("checklist__render").await,
+                WidgetPromotion::DeniedNoGrant { .. }
+            ),
+            "an enabled plugin without widget:render must NOT auto-promote"
+        );
+        // The log-reducing wrapper yields no binding (text-only delivery).
+        assert!(reg
+            .widget_promotion_or_log("checklist__render")
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn widget_with_grant_promotes() {
+        let manifest = widget_manifest("checklist", "checklist__render", &[WIDGET_RENDER_GRANT]);
+        let reg = registry_with_governance(manifest, "checklist", true).await;
+        assert!(reg
+            .widget_promotion_or_log("checklist__render")
+            .await
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn disabled_owner_refuses_widget() {
+        let manifest = widget_manifest("checklist", "checklist__render", &[WIDGET_RENDER_GRANT]);
+        let reg = registry_with_governance(manifest, "checklist", false).await;
+        assert!(
+            matches!(
+                reg.resolve_widget_promotion("checklist__render").await,
+                WidgetPromotion::DeniedDisabled { .. }
+            ),
+            "a disabled owning plugin must not render its widget"
+        );
+    }
+
+    #[tokio::test]
+    async fn bare_registry_fails_open_for_builtins() {
+        // No governance context wired (tests / CLI / bare registry) → fail-open so
+        // every built-in widget keeps binding (backward-compat rule 3).
+        let reg = McpRegistry::empty();
+        assert!(
+            matches!(
+                reg.resolve_widget_promotion("checklist__render").await,
+                WidgetPromotion::Allow(_)
+            ),
+            "bare registry must fail open so built-in widgets keep rendering"
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_external_server_with_no_record_fails_open() {
+        // Governance IS wired, but no installed manifest declares checklist__render
+        // (the wired manifest claims a different tool). A tool no manifest claims is
+        // the legacy external server case → fail OPEN (documented delegate).
+        let manifest = widget_manifest("other-plugin", "other__render", &[WIDGET_RENDER_GRANT]);
+        let reg = registry_with_governance(manifest, "other-plugin", true).await;
+        assert!(
+            matches!(
+                reg.resolve_widget_promotion("checklist__render").await,
+                WidgetPromotion::Allow(_)
+            ),
+            "an undeclared tool_id must fail open (legacy external delegate)"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_widget_tool_yields_none() {
+        // A companion (non-render) tool has no binding at all → no widget.
+        let reg = McpRegistry::empty();
+        assert!(matches!(
+            reg.resolve_widget_promotion("checklist__update").await,
+            WidgetPromotion::None
+        ));
+    }
+
+    /// A synth MCP-server governance record (`category == MCP_SERVER_CATEGORY`,
+    /// `id == server`), with an optional declared widget contribution.
+    fn synth_mcp_manifest(server: &str, declared_widget: Option<&str>) -> PluginManifest {
+        let contributes = declared_widget.map(|tid| crate::plugin_manifest::Contributes {
+            widgets: vec![crate::plugin_manifest::WidgetContribution {
+                tool_id: tid.to_owned(),
+                uri: "ui://widget/checklist.html".to_owned(),
+                ui_entry: None,
+                mime: "text/html+skybridge".to_owned(),
+                default_display_mode: "inline".to_owned(),
+            }],
+            ..Default::default()
+        });
+        PluginManifest {
+            id: server.to_owned(),
+            name: server.to_owned(),
+            version: "1.0.0".to_owned(),
+            category: Some(MCP_SERVER_CATEGORY.to_owned()),
+            permission_grants: vec![WIDGET_RENDER_GRANT.to_owned()],
+            contributes,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn recorded_mcp_server_undeclared_widget_fails_closed() {
+        // Fix 2 / goal (c): an ENABLED synth MCP-server record owns the tool's
+        // server namespace but its contributes.widgets is EMPTY (the state every
+        // freshly catalog-installed third-party server is in). Even though the
+        // tool advertises a widget binding, promotion must fail CLOSED — no
+        // per-widget consent ⇒ no auto-promotion of sandboxed HTML.
+        let manifest = synth_mcp_manifest("checklist", None);
+        let reg = registry_with_governance(manifest, "checklist", true).await;
+        assert!(
+            matches!(
+                reg.resolve_widget_promotion("checklist__render").await,
+                WidgetPromotion::DeniedUndeclared { .. }
+            ),
+            "an enabled MCP-server record that never declared the widget must NOT auto-promote"
+        );
+        // The chat-path wrapper yields no binding → the result is delivered as text.
+        assert!(reg
+            .widget_promotion_or_log("checklist__render")
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn recorded_mcp_server_disabled_undeclared_stays_closed() {
+        // A DISABLED synth MCP-server record: still no widget (disabled owner).
+        let manifest = synth_mcp_manifest("checklist", None);
+        let reg = registry_with_governance(manifest, "checklist", false).await;
+        assert!(matches!(
+            reg.resolve_widget_promotion("checklist__render").await,
+            WidgetPromotion::DeniedDisabled { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn recorded_mcp_server_declared_widget_promotes() {
+        // The closed loop opens: once spawn-time widget discovery records the
+        // widget tool in the MCP server's contributes.widgets (and the record is
+        // enabled + holds widget:render), the SAME unified path promotes it.
+        let manifest = synth_mcp_manifest("checklist", Some("checklist__render"));
+        let reg = registry_with_governance(manifest, "checklist", true).await;
+        assert!(
+            matches!(
+                reg.resolve_widget_promotion("checklist__render").await,
+                WidgetPromotion::Allow(_)
+            ),
+            "a declared + granted + enabled MCP-server widget must promote"
+        );
     }
 }
 

@@ -10,6 +10,8 @@ use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
+use crate::win_process::NoWindow;
+
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 30000;
 
@@ -62,6 +64,7 @@ impl SglangProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false)
+            .no_window()
             .spawn()
             .context("spawning sglang server")?;
 

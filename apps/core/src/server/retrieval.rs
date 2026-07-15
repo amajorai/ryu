@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
@@ -67,6 +67,21 @@ pub struct RetrievableChunk {
     /// 1..=5 importance for `Memory` chunks; used to boost ranking.
     #[serde(default)]
     pub mem_importance: i32,
+    /// Denormalized owner (the source document's / memory's `owner_user_id`), so the
+    /// per-caller tenancy filter runs in-process without a cross-store join. `None`
+    /// = unattributed: shared knowledge (OKF / legacy Space chunk) for `Space`, and
+    /// fail-closed (owner-only, invisible to a mismatched caller) for user-scope
+    /// `Memory`. Refreshed for legacy memory rows by `backfill_memory_owner`.
+    #[serde(default)]
+    pub owner_user_id: Option<String>,
+    /// Denormalized owning org, paired with `owner_user_id` for the org/team
+    /// visibility branch.
+    #[serde(default)]
+    pub owner_org_id: Option<String>,
+    /// Sharing visibility (`private`/`org`/`team`) for `Space` chunks; `None` for
+    /// memory (its `mem_scope` decides sharing).
+    #[serde(default)]
+    pub visibility: Option<String>,
 }
 
 /// A retrieved chunk paired with its relevance score (higher is more relevant).
@@ -104,6 +119,19 @@ pub struct RetrievalOptions {
     /// How many candidates to collect before reranking. Must be >= top_k.
     /// Defaults to `top_k * 4` when not set.
     pub rerank_candidates: Option<usize>,
+    /// Per-caller tenancy — the retrieval twin of the Spaces `DocFilter`. When
+    /// `node_bound` is `false` (default / UNBOUND node) NO owner filtering runs, so
+    /// every existing caller is byte-identical. When `true`, a user-scope memory
+    /// chunk is returned only to its owner (`caller_user_id`), and a `Space` chunk
+    /// only if unowned (shared/OKF) or owned by the caller / shared to their org.
+    #[serde(default)]
+    pub node_bound: bool,
+    /// The verified caller's user id (bound-node owner match). `None` = anonymous.
+    #[serde(default)]
+    pub caller_user_id: Option<String>,
+    /// The caller's org (bound-node org/team-visibility match).
+    #[serde(default)]
+    pub caller_org_id: Option<String>,
 }
 
 impl Default for RetrievalOptions {
@@ -116,6 +144,35 @@ impl Default for RetrievalOptions {
             project_id: None,
             min_score: 0.0,
             rerank_candidates: None,
+            node_bound: false,
+            caller_user_id: None,
+            caller_org_id: None,
+        }
+    }
+}
+
+/// The denormalized owner stamped onto a chunk at index time. `shared()` (all
+/// `None`) marks OKF / node-shared knowledge; `owned(uid, org, vis)` attributes a
+/// document or memory to a principal so the per-caller filter can gate it.
+#[derive(Clone, Copy, Default)]
+pub struct RetrievalOwner<'a> {
+    pub user_id: Option<&'a str>,
+    pub org_id: Option<&'a str>,
+    pub visibility: Option<&'a str>,
+}
+
+impl<'a> RetrievalOwner<'a> {
+    /// Unattributed — OKF bundles and node-shared knowledge (visible to everyone).
+    pub fn shared() -> Self {
+        Self::default()
+    }
+
+    /// Attributed to `user_id` within `org_id` at `visibility`.
+    pub fn owned(user_id: Option<&'a str>, org_id: Option<&'a str>, visibility: Option<&'a str>) -> Self {
+        Self {
+            user_id,
+            org_id,
+            visibility,
         }
     }
 }
@@ -616,12 +673,74 @@ impl RetrievalStore {
         let conn = Connection::open(&path)
             .with_context(|| format!("opening retrieval db {}", path.display()))?;
         Self::init_schema(&conn)?;
+        // One-shot owner backfill for memory chunks indexed before per-resource
+        // tenancy existed (best-effort; never blocks opening the store). Deliberately
+        // NOT in `init_schema` (the in-memory test store runs that and must never
+        // read the real account vault).
+        if let Err(e) = Self::backfill_memory_owner(&conn) {
+            tracing::warn!("retrieval memory-owner backfill skipped: {e:#}");
+        }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             embedder,
             reranker,
             registry,
         })
+    }
+
+    /// Attribute pre-tenancy MEMORY chunks to the local owner once the node binds —
+    /// the retrieval twin of `MemoryStore::backfill` / `ConversationStore::backfill_tenancy`.
+    ///
+    /// Memory chunks indexed before the `owner_user_id` denorm existed carry NULL
+    /// (or the pre-attribution `'local'` sentinel, mirrored from `memory_entries`).
+    /// On a bound node the user-scope tenancy filter would then hide them from their
+    /// real owner (a lockout). This stamps them to the local vault owner. Unbound
+    /// node → return immediately (no marker), byte-identical. Idempotent via a marker
+    /// row stored inside `chunks` is not possible (no meta table here), so it uses a
+    /// dedicated `retrieval_meta` table.
+    fn backfill_memory_owner(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS retrieval_meta (key TEXT PRIMARY KEY, value TEXT)",
+        )
+        .context("creating retrieval_meta")?;
+        let done: Option<String> = conn
+            .query_row(
+                "SELECT value FROM retrieval_meta WHERE key = 'mem_owner_backfill_v1'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if done.is_some() {
+            return Ok(());
+        }
+        // Unbound (personal) node: chunks stay unattributed, by design. Not marked.
+        let Some(org) = crate::sidecar::control_plane::registered_org() else {
+            return Ok(());
+        };
+        let Some(owner) = crate::auth::load_accounts()
+            .active()
+            .map(|a| a.user_id.clone())
+        else {
+            tracing::warn!(
+                "retrieval memory-owner backfill: org-bound node with no signed-in local account \
+                 — leaving pre-tenancy memory chunks unattributed (fail closed)."
+            );
+            return Ok(());
+        };
+        let claimed = conn
+            .execute(
+                "UPDATE chunks SET owner_user_id = ?1, owner_org_id = ?2
+                 WHERE source = 'memory'
+                   AND (owner_user_id IS NULL OR owner_user_id = 'local')",
+                params![owner, org.id],
+            )
+            .context("backfilling retrieval memory-chunk owner")?;
+        conn.execute(
+            "INSERT OR REPLACE INTO retrieval_meta (key, value) VALUES ('mem_owner_backfill_v1', ?1)",
+            params![owner],
+        )?;
+        tracing::info!("retrieval memory-owner backfill: attributed {claimed} memory chunk(s)");
+        Ok(())
     }
 
     /// Open an in-memory store with the local embedder at default registry dims
@@ -728,6 +847,14 @@ impl RetrievalStore {
             [],
         );
 
+        // Denormalized owner (per-resource tenancy). Mirrors how `mem_scope` is
+        // denormalized off `memory_entries`: it lets the per-caller filter run
+        // in-query without a cross-store join. NULL for OKF / legacy chunks.
+        // Duplicate-column errors on fresh DBs are ignored.
+        let _ = conn.execute("ALTER TABLE chunks ADD COLUMN owner_user_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE chunks ADD COLUMN owner_org_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE chunks ADD COLUMN visibility TEXT", []);
+
         // Built after the ALTERs above so it works on DBs created before the
         // mem_scope columns existed — on those, `CREATE TABLE IF NOT EXISTS`
         // no-ops and the columns only appear via the migrations, so indexing
@@ -747,6 +874,7 @@ impl RetrievalStore {
         source: ChunkSource,
         space_id: Option<&str>,
         content: &str,
+        owner: RetrievalOwner<'_>,
     ) -> Result<()> {
         let embedding = self.embedder.embed(content).await?;
         let blob = encode_embedding(&embedding);
@@ -754,16 +882,32 @@ impl RetrievalStore {
         let now = chrono::Utc::now().timestamp_millis();
         let conn = self.conn.lock().await;
         conn.execute(
-            "INSERT INTO chunks (id, source, space_id, content, embedding, embedding_model, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO chunks
+                (id, source, space_id, content, embedding, embedding_model, created_at,
+                 owner_user_id, owner_org_id, visibility)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(id) DO UPDATE SET
                  source          = excluded.source,
                  space_id        = excluded.space_id,
                  content         = excluded.content,
                  embedding       = excluded.embedding,
                  embedding_model = excluded.embedding_model,
-                 created_at      = excluded.created_at",
-            params![id, source.as_str(), space_id, content, blob, model, now],
+                 created_at      = excluded.created_at,
+                 owner_user_id   = excluded.owner_user_id,
+                 owner_org_id    = excluded.owner_org_id,
+                 visibility      = excluded.visibility",
+            params![
+                id,
+                source.as_str(),
+                space_id,
+                content,
+                blob,
+                model,
+                now,
+                owner.user_id,
+                owner.org_id,
+                owner.visibility,
+            ],
         )
         .context("indexing chunk")?;
         Ok(())
@@ -781,6 +925,7 @@ impl RetrievalStore {
         scope_id: Option<&str>,
         category: &str,
         importance: i32,
+        owner: RetrievalOwner<'_>,
     ) -> Result<()> {
         let embedding = self.embedder.embed(content).await?;
         let blob = encode_embedding(&embedding);
@@ -790,8 +935,9 @@ impl RetrievalStore {
         conn.execute(
             "INSERT INTO chunks
                 (id, source, space_id, content, embedding, embedding_model, created_at,
-                 mem_scope, mem_scope_id, mem_category, mem_importance)
-             VALUES (?1, 'memory', NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 mem_scope, mem_scope_id, mem_category, mem_importance,
+                 owner_user_id, owner_org_id, visibility)
+             VALUES (?1, 'memory', NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL)
              ON CONFLICT(id) DO UPDATE SET
                  source          = 'memory',
                  space_id        = NULL,
@@ -802,7 +948,9 @@ impl RetrievalStore {
                  mem_scope       = excluded.mem_scope,
                  mem_scope_id    = excluded.mem_scope_id,
                  mem_category    = excluded.mem_category,
-                 mem_importance  = excluded.mem_importance",
+                 mem_importance  = excluded.mem_importance,
+                 owner_user_id   = excluded.owner_user_id,
+                 owner_org_id    = excluded.owner_org_id",
             params![
                 id,
                 content,
@@ -813,6 +961,8 @@ impl RetrievalStore {
                 scope_id,
                 category,
                 importance.clamp(1, 5),
+                owner.user_id,
+                owner.org_id,
             ],
         )
         .context("indexing memory chunk")?;
@@ -1162,7 +1312,8 @@ impl RetrievalStore {
         let mut stmt = conn
             .prepare(
                 "SELECT id, source, space_id, content, embedding, \
-                        mem_scope, mem_scope_id, mem_importance FROM chunks \
+                        mem_scope, mem_scope_id, mem_importance, \
+                        owner_user_id, owner_org_id, visibility FROM chunks \
                  WHERE embedding_model = ?1",
             )
             .context("preparing candidate query")?;
@@ -1182,6 +1333,9 @@ impl RetrievalStore {
                         mem_importance: row
                             .get::<_, Option<i32>>(7)?
                             .unwrap_or(DEFAULT_MEM_IMPORTANCE),
+                        owner_user_id: row.get(8)?,
+                        owner_org_id: row.get(9)?,
+                        visibility: row.get(10)?,
                     },
                     decode_embedding(&blob),
                 ))
@@ -1203,17 +1357,72 @@ impl RetrievalStore {
 /// memory toggle with the Space selection.
 fn chunk_matches(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bool {
     match chunk.source {
-        ChunkSource::Memory => opts.include_memory && memory_level_matches(chunk, opts),
-        ChunkSource::Space => match &opts.space_ids {
-            // `None` => search all Spaces.
-            None => true,
-            // A list (possibly empty) => only those Spaces.
-            Some(ids) => chunk
-                .space_id
-                .as_ref()
-                .is_some_and(|sid| ids.iter().any(|want| want == sid)),
-        },
+        ChunkSource::Memory => {
+            opts.include_memory
+                && memory_level_matches(chunk, opts)
+                && memory_tenancy_allows(chunk, opts)
+        }
+        ChunkSource::Space => {
+            let space_selected = match &opts.space_ids {
+                // `None` => search all Spaces.
+                None => true,
+                // A list (possibly empty) => only those Spaces.
+                Some(ids) => chunk
+                    .space_id
+                    .as_ref()
+                    .is_some_and(|sid| ids.iter().any(|want| want == sid)),
+            };
+            space_selected && space_tenancy_allows(chunk, opts)
+        }
     }
+}
+
+/// Per-caller tenancy for a MEMORY chunk — the retrieval twin of the memory-store
+/// visibility predicate. On an UNBOUND node (`node_bound = false`) it is a no-op
+/// (byte-identical). On a BOUND node: `node`/`project` scopes are the shared "company
+/// brain" (visible to every member), while `user`-scope facts are PRIVATE — returned
+/// only to their owner. A user-scope chunk whose owner does not equal the caller
+/// (including legacy NULL/`'local'` owners the backfill has not yet reached) is
+/// hidden. This is the filter that stops one member retrieving another's private
+/// memory via `/api/retrieval/search`.
+fn memory_tenancy_allows(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bool {
+    if !opts.node_bound {
+        return true;
+    }
+    let scope = chunk.mem_scope.as_deref().unwrap_or("user");
+    match scope {
+        "node" | "project" => true,
+        // user scope (and any unknown scope, treated as user) → owner-only.
+        _ => matches!(
+            (chunk.owner_user_id.as_deref(), opts.caller_user_id.as_deref()),
+            (Some(owner), Some(caller)) if owner == caller
+        ),
+    }
+}
+
+/// Per-caller tenancy for a SPACE chunk. UNBOUND → no-op. BOUND: an UNOWNED chunk
+/// (OKF bundle / legacy manual index) is shared knowledge and stays visible; an
+/// OWNED chunk is visible only to its owner, or to the caller's org when explicitly
+/// shared (`visibility` in `org`/`team`).
+fn space_tenancy_allows(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bool {
+    if !opts.node_bound {
+        return true;
+    }
+    let Some(owner) = chunk.owner_user_id.as_deref() else {
+        // Unowned Space chunk = shared knowledge (OKF, node-shared bundle).
+        return true;
+    };
+    if opts.caller_user_id.as_deref() == Some(owner) {
+        return true;
+    }
+    matches!(
+        (
+            chunk.owner_org_id.as_deref(),
+            opts.caller_org_id.as_deref(),
+            chunk.visibility.as_deref(),
+        ),
+        (Some(org), Some(caller_org), Some(vis)) if org == caller_org && (vis == "org" || vis == "team")
+    )
 }
 
 /// Whether a `Memory` chunk passes the caller's level + active-project filter.
@@ -1475,7 +1684,7 @@ mod tests {
                 ChunkSource::Memory,
                 None,
                 "The user prefers dark mode and concise answers.",
-            )
+            RetrievalOwner::shared())
             .await
             .unwrap();
         store
@@ -1484,7 +1693,7 @@ mod tests {
                 ChunkSource::Space,
                 Some("docs"),
                 "Ryu Core runs on port 7980 and routes chat through adapters.",
-            )
+            RetrievalOwner::shared())
             .await
             .unwrap();
         store
@@ -1493,7 +1702,7 @@ mod tests {
                 ChunkSource::Space,
                 Some("docs"),
                 "The gateway enforces firewall, routing, and budgets.",
-            )
+            RetrievalOwner::shared())
             .await
             .unwrap();
         store
@@ -1502,7 +1711,7 @@ mod tests {
                 ChunkSource::Space,
                 Some("recipes"),
                 "Preheat the oven to 200 degrees and bake the bread.",
-            )
+            RetrievalOwner::shared())
             .await
             .unwrap();
     }
@@ -1581,7 +1790,7 @@ mod tests {
                 None,
                 "preference",
                 3,
-            )
+            RetrievalOwner::shared())
             .await
             .unwrap();
         store
@@ -1592,7 +1801,7 @@ mod tests {
                 Some("/proj/x"),
                 "project_context",
                 4,
-            )
+            RetrievalOwner::shared())
             .await
             .unwrap();
 
@@ -1946,5 +2155,186 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    // ── Per-caller tenancy (the content-escape filter) ────────────────────────
+    //
+    // These are the acceptance tests for the retrieval half of the Spaces/memory
+    // tenancy plane: `/api/retrieval/search` is where document CONTENT and
+    // user-scope memory actually escape (decrypted chunks), so the filter here is
+    // the highest-value one. They drive `retrieve()` end-to-end with a bound-node
+    // `RetrievalOptions` — no org registration needed, because the caller tenancy is
+    // passed IN (the same "pure form" trick the conversation plane's ACL uses).
+
+    /// Seed Alice's + Bob's user-scope memory and a shared node-scope fact, all with
+    /// the same content so cosine ranks them together — the filter, not relevance,
+    /// decides what each caller sees.
+    async fn seed_tenancy(store: &RetrievalStore) {
+        let org = Some("org1");
+        store
+            .index_memory_chunk(
+                "alice-mem",
+                "the secret launch date is March",
+                "user",
+                None,
+                "user_fact",
+                3,
+                RetrievalOwner::owned(Some("alice"), org, None),
+            )
+            .await
+            .unwrap();
+        store
+            .index_memory_chunk(
+                "bob-mem",
+                "the secret launch date is March",
+                "user",
+                None,
+                "user_fact",
+                3,
+                RetrievalOwner::owned(Some("bob"), org, None),
+            )
+            .await
+            .unwrap();
+        store
+            .index_memory_chunk(
+                "shared-node-mem",
+                "the secret launch date is March",
+                "node",
+                None,
+                "organization",
+                3,
+                RetrievalOwner::owned(Some("alice"), org, None),
+            )
+            .await
+            .unwrap();
+    }
+
+    fn bound_opts(caller: &str) -> RetrievalOptions {
+        RetrievalOptions {
+            top_k: 10,
+            min_score: 0.0,
+            node_bound: true,
+            caller_user_id: Some(caller.to_owned()),
+            caller_org_id: Some("org1".to_owned()),
+            ..Default::default()
+        }
+    }
+
+    /// THE explicit content-escape test: on a bound node Bob CANNOT retrieve Alice's
+    /// user-scope memory, but the shared node-scope fact IS visible to him.
+    #[tokio::test]
+    async fn bob_cannot_retrieve_alices_user_memory_but_shares_node_memory() {
+        let store = RetrievalStore::open_in_memory().unwrap();
+        seed_tenancy(&store).await;
+
+        let hits = store
+            .retrieve("secret launch date", &bound_opts("bob"))
+            .await
+            .unwrap();
+        let ids: Vec<&str> = hits.iter().map(|c| c.id.as_str()).collect();
+        assert!(!ids.contains(&"alice-mem"), "Bob must NOT see Alice's user-scope memory");
+        assert!(ids.contains(&"bob-mem"), "Bob sees his own user-scope memory");
+        assert!(
+            ids.contains(&"shared-node-mem"),
+            "node-scope memory is the shared brain, visible to Bob"
+        );
+    }
+
+    /// No-lockout: Alice reaches her OWN user-scope memory (+ the shared fact).
+    #[tokio::test]
+    async fn alice_retrieves_her_own_user_memory() {
+        let store = RetrievalStore::open_in_memory().unwrap();
+        seed_tenancy(&store).await;
+
+        let hits = store
+            .retrieve("secret launch date", &bound_opts("alice"))
+            .await
+            .unwrap();
+        let ids: Vec<&str> = hits.iter().map(|c| c.id.as_str()).collect();
+        assert!(ids.contains(&"alice-mem"));
+        assert!(ids.contains(&"shared-node-mem"));
+        assert!(!ids.contains(&"bob-mem"), "Alice must not see Bob's private memory");
+    }
+
+    /// An UNBOUND node is byte-identical: no owner filtering, every chunk visible
+    /// regardless of who owns it (the default `node_bound = false`).
+    #[tokio::test]
+    async fn unbound_node_retrieval_is_unfiltered() {
+        let store = RetrievalStore::open_in_memory().unwrap();
+        seed_tenancy(&store).await;
+
+        let opts = RetrievalOptions {
+            top_k: 10,
+            ..Default::default()
+        };
+        let hits = store.retrieve("secret launch date", &opts).await.unwrap();
+        let ids: Vec<&str> = hits.iter().map(|c| c.id.as_str()).collect();
+        assert!(ids.contains(&"alice-mem"));
+        assert!(ids.contains(&"bob-mem"));
+        assert!(ids.contains(&"shared-node-mem"));
+    }
+
+    /// A Space chunk owned by Alice (visibility private) does not escape to Bob, but
+    /// an UNOWNED (OKF / shared-knowledge) Space chunk stays visible to everyone.
+    #[tokio::test]
+    async fn space_chunk_owner_filter_and_shared_okf() {
+        let store = RetrievalStore::open_in_memory().unwrap();
+        store
+            .index_chunk(
+                "alice-doc",
+                ChunkSource::Space,
+                Some("docs"),
+                "quarterly revenue was forty two million",
+                RetrievalOwner::owned(Some("alice"), Some("org1"), Some("private")),
+            )
+            .await
+            .unwrap();
+        store
+            .index_chunk(
+                "okf-shared",
+                ChunkSource::Space,
+                Some("docs"),
+                "quarterly revenue reporting standards overview",
+                RetrievalOwner::shared(),
+            )
+            .await
+            .unwrap();
+
+        let hits = store
+            .retrieve("quarterly revenue", &bound_opts("bob"))
+            .await
+            .unwrap();
+        let ids: Vec<&str> = hits.iter().map(|c| c.id.as_str()).collect();
+        assert!(!ids.contains(&"alice-doc"), "Bob must not read Alice's private document chunk");
+        assert!(ids.contains(&"okf-shared"), "shared/OKF knowledge stays visible");
+    }
+
+    /// The pure filter functions, exercised directly (no DB): the same matrix the
+    /// SQL-less unit tests of the conversation plane use.
+    #[test]
+    fn memory_tenancy_pure_matrix() {
+        let base = RetrievableChunk {
+            id: "x".into(),
+            source: ChunkSource::Memory,
+            space_id: None,
+            content: String::new(),
+            mem_scope: Some("user".into()),
+            mem_scope_id: None,
+            mem_importance: 3,
+            owner_user_id: Some("alice".into()),
+            owner_org_id: Some("org1".into()),
+            visibility: None,
+        };
+        let bob = bound_opts("bob");
+        let alice = bound_opts("alice");
+        // user-scope: owner-only.
+        assert!(!memory_tenancy_allows(&base, &bob));
+        assert!(memory_tenancy_allows(&base, &alice));
+        // node/project: shared.
+        let node = RetrievableChunk { mem_scope: Some("node".into()), ..base.clone() };
+        assert!(memory_tenancy_allows(&node, &bob));
+        // unbound: everything.
+        let unbound = RetrievalOptions::default();
+        assert!(memory_tenancy_allows(&base, &unbound));
     }
 }

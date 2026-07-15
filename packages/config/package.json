@@ -1,6 +1,6 @@
 {
   "name": "@ryu/config",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "description": "Shared TypeScript configuration for Ryu packages.",
   "license": "Apache-2.0"
 }

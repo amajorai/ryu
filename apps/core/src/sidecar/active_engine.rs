@@ -41,30 +41,32 @@ pub fn is_local_engine(name: &str) -> bool {
 /// engine binds a fixed loopback port (see the provider modules under
 /// `sidecar/providers/`); chat requests for an agent bound to a local engine are
 /// proxied to `{base}/v1/chat/completions`. Returns `None` for non-engines.
-pub fn local_engine_base_url(name: &str) -> Option<&'static str> {
+pub fn local_engine_base_url(name: &str) -> Option<String> {
     match name {
         // ollama serves its OpenAI-compat API on 11434.
-        "ollama" => Some("http://127.0.0.1:11434"),
-        // llama-server (`--port 8080 --host 127.0.0.1`).
-        "llamacpp" => Some("http://127.0.0.1:8080"),
+        "ollama" => Some("http://127.0.0.1:11434".to_owned()),
+        // llama-server (`--port 8080 --host 127.0.0.1`). Profile-aware: the spawn
+        // side (`providers/llamacpp/{process,mod}.rs`) binds the same
+        // `profile::port(8080)`, so a dev stack (9080) never collides with release.
+        "llamacpp" => Some(format!("http://127.0.0.1:{}", crate::profile::port(8080))),
         // vllm OpenAI server (DEFAULT_PORT = 8000).
-        "vllm" => Some("http://127.0.0.1:8000"),
+        "vllm" => Some("http://127.0.0.1:8000".to_owned()),
         // sglang launch_server (DEFAULT_PORT = 30000).
-        "sglang" => Some("http://127.0.0.1:30000"),
+        "sglang" => Some("http://127.0.0.1:30000".to_owned()),
         // mlx_lm server (DEFAULT_PORT = 8082).
-        "mlx" => Some("http://127.0.0.1:8082"),
+        "mlx" => Some("http://127.0.0.1:8082".to_owned()),
         // mlx_vlm.server (DEFAULT_PORT = 8084).
-        "mlx-vlm" => Some("http://127.0.0.1:8084"),
+        "mlx-vlm" => Some("http://127.0.0.1:8084".to_owned()),
         // omlx serve (DEFAULT_PORT = 8000 — shared with vLLM; mutually exclusive).
-        "omlx" => Some("http://127.0.0.1:8000"),
+        "omlx" => Some("http://127.0.0.1:8000".to_owned()),
         // Docker Model Runner serves its OpenAI-compat API under `/engines/v1`
         // (not the bare `/v1`). Returning the `/engines` base makes the standard
         // `{base}/v1/chat/completions` join resolve to DMR's real endpoint, so no
         // routing code special-cases it. Adopt-only — Docker owns the process.
-        "docker-model-runner" => Some("http://127.0.0.1:12434/engines"),
+        "docker-model-runner" => Some("http://127.0.0.1:12434/engines".to_owned()),
         // apfel serves Apple Foundation Models on :11434 (shared with Ollama —
         // the two never reside at once; `apfel` has no `--port` override).
-        "apfel" => Some("http://127.0.0.1:11434"),
+        "apfel" => Some("http://127.0.0.1:11434".to_owned()),
         _ => None,
     }
 }
@@ -82,22 +84,26 @@ pub fn local_engine_base_url(name: &str) -> Option<&'static str> {
 ///   - `mlx`      → `mlx_lm server --port 8082` (`providers/mlx/process.rs`, Apple Silicon only)
 ///
 /// Returns `None` for names that are not managed local engines.
-pub fn local_engine_url(name: &str) -> Option<&'static str> {
+pub fn local_engine_url(name: &str) -> Option<String> {
     match name {
-        "llamacpp" => Some("http://127.0.0.1:8080/v1"),
-        "ollama" => Some("http://127.0.0.1:11434/v1"),
-        "vllm" => Some("http://127.0.0.1:8000/v1"),
-        "sglang" => Some("http://127.0.0.1:30000/v1"),
-        "mlx" => Some("http://127.0.0.1:8082/v1"),
-        "mlx-vlm" => Some("http://127.0.0.1:8084/v1"),
+        // Profile-aware (matches the spawn port in `providers/llamacpp`).
+        "llamacpp" => Some(format!(
+            "http://127.0.0.1:{}/v1",
+            crate::profile::port(8080)
+        )),
+        "ollama" => Some("http://127.0.0.1:11434/v1".to_owned()),
+        "vllm" => Some("http://127.0.0.1:8000/v1".to_owned()),
+        "sglang" => Some("http://127.0.0.1:30000/v1".to_owned()),
+        "mlx" => Some("http://127.0.0.1:8082/v1".to_owned()),
+        "mlx-vlm" => Some("http://127.0.0.1:8084/v1".to_owned()),
         // oMLX shares vLLM's :8000 — safe, the two never reside at once.
-        "omlx" => Some("http://127.0.0.1:8000/v1"),
+        "omlx" => Some("http://127.0.0.1:8000/v1".to_owned()),
         // Docker Model Runner's OpenAI-compat API is under `/engines/v1`; the
         // gateway appends `/chat/completions`, yielding the correct DMR path.
-        "docker-model-runner" => Some("http://127.0.0.1:12434/engines/v1"),
+        "docker-model-runner" => Some("http://127.0.0.1:12434/engines/v1".to_owned()),
         // apfel (Apple Foundation Models) — OpenAI-compat on :11434. Shares the
         // port with Ollama; safe, the two never reside at once.
-        "apfel" => Some("http://127.0.0.1:11434/v1"),
+        "apfel" => Some("http://127.0.0.1:11434/v1".to_owned()),
         _ => None,
     }
 }
@@ -170,19 +176,27 @@ mod tests {
     #[test]
     fn local_engines_expose_base_urls() {
         assert_eq!(
-            local_engine_base_url("ollama"),
+            local_engine_base_url("ollama").as_deref(),
             Some("http://127.0.0.1:11434")
         );
+        // llamacpp is profile-aware; under the (default) release profile in tests
+        // it is the original :8080.
         assert_eq!(
-            local_engine_base_url("llamacpp"),
+            local_engine_base_url("llamacpp").as_deref(),
             Some("http://127.0.0.1:8080")
         );
-        assert_eq!(local_engine_base_url("vllm"), Some("http://127.0.0.1:8000"));
         assert_eq!(
-            local_engine_base_url("sglang"),
+            local_engine_base_url("vllm").as_deref(),
+            Some("http://127.0.0.1:8000")
+        );
+        assert_eq!(
+            local_engine_base_url("sglang").as_deref(),
             Some("http://127.0.0.1:30000")
         );
-        assert_eq!(local_engine_base_url("mlx"), Some("http://127.0.0.1:8082"));
+        assert_eq!(
+            local_engine_base_url("mlx").as_deref(),
+            Some("http://127.0.0.1:8082")
+        );
         // Non-engines (agents/tools) have no local inference endpoint.
         assert_eq!(local_engine_base_url("zeroclaw"), None);
         assert_eq!(local_engine_base_url(""), None);

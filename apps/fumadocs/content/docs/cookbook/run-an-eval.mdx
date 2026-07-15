@@ -11,8 +11,8 @@ against a reference rather than eyeball it.
 
 Two distinct things live behind the word "eval" here, and this recipe keeps them apart. The catalog
 (`GET /v1/evaluators`) is the shared definition surface. The offline runner (`POST /v1/evals/run`)
-is what replays a dataset and scores each case. Binding a chosen catalog entry into that runner is
-still in progress, so read the caveat in step 3 before you wire anything to a pipeline.
+replays a dataset and scores each case — pass registry `evaluators` ids (run-level and/or per-case)
+to score with catalog judges, or use `assertions` for deterministic checks.
 
 ## What you'll use
 
@@ -73,8 +73,9 @@ or warn on the request path right now. Treat the rest as catalogued definitions,
 ### Run an offline eval set
 
 The runner that works today is `POST /v1/evals/run`. It replays each prompt in `dataset` through the
-full pipeline (firewall, routing, provider call) and scores each case against its `assertions`. An
-explicit run always scores, independent of passive evals, and cases run sequentially:
+full pipeline (firewall, routing, provider call) and scores each case. Pass registry evaluator ids
+via a run-level `evaluators` array and/or per-case `evaluators`, or use `assertions` for deterministic
+checks. An explicit run always scores, independent of passive evals, and cases run sequentially:
 
 ```bash
 curl -X POST http://127.0.0.1:7981/v1/evals/run \
@@ -82,10 +83,11 @@ curl -X POST http://127.0.0.1:7981/v1/evals/run \
   -H "content-type: application/json" \
   -d '{
     "model": "gpt-4o-mini",
+    "evaluators": ["exact_match"],
     "dataset": [
       {
         "prompt": "What is the capital of France?",
-        "assertions": [{ "kind": "contains", "value": "Paris" }]
+        "expected": "Paris"
       },
       {
         "prompt": "Reply with valid JSON only.",
@@ -97,17 +99,13 @@ curl -X POST http://127.0.0.1:7981/v1/evals/run \
 
 Assertions are deterministic (`contains`, `not_contains`, `equals`, `regex`, `json_valid`) plus
 `llm_judge`, a second pipeline call whose verdict is parsed defensively. Set `judge_model` to hold
-one judge fixed across every case. The response returns a per-case score plus an aggregate. An empty
-`dataset` uses a built-in 3-case set. See [Evals and audit](/docs/gateway/evals-audit) for the full
-field list.
+one judge fixed across every case. The response returns per-case scores (including per-evaluator
+breakdowns when `evaluators` are requested) plus an aggregate. An empty `dataset` uses a built-in
+3-case set. See [Evals and audit](/docs/gateway/evals-audit) for the full field list.
 
-<Callout type="warn">
-The catalog (`GET /v1/evaluators`) is shipped and honest per entry, but selecting a catalog evaluator
-id and having the offline runner score a dataset **by that evaluator** is the P2 offline-runner
-integration, still in progress. Until it lands, express the check you want as an `assertion` on the
-case, as above; you cannot yet pass a catalog `id` such as `correctness` to `/v1/evals/run` and have
-it score with that rubric.
-</Callout>
+From Core, `POST /api/gateway/evals/run` accepts the same body; add optional
+`code_evaluators: [{ id, lang, source }]` (`lang` = `js` | `python`) for user functions Core runs
+locally and merges into each case's `evaluators` array.
 
 </Step>
 
@@ -118,8 +116,8 @@ it score with that rubric.
 - `GET /v1/evaluators` returns 30 entries. Exactly five report `enforced: true`
   (`pii_leakage`, `code_injection`, `prompt_injection`, `toxicity`, `bias_fairness`); every other
   entry, including both image judges, reports `false`.
-- `POST /v1/evals/run` returns a per-case score and an aggregate. A passing assertion scores the case
-  as satisfied; a failing one marks it failed rather than erroring the whole run.
+- `POST /v1/evals/run` returns per-case scores and an aggregate. Registry `evaluators` add
+  per-evaluator breakdowns; assertions still work for deterministic checks.
 - A multi-model run with `llm_judge` fans out `models * cases * (1 + judge_calls)` provider calls
   under Core's 120s proxy timeout, so keep the matrix small or it times out at the proxy.
 

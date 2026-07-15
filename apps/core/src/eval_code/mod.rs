@@ -27,6 +27,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
+use crate::win_process::NoWindow;
+
 /// Per-eval wall-clock ceiling. Deliberately small — NOT the 30 s tool-exec
 /// per-*run* ceiling: a dataset run multiplies this by cases × evaluators, so it
 /// must stay tight or the proxy could hang for minutes after the gateway leg
@@ -271,6 +273,7 @@ fn python_on_path() -> bool {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .stdin(Stdio::null())
+        .no_window()
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -301,6 +304,7 @@ async fn run_python_subprocess(
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .kill_on_drop(true)
+    .no_window()
     .spawn()
     {
         Ok(c) => c,

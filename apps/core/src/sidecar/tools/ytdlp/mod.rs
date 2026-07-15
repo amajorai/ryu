@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::win_process::NoWindow;
+
 /// Absolute path to the managed yt-dlp binary (`~/.ryu/bin/yt-dlp[.exe]`).
 ///
 /// Single source of truth for both existence checks and spawning — always spawn
@@ -101,6 +103,7 @@ pub async fn download_video(
     }
     cmd.arg("--");
     cmd.arg(url);
+    cmd.no_window();
 
     let output = cmd
         .output()

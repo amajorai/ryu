@@ -1,6 +1,6 @@
 [package]
 name = "ryu-gateway"
-version = "0.0.2"
+version = "0.0.4"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -41,6 +41,18 @@ base64 = "0.22"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 
+# WASM policy tier (gateway plugin plane — in-process third-party policy code).
+# Pinned to v45 to match Core's sandbox dep (apps/core/Cargo.toml) so the tree
+# holds ONE wasmtime. Default features (proven to build on this machine via Core);
+# the sandbox posture comes entirely from the runtime `Config`/`Linker`/`StoreLimits`
+# (zero-import linker, NO WASI, fuel + epoch + memory caps), NOT from Cargo features,
+# so trimming features would buy no security and risk the build. Untrusted policy
+# modules run here; the hardened host is `src/wasm_policy/`. NOTE: this is mirrored
+# fresh (Core's spike has none of the fuel/epoch/limit hardening) — the shared
+# `ryu-wasm-host` crate that would dedupe this AND retrofit Core is a documented
+# follow-up (see src/wasm_policy/mod.rs).
+wasmtime = "45"
+
 # OpenTelemetry seam (#540, P1): mirrors Core's seam (apps/core/Cargo.toml). The
 # vendor-neutral instrumentation export path. `tracing-opentelemetry` 0.33 bridges
 # the existing `tracing` spans into OTel; it pins `opentelemetry` ^0.32, so the
@@ -63,3 +75,8 @@ tracing-opentelemetry = "0.33"
 # same `crash-reports-enabled` pref. Same minimal feature set as Core (panic
 # integration only, NO `sentry-tracing`/`sentry-log`) + a home-dir path scrub.
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "native-tls"] }
+
+[dev-dependencies]
+# WAT → wasm compilation for the wasm-policy test guests (proof + malicious-guest
+# fixtures authored inline as `.wat`, no wasm32 toolchain / committed binary blob).
+wat = "1"

@@ -1,24 +1,44 @@
-//! The default [`CredentialSource`] backends (Unit 1, #519).
+//! The [`CredentialSource`] backends (Unit 1, #519).
 //!
-//! Three impls live here, all behind the [`CredentialSource`] trait and
-//! dispatched through the [`super::CredentialBackend`] enum:
+//! One impl lives here, behind the [`CredentialSource`] trait and dispatched
+//! through the [`super::CredentialBackend`] enum:
 //!
-//! - [`ManualImport`] — the **default**: the user pastes a cookie/token, Core
-//!   seals it via the Unit 0 cipher, and the connection is `AUTHENTICATED`. No
-//!   hosted page, no live re-fetch — the creds live in the vault.
-//! - [`ComposioSource`] — Composio connects accounts **on first tool
-//!   execution** (the tool path elicits a connect URL) and holds the secret
-//!   server-side, so its capture-oriented methods return honest errors pointing
-//!   at that path rather than sealing a vault blob it can't produce.
-//! - [`BrowserToolSource`] — a wired stub returning a clear `NotImplemented`
-//!   error; it is blocked on a browser-capture backend (Ryu ships no browser
-//!   engine) and lands in a later unit.
+//! - [`ManualImport`] — the **default** and the only capture backend: the user
+//!   pastes a cookie/token, Core seals it via the Unit 0 cipher, and the
+//!   connection is `AUTHENTICATED`. No hosted page, no live re-fetch — the creds
+//!   live in the vault.
+//!
+//! Two backends that used to be registered here are gone, for the same reason:
+//! a backend whose methods cannot really run must not be *selectable*, because a
+//! caller then picks it and only discovers at login time that it errors.
+//!
+//! - **`browser-tool`** — a browser-session capture source needs a browser
+//!   engine / CDP / cookie jar, and Core ships none (`ghost` is AX-tree + input
+//!   + screenshot, `shadow` is screen/audio capture + OCR — neither exposes
+//!   browser storage). Every method returned `NotImplemented`.
+//! - **`composio`** — a *dead vault backend*, not a dead integration. Composio
+//!   connects an account **on first tool execution** and keeps the secret
+//!   **server-side**, so there is no blob for the vault to seal, re-fetch, or
+//!   health-check: `begin_login` / `import` / `fetch_state` could only ever
+//!   error, and as the registry default its erroring `fetch_state` flipped every
+//!   authenticated connection to `NEEDS_AUTH` on each [`crate::identity::health`]
+//!   sweep. The **live** Composio path is untouched and lives elsewhere:
+//!   [`crate::composio_connect`] (`initiate` / `connection_status`) and
+//!   [`crate::sidecar::mcp::composio`]'s `dispatch`, which returns the
+//!   `__ryu_elicitation__` connect URL; the tool seam skips `composio__…` ids
+//!   entirely ([`crate::identity::consult_for_tool_call`]). Wiring Composio in as
+//!   a real vault backend would need a domain→toolkit map plus sealed-marker /
+//!   health semantics: a separate unit, not a stub.
+//!
+//! Both were removed from the closed [`super::CredentialBackend`] dispatcher
+//! rather than left as traps; see `super`'s module docs for the honest path a
+//! real capture backend would take.
 //!
 //! Per `CLAUDE.md` "nothing hardcoded": the trait is the swap point and the
 //! backend is selected per domain through the registry — no domain is
 //! special-cased and no backend is wired in inline.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 
 use super::{CredentialSource, LoginFlow, LoginKind};
 use crate::crypto::global_cipher;
@@ -85,98 +105,5 @@ impl CredentialSource for ManualImport {
         record
             .encrypted_state
             .with_context(|| format!("connection for `{domain}` has no sealed state (NEEDS_AUTH)"))
-    }
-}
-
-/// Composio-backed credentials.
-///
-/// Composio establishes a connected account **on first tool execution**, not by
-/// capturing a credential blob into Ryu's vault: when an agent runs a Composio
-/// action against an un-connected account, [`crate::sidecar::mcp::composio`]'s
-/// `dispatch` detects the connection-required response and returns the
-/// `__ryu_elicitation__` connect URL so the user can authorize. Composio then
-/// holds the secret **server-side** and re-uses it on the next call.
-///
-/// That means this `CredentialSource` has nothing to seal or re-fetch: there is
-/// no per-domain connect-initiate / connection-status / credential-fetch API
-/// exposed to Core (only catalog + `dispatch`), and no domain→toolkit mapping at
-/// this seam. So the capture-oriented methods return honest errors that point at
-/// the real connect path rather than pretending a vault blob exists, and `poll`
-/// mirrors [`ManualImport`] (this backend never observes a connection here). A
-/// full vault-style Composio backend is a later unit; see the deferred note.
-#[derive(Debug, Clone, Default)]
-pub struct ComposioSource;
-
-impl ComposioSource {
-    /// The backend id (`"composio"`).
-    pub const ID: &'static str = "composio";
-
-    /// Shared, actionable explanation for the capture-oriented methods.
-    fn unsupported(method: &str) -> anyhow::Error {
-        anyhow::anyhow!(
-            "Composio holds credentials server-side and exposes no per-domain {method}; \
-             a Composio account is connected on first tool execution, where \
-             `sidecar/mcp/composio.rs::dispatch` returns the `__ryu_elicitation__` connect URL \
-             — there is no sealed vault blob for the Identity Vault to manage"
-        )
-    }
-}
-
-impl CredentialSource for ComposioSource {
-    fn id(&self) -> &str {
-        Self::ID
-    }
-
-    async fn begin_login(&self, _domain: &str) -> Result<LoginFlow> {
-        bail!(Self::unsupported("connect-initiate"))
-    }
-
-    async fn poll(&self, _flow_id: &str) -> Result<ConnectionStatus> {
-        // This backend never captures a connection into the vault, so it can
-        // never observe one becoming AUTHENTICATED here. Mirror the manual
-        // backend's safe default rather than erroring on a benign poll.
-        Ok(ConnectionStatus::NeedsAuth)
-    }
-
-    async fn import(&self, _domain: &str, _raw: SecretState) -> Result<SealedState> {
-        bail!(Self::unsupported("credential import"))
-    }
-
-    async fn fetch_state(&self, _profile_id: &str, _domain: &str) -> Result<SealedState> {
-        bail!(Self::unsupported("credential fetch"))
-    }
-}
-
-/// Stub backend for an external MCP browser tool (e.g. agentbrowser) capturing
-/// a logged-in session. The browser engine itself is out of scope (Ryu ships
-/// none) — this is the future seam impl. Wired so the registry resolves it;
-/// every method fails with a clear `NotImplemented`.
-#[derive(Debug, Clone, Default)]
-pub struct BrowserToolSource;
-
-impl BrowserToolSource {
-    /// The backend id (`"browser-tool"`).
-    pub const ID: &'static str = "browser-tool";
-}
-
-impl CredentialSource for BrowserToolSource {
-    fn id(&self) -> &str {
-        Self::ID
-    }
-
-    async fn begin_login(&self, _domain: &str) -> Result<LoginFlow> {
-        bail!("CredentialSource 'browser-tool' not implemented yet (Identity Vault epic #517)")
-    }
-
-    async fn poll(&self, _flow_id: &str) -> Result<ConnectionStatus> {
-        bail!("CredentialSource 'browser-tool' not implemented yet (Identity Vault epic #517)")
-    }
-
-    async fn import(&self, _domain: &str, _raw: SecretState) -> Result<SealedState> {
-        bail!("CredentialSource 'browser-tool' not implemented yet (Identity Vault epic #517)")
-    }
-
-    async fn fetch_state(&self, _profile_id: &str, _domain: &str) -> Result<SealedState> {
-        bail!("CredentialSource 'browser-tool' not implemented yet (Identity Vault epic #517)")
     }
 }

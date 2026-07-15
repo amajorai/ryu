@@ -17,7 +17,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -25,10 +25,37 @@ use tokio::sync::Mutex;
 use crate::crypto::global_cipher;
 use crate::sidecar::download_manager::ryu_dir;
 
+use super::source::{is_known_source, known_source_ids};
 use super::{ConnectionRecord, ConnectionStatus, FlowStatus, Profile, SealedState, SecretState};
 
 /// Default backend id used when a connection's `source` is unspecified.
 const DEFAULT_SOURCE: &str = "manual";
+
+/// Backend ids that **used to be registered** and were retired. Rows persisted
+/// under one of these by an older build are rewritten to [`DEFAULT_SOURCE`] by
+/// the migration, so no row is left naming a backend that no longer exists.
+///
+/// **Append here when you retire a backend** — this list, not the complement of
+/// [`known_source_ids`], is what the sweep matches on. The difference matters:
+/// matching "anything not currently known" would also rewrite an id that is
+/// merely *unrecognized by this binary* — e.g. an older Core opening a
+/// `~/.ryu/identities.db` written by a newer one (a downgrade, or a mixed-version
+/// data folder) would silently clobber a perfectly valid future backend id, and
+/// the rewrite is one-way. Naming the retired ids explicitly keeps the sweep to
+/// ids we know are dead. Leaving an unknown id alone is safe: both readers
+/// degrade gracefully — `server::identity_api` falls back to the per-domain
+/// registry when `CredentialBackend::from_id` returns `None`, and the health
+/// sweep resolves through the registry and never reads the column.
+///
+/// - `browser-tool` — a `NotImplemented` stub for a browser engine Core doesn't ship.
+/// - `composio` — a dead vault backend: Composio holds credentials server-side,
+///   so `begin_login`/`import`/`fetch_state` could only bail. (The *live*
+///   Composio integration is a separate seam and is unaffected.)
+///
+/// Retiring a row this way is lossless: neither backend could ever `import`, so
+/// such a row carries no `encrypted_state` to lose — and the sweep touches only
+/// the `source` column regardless.
+const RETIRED_SOURCE_IDS: &[&str] = &["browser-tool", "composio"];
 
 fn db_path() -> PathBuf {
     ryu_dir().join("identities.db")
@@ -88,6 +115,33 @@ impl IdentityStore {
                 ON connections(profile_id);",
         )
         .context("running identities schema migration")?;
+
+        // Retire rows written under a backend that no longer exists (the
+        // `browser-tool` stub and the `composio` dead vault backend, both of which
+        // older builds accepted). Such a row would otherwise resolve
+        // inconsistently — `begin_login` would silently fall back to the
+        // per-domain registry while the row still claimed a backend that is gone.
+        //
+        // The match is on [`RETIRED_SOURCE_IDS`] (ids we *know* are dead), NOT on
+        // "any id not in `known_source_ids()`": see that const's docs — the
+        // complement form also clobbers an id this binary merely doesn't recognize
+        // (a downgrade / mixed-version data folder), and the rewrite is one-way.
+        //
+        // Idempotent: a re-run matches nothing. The ids are compile-time constants,
+        // so the inlined list is never user input.
+        let retired = RETIRED_SOURCE_IDS
+            .iter()
+            .map(|id| format!("'{id}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        conn.execute(
+            &format!(
+                "UPDATE connections SET source = '{DEFAULT_SOURCE}'
+                 WHERE source IN ({retired})"
+            ),
+            [],
+        )
+        .context("normalizing retired identity source ids")?;
         Ok(())
     }
 
@@ -96,6 +150,15 @@ impl IdentityStore {
     /// Create a new connection for `profile_id` + `domain`, starting in
     /// `NEEDS_AUTH`/`IDLE` with no credential state. `source` defaults to
     /// `"manual"` when `None`.
+    ///
+    /// An unregistered `source` is **rejected here**, at creation. The store is
+    /// the only writer of the `source` column, so this is the chokepoint that
+    /// keeps an unselectable backend out of the DB. A retired id (`browser-tool`,
+    /// `composio`) is no longer registered, so it is refused with a 400 naming the
+    /// real options — where it used to be accepted verbatim and only blow up
+    /// later, at `begin_login`, as an opaque 500 (or, worse, silently fall back to
+    /// a different backend than the row named). See [`crate::identity::source`] on
+    /// why only fully-implemented backends are registered.
     pub async fn create(
         &self,
         profile_id: &str,
@@ -105,6 +168,12 @@ impl IdentityStore {
         let id = format!("conn_{}", uuid::Uuid::new_v4().simple());
         let now = now_unix();
         let source = source.unwrap_or(DEFAULT_SOURCE).to_owned();
+        if !is_known_source(&source) {
+            bail!(
+                "unknown identity source `{source}`; known sources: {}",
+                known_source_ids().join(", ")
+            );
+        }
         let conn = self.conn.lock().await;
         conn.execute(
             "INSERT INTO connections
@@ -309,6 +378,150 @@ impl IdentityStore {
         let conn = self.conn.lock().await;
         let removed = conn.execute("DELETE FROM connections WHERE id = ?1", params![id])?;
         Ok(removed > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An unregistered backend id must be refused **at create**, not accepted and
+    /// then blown up at login time. This is what closes the `browser-tool` and
+    /// `composio` traps on the HTTP path (`POST /api/identities/connections`
+    /// forwards `source` verbatim).
+    ///
+    /// **The `composio` leg is the behavior change**: that create used to be
+    /// `Ok`, and the connection it made then returned HTTP 500 from
+    /// `POST /connections/{id}/login`. It is now rejected up front.
+    #[tokio::test]
+    async fn create_rejects_retired_and_unknown_sources() {
+        let store = IdentityStore::open_in_memory().unwrap();
+
+        for bad in ["browser-tool", "composio", "not-a-backend"] {
+            let err = store
+                .create("prof_1", "app.netflix.com", Some(bad))
+                .await
+                .unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("unknown identity source"),
+                "`{bad}`: got {msg}"
+            );
+            // The error names the real options so a caller can fix the request.
+            assert!(msg.contains("manual"), "`{bad}`: got {msg}");
+        }
+
+        // Nothing was written — the 500 that used to follow a `composio` create
+        // (at `POST /connections/{id}/login`) is now unreachable: there is no row.
+        assert!(store.list().await.unwrap().is_empty());
+
+        // A registered source still works, and the default stays `manual`.
+        let ok = store.create("prof_1", "a.example.com", None).await.unwrap();
+        assert_eq!(ok.source, "manual");
+        assert!(store
+            .create("prof_2", "b.example.com", Some("manual"))
+            .await
+            .is_ok());
+    }
+
+    /// A row persisted by an older build under a now-retired id is normalized to
+    /// `manual` by the migration, so it resolves consistently instead of naming a
+    /// backend that no longer exists. Idempotent: re-running changes nothing.
+    #[tokio::test]
+    async fn migration_normalizes_retired_source_ids() {
+        let store = IdentityStore::open_in_memory().unwrap();
+        {
+            let conn = store.conn.lock().await;
+            // Simulate the pre-removal rows: both ids were accepted verbatim, and
+            // `browser-tool` could even have state sealed under it.
+            conn.execute(
+                "INSERT INTO connections
+                    (id, profile_id, domain, status, flow_status, source,
+                     encrypted_state, last_checked, created_at, updated_at)
+                 VALUES ('conn_legacy', 'prof_1', 'app.netflix.com', 'AUTHENTICATED',
+                         'DONE', 'browser-tool', 'enc:v1:blob', 0, 0, 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO connections
+                    (id, profile_id, domain, status, flow_status, source,
+                     encrypted_state, last_checked, created_at, updated_at)
+                 VALUES ('conn_composio', 'prof_1', 'notion.so', 'NEEDS_AUTH',
+                         'IDLE', 'composio', NULL, 0, 0, 0)",
+                [],
+            )
+            .unwrap();
+            IdentityStore::migrate(&conn).unwrap();
+        }
+
+        let record = store.get("conn_legacy").await.unwrap().unwrap();
+        assert_eq!(record.source, "manual", "retired id must be normalized");
+        // Normalization rewrites only `source` — the sealed state is untouched.
+        assert!(record.encrypted_state.is_some());
+
+        // The composio row is retired too, rather than left orphaned naming a
+        // backend the dispatcher no longer resolves.
+        assert_eq!(
+            store.get("conn_composio").await.unwrap().unwrap().source,
+            "manual"
+        );
+
+        // Re-running the migration is a no-op for an already-known id.
+        {
+            let conn = store.conn.lock().await;
+            IdentityStore::migrate(&conn).unwrap();
+        }
+        assert_eq!(
+            store.get("conn_legacy").await.unwrap().unwrap().source,
+            "manual"
+        );
+    }
+
+    /// A registered id is never rewritten by the normalization sweep.
+    #[tokio::test]
+    async fn migration_leaves_known_sources_alone() {
+        let store = IdentityStore::open_in_memory().unwrap();
+        store.create("prof_1", "a.example.com", None).await.unwrap();
+        {
+            let conn = store.conn.lock().await;
+            IdentityStore::migrate(&conn).unwrap();
+        }
+        let found = store.find("prof_1", "a.example.com").await.unwrap().unwrap();
+        assert_eq!(found.source, "manual");
+    }
+
+    /// **Downgrade safety.** The sweep retires the ids we *know* are dead; it must
+    /// NOT rewrite an id it merely doesn't recognize. An older Core opening a
+    /// `~/.ryu/identities.db` written by a newer one (a downgrade, or a
+    /// mixed-version data folder) would otherwise silently clobber a valid future
+    /// backend id — a one-way loss. The row stays as written; both readers degrade
+    /// gracefully to the per-domain registry.
+    #[tokio::test]
+    async fn migration_leaves_an_unrecognized_future_source_intact() {
+        let store = IdentityStore::open_in_memory().unwrap();
+        {
+            let conn = store.conn.lock().await;
+            // A backend a *newer* build registers and this one has never heard of
+            // (e.g. the browser-extension cookie-jar source the source docs spec).
+            conn.execute(
+                "INSERT INTO connections
+                    (id, profile_id, domain, status, flow_status, source,
+                     encrypted_state, last_checked, created_at, updated_at)
+                 VALUES ('conn_future', 'prof_1', 'app.netflix.com', 'AUTHENTICATED',
+                         'DONE', 'extension', 'enc:v1:blob', 0, 0, 0)",
+                [],
+            )
+            .unwrap();
+            IdentityStore::migrate(&conn).unwrap();
+        }
+
+        let record = store.get("conn_future").await.unwrap().unwrap();
+        assert_eq!(
+            record.source, "extension",
+            "an unknown-but-not-retired id must be left alone, not clobbered to manual"
+        );
+        assert!(record.encrypted_state.is_some());
     }
 }
 

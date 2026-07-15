@@ -30,6 +30,7 @@ use crate::sidecar::adapters::{
 use crate::sidecar::gateway::{check_exec_scan, ExecScanOutcome};
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::BoxFuture;
+use crate::win_process::NoWindow;
 
 /// A single event emitted by a running ACP session.
 ///
@@ -171,6 +172,12 @@ pub struct ToolWidgetEvent {
     pub initial_widget_state: Option<serde_json::Value>,
     /// `"inline" | "fullscreen" | "pip"`.
     pub display_mode: String,
+    /// The widget's declared remote-asset hosts (`resource_domains`), parsed from
+    /// the widget resource's `_meta`. Threaded to the SSE `csp.resource_domains`
+    /// so the client widens `img-src`/`font-src`/`media-src` to the Core asset
+    /// proxy and rewrites these hosts' URLs through it (governed egress). Empty ⇒
+    /// the CSP stays fully locked (`data:` only).
+    pub resource_domains: Vec<String>,
 }
 
 /// User-chosen ACP session controls applied to a single turn, all read from the
@@ -352,6 +359,7 @@ async fn terminal_create(
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+    cmd.no_window();
 
     let mut child = cmd
         .spawn()
@@ -688,8 +696,16 @@ pub fn observed_tools_for(agent_id: &str) -> Vec<ToolInfo> {
 // `POST /api/chat/permission` route calls `resolve_permission` to deliver the
 // user's chosen option id (or `None` to cancel/reject).
 
-type PermissionWaiters =
-    Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<Option<String>>>>;
+/// `request_id → (waiter, host conversation id)`.
+///
+/// The conversation is carried so `POST /api/chat/permission` can GATE the decision
+/// on the thread the prompt belongs to. Without it, `perm-<seq>` ids are sequential
+/// and trivially guessable, so any holder of the node token could approve or DENY
+/// another user's pending tool-permission prompt — a human-in-the-loop integrity
+/// bypass. `None` for an ephemeral (no-conversation) instance.
+type PermissionWaiters = Mutex<
+    std::collections::HashMap<String, (tokio::sync::oneshot::Sender<Option<String>>, Option<String>)>,
+>;
 
 fn pending_permissions() -> &'static PermissionWaiters {
     static WAITERS: OnceLock<PermissionWaiters> = OnceLock::new();
@@ -706,12 +722,31 @@ fn next_permission_id() -> String {
 /// Register a waiter for `request_id` and return the receiver the permission
 /// handler awaits. Dropping the returned receiver (or never resolving) leaves
 /// the handler to time out and cancel.
-fn register_permission(request_id: String) -> tokio::sync::oneshot::Receiver<Option<String>> {
+fn register_permission(
+    request_id: String,
+    conversation_id: Option<String>,
+) -> tokio::sync::oneshot::Receiver<Option<String>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     if let Ok(mut map) = pending_permissions().lock() {
-        map.insert(request_id, tx);
+        map.insert(
+            request_id,
+            (tx, conversation_id.filter(|s| !s.is_empty())),
+        );
     }
     rx
+}
+
+/// The host conversation a pending permission request belongs to, WITHOUT consuming
+/// the waiter — so `POST /api/chat/permission` can run its ACL before delivering the
+/// decision.
+///
+/// `None` = no such pending request (already answered or timed out).
+/// `Some(None)` = pending, but raised by an ephemeral instance with no conversation.
+pub fn peek_permission_scope(request_id: &str) -> Option<Option<String>> {
+    pending_permissions()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(request_id).map(|(_, cid)| cid.clone()))
 }
 
 /// Ask the connected desktop user to approve a synthetic tool action and wait
@@ -721,9 +756,10 @@ pub async fn request_user_permission(
     tx: &mpsc::UnboundedSender<AcpEvent>,
     tool_call: serde_json::Value,
     options: serde_json::Value,
+    conversation_id: Option<String>,
 ) -> Option<String> {
     let request_id = next_permission_id();
-    let rx = register_permission(request_id.clone());
+    let rx = register_permission(request_id.clone(), conversation_id);
     let _ = tx.send(AcpEvent::PermissionRequest {
         request_id: request_id.clone(),
         tool_call,
@@ -748,7 +784,7 @@ pub fn resolve_permission(request_id: &str, option_id: Option<String>) -> bool {
         .ok()
         .and_then(|mut map| map.remove(request_id));
     match sender {
-        Some(tx) => tx.send(option_id).is_ok(),
+        Some((tx, _conversation_id)) => tx.send(option_id).is_ok(),
         None => false,
     }
 }
@@ -1589,6 +1625,18 @@ pub async fn run_acp_instance(
                 let instance_conversation =
                     first_turn.permission_scope_id.clone().unwrap_or_default();
 
+                // Widget synthesis inputs for the managed-Pi widget path. Pi has no
+                // MCP bridge, so a widget-bearing tool it calls through the `ryu-mcp`
+                // extension carries its MCP `_meta`/`structuredContent` in the tool
+                // result's `details.ryuWidget`, which pi-acp preserves as ACP
+                // `rawOutput`. We rebuild the widget event from that below — REUSING
+                // the shared `build_widget_event`, keyed to the real tool-call id —
+                // so it flows to `ui_tool_widget` exactly like the bridge path. Held
+                // at instance scope (stable for the chat) so each per-message closure
+                // can clone them. `None` mcp (legacy/test) → no synthesis.
+                let widget_mcp = first_turn.mcp.clone();
+                let widget_agent_id = first_turn.agent_id.clone();
+
                 // Persistent per-instance permission channel + a swappable sink. The
                 // Ryu MCP bridge is built ONCE (below) with `instance_tx` as its
                 // `permission_tx`, but each turn streams to a DIFFERENT consumer. A
@@ -1843,8 +1891,17 @@ pub async fn run_acp_instance(
                         SessionMessage::SessionMessage(message) => {
                             let tx_chunk = tx.clone();
                             let tx_perm = tx.clone();
+                            // Per-message copies for the managed-Pi widget synthesis
+                            // in the `ToolCallUpdate` arm (the closure is `move`).
+                            let widget_mcp = widget_mcp.clone();
+                            let widget_agent_id = widget_agent_id.clone();
+                            let widget_conversation = instance_conversation.clone();
                             let interactive = turn.interactive;
                             let scan_agent = scan_agent.clone();
+                            // Per-message copy of the instance's conversation id: the
+                            // permission handler below is a `move` closure, so it needs
+                            // its own owned copy to scope the prompt it registers.
+                            let perm_conversation = instance_conversation.clone();
                             // Per-message handles for the fs/terminal request handlers.
                             let terms_read = Arc::clone(&terminals);
                             let terms_out = Arc::clone(&terminals);
@@ -1937,6 +1994,42 @@ pub async fn run_acp_instance(
                                         SessionUpdate::ToolCallUpdate(update) => {
                                             if let Some(ev) = tool_update_event(&update) {
                                                 let _ = tx_chunk.send(ev);
+                                            }
+                                            // Managed-Pi widget path: a COMPLETED update
+                                            // whose `rawOutput.details.ryuWidget` binding
+                                            // was stamped by the `ryu-mcp` extension yields
+                                            // a widget. `pi_widget_binding` gates on
+                                            // COMPLETED + marker presence (so a partial
+                                            // `tool_execution_update` cannot emit a premature
+                                            // widget) and extracts the raw MCP result. REUSE
+                                            // the shared `build_widget_event` — no second
+                                            // synthesizer; it reads `_meta`/`structuredContent`
+                                            // from that result and never re-dispatches.
+                                            if let Some(reg) = widget_mcp.as_deref() {
+                                                if let Some((tool, args, result)) = pi_widget_binding(
+                                                    update.fields.status.as_ref(),
+                                                    update.fields.raw_output.as_ref(),
+                                                ) {
+                                                    let conversation = (!widget_conversation
+                                                        .is_empty())
+                                                    .then(|| widget_conversation.clone());
+                                                    if let Some(event) =
+                                                        super::mcp_bridge::build_widget_event(
+                                                            reg,
+                                                            &tool,
+                                                            &args,
+                                                            &result,
+                                                            Some(update.tool_call_id.to_string()),
+                                                            conversation,
+                                                            widget_agent_id.clone(),
+                                                        )
+                                                        .await
+                                                    {
+                                                        let _ = tx_chunk.send(AcpEvent::ToolWidget(
+                                                            Box::new(event),
+                                                        ));
+                                                    }
+                                                }
                                             }
                                         }
                                         SessionUpdate::CurrentModeUpdate(m) => {
@@ -2037,7 +2130,13 @@ pub async fn run_acp_instance(
                                             // Surface the request to the user and await
                                             // their decision; cancel (reject) on timeout.
                                             let request_id = next_permission_id();
-                                            let rx = register_permission(request_id.clone());
+                                            // Scope the prompt to this instance's
+                                            // conversation so its decision can be
+                                            // ACL-gated (see `peek_permission_scope`).
+                                            let rx = register_permission(
+                                                request_id.clone(),
+                                                Some(perm_conversation.clone()),
+                                            );
                                             let _ = tx_perm.send(AcpEvent::PermissionRequest {
                                                 request_id: request_id.clone(),
                                                 tool_call: serde_json::to_value(&req.tool_call)
@@ -2425,6 +2524,34 @@ fn tool_update_event(update: &ToolCallUpdate) -> Option<AcpEvent> {
     })
 }
 
+/// Extract a managed-Pi widget binding from a `ToolCallUpdate`'s raw output.
+///
+/// The `ryu-mcp` Pi extension stamps `details.ryuWidget = { tool, arguments,
+/// output }` on its tool result; pi-acp preserves that verbatim as the ACP
+/// `rawOutput`. This returns `(tool_id, arguments, mcp_result)` — the exact inputs
+/// the shared [`super::mcp_bridge::build_widget_event`] needs — or `None` when the
+/// update is not a completed Pi widget result.
+///
+/// Gating on [`ToolCallStatus::Completed`] is load-bearing: pi-acp also emits an
+/// in-progress `tool_call_update` (`tool_execution_update`) carrying a partial
+/// `rawOutput`, and a widget must render only from the final result.
+fn pi_widget_binding(
+    status: Option<&ToolCallStatus>,
+    raw_output: Option<&serde_json::Value>,
+) -> Option<(String, serde_json::Value, serde_json::Value)> {
+    if !matches!(status, Some(ToolCallStatus::Completed)) {
+        return None;
+    }
+    let binding = raw_output?.get("details")?.get("ryuWidget")?;
+    let tool = binding.get("tool").and_then(serde_json::Value::as_str)?;
+    let result = binding.get("output")?.clone();
+    let args = binding
+        .get("arguments")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    Some((tool.to_owned(), args, result))
+}
+
 /// A single fallback provider entry in the default-agent recovery chain.
 /// Returned by [`AcpAgentRegistry::fallback_chain_for_default`].
 #[derive(Debug, Clone)]
@@ -2496,13 +2623,13 @@ pub async fn probe_cli_version(binary: &str) -> Option<String> {
     #[cfg(target_os = "windows")]
     let mut cmd = {
         let mut cmd = tokio::process::Command::new("cmd");
-        cmd.args(["/c", binary, "--version"]);
+        cmd.args(["/c", binary, "--version"]).no_window();
         cmd
     };
     #[cfg(not(target_os = "windows"))]
     let mut cmd = {
         let mut cmd = tokio::process::Command::new(binary);
-        cmd.arg("--version");
+        cmd.arg("--version").no_window();
         cmd
     };
 
@@ -2647,6 +2774,7 @@ pub async fn update_managed_pi() -> anyhow::Result<()> {
         .current_dir(&pi_dir)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
+        .no_window()
         .status()
         .await
         .map_err(|e| anyhow::anyhow!("spawn bun add: {e}"))?;
@@ -2720,6 +2848,22 @@ pub fn ryu_pi_acp_cmd() -> Option<String> {
         String::new()
     };
 
+    // Ryu-MCP extension wiring (widget path for the DEFAULT agent). The managed Pi
+    // has NO in-process MCP bridge (pi-acp advertises no MCP-server support), so it
+    // reaches Core's tools — including widget-bearing ones — via the `ryu-mcp`
+    // extension (shipped by `pi_config::ensure_pi_mcp_extension`), which POSTs to
+    // Core's HTTP tool API. These env vars tell that extension where Core is, which
+    // agent id to attribute the call to (for the per-agent allowlist + widget
+    // identity), and — on an exposed node — the bearer to present. `RYU_TOKEN` is
+    // omitted on loopback dev (Core then requires no token). Mirrors how the gateway
+    // sidecar learns `CORE_URL`/`CORE_TOKEN`.
+    let core_url = crate::sidecar::gateway::core_self_url();
+    let mcp_agent_id = crate::registry::DEFAULT_AGENT_ID;
+    let core_token = std::env::var("RYU_TOKEN")
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|s| !s.is_empty());
+
     #[cfg(target_os = "windows")]
     {
         // CRITICAL (Windows): this whole command string is re-parsed by
@@ -2738,8 +2882,14 @@ pub fn ryu_pi_acp_cmd() -> Option<String> {
         } else {
             String::new()
         };
+        let mut mcp_env = format!(
+            "set RYU_MCP_CORE_URL={core_url}&& set RYU_MCP_AGENT_ID={mcp_agent_id}&& "
+        );
+        if let Some(t) = &core_token {
+            mcp_env.push_str(&format!("set RYU_MCP_CORE_TOKEN={t}&& "));
+        }
         Some(format!(
-            "cmd /c {gateway_env}set PI_CODING_AGENT_DIR={config_dir}&& set PI_ACP_PI_COMMAND={pi_path}&& npx -y pi-acp"
+            "cmd /c {gateway_env}{mcp_env}set PI_CODING_AGENT_DIR={config_dir}&& set PI_ACP_PI_COMMAND={pi_path}&& npx -y pi-acp"
         ))
     }
     #[cfg(not(target_os = "windows"))]
@@ -2749,8 +2899,13 @@ pub fn ryu_pi_acp_cmd() -> Option<String> {
         } else {
             String::new()
         };
+        let mut mcp_env =
+            format!("RYU_MCP_CORE_URL={core_url} RYU_MCP_AGENT_ID={mcp_agent_id} ");
+        if let Some(t) = &core_token {
+            mcp_env.push_str(&format!("RYU_MCP_CORE_TOKEN={t} "));
+        }
         Some(format!(
-            "{gateway_env}PI_CODING_AGENT_DIR={config_dir} PI_ACP_PI_COMMAND={pi_path} npx -y pi-acp"
+            "{gateway_env}{mcp_env}PI_CODING_AGENT_DIR={config_dir} PI_ACP_PI_COMMAND={pi_path} npx -y pi-acp"
         ))
     }
 }
@@ -3340,7 +3495,9 @@ impl AcpAgentRegistry {
         let base_url = std::env::var("RYU_FALLBACK_LLM_BASE_URL")
             .ok()
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "http://127.0.0.1:8080".to_owned());
+            // Default points at the local llamacpp chat engine, whose port is
+            // profile-aware (release 8080, dev 9080, …).
+            .unwrap_or_else(|| format!("http://127.0.0.1:{}", crate::profile::port(8080)));
         let model = std::env::var("RYU_FALLBACK_LLM_MODEL")
             .ok()
             .filter(|s| !s.is_empty())
@@ -3445,6 +3602,120 @@ mod tests {
 
     fn pi_acp_cmd_gated() -> String {
         pi_acp_cmd()
+    }
+
+    // ── Managed-Pi widget synthesis (Round A) ──────────────────────────────
+    //
+    // The `ryu-mcp` Pi extension stamps `details.ryuWidget = { tool, arguments,
+    // output }` on its tool result; pi-acp preserves it as ACP `rawOutput`. These
+    // cover the NEW extraction/gating (`pi_widget_binding`) and the end-to-end
+    // synthesis into a `ToolWidgetEvent` via the SHARED `build_widget_event`, using
+    // a real in-process app (`checklist__render`) so the binding + HTML resolve.
+    use crate::sidecar::mcp::McpRegistry;
+
+    fn ryu_widget_raw_output(tool: &str, structured: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "content": [{ "type": "text", "text": "done" }],
+            "details": {
+                "ryuWidget": {
+                    "tool": tool,
+                    "arguments": { "title": "Groceries" },
+                    "output": { "structuredContent": structured, "content": [] },
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn pi_widget_binding_extracts_only_on_completed_with_marker() {
+        let raw = ryu_widget_raw_output("checklist__render", serde_json::json!({ "items": [] }));
+
+        // Completed + marker → extracted (tool, args, mcp result).
+        let got = pi_widget_binding(Some(&ToolCallStatus::Completed), Some(&raw));
+        let (tool, args, result) = got.expect("completed + marker extracts a binding");
+        assert_eq!(tool, "checklist__render");
+        assert_eq!(args["title"], serde_json::json!("Groceries"));
+        assert_eq!(result["structuredContent"]["items"], serde_json::json!([]));
+
+        // In-progress (a partial `tool_execution_update`) must NOT extract — else a
+        // premature widget would render before the tool finished.
+        assert!(pi_widget_binding(Some(&ToolCallStatus::InProgress), Some(&raw)).is_none());
+        // Missing status → none.
+        assert!(pi_widget_binding(None, Some(&raw)).is_none());
+    }
+
+    #[test]
+    fn pi_widget_binding_none_without_marker_or_fields() {
+        // Completed but no `details.ryuWidget` (an ordinary Pi tool result).
+        let plain = serde_json::json!({ "content": [{ "type": "text", "text": "hi" }] });
+        assert!(pi_widget_binding(Some(&ToolCallStatus::Completed), Some(&plain)).is_none());
+        // Marker present but missing the required `tool` / `output` fields → none.
+        let partial = serde_json::json!({ "details": { "ryuWidget": { "arguments": {} } } });
+        assert!(pi_widget_binding(Some(&ToolCallStatus::Completed), Some(&partial)).is_none());
+        // No raw_output at all → none.
+        assert!(pi_widget_binding(Some(&ToolCallStatus::Completed), None).is_none());
+    }
+
+    #[tokio::test]
+    async fn pi_widget_synthesis_builds_tool_widget_event() {
+        // End-to-end (minus the live Pi subprocess): the exact two-step the ACP
+        // `ToolCallUpdate` handler runs — extract the binding, then feed it to the
+        // SHARED `build_widget_event`. `checklist__render` is an in-process app, so
+        // its widget binding + HTML resolve without any live MCP server.
+        let mcp = McpRegistry::empty();
+        let raw = ryu_widget_raw_output(
+            "checklist__render",
+            serde_json::json!({ "title": "Groceries", "items": [{ "text": "milk" }] }),
+        );
+
+        let (tool, args, result) =
+            pi_widget_binding(Some(&ToolCallStatus::Completed), Some(&raw)).expect("binding");
+        let event = crate::sidecar::adapters::mcp_bridge::build_widget_event(
+            &mcp,
+            &tool,
+            &args,
+            &result,
+            Some("acp_call_42".to_owned()),
+            Some("conv-widget-test".to_owned()),
+            "ryu".to_owned(),
+        )
+        .await
+        .expect("checklist render synthesizes a widget event");
+
+        // The widget correlates to the REAL ACP tool-call id (not the synthetic one).
+        assert_eq!(event.tool_call_id, "acp_call_42");
+        assert_eq!(event.tool_name, "checklist__render");
+        assert_eq!(event.template_uri, "ui://widget/checklist.html");
+        // `structuredContent` → `toolOutput`, delivered RAW to the widget.
+        assert_eq!(event.tool_output["title"], serde_json::json!("Groceries"));
+        assert!(!event.widget_html.is_empty(), "widget HTML resolves");
+    }
+
+    #[tokio::test]
+    async fn pi_widget_synthesis_skips_error_results() {
+        // An `isError` MCP result NEVER emits a widget (spec §1.1) — even when the
+        // Pi extension stamped the marker.
+        let mcp = McpRegistry::empty();
+        let raw = serde_json::json!({
+            "details": { "ryuWidget": {
+                "tool": "checklist__render",
+                "arguments": {},
+                "output": { "isError": true, "content": [{ "type": "text", "text": "boom" }] },
+            }}
+        });
+        let (tool, args, result) =
+            pi_widget_binding(Some(&ToolCallStatus::Completed), Some(&raw)).expect("binding");
+        let event = crate::sidecar::adapters::mcp_bridge::build_widget_event(
+            &mcp,
+            &tool,
+            &args,
+            &result,
+            Some("acp_call_err".to_owned()),
+            Some("conv-err".to_owned()),
+            "ryu".to_owned(),
+        )
+        .await;
+        assert!(event.is_none(), "isError result must not synthesize a widget");
     }
 
     #[test]

@@ -1,8 +1,9 @@
 import { RootProvider } from "fumadocs-ui/provider/next";
-import type { Metadata } from "next";
 
 import "./global.css";
 import { Geist, Inter } from "next/font/google";
+
+import { generateMetadata } from "@/lib/metadata";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -15,11 +16,7 @@ const geist = Geist({
   variable: "--font-geist",
 });
 
-export const metadata: Metadata = {
-  title: "Ryu Docs",
-  description:
-    "Documentation for Ryu — end-to-end infrastructure for AI agents",
-};
+export const metadata = generateMetadata();
 
 export default function Layout({ children }: LayoutProps<"/">) {
   return (

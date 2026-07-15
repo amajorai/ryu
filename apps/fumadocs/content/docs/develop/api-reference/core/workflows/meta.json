@@ -2,12 +2,22 @@
   "title": "Workflows",
   "description": "Workflow DAG engine.",
   "pages": [
+    "list_workflow_templates",
+    "install_workflow_template",
+    "get_workflow_template",
+    "workflow_webhook",
+    "list_jobs",
+    "get_job",
     "list_workflows",
     "create_workflow",
     "get_workflow_run",
     "resume_workflow_run",
     "get_workflow",
     "delete_workflow",
-    "run_workflow"
+    "run_workflow",
+    "list_workflow_versions",
+    "create_workflow_version",
+    "get_workflow_version",
+    "restore_workflow_version"
   ]
 }

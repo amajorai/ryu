@@ -9,12 +9,26 @@
 
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
+import { setSurfaceProvider } from "@ryuhq/core-client/client";
 import { App } from "./App.tsx";
+import { ensureCoreRunning } from "./core/bootstrap.ts";
 import { buildTarget } from "./core/target.ts";
 
+// Declare the calling surface once, at entry, so EVERY core-client request carries
+// `X-Ryu-Surface: cli` (makeHeaders reads the provider). Core filters the plugin
+// list/catalog/contributions to what actually targets this surface; without it the
+// list is unfiltered. The TUI is a terminal client to a Core node, so "cli" is the
+// natural token (it shares that surface vocabulary with apps/cli). Mirrors the
+// setBuyerTokenProvider precedent — the shared client never hardcodes a surface.
+setSurfaceProvider(() => "cli");
+
 const main = async (): Promise<void> => {
+	const target = buildTarget();
+	// Bring a local node online if none is answering (no-op if Core is already up or
+	// the target is remote). Lets `ryu-tui` alone start everything, like the desktop.
+	await ensureCoreRunning(target);
 	const renderer = await createCliRenderer({ exitOnCtrlC: false });
-	createRoot(renderer).render(<App target={buildTarget()} />);
+	createRoot(renderer).render(<App target={target} />);
 };
 
 main().catch((err) => {

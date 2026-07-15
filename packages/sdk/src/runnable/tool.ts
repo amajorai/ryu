@@ -14,6 +14,7 @@
  * call gateway.chat() when they need model assistance.
  */
 
+import type { RunnableMeta } from "../manifest.ts";
 import type { Runnable, RunnableContext } from "./runnable-types.ts";
 
 // ── JSON Schema types ─────────────────────────────────────────────────────────
@@ -155,6 +156,24 @@ export interface ToolRunnable<
 	readonly kind: "tool";
 	/** JSON Schema for this tool's input — compatible with Core's ToolInfo.schema. */
 	readonly schema: ToolSchema;
+	/**
+	 * The `run` body serialized for Core's `inline_deno` tool backend — the exact
+	 * same technique `defineTurnHook` uses for its `code`. This is what makes a
+	 * `defineTool` **shippable**: bundled into a plugin manifest (see
+	 * {@link inlineToolRunnable} / `definePlugin({ tools })`), Core runs it in the
+	 * Deno sandbox, so the tool ships NEW behavior instead of only aliasing an
+	 * existing tool.
+	 *
+	 * IMPORTANT: like a hook body, the serialized function is **self-contained** —
+	 * it runs in a fresh sandbox with only `input` (the call arguments) and `host`
+	 * (the capability bridge: `host.sideModel` / `host.storage` / `host.log`, each
+	 * gated by the plugin's grants) in scope. It cannot capture outer variables,
+	 * imports, or closures, and `ctx.gateway` is **not** available in the sandbox
+	 * — a shipped tool reaches models through `host.sideModel`. When run in-process
+	 * via {@link ToolRunnable.run} the normal `(input, ctx)` contract still holds;
+	 * the sandbox form is the second parameter aliased to `host`.
+	 */
+	readonly code: string;
 }
 
 // ── Factory ───────────────────────────────────────────────────────────────────
@@ -194,14 +213,48 @@ export function defineTool<
 >(options: ToolOptions<TInput, TOutput>): ToolRunnable<TInput, TOutput> {
 	const { id, name, schema, run } = options;
 
+	// Serialize the run body for Core's `inline_deno` backend — the same approach
+	// `defineTurnHook` uses: the sandbox wraps this in an async IIFE where `input`
+	// and `host` are in scope and a bare `return` reports the tool result.
+	const code = `return await (${run.toString()})(input, host);`;
+
 	return {
 		id,
 		name,
 		kind: "tool",
 		schema,
+		code,
 		run(input: TInput, ctx: RunnableContext): Promise<TOutput> {
 			validateInput(input, schema, id);
 			return run(input, ctx);
 		},
 	} satisfies ToolRunnable<TInput, TOutput>;
+}
+
+/**
+ * Convert a {@link ToolRunnable} into a `plugin.json` `kind:"tool"` runnable that
+ * ships its `run` body as Core's `inline_deno` backend. The emitted config
+ * mirrors Core's `ToolConfig` (`apps/core/src/plugin_manifest/schema.rs`):
+ * `{ slug, backend:"inline_deno", code, description?, input_schema }`. Core
+ * registers it as `app__<slug>` — discoverable via `/api/tools/search` and
+ * executed in the grant-gated sandbox.
+ *
+ * The plugin must declare the `tool:execute` grant (see `definePlugin`).
+ */
+export function inlineToolRunnable(
+	tool: ToolRunnable,
+	options?: { description?: string }
+): RunnableMeta {
+	return {
+		id: tool.id,
+		name: tool.name,
+		kind: "tool",
+		config: {
+			slug: tool.id,
+			backend: "inline_deno",
+			code: tool.code,
+			input_schema: tool.schema,
+			...(options?.description ? { description: options.description } : {}),
+		},
+	};
 }

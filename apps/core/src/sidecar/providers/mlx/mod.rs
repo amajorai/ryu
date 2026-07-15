@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
+use crate::win_process::NoWindow;
 use process::DEFAULT_PORT;
 
 /// Default model MLX serves when none is configured. Like vLLM/SGLang, MLX binds
@@ -188,6 +189,7 @@ impl Sidecar for MlxManager {
             tracing::info!("uninstalling mlx via pip");
             match tokio::process::Command::new(&python)
                 .args(["-m", "pip", "uninstall", "-y", installer::PIP_PACKAGE])
+                .no_window()
                 .status()
                 .await
             {

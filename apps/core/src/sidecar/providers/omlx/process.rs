@@ -19,6 +19,8 @@ use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
+use crate::win_process::NoWindow;
+
 /// oMLX's default loopback port (documented). Shared with vLLM by design — the
 /// two are mutually-exclusive residents (see module docs).
 pub const DEFAULT_PORT: u16 = 8000;
@@ -63,6 +65,7 @@ impl OmlxProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false)
+            .no_window()
             .spawn()
             .context("spawning omlx serve")?;
 

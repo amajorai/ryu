@@ -467,6 +467,9 @@ async fn require_agent_builder_configure_permission(
                 "kind": "reject_once"
             }
         ]),
+        // The host conversation, so `POST /api/chat/permission` can gate the decision
+        // on the thread that raised it.
+        permission_scope_id.map(str::to_owned),
     )
     .await;
     match chosen.as_deref() {
@@ -602,6 +605,14 @@ impl rmcp::ServerHandler for RyuMcpHandler {
                     None,
                     &self.identity_profile_ids,
                     None,
+                    // THE AGENT-PLANE PRINCIPAL. `permission_scope_id` IS the host
+                    // conversation id (`acp.rs` keys the whole instance by it), so
+                    // the agent's tool calls are authorized as the OWNER of the
+                    // conversation the turn is running in — resolved fresh at
+                    // dispatch, never cached at build time. This is what stops Bob's
+                    // agent reading Alice's chats through `threads__read_thread` /
+                    // `search_conversations__search`.
+                    self.permission_scope_id.as_deref(),
                 )
                 .await
                 .map_err(|e| {
@@ -669,7 +680,16 @@ pub(crate) async fn build_widget_event(
     conversation_id: Option<String>,
     agent_id: String,
 ) -> Option<ToolWidgetEvent> {
-    let binding = mcp.widget_binding(tool_id).await?;
+    // DEDUP + grant gate (Round: one plugin model): the promotion decision now
+    // routes through the single manifest-gated resolver. `contributes.widgets[]`
+    // is the source of record for WHETHER a tool may render; the `_meta`/apps
+    // discovery only supplies the binding DETAIL it returns on Allow. A tool whose
+    // owning (enabled) plugin lacks the `widget:render` grant is refused here —
+    // its result is still delivered as text, so refusal never breaks the turn.
+    let binding = match mcp.widget_promotion_or_log(tool_id).await {
+        Some(binding) => binding,
+        None => return None,
+    };
     let typed = McpToolResult::from_result_value(result.clone());
     // `isError` results NEVER emit a widget (spec §1.1).
     if typed.is_error {
@@ -690,21 +710,11 @@ pub(crate) async fn build_widget_event(
         tool_ids,
     )?;
 
-    // `_meta` minus `ryu/widget` (Core strips) → `toolResponseMetadata`.
-    let mut meta = typed.meta.unwrap_or_else(|| Value::Object(Default::default()));
-    if let Some(obj) = meta.as_object_mut() {
-        obj.remove("ryu/widget");
-    }
-    let tool_output = typed.structured_content.unwrap_or(Value::Null);
-
-    // Injection defense (B3): first-party in-process apps are trusted; results
-    // from any other server are neutralized (structured string leaves) before
-    // they reach the widget / model-context fold.
-    let (tool_output, meta) = if crate::sidecar::mcp::apps::owns(server) {
-        (tool_output, meta)
-    } else {
-        (neutralize_structured(tool_output), neutralize_structured(meta))
-    };
+    // The WIDGET channel: `structuredContent` → `toolOutput`, `_meta` minus
+    // `ryu/widget` → `toolResponseMetadata`. Delivered RAW — see
+    // [`widget_payload`] for why, and for the trace proving the model edge stays
+    // neutralized.
+    let (tool_output, meta) = widget_payload(typed);
 
     let approved_grants = if binding.widget_accessible {
         vec!["tool:call".to_owned(), "ui:send_message".to_owned()]
@@ -734,26 +744,78 @@ pub(crate) async fn build_widget_event(
         invoked: binding.invoked_label,
         initial_widget_state: instance.widget_state,
         display_mode: "inline".to_owned(),
+        // The declared remote-asset hosts, parsed from the SAME widget-resource
+        // `_meta` the server-side asset proxy uses as its authoritative allowlist
+        // (`server::widgets::parse_resource_domains`). Threading it here is what
+        // lights the governed CSP-widen + asset-rewrite path on the client; empty
+        // ⇒ the CSP stays fully locked. One parse, reused — no forked allowlist.
+        resource_domains: resource
+            .meta
+            .as_ref()
+            .map(crate::server::widgets::parse_resource_domains)
+            .unwrap_or_default(),
     })
 }
 
-/// Recursively neutralize string leaves of a structured value (injection defense
-/// for widget data originating from a non-first-party MCP server). No-op when
-/// the untrusted-wrapping control is disabled.
-fn neutralize_structured(v: Value) -> Value {
-    if !untrusted::is_enabled() {
-        return v;
+/// Split an MCP tool result into the two values the **widget channel** carries:
+/// `(toolOutput, toolResponseMetadata)` = (`structuredContent`, `_meta` minus the
+/// Core-internal `ryu/widget` binding key). Missing `structuredContent` → `Null`;
+/// missing `_meta` → `{}`.
+///
+/// # The widget payload is delivered RAW — and that is deliberate. Do not "fix" it.
+///
+/// This value is **presentation data**, not model context. It is handed to a
+/// widget rendering inside a null-origin, CSP-locked, sandboxed iframe and is
+/// never folded back into the LLM prompt. Boundary-marker neutralization
+/// ([`untrusted::neutralize`]) is a *prompt-injection* defense: it exists so a
+/// poisoned tool result cannot impersonate the transcript once it re-enters the
+/// model. Applying it here bought nothing and corrupted every third-party widget
+/// — a title came through as
+/// `<<<EXTERNAL_UNTRUSTED_CONTENT>>>Pizza Palace<<<END_EXTERNAL_UNTRUSTED_CONTENT>>>`
+/// and rendered the markers literally. (First-party in-process apps were exempt,
+/// which is why the corruption only ever showed on external servers.)
+///
+/// **The neutralization boundary belongs at the MODEL EDGE, not at widget
+/// delivery.** Every path by which data on this channel could reach a model was
+/// traced; each is defended at its own model edge, independently of this
+/// function:
+///
+/// 1. **ACP model fold.** The bridge's `call_tool` stringifies the *original*
+///    `result` (not this payload — the two channels are separate values derived
+///    from the same result) and runs it through [`neutralize_external_result`]
+///    before handing it to the agent. Still wrapped + template-token-stripped.
+/// 2. **Widget → `sendFollowUpMessage`.** Reaches the model as a user-looking
+///    turn, so it is firewall/DLP-scanned at `POST /api/widgets/follow-up`
+///    (`crate::server::widgets::widget_follow_up`, gateway `check_exec_scan`,
+///    fail-closed) before injection. Note this channel is attacker-controlled
+///    *regardless*: the widget's own HTML/JS is served raw from the same
+///    untrusted MCP server, so it can compose any prompt string it likes with or
+///    without `toolOutput`. Neutralizing `toolOutput` never defended it.
+/// 3. **Widget → `callTool`.** Governed by `POST /api/widgets/tools/call`
+///    (provenance gate → gateway `/v1/exec/tool`: allowlist, firewall, budget,
+///    audit). Its result is returned to the *iframe* (`pushGlobals({toolOutput})`
+///    in `apps/desktop/src/contributions/host/AppWidget.tsx`); it is not appended
+///    to the conversation and never re-enters the prompt.
+/// 4. **Persistence / history replay.** The widget event is **emit-only**: the
+///    `AcpEvent::ToolWidget` arm in `adapters/mod.rs` yields the SSE part and does
+///    *not* push it into the `PartsAccumulator`, so no widget payload is written
+///    to the `messages.parts` column and none can be replayed into model context
+///    on reload. `widgetState` (`POST /api/widgets/state`) lives only in the
+///    in-memory `WidgetInstanceStore` and is replayed to the *iframe*, not the model.
+///
+/// KNOWN PRE-EXISTING GAP (not this function's, and not introduced here): the
+/// OpenAI-compat chat tool loop folds its raw tool result into a `role:"tool"`
+/// message with **no** [`neutralize_external_result`] equivalent
+/// (`adapters/mod.rs`, the `oai_messages.push({"role":"tool"…})` after
+/// `exec_chat_tool`). That model edge was already un-neutralized before the widget
+/// channel was split, so this change neither causes nor worsens it — but it should
+/// be closed at *that* model edge, not by re-neutralizing the widget channel.
+fn widget_payload(typed: McpToolResult) -> (Value, Value) {
+    let mut meta = typed.meta.unwrap_or_else(|| Value::Object(Default::default()));
+    if let Some(obj) = meta.as_object_mut() {
+        obj.remove("ryu/widget");
     }
-    match v {
-        Value::String(s) => Value::String(untrusted::neutralize(&s)),
-        Value::Array(a) => Value::Array(a.into_iter().map(neutralize_structured).collect()),
-        Value::Object(o) => Value::Object(
-            o.into_iter()
-                .map(|(k, val)| (k, neutralize_structured(val)))
-                .collect(),
-        ),
-        other => other,
-    }
+    (typed.structured_content.unwrap_or(Value::Null), meta)
 }
 
 /// Wrap + template-token-strip a tool RESULT before it re-enters the ACP model,
@@ -764,6 +826,11 @@ fn neutralize_structured(v: Value) -> Value {
 /// JSON envelopes the desktop and the next round parse, so they are EXCLUDED —
 /// wrapping would corrupt that discovery contract. Default-ON (opt-out via
 /// [`untrusted::set_enabled`]).
+///
+/// **This is the ACP plane's model edge, and it is the only place the ACP tool
+/// result is neutralized.** The widget channel ([`widget_payload`]) deliberately
+/// does NOT neutralize — see that function's doc comment for the full trace. Keep
+/// the boundary here; do not push it back onto widget delivery.
 fn neutralize_external_result(tool_id: &str, text: String) -> String {
     let is_external = !matches!(tool_id, "tool_search" | "describe");
     if is_external && untrusted::is_enabled() {
@@ -866,6 +933,108 @@ mod tests {
         assert_eq!(off, poisoned);
         // Restore the default-ON state for other tests.
         untrusted::set_enabled("true");
+    }
+
+    /// A realistic external-server `tools/call` result: a widget payload with
+    /// nested structures, plus the `ryu/widget` binding key Core strips from `_meta`.
+    fn external_widget_result() -> Value {
+        json!({
+            "content": [{ "type": "text", "text": "Found 2 places" }],
+            "structuredContent": {
+                "title": "Pizza Palace",
+                "rating": 4.5,
+                "open": true,
+                "reviews": [
+                    { "author": "Ada", "body": "great <|im_start|> crust" },
+                    { "author": "Bob", "body": null }
+                ],
+                "nested": { "deep": { "leaf": "still a string" } }
+            },
+            "_meta": {
+                "ryu/widget": { "outputTemplate": "ui://widget/places.html" },
+                "provider": "acme-places",
+                "counts": [1, 2, 3]
+            }
+        })
+    }
+
+    #[test]
+    fn external_widget_payload_is_raw_and_model_fold_is_still_neutralized() {
+        let _guard = untrusted::FLAG_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Default-ON is the case that used to corrupt every third-party widget.
+        untrusted::set_enabled("true");
+
+        let raw = external_widget_result();
+        let (tool_output, meta) = widget_payload(McpToolResult::from_result_value(raw.clone()));
+
+        // 1. WIDGET CHANNEL: strings arrive INTACT — no boundary markers anywhere.
+        let out_str = serde_json::to_string(&tool_output).expect("serialize");
+        let meta_str = serde_json::to_string(&meta).expect("serialize");
+        for s in [&out_str, &meta_str] {
+            assert!(
+                !s.contains(untrusted::UNTRUSTED_OPEN) && !s.contains(untrusted::UNTRUSTED_CLOSE),
+                "widget payload must not carry boundary markers: {s}"
+            );
+        }
+        assert_eq!(tool_output["title"], json!("Pizza Palace"));
+        // Nested structures survive: arrays, nested objects, numbers, bools, nulls.
+        assert_eq!(tool_output["rating"], json!(4.5));
+        assert_eq!(tool_output["open"], json!(true));
+        assert_eq!(tool_output["reviews"][0]["author"], json!("Ada"));
+        assert_eq!(
+            tool_output["reviews"][0]["body"],
+            json!("great <|im_start|> crust"),
+            "the widget renders text verbatim; the model never sees this value"
+        );
+        assert_eq!(tool_output["reviews"][1]["body"], Value::Null);
+        assert_eq!(tool_output["nested"]["deep"]["leaf"], json!("still a string"));
+        assert_eq!(meta["provider"], json!("acme-places"));
+        assert_eq!(meta["counts"], json!([1, 2, 3]));
+        // `ryu/widget` is Core-internal and is stripped from `toolResponseMetadata`.
+        assert!(meta.get("ryu/widget").is_none(), "ryu/widget must be stripped");
+
+        // 2. MODEL EDGE, same result: still wrapped AND template-token-stripped.
+        // This is the value the ACP `call_tool` folds back into model context.
+        let model_text = neutralize_external_result("acme__places_search", raw.to_string());
+        assert!(model_text.starts_with(untrusted::UNTRUSTED_OPEN));
+        assert!(model_text.ends_with(untrusted::UNTRUSTED_CLOSE));
+        assert!(
+            !model_text.contains("<|im_start|>"),
+            "the model-facing fold must still strip chat-template tokens"
+        );
+        assert!(model_text.contains("Pizza Palace"), "benign content survives");
+    }
+
+    #[test]
+    fn builtin_app_widget_payload_is_unchanged() {
+        let _guard = untrusted::FLAG_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        untrusted::set_enabled("true");
+        // First-party in-process apps were always exempt from neutralization on
+        // the widget channel; removing the `apps::owns` branch must leave them
+        // byte-for-byte identical — the external payload now takes the same path.
+        let builtin = json!({
+            "structuredContent": { "quests": [{ "title": "Ship the widget fix" }] },
+            "_meta": { "ryu/widget": { "outputTemplate": "ui://widget/quest-board.html" } }
+        });
+        let (tool_output, meta) = widget_payload(McpToolResult::from_result_value(builtin));
+        assert_eq!(
+            tool_output,
+            json!({ "quests": [{ "title": "Ship the widget fix" }] })
+        );
+        assert_eq!(meta, json!({}), "only ryu/widget was present, so meta empties");
+    }
+
+    #[test]
+    fn widget_payload_defaults_missing_channels() {
+        // No `structuredContent` → Null; no `_meta` → `{}`. (Pre-split behaviour.)
+        let (tool_output, meta) =
+            widget_payload(McpToolResult::from_result_value(json!({ "content": [] })));
+        assert_eq!(tool_output, Value::Null);
+        assert_eq!(meta, json!({}));
     }
 
     #[tokio::test]

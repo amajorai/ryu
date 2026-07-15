@@ -20,6 +20,13 @@ const DEFAULT_LIMIT: u32 = 100;
 const MAX_LIMIT: u32 = 500;
 
 /// `GET /api/activity?limit=N&before=EPOCH` — recent feed items, newest first.
+#[utoipa::path(
+    get,
+    path = "/api/activity",
+    tag = "Activity",
+    summary = "recent feed items, newest first.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_activity(
     State(state): State<ServerState>,
     Query(params): Query<HashMap<String, String>>,
@@ -57,6 +64,14 @@ pub struct CreateActivityBody {
 }
 
 /// `POST /api/activity` — record a manual feed item.
+#[utoipa::path(
+    post,
+    path = "/api/activity",
+    tag = "Activity",
+    summary = "record a manual feed item.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn create_activity(
     State(state): State<ServerState>,
     Json(body): Json<CreateActivityBody>,
@@ -99,6 +114,13 @@ enum ActivityStreamFrame {
 /// `GET /api/activity/stream` — SSE: a full snapshot on connect, then a frame per
 /// newly-recorded item. Snapshot-first (mirrors `GET /api/runs/stream`) so a
 /// late/lagged client self-heals.
+#[utoipa::path(
+    get,
+    path = "/api/activity/stream",
+    tag = "Activity",
+    summary = "SSE: a full snapshot on connect, then a frame per",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn activity_stream(
     State(state): State<ServerState>,
 ) -> axum::response::sse::Sse<

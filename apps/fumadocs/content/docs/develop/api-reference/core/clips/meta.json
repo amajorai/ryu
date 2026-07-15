@@ -1,0 +1,18 @@
+{
+  "title": "Clips",
+  "description": "Clips API endpoints.",
+  "pages": [
+    "list_clips",
+    "ingest",
+    "recent_activity",
+    "get_sources",
+    "start_clip",
+    "get_context",
+    "post_diagnostics",
+    "get_file",
+    "get_frame",
+    "pause_clip",
+    "resume_clip",
+    "stop_clip"
+  ]
+}

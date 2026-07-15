@@ -45,6 +45,7 @@ mod native_history;
 mod okf;
 mod openrouter_auth;
 mod paths;
+mod profile;
 mod pi_config;
 mod plugin_host;
 mod plugin_manifest;
@@ -77,6 +78,7 @@ mod update;
 mod usage;
 mod voice;
 mod webhook_ingress;
+mod win_process;
 mod workflow;
 
 use std::sync::Arc;
@@ -92,7 +94,7 @@ use sidecar::{
         llamacpp::LlamaCppRerankManager, mlx::MlxManager, mlx_vlm::MlxVlmManager,
         ollama::OllamaManager, omlx::OmlxManager, outetts::OuteTtsManager,
         parakeet::ParakeetManager, ryutts::RyuTtsManager, sdcpp::StableDiffusionManager,
-        sglang::SglangManager, unsloth::UnslothManager, vllm::VllmManager,
+        sglang::SglangManager, vllm::VllmManager,
         whispercpp::WhisperCppManager, DockerModelRunnerManager,
     },
     tailscale::TailscaleManager,
@@ -133,6 +135,13 @@ async fn main() {
             return;
         }
     }
+
+    // RYU_PROFILE stack isolation: seed the profile-derived env defaults (data
+    // dir, core bind, gateway URL + config, Shadow URL, embed/rerank URLs) BEFORE
+    // anything caches a path/port or resolves the data dir. No-op on the default
+    // `release` profile, and any env var the user already set wins. The matching
+    // sidecar SPAWN ports are threaded through `profile::port` in `sidecar/**`.
+    crate::profile::apply_env_defaults();
 
     // OpenTelemetry export seam (#539, P1): build an OPTIONAL OTLP layer that is
     // installed ONLY when the user consented (`diagnostics-export-enabled`) AND a
@@ -273,10 +282,10 @@ async fn main() {
         // alongside the resident chat engine (NOT in startup_order: diffusion
         // models are multi-GB, so it only starts once a user installs it).
         Arc::new(StableDiffusionManager::new().with_downloads(download_center.clone())),
-        // Unsloth fine-tuning sidecar — Python LoRA/QLoRA training runtime. Opt-in;
-        // NOT in startup_order — training is heavy + on-demand and needs a CUDA
-        // GPU, so it only starts once a user installs it or runs `bun run dev:unsloth`.
-        Arc::new(UnslothManager::new().with_downloads(download_center.clone())),
+        // (The Unsloth fine-tuning sidecar is no longer Core-managed — it is a
+        // manifest-declared managed sidecar OWNED by the `com.ryu.finetune` app,
+        // started on plugin-enable + boot-reconcile. Core keeps only the HTTP client
+        // helpers in `sidecar::providers::unsloth` that `server::finetune` calls.)
         // Tools
         Arc::new(SpiderManager::new()),
         // Autoresearch experiment runner (Python stdlib HTTP service). Opt-in;
@@ -439,6 +448,28 @@ async fn main() {
         .await
     {
         tracing::warn!("failed to ensure Clips system space: {e:#}");
+    }
+    // Ensure the "Canvas" system space and import any legacy file-store boards into
+    // it as `com.ryu.canvas` app documents (the built-in creative canvas was ported
+    // to a Ryu App; see `server::canvas_migrate`). Idempotent — migrated files are
+    // renamed so a restart never re-imports them.
+    match spaces
+        .ensure_system_space("Canvas", Some("Node-based creative canvases"))
+        .await
+    {
+        Ok(space_id) => {
+            server::canvas_migrate::migrate_legacy_canvases(&spaces, &space_id).await;
+        }
+        Err(e) => tracing::warn!("failed to ensure Canvas system space: {e:#}"),
+    }
+    // Ensure the "Whiteboard" system space where `com.ryu.whiteboard` app documents
+    // (freeform boards) live. Unlike Canvas there is no legacy file-store to import,
+    // so just ensure the space. Idempotent.
+    if let Err(e) = spaces
+        .ensure_system_space("Whiteboard", Some("Freeform whiteboards"))
+        .await
+    {
+        tracing::warn!("failed to ensure Whiteboard system space: {e:#}");
     }
     let retrieval = match server::retrieval::RetrievalStore::open_default() {
         Ok(store) => store,
@@ -690,80 +721,25 @@ async fn main() {
     if let Ok(Some(rec)) = app_store.get(crate::predict::PREDICT_PLUGIN_ID).await {
         crate::predict::set_enabled(rec.enabled);
     }
-    // Whiteboard app (default-on companion) — DEDICATED seed, run BEFORE the generic
-    // CORE_DEFAULT_ON loop. The generic loop enables with an EMPTY grant slice and
-    // never sets `ui_code`; this companion needs its Gateway-approved grants
-    // (`spaces:docs` + `hook:side-model`, so its sandboxed frame can own Space
-    // documents + AI-generate) AND its prebuilt `ui_code` HTML bundle. Seeding here
-    // first establishes the record, so the generic loop below then skips it (a
-    // record present — enabled or disabled — always wins, honouring a user who later
-    // disables it). One-time: only acts when there is NO prior record.
-    match app_store
-        .get(crate::plugin_manifest::WHITEBOARD_PLUGIN_ID)
-        .await
+    // Default-on plugin seeding (#444) — the ONE definition lives in
+    // `plugins::seed`. It seeds every `CORE_DEFAULT_ON` plugin INSTALLED +
+    // ENABLED on a fresh install (the three companions with their grants +
+    // prebuilt `ui_code` bundle, everything else with empty grants), in
+    // DEPENDENCY ORDER, and refuses to enable a plugin whose `requires` cannot be
+    // satisfied from the default-on set.
+    //
+    // It writes the store directly rather than calling `lifecycle::enable_app`
+    // because the Gateway is not spawned until further below and `enable_app`
+    // fails closed on an unreachable Gateway — routing the seed through it would
+    // disable every default-on plugin on every fresh install. The dependency
+    // GRAPH is still honoured (see the module docs); only the Gateway grant call
+    // is bypassed, for a fixed first-party grant set.
+    //
+    // One-time and user-respecting: a plugin with any existing record (enabled OR
+    // disabled) is left alone, so a user's disable survives restarts.
     {
-        Ok(Some(_)) => {} // record exists — user choice wins, do not re-seed.
-        Ok(None) => {
-            let version = {
-                let manifests = app_manifests.read().await;
-                manifests
-                    .iter()
-                    .find(|m| m.id == crate::plugin_manifest::WHITEBOARD_PLUGIN_ID)
-                    .map(|m| m.version.clone())
-            };
-            if let Some(version) = version {
-                let id = crate::plugin_manifest::WHITEBOARD_PLUGIN_ID;
-                let grants = [
-                    "spaces:docs".to_owned(),
-                    "hook:side-model".to_owned(),
-                ];
-                if let Err(e) = app_store.insert(id, &version).await {
-                    tracing::warn!("whiteboard seed: insert failed: {e}");
-                } else if let Err(e) = app_store
-                    .set_ui_code(id, Some(crate::plugin_manifest::WHITEBOARD_UI_HTML))
-                    .await
-                {
-                    tracing::warn!("whiteboard seed: set_ui_code failed: {e}");
-                } else if let Err(e) = app_store.set_enabled(id, &grants).await {
-                    tracing::warn!("whiteboard seed: enable failed: {e}");
-                } else {
-                    tracing::info!("whiteboard seed: enabled default-on companion '{id}'");
-                }
-            }
-        }
-        Err(e) => tracing::warn!("whiteboard seed: lookup failed: {e}"),
-    }
-    // Two-tier registry default-on seeding (#444): Core-tier plugins flagged
-    // default-on (`CORE_DEFAULT_ON`, e.g. the local engines plugin) are seeded
-    // INSTALLED + ENABLED on a fresh install. The seed is one-time and respects a
-    // user's explicit choice: it only acts when there is NO prior record for the
-    // plugin (a record present — enabled OR disabled — always wins), so a user who
-    // later disables a Core plugin keeps it disabled across restarts. Community
-    // plugins are never auto-seeded (install-then-enable opt-in).
-    for &plugin_id in crate::plugins::builtins::CORE_DEFAULT_ON {
-        match app_store.get(plugin_id).await {
-            Ok(Some(_)) => {} // record exists — user choice wins, do not re-seed.
-            Ok(None) => {
-                // Resolve the manifest version for the install record.
-                let version = {
-                    let manifests = app_manifests.read().await;
-                    manifests
-                        .iter()
-                        .find(|m| m.id == plugin_id)
-                        .map(|m| m.version.clone())
-                };
-                if let Some(version) = version {
-                    if let Err(e) = app_store.insert(plugin_id, &version).await {
-                        tracing::warn!("core-tier seed: insert '{plugin_id}' failed: {e}");
-                    } else if let Err(e) = app_store.set_enabled(plugin_id, &[]).await {
-                        tracing::warn!("core-tier seed: enable '{plugin_id}' failed: {e}");
-                    } else {
-                        tracing::info!("core-tier seed: enabled default-on plugin '{plugin_id}'");
-                    }
-                }
-            }
-            Err(e) => tracing::warn!("core-tier seed: lookup '{plugin_id}' failed: {e}"),
-        }
+        let manifests = app_manifests.read().await.clone();
+        crate::plugins::seed::seed_default_on(&app_store, &manifests).await;
     }
     // Agent Skill registry (M3 / issue #145). Loads from the universal Agent
     // Skills directory `~/.claude/skills/<id>/SKILL.md` (overridable via
@@ -1161,7 +1137,7 @@ async fn main() {
         .find(|a| a.starts_with("--bind="))
         .and_then(|a| a.strip_prefix("--bind=").map(str::to_string))
         .or_else(|| std::env::var("RYU_BIND").ok())
-        .unwrap_or_else(|| "127.0.0.1:7980".to_string());
+        .unwrap_or_else(|| format!("127.0.0.1:{}", crate::profile::port(7980)));
 
     let router = server::create_router(server_state, auth_token, &bind_addr);
 

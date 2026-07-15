@@ -18,9 +18,15 @@
 //! `async fn` trait methods (not object-safe) + a closed enum match-dispatched —
 //! no `async-trait`, no `dyn`. See [`tunnels`].
 
+mod dispatch;
 mod ryu_relay;
 mod tunnels;
 
+pub use dispatch::{
+    deliver_inbound, deliver_workflow_webhook, last_delivery, record_delivery, timestamp_fresh,
+    workflow_webhook_path, InboundOutcome, WorkflowWebhookOutcome,
+};
+pub use ryu_relay::relay_inbound_url;
 pub use tunnels::{
     CloudflaredSource, Ingress, OwnRelaySource, RyuRelaySource, TailscaleFunnelSource,
     OWN_RELAY_URL_ENV, WEBHOOK_PATH,
@@ -118,6 +124,32 @@ pub fn set_public_url(url: Option<String>) {
 /// The current public ingress URL, if one has been resolved.
 pub fn public_url() -> Option<String> {
     PUBLIC_URL.read().ok().and_then(|g| g.clone())
+}
+
+/// The resolved public **origin** base URL (no webhook path) — but ONLY when the
+/// active ingress is a true reverse-proxy origin that forwards *every* path to
+/// Core. `None` otherwise.
+///
+/// The webhook registry (`GET /api/webhooks`) uses this to build a per-endpoint
+/// URL (`base + /api/workflows/<id>/webhook`, …) — the fix for the desktop
+/// showing a `localhost` URL for a workflow webhook.
+///
+/// The discriminator is whether [`public_url`] is [`WEBHOOK_PATH`]-suffixed:
+/// - **Tunnel backends** (Cloudflared / TailscaleFunnel / OwnRelay) publish
+///   `<origin>/api/composio/webhook`. Stripping the suffix yields a real origin
+///   that forwards every path, so `base + <any-path>` is directly reachable.
+/// - **Managed RyuRelay** publishes a relay-ingress endpoint
+///   (`…/api/composio-relay/ingress/<token>`) that is NOT path-composable —
+///   appending `/api/workflows/<id>/webhook` would produce a dead URL. So this
+///   returns `None` for the relay, and the registry advertises `null` for the
+///   per-path (workflow) URLs (they are genuinely not path-addressable until the
+///   server emits the generic inbound frame — see [`dispatch`] + the server
+///   handoff). The relay's own composio ingress URL is still surfaced verbatim
+///   via [`public_url`].
+pub fn public_base_url() -> Option<String> {
+    let u = public_url()?;
+    let base = u.strip_suffix(WEBHOOK_PATH)?;
+    Some(base.trim_end_matches('/').to_owned())
 }
 
 /// The configured backend kind, resolved from (1) the `RYU_WEBHOOK_INGRESS_URL`
@@ -222,8 +254,14 @@ mod tests {
         assert!(IngressKind::from_str("nope").is_err());
     }
 
+    /// Serializes the tests that mutate the process-global `PUBLIC_URL` (cargo
+    /// runs them on parallel threads in one process; without this a sibling's
+    /// `set_public_url` could flip the value mid-assertion).
+    static PUBLIC_URL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn public_url_global_round_trips() {
+        let _guard = PUBLIC_URL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Re-settable (not OnceLock): two sets both take effect.
         set_public_url(Some("https://a.example/api/composio/webhook".to_owned()));
         assert_eq!(
@@ -237,6 +275,23 @@ mod tests {
         );
         set_public_url(None);
         assert!(public_url().is_none());
+    }
+
+    #[test]
+    fn public_base_url_only_for_true_origins() {
+        let _guard = PUBLIC_URL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // A WEBHOOK_PATH-suffixed URL (tunnel/OwnRelay) yields a composable origin.
+        set_public_url(Some("https://x.example/api/composio/webhook".to_owned()));
+        assert_eq!(public_base_url().as_deref(), Some("https://x.example"));
+        // A relay-ingress URL (RyuRelay) is NOT path-composable → None (never a
+        // fabricated dead URL like `<ingress>/api/workflows/<id>/webhook`).
+        set_public_url(Some(
+            "https://s.example/api/composio-relay/ingress/tok123".to_owned(),
+        ));
+        assert!(public_base_url().is_none());
+        // No ingress up → None.
+        set_public_url(None);
+        assert!(public_base_url().is_none());
     }
 
     #[test]

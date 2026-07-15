@@ -51,6 +51,8 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 
+use crate::win_process::NoWindow;
+
 use super::{
     ExecOutcome, InvokeOutcome, ResumeDecision, SandboxToolInvoker, ToolInvocation,
     DEFAULT_DEADLINE_SECS, MAX_PREVIEW_CHARS,
@@ -90,6 +92,7 @@ fn bun_on_path() -> bool {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .stdin(Stdio::null())
+        .no_window()
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -176,6 +179,7 @@ async fn run_harness(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
+        .no_window()
         .spawn()
     {
         Ok(c) => c,

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
+use crate::win_process::NoWindow;
 use process::DEFAULT_PORT;
 
 /// Default model vLLM serves when none is configured. vLLM (unlike llama.cpp /
@@ -181,6 +182,7 @@ impl Sidecar for VllmManager {
             tracing::info!("uninstalling vllm via pip");
             match tokio::process::Command::new(&python)
                 .args(["-m", "pip", "uninstall", "-y", "vllm"])
+                .no_window()
                 .status()
                 .await
             {

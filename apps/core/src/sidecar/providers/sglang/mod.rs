@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
+use crate::win_process::NoWindow;
 use process::DEFAULT_PORT;
 
 /// Default model SGLang serves when none is configured. Like vLLM, SGLang binds
@@ -179,6 +180,7 @@ impl Sidecar for SglangManager {
             tracing::info!("uninstalling sglang via pip");
             match tokio::process::Command::new(&python)
                 .args(["-m", "pip", "uninstall", "-y", "sglang"])
+                .no_window()
                 .status()
                 .await
             {

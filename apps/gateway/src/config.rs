@@ -654,7 +654,10 @@ impl Default for ControlPlaneConfig {
 }
 
 fn default_bind() -> String {
-    "0.0.0.0:7981".to_string()
+    // Profile-aware (release `0.0.0.0:7981`, dev `0.0.0.0:8981`, …) so a
+    // standalone dev gateway never collides with a release one. Core-spawned
+    // gateways get an explicit `--bind` that is already profile-offset.
+    crate::profile::default_bind()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -1907,7 +1910,9 @@ impl GatewayConfig {
         std::env::var("GATEWAY_CONFIG")
             .ok()
             .map(std::path::PathBuf::from)
-            .or_else(|| dirs::config_dir().map(|d| d.join("ryu").join("gateway.toml")))
+            // Profile-aware fallback (`<config>/ryu{suffix}/gateway.toml`) so a
+            // standalone dev gateway reads its own config, not the release one.
+            .or_else(crate::profile::default_config_path)
     }
 
     /// Atomically persist `self` to `gateway.toml`, creating the parent directory
@@ -2588,7 +2593,10 @@ pub struct TelegramChannelConfig {
 }
 
 fn default_core_url() -> String {
-    "http://127.0.0.1:7980".to_string()
+    // The channels callback URL to Core. Profile-aware (release 7980, dev 8980, …)
+    // so a standalone dev gateway's channel adapters reach the dev Core, not the
+    // release one. `RYU_CORE_URL` (set explicitly) still wins.
+    format!("http://127.0.0.1:{}", crate::profile::port(7980))
 }
 
 /// Slack channel config. Uses Socket Mode so no public webhook URL is required:

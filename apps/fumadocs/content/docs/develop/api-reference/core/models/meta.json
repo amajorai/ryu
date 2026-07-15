@@ -8,6 +8,13 @@
     "models_catalog_detail",
     "models_catalog_install",
     "models_catalog_uninstall",
-    "models_device"
+    "models_context_window",
+    "models_device",
+    "models_engines",
+    "models_installed",
+    "models_llmfit_estimate",
+    "models_updates",
+    "get_model_launch_config",
+    "set_model_launch_config"
   ]
 }

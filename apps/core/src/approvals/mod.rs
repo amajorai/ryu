@@ -148,6 +148,13 @@ pub enum PendingAction {
         profile_ids: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
+        /// The SERVER-DERIVED host conversation this gated tool call ran on behalf
+        /// of. Carried across the approval so the re-dispatch resolves the SAME
+        /// `ToolPrincipal` the original call would have — an approval must not
+        /// silently widen (or narrow) what the tool can reach. `None` on an
+        /// approval queued before this field existed ⇒ `Unresolved` ⇒ fail closed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host_conversation_id: Option<String>,
     },
 }
 
@@ -731,6 +738,7 @@ impl ApprovalEngine {
                 user_id,
                 profile_ids,
                 session_id,
+                host_conversation_id,
             } => {
                 let registry = self.registry.as_ref().ok_or_else(|| {
                     anyhow::anyhow!("no MCP registry attached; cannot run approved tool call")
@@ -745,6 +753,7 @@ impl ApprovalEngine {
                         user_id.as_deref(),
                         profile_ids,
                         session_id.clone(),
+                        host_conversation_id.as_deref(),
                     )
                     .await?;
                 // The no-gate path can still return an identity `__ryu_elicitation__`
@@ -800,6 +809,7 @@ pub async fn gate_tool_call(
     user_id: Option<&str>,
     profile_ids: &[String],
     session_id: Option<String>,
+    host_conversation_id: Option<&str>,
 ) -> Option<anyhow::Error> {
     // Composio owns its own connection-required path; leave it to that flow.
     if tool_id.starts_with("composio__") {
@@ -816,6 +826,7 @@ pub async fn gate_tool_call(
         user_id: user_id.map(str::to_owned),
         profile_ids: profile_ids.to_vec(),
         session_id,
+        host_conversation_id: host_conversation_id.map(str::to_owned),
     };
     let req = ApprovalRequest::for_tool_call(tool_id, tags, action);
     match engine.request(req).await {
@@ -859,6 +870,7 @@ mod tests {
             user_id: None,
             profile_ids: Vec::new(),
             session_id: None,
+            host_conversation_id: None,
         };
         let req =
             ApprovalRequest::for_tool_call("gmail__send_email", vec!["send".to_owned()], action);

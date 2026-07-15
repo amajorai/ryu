@@ -11,9 +11,55 @@
  * known provider literals.  A new provider must never require an SDK change.
  */
 
-// biome-ignore lint/performance/noNamespaceImport: the native UniFFI addon exposes a dynamic set of bindings resolved at runtime; a namespace import is the addon's supported entry shape.
-import * as nativeAddon from "@ryuhq/sdk-native";
+import { createRequire } from "node:module";
 import { z } from "zod";
+
+// ── Lazy, optional native addon ──────────────────────────────────────────────
+//
+// The Rust-cored validation helpers at the bottom of this file delegate to the
+// `@ryuhq/sdk-native` napi addon (`crates/ryu-sdk-napi`). That addon is a
+// prebuilt, platform-specific `.node` binary and is *not* always present — e.g.
+// in a fresh `create-ryu-app` scaffold context, which imports this module only
+// for `PluginManifestSchema` (pure-JS zod). Importing `@ryuhq/sdk/manifest`
+// must therefore never hard-require the addon at module load. We load it lazily
+// on first use of a helper that needs it, cache it, and throw a descriptive
+// error only if a caller actually invokes those helpers without the addon.
+type NativeAddon = {
+	validatePluginId(id: string): void;
+	parseAndValidateManifest(manifestJson: string): string;
+	pluginManifestJsonSchema(): string;
+};
+
+let cachedNative: NativeAddon | null = null;
+let nativeLoadError: Error | null = null;
+
+/**
+ * Load the `@ryuhq/sdk-native` addon on demand. Uses a synchronous `require`
+ * (via `createRequire`) so the surrounding helpers can stay synchronous, and
+ * works in both the ESM and CJS builds (tsup `shims` provides `import.meta.url`
+ * in the CJS output). Throws a descriptive error when the addon is absent.
+ */
+function loadNative(): NativeAddon {
+	if (cachedNative) {
+		return cachedNative;
+	}
+	if (nativeLoadError) {
+		throw nativeLoadError;
+	}
+	try {
+		const req = createRequire(import.meta.url);
+		cachedNative = req("@ryuhq/sdk-native") as NativeAddon;
+		return cachedNative;
+	} catch (cause) {
+		nativeLoadError = new Error(
+			"@ryuhq/sdk-native (the Rust-cored napi addon) is not available; " +
+				"Core-strict manifest validation requires it. Build/install the addon, " +
+				"or use PluginManifestSchema (pure-JS zod) for authoring-time validation.",
+			{ cause }
+		);
+		throw nativeLoadError;
+	}
+}
 
 // ── RunnableKind ─────────────────────────────────────────────────────────────
 
@@ -230,6 +276,79 @@ export const SetupStepSchema = z.object({
 
 export type SetupStep = z.infer<typeof SetupStepSchema>;
 
+// ── Requires (plugin-to-plugin dependencies) ─────────────────────────────────
+
+/**
+ * A single plugin-to-plugin dependency edge. Mirrors `AppDependency` in
+ * `apps/core/src/plugin_manifest/mod.rs`.
+ *
+ * `min_version` is snake_case on the wire (Core declares no serde rename) and is
+ * a **minimum**, not a caret range: a bare `"1.2.0"` means `">=1.2.0"`, so an
+ * installed `2.0.0` satisfies it. Explicit comparator syntax (`">=1.2, <2"`,
+ * `"^1.2"`, `"~1.2"`) is honoured verbatim by Core's `parse_min_version`.
+ */
+export const AppDependencySchema = z.object({
+	/** The `id` of the plugin this one depends on. */
+	id: z.string().min(1, "dependency id is required"),
+	/** Optional MINIMUM version the dependency must satisfy (`"1.2.0"` = `">=1.2.0"`). */
+	min_version: z.string().min(1).optional(),
+});
+
+export type AppDependency = z.infer<typeof AppDependencySchema>;
+
+/**
+ * The `requires` block — this plugin's dependencies. Mirrors `Requires` in
+ * `apps/core/src/plugin_manifest/mod.rs`.
+ *
+ * Core resolves `apps` into a topological enable order (`plugins::graph`):
+ * enabling this plugin auto-enables its dependencies first, and disabling a
+ * dependency is REFUSED (409) while an enabled dependent still needs it.
+ *
+ * **Absent = no dependencies** — the backward-compatible default every manifest
+ * predating this field carries.
+ */
+export const RequiresSchema = z.object({
+	/** Other plugins that must be installed + enabled before this one enables. */
+	apps: z.array(AppDependencySchema).default([]),
+	/**
+	 * Permission grants implied by the dependencies. Declaration only — the
+	 * Gateway remains the sole authority on what a grant *allows*, and Core's
+	 * dependency graph resolves `apps` only.
+	 */
+	grants: z.array(z.string()).default([]),
+});
+
+export type Requires = z.infer<typeof RequiresSchema>;
+
+// ── Surface (targets) ────────────────────────────────────────────────────────
+
+/**
+ * A host surface a plugin can declare support for via `targets`. Mirrors Core's
+ * `Surface` enum (`#[serde(rename_all = "kebab-case")]`), so these eight tokens
+ * are the exact wire values — also the vocabulary of the `x-ryu-surface` request
+ * header Core filters listings on.
+ */
+export const SurfaceSchema = z.enum([
+	/** The Ryu Gateway. */
+	"gateway",
+	/** A headless Core node (no UI). */
+	"core",
+	/** The Tauri desktop app. */
+	"desktop",
+	/** The Electron dynamic-island companion. */
+	"island",
+	/** The Expo/React-Native mobile app. */
+	"mobile",
+	/** The browser extension. */
+	"extension",
+	/** The Next.js web app. */
+	"web",
+	/** The terminal client. */
+	"cli",
+]);
+
+export type Surface = z.infer<typeof SurfaceSchema>;
+
 // ── PluginManifest ───────────────────────────────────────────────────────────
 
 /**
@@ -299,6 +418,27 @@ export const PluginManifestSchema = z.object({
 	 * Absent for a plugin that contributes nothing here.
 	 */
 	contributes: ContributesSchema.optional(),
+
+	/**
+	 * **Plugin-to-plugin dependencies** — the other plugins this one needs. Core
+	 * resolves them into a topological enable order (dependencies enable first;
+	 * disabling one is refused while an enabled dependent needs it).
+	 *
+	 * Absent = **no dependencies**, the backward-compatible default. Kept
+	 * `.optional()` (never defaulted) so a manifest that declares none serialises
+	 * with no `requires` key at all, exactly like Core's
+	 * `#[serde(skip_serializing_if = "Option::is_none")]`.
+	 */
+	requires: RequiresSchema.optional(),
+
+	/**
+	 * Host surfaces this plugin runs on. **Empty or absent = runs on EVERY
+	 * surface** — the backward-compatible default, which must never be read as
+	 * "runs nowhere". Core filters only when the list is explicitly non-empty, and
+	 * only at the read boundary (`GET /api/plugins`, keyed on `x-ryu-surface`), so
+	 * an unsupported-target plugin stays installable and inspectable.
+	 */
+	targets: z.array(SurfaceSchema).default([]),
 
 	/**
 	 * Optional per-item AFFILIATE terms: the commission paid to a referrer when a
@@ -378,9 +518,7 @@ export const PluginManifestSchema = z.object({
 	 * Optional companion/config card (Ryu extension): a single setup step or an
 	 * array of steps guiding the user through post-install configuration.
 	 */
-	setup: z
-		.union([SetupStepSchema, z.array(SetupStepSchema)])
-		.optional(),
+	setup: z.union([SetupStepSchema, z.array(SetupStepSchema)]).optional(),
 });
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;
@@ -400,7 +538,7 @@ export type PluginManifest = z.infer<typeof PluginManifestSchema>;
  * rules. Throws a descriptive `Error` when invalid.
  */
 export function validatePluginId(id: string): void {
-	nativeAddon.validatePluginId(id);
+	loadNative().validatePluginId(id);
 }
 
 /**
@@ -409,7 +547,7 @@ export function validatePluginId(id: string): void {
  * manifest JSON string, or throws.
  */
 export function validateManifestStrict(manifestJson: string): string {
-	return nativeAddon.parseAndValidateManifest(manifestJson);
+	return loadNative().parseAndValidateManifest(manifestJson);
 }
 
 /**
@@ -417,5 +555,5 @@ export function validateManifestStrict(manifestJson: string): string {
  * lockstep with the Rust types because it is emitted from them.
  */
 export function coreManifestJsonSchema(): unknown {
-	return JSON.parse(nativeAddon.pluginManifestJsonSchema());
+	return JSON.parse(loadNative().pluginManifestJsonSchema());
 }

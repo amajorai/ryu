@@ -37,5 +37,6 @@
         "default_display_mode": "inline"
       }
     ]
-  }
+  },
+  "permission_grants": ["widget:render"]
 }

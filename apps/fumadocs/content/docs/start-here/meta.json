@@ -8,6 +8,7 @@
     "getting-started/index",
     "getting-started/install-sidecar",
     "getting-started/first-chat",
+    "environment-variables",
     "architecture/index",
     "architecture/why-ryu",
     "architecture/core-vs-gateway",

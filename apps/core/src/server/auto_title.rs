@@ -180,7 +180,7 @@ async fn local_title(state: &ServerState, system: &str, user_input: &str) -> Opt
     let base = local_engine_url(&engine)?; // e.g. http://127.0.0.1:8080/v1
                                            // The served model id. llama.cpp ignores it; ollama/vllm/DMR need the real
                                            // pulled name, so query `/models` and fall back to the engine name.
-    let model = served_model_id(state, base)
+    let model = served_model_id(state, &base)
         .await
         .unwrap_or_else(|| engine.clone());
     let body = post_completion(

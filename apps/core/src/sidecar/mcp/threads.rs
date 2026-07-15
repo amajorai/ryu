@@ -34,7 +34,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use tokio::sync::Semaphore;
 
-use super::RegistryTool;
+use super::{RegistryTool, ToolPrincipal};
 use crate::server::conversations::ConversationStore;
 
 /// Reserved registry server name for the built-in coordinator-threads provider.
@@ -233,37 +233,102 @@ fn truncate(text: &str) -> String {
     out
 }
 
+/// The "this thread is not yours" answer. Deliberately identical to the genuine
+/// "thread not found" envelope so a denied read is not an existence ORACLE: an
+/// agent cannot enumerate which conversation ids exist on the node by probing.
+fn not_found() -> Value {
+    json!({ "ok": false, "error": "thread not found" })
+}
+
+/// Whether `principal` may READ `thread_id`, using the SAME
+/// `TENANCY_VISIBLE_PREDICATE` the HTTP plane filters with
+/// ([`ConversationStore::visible_conversation_ids`]) — so the agent plane and the
+/// REST plane can never drift apart.
+async fn can_read(
+    store: &ConversationStore,
+    principal: &ToolPrincipal,
+    thread_id: &str,
+) -> Result<bool> {
+    if matches!(principal, ToolPrincipal::Unrestricted) {
+        return Ok(true);
+    }
+    let (uid, org, bound) = principal.filter_args();
+    Ok(store
+        .visible_conversation_ids(uid, org, bound)
+        .await?
+        .iter()
+        .any(|id| id == thread_id))
+}
+
 /// Dispatch a `threads` tool call. `store` is the wired conversation store. A
 /// malformed call returns `Err`; an unavailable dependency (no agent runner)
 /// returns an `ok:false` envelope so the agent can degrade gracefully.
-pub async fn dispatch(tool: &str, arguments: Value, store: &ConversationStore) -> Result<Value> {
+///
+/// **Tenancy.** Every arm is gated on `principal` — the owner of the conversation
+/// this agent turn runs on behalf of (see [`ToolPrincipal`]). Without this, these
+/// tools defeated the entire HTTP ACL in one hop: on an org-bound node Bob's agent
+/// could `read_thread` Alice's conversation and print her decrypted messages into
+/// Bob's chat. **An agent must never be able to read what its principal cannot
+/// read.** READS use the same visible-set predicate as REST; WRITES require a
+/// strict owner-match (an org-visible thread is still not writable by a colleague's
+/// agent); CREATES stamp the principal as the new row's owner, which is what stops a
+/// coordinator being locked out of its own worker threads.
+pub async fn dispatch(
+    tool: &str,
+    arguments: Value,
+    store: &ConversationStore,
+    principal: &ToolPrincipal,
+) -> Result<Value> {
     match tool {
-        "create_thread" => create_thread(arguments, store).await,
-        "list_threads" => list_threads(arguments, store).await,
-        "read_thread" => read_thread(arguments, store).await,
-        "send_message_to_thread" => send_message_to_thread(arguments, store).await,
+        "create_thread" => create_thread(arguments, store, principal).await,
+        "list_threads" => list_threads(arguments, store, principal).await,
+        "read_thread" => read_thread(arguments, store, principal).await,
+        "send_message_to_thread" => send_message_to_thread(arguments, store, principal).await,
         "set_thread_title" => {
             let id = require_str(&arguments, "thread_id")?;
             let title = require_str(&arguments, "title")?;
+            if !principal.owns(store, id).await {
+                return Ok(not_found());
+            }
             store.set_title(id, title).await?;
             Ok(json!({ "ok": true, "thread_id": id, "title": title }))
         }
         "set_thread_pinned" => {
             let id = require_str(&arguments, "thread_id")?;
             let pinned = opt_bool(&arguments, "pinned", true);
+            if !principal.owns(store, id).await {
+                return Ok(not_found());
+            }
             store.set_pinned(id, pinned).await?;
             Ok(json!({ "ok": true, "thread_id": id, "pinned": pinned }))
         }
         "set_thread_archived" => {
             let id = require_str(&arguments, "thread_id")?;
             let archived = opt_bool(&arguments, "archived", true);
+            if !principal.owns(store, id).await {
+                return Ok(not_found());
+            }
             store.set_archived(id, archived).await?;
             Ok(json!({ "ok": true, "thread_id": id, "archived": archived }))
         }
         "fork_thread" => {
             let id = require_str(&arguments, "thread_id")?;
             let up_to = opt_str(&arguments, "up_to_message_id");
-            match store.fork_conversation(id, up_to.as_deref()).await? {
+            // READ is the right gate on the SOURCE (forking only reads it), and the
+            // FORKER — i.e. this turn's principal — owns the copy. The copy is born
+            // stamped (`principal.tenancy()`), so on an org-bound node the operator
+            // can actually reach the thread their agent just created. This replaces
+            // the old `(None, None)` fork, which minted a row denied to EVERYONE.
+            if !can_read(store, principal, id).await? {
+                return Ok(json!({
+                    "ok": false,
+                    "error": "source thread not found, or up_to_message_id is not a message of it",
+                }));
+            }
+            match store
+                .fork_conversation(id, up_to.as_deref(), principal.tenancy())
+                .await?
+            {
                 Some(summary) => Ok(json!({
                     "ok": true,
                     "thread_id": summary.id,
@@ -280,13 +345,25 @@ pub async fn dispatch(tool: &str, arguments: Value, store: &ConversationStore) -
     }
 }
 
-async fn create_thread(arguments: Value, store: &ConversationStore) -> Result<Value> {
+async fn create_thread(
+    arguments: Value,
+    store: &ConversationStore,
+    principal: &ToolPrincipal,
+) -> Result<Value> {
     let title = opt_str(&arguments, "title");
     let agent_id = opt_str(&arguments, "agent_id");
     let cwd = opt_str(&arguments, "cwd");
     let thread_id = uuid::Uuid::new_v4().to_string();
+    // The new worker thread is born OWNED by this turn's principal. Previously it
+    // was minted untenanted, which on an org-bound node made it invisible and
+    // undeniably-denied to its own operator — a lockout, not a leak.
     store
-        .ensure_conversation(&thread_id, agent_id.as_deref(), title.as_deref())
+        .ensure_conversation(
+            &thread_id,
+            agent_id.as_deref(),
+            title.as_deref(),
+            principal.tenancy(),
+        )
         .await?;
     if let Some(ref dir) = cwd {
         // Record the working folder so list_threads surfaces it; the worktree
@@ -304,9 +381,16 @@ async fn create_thread(arguments: Value, store: &ConversationStore) -> Result<Va
     }))
 }
 
-async fn list_threads(arguments: Value, store: &ConversationStore) -> Result<Value> {
+async fn list_threads(
+    arguments: Value,
+    store: &ConversationStore,
+    principal: &ToolPrincipal,
+) -> Result<Value> {
     let include_archived = opt_bool(&arguments, "include_archived", false);
-    let mut convs = store.list_conversations().await?;
+    // Was `list_conversations()` — the UNFILTERED, every-row-on-the-node listing.
+    // Now filtered in SQL by the same predicate the REST list uses.
+    let (uid, org, bound) = principal.filter_args();
+    let mut convs = store.list_conversations_visible(uid, org, bound).await?;
     if !include_archived {
         convs.retain(|c| !c.archived);
     }
@@ -333,19 +417,30 @@ async fn list_threads(arguments: Value, store: &ConversationStore) -> Result<Val
     Ok(json!({ "ok": true, "threads": threads, "count": count }))
 }
 
-async fn read_thread(arguments: Value, store: &ConversationStore) -> Result<Value> {
+async fn read_thread(
+    arguments: Value,
+    store: &ConversationStore,
+    principal: &ToolPrincipal,
+) -> Result<Value> {
     let thread_id = require_str(&arguments, "thread_id")?;
     let limit = arguments
         .get("limit")
         .and_then(Value::as_u64)
         .map(|n| (n as usize).clamp(1, MAX_READ_LIMIT))
         .unwrap_or(DEFAULT_READ_LIMIT);
+    // THE GATE. `get_conversation_detail` returns DECRYPTED message bodies, so this
+    // check must run BEFORE it — a non-visible thread is indistinguishable from a
+    // non-existent one.
+    if !can_read(store, principal, thread_id).await? {
+        return Ok(not_found());
+    }
     let Some(detail) = store.get_conversation_detail(thread_id).await? else {
-        return Ok(json!({ "ok": false, "error": "thread not found" }));
+        return Ok(not_found());
     };
     // Find this thread's run_status from the list (detail omits it).
+    let (uid, org, bound) = principal.filter_args();
     let run_status = store
-        .list_conversations()
+        .list_conversations_visible(uid, org, bound)
         .await
         .ok()
         .and_then(|convs| convs.into_iter().find(|c| c.id == thread_id))
@@ -375,12 +470,23 @@ async fn read_thread(arguments: Value, store: &ConversationStore) -> Result<Valu
     }))
 }
 
-async fn send_message_to_thread(arguments: Value, store: &ConversationStore) -> Result<Value> {
+async fn send_message_to_thread(
+    arguments: Value,
+    store: &ConversationStore,
+    principal: &ToolPrincipal,
+) -> Result<Value> {
     let thread_id = require_str(&arguments, "thread_id")?.to_owned();
     let message = require_str(&arguments, "message")?.to_owned();
     let wait = opt_bool(&arguments, "wait", false);
     let isolate = opt_bool(&arguments, "isolate", true);
     let cwd_override = opt_str(&arguments, "cwd");
+
+    // THE WRITE GATE. This runs a REAL agent turn against the target thread (reading
+    // its history as context and appending to it), so it needs strict owner-match,
+    // not mere read-visibility.
+    if !principal.owns(store, &thread_id).await {
+        return Ok(not_found());
+    }
 
     let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() else {
         return Ok(json!({
@@ -391,13 +497,14 @@ async fn send_message_to_thread(arguments: Value, store: &ConversationStore) -> 
     };
 
     // Resolve the worker's agent + working folder from its stored row.
+    let (uid, org, bound) = principal.filter_args();
     let summary = store
-        .list_conversations()
+        .list_conversations_visible(uid, org, bound)
         .await?
         .into_iter()
         .find(|c| c.id == thread_id);
     let Some(summary) = summary else {
-        return Ok(json!({ "ok": false, "error": "thread not found" }));
+        return Ok(not_found());
     };
     let agent_id = summary.agent_id.clone();
     let cwd = cwd_override.or_else(|| summary.folder_path.clone());
@@ -439,6 +546,7 @@ async fn send_message_to_thread(arguments: Value, store: &ConversationStore) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::conversations::Tenancy;
 
     #[test]
     fn lists_eight_tools_with_qualified_ids() {
@@ -454,19 +562,19 @@ mod tests {
     #[tokio::test]
     async fn create_then_list_then_read_roundtrip() {
         let store = ConversationStore::open_in_memory().expect("store");
-        let created = dispatch("create_thread", json!({ "title": "Ticket 1" }), &store)
+        let created = dispatch("create_thread", json!({ "title": "Ticket 1" }), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("create");
         assert_eq!(created["ok"], json!(true));
         let thread_id = created["thread_id"].as_str().expect("thread_id").to_owned();
 
-        let listed = dispatch("list_threads", json!({}), &store)
+        let listed = dispatch("list_threads", json!({}), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("list");
         assert_eq!(listed["count"], json!(1));
         assert_eq!(listed["threads"][0]["thread_id"], json!(thread_id));
 
-        let read = dispatch("read_thread", json!({ "thread_id": thread_id }), &store)
+        let read = dispatch("read_thread", json!({ "thread_id": thread_id }), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("read");
         assert_eq!(read["ok"], json!(true));
@@ -476,13 +584,13 @@ mod tests {
     #[tokio::test]
     async fn pin_and_archive_flags_affect_listing() {
         let store = ConversationStore::open_in_memory().expect("store");
-        let a = dispatch("create_thread", json!({ "title": "A" }), &store)
+        let a = dispatch("create_thread", json!({ "title": "A" }), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("a")["thread_id"]
             .as_str()
             .unwrap()
             .to_owned();
-        let b = dispatch("create_thread", json!({ "title": "B" }), &store)
+        let b = dispatch("create_thread", json!({ "title": "B" }), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("b")["thread_id"]
             .as_str()
@@ -494,10 +602,11 @@ mod tests {
             "set_thread_pinned",
             json!({ "thread_id": b, "pinned": true }),
             &store,
+            &ToolPrincipal::Unrestricted,
         )
         .await
         .expect("pin");
-        let listed = dispatch("list_threads", json!({}), &store)
+        let listed = dispatch("list_threads", json!({}), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("list");
         assert_eq!(listed["threads"][0]["thread_id"], json!(b));
@@ -507,14 +616,15 @@ mod tests {
             "set_thread_archived",
             json!({ "thread_id": a, "archived": true }),
             &store,
+            &ToolPrincipal::Unrestricted,
         )
         .await
         .expect("archive");
-        let default_list = dispatch("list_threads", json!({}), &store)
+        let default_list = dispatch("list_threads", json!({}), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("list2");
         assert_eq!(default_list["count"], json!(1));
-        let full_list = dispatch("list_threads", json!({ "include_archived": true }), &store)
+        let full_list = dispatch("list_threads", json!({ "include_archived": true }), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("list3");
         assert_eq!(full_list["count"], json!(2));
@@ -523,7 +633,7 @@ mod tests {
     #[tokio::test]
     async fn set_title_updates_thread() {
         let store = ConversationStore::open_in_memory().expect("store");
-        let id = dispatch("create_thread", json!({}), &store)
+        let id = dispatch("create_thread", json!({}), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("create")["thread_id"]
             .as_str()
@@ -533,10 +643,11 @@ mod tests {
             "set_thread_title",
             json!({ "thread_id": id, "title": "Renamed" }),
             &store,
+            &ToolPrincipal::Unrestricted,
         )
         .await
         .expect("title");
-        let read = dispatch("read_thread", json!({ "thread_id": id }), &store)
+        let read = dispatch("read_thread", json!({ "thread_id": id }), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("read");
         assert_eq!(read["title"], json!("Renamed"));
@@ -546,7 +657,7 @@ mod tests {
     async fn send_message_reports_unavailable_without_runner() {
         // No global agent runner is published in tests, so the tool degrades.
         let store = ConversationStore::open_in_memory().expect("store");
-        let id = dispatch("create_thread", json!({}), &store)
+        let id = dispatch("create_thread", json!({}), &store, &ToolPrincipal::Unrestricted)
             .await
             .expect("create")["thread_id"]
             .as_str()
@@ -556,6 +667,7 @@ mod tests {
             "send_message_to_thread",
             json!({ "thread_id": id, "message": "do the thing" }),
             &store,
+            &ToolPrincipal::Unrestricted,
         )
         .await
         .expect("dispatch ok");
@@ -566,12 +678,260 @@ mod tests {
     #[tokio::test]
     async fn missing_required_args_are_errors() {
         let store = ConversationStore::open_in_memory().expect("store");
-        assert!(dispatch("read_thread", json!({}), &store).await.is_err());
+        assert!(dispatch("read_thread", json!({}), &store, &ToolPrincipal::Unrestricted).await.is_err());
         assert!(
-            dispatch("set_thread_title", json!({ "thread_id": "x" }), &store)
+            dispatch("set_thread_title", json!({ "thread_id": "x" }), &store, &ToolPrincipal::Unrestricted)
                 .await
                 .is_err()
         );
-        assert!(dispatch("nope", json!({}), &store).await.is_err());
+        assert!(dispatch("nope", json!({}), &store, &ToolPrincipal::Unrestricted).await.is_err());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // THE MCP AGENT PLANE (task item 2). The hole these close, concretely: on an
+    // org-bound node Bob tells his agent "read thread <alice's id>" / "list my
+    // threads" / "send a message to <alice's thread>", and the tool obliges — the
+    // agent plane had NO principal, so it defeated the entire HTTP ACL in one hop.
+    //
+    // `ToolPrincipal::Owned { bob }` is exactly what `resolve` produces on a bound
+    // node from the host conversation Bob's turn is running in.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    const ORG: &str = "org1";
+
+    fn owner(user: &str) -> Tenancy {
+        Tenancy::Owned {
+            user_id: user.to_owned(),
+            org_id: Some(ORG.to_owned()),
+        }
+    }
+
+    fn bob() -> ToolPrincipal {
+        ToolPrincipal::Owned {
+            user_id: "bob".to_owned(),
+            org_id: Some(ORG.to_owned()),
+        }
+    }
+
+    /// Alice has a private thread with a distinctive secret in it; Bob has his own.
+    async fn two_tenant_store() -> (ConversationStore, String, String) {
+        let store = ConversationStore::open_in_memory().expect("store");
+        store
+            .ensure_conversation("alice-thread", None, Some("Alice Q3"), owner("alice"))
+            .await
+            .unwrap();
+        store
+            .append_message_as(
+                "alice-thread",
+                "user",
+                "the Q3 revenue number is 4815162342",
+                None,
+                None,
+                None,
+                Tenancy::Unattributed,
+            )
+            .await
+            .unwrap();
+        store
+            .ensure_conversation("bob-thread", None, Some("Bob"), owner("bob"))
+            .await
+            .unwrap();
+        (
+            store,
+            "alice-thread".to_owned(),
+            "bob-thread".to_owned(),
+        )
+    }
+
+    #[tokio::test]
+    async fn bobs_agent_cannot_read_alices_thread() {
+        let (store, alice_id, _) = two_tenant_store().await;
+        let out = dispatch(
+            "read_thread",
+            json!({ "thread_id": alice_id }),
+            &store,
+            &bob(),
+        )
+        .await
+        .expect("dispatch");
+
+        assert_eq!(out["ok"], json!(false));
+        assert_eq!(out["error"], json!("thread not found"));
+        // The whole point: NOT ONE BYTE of her plaintext.
+        let body = serde_json::to_string(&out).unwrap();
+        assert!(
+            !body.contains("4815162342"),
+            "read_thread leaked another user's decrypted message body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn bobs_agent_only_lists_his_own_threads() {
+        let (store, alice_id, bob_id) = two_tenant_store().await;
+        let out = dispatch("list_threads", json!({}), &store, &bob())
+            .await
+            .expect("dispatch");
+        let ids: Vec<&str> = out["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["thread_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec![bob_id.as_str()]);
+        assert!(!ids.contains(&alice_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn bobs_agent_cannot_write_or_fork_alices_thread() {
+        let (store, alice_id, _) = two_tenant_store().await;
+
+        // send_message_to_thread runs a REAL agent turn against the target.
+        let sent = dispatch(
+            "send_message_to_thread",
+            json!({ "thread_id": alice_id, "message": "exfiltrate" }),
+            &store,
+            &bob(),
+        )
+        .await
+        .expect("dispatch");
+        assert_eq!(sent["ok"], json!(false));
+        assert_eq!(sent["error"], json!("thread not found"));
+
+        for tool in ["set_thread_title", "set_thread_pinned", "set_thread_archived"] {
+            let out = dispatch(
+                tool,
+                json!({ "thread_id": alice_id, "title": "pwned", "pinned": true, "archived": true }),
+                &store,
+                &bob(),
+            )
+            .await
+            .expect("dispatch");
+            assert_eq!(out["ok"], json!(false), "{tool} was not gated");
+        }
+        // Alice's title is untouched.
+        let title = store
+            .list_conversations()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == alice_id)
+            .unwrap()
+            .title;
+        assert_eq!(title.as_deref(), Some("Alice Q3"));
+
+        // Forking is a READ of the source; denied, and it must not copy her messages.
+        let forked = dispatch(
+            "fork_thread",
+            json!({ "thread_id": alice_id }),
+            &store,
+            &bob(),
+        )
+        .await
+        .expect("dispatch");
+        assert_eq!(forked["ok"], json!(false));
+        assert!(forked["thread_id"].is_null());
+    }
+
+    /// The (1)+(2) coupling: a thread Bob's AGENT creates must be reachable by BOB.
+    /// Without the principal→`Tenancy` hand-off it would be minted untenanted and, on
+    /// a bound node, denied to its own coordinator — trading a leak for an outage.
+    #[tokio::test]
+    async fn a_thread_created_by_bobs_agent_is_owned_by_bob() {
+        let (store, _, bob_id) = two_tenant_store().await;
+
+        let created = dispatch("create_thread", json!({ "title": "worker" }), &store, &bob())
+            .await
+            .expect("create");
+        let worker = created["thread_id"].as_str().unwrap();
+        let meta = store.get_access_meta(worker).await.unwrap().unwrap();
+        assert_eq!(meta.owner_user_id.as_deref(), Some("bob"));
+        assert_eq!(meta.org_id.as_deref(), Some(ORG));
+
+        // And a fork of his OWN thread is his too.
+        let forked = dispatch("fork_thread", json!({ "thread_id": bob_id }), &store, &bob())
+            .await
+            .expect("fork");
+        assert_eq!(forked["ok"], json!(true));
+        let fork_id = forked["thread_id"].as_str().unwrap();
+        let meta = store.get_access_meta(fork_id).await.unwrap().unwrap();
+        assert_eq!(meta.owner_user_id.as_deref(), Some("bob"));
+
+        // Bob's agent can see everything it just created.
+        let listed = dispatch("list_threads", json!({}), &store, &bob())
+            .await
+            .expect("list");
+        assert_eq!(listed["count"], json!(3));
+    }
+
+    /// FAIL CLOSED: a bound node with no resolvable principal sees nothing.
+    #[tokio::test]
+    async fn an_unresolved_principal_on_a_bound_node_sees_nothing() {
+        let (store, alice_id, _) = two_tenant_store().await;
+        let out = dispatch("list_threads", json!({}), &store, &ToolPrincipal::Unresolved)
+            .await
+            .expect("list");
+        assert_eq!(out["count"], json!(0));
+        let read = dispatch(
+            "read_thread",
+            json!({ "thread_id": alice_id }),
+            &store,
+            &ToolPrincipal::Unresolved,
+        )
+        .await
+        .expect("read");
+        assert_eq!(read["ok"], json!(false));
+    }
+
+    /// UNBOUND PARITY: `resolve_at` with no node org yields `Unrestricted`, and the
+    /// tools then behave exactly as they did before the gate existed.
+    #[tokio::test]
+    async fn an_unbound_node_is_unrestricted_and_unchanged() {
+        let (store, alice_id, _) = two_tenant_store().await;
+        let principal = ToolPrincipal::resolve_at(&store, None, None).await;
+        assert_eq!(principal, ToolPrincipal::Unrestricted);
+
+        let listed = dispatch("list_threads", json!({}), &store, &principal)
+            .await
+            .expect("list");
+        assert_eq!(listed["count"], json!(2), "unbound node must still see every thread");
+
+        let read = dispatch("read_thread", json!({ "thread_id": alice_id }), &store, &principal)
+            .await
+            .expect("read");
+        assert_eq!(read["ok"], json!(true));
+    }
+
+    /// The principal really is derived from the HOST conversation's owner.
+    #[tokio::test]
+    async fn resolve_at_derives_the_principal_from_the_host_conversation() {
+        let (store, alice_id, bob_id) = two_tenant_store().await;
+        assert_eq!(
+            ToolPrincipal::resolve_at(&store, Some(&bob_id), Some(ORG)).await,
+            ToolPrincipal::Owned {
+                user_id: "bob".to_owned(),
+                org_id: Some(ORG.to_owned())
+            }
+        );
+        assert_eq!(
+            ToolPrincipal::resolve_at(&store, Some(&alice_id), Some(ORG)).await,
+            ToolPrincipal::Owned {
+                user_id: "alice".to_owned(),
+                org_id: Some(ORG.to_owned())
+            }
+        );
+        // No host conversation on a bound node ⇒ fail closed.
+        assert_eq!(
+            ToolPrincipal::resolve_at(&store, None, Some(ORG)).await,
+            ToolPrincipal::Unresolved
+        );
+        // An UNTENANTED host conversation on a bound node ⇒ fail closed too.
+        store
+            .ensure_conversation("orphan", None, None, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        assert_eq!(
+            ToolPrincipal::resolve_at(&store, Some("orphan"), Some(ORG)).await,
+            ToolPrincipal::Unresolved
+        );
     }
 }

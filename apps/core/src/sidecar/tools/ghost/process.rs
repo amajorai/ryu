@@ -8,6 +8,8 @@ use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
+use crate::win_process::NoWindow;
+
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
 fn ghost_dir() -> PathBuf {
@@ -63,6 +65,7 @@ impl GhostProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false)
+            .no_window()
             .spawn()?;
 
         // Write PID file so we can recover from a crash on next start.
@@ -179,6 +182,7 @@ impl GhostProcess {
         {
             let _ = std::process::Command::new("taskkill")
                 .args(["/F", "/PID", &pid.to_string()])
+                .no_window()
                 .output();
         }
     }

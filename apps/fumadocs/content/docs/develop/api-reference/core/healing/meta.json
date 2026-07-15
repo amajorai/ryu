@@ -1,0 +1,10 @@
+{
+  "title": "Healing",
+  "description": "Healing API endpoints.",
+  "pages": [
+    "config",
+    "set_config",
+    "simulate_failure",
+    "status"
+  ]
+}

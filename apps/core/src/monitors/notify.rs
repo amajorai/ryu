@@ -109,6 +109,59 @@ async fn send_webhook(http: &reqwest::Client, url: &str, alert: &Alert) {
     }
 }
 
+/// Post a plain-text message to a Slack/Discord/generic incoming webhook. Sends
+/// both `text` (Slack) and `content` (Discord) so one URL fits either service.
+///
+/// Unlike [`send_webhook`], this carries no `Alert` framing — it is the raw
+/// send primitive behind the [`crate::workflow::NodeKind::ChannelSend`] node.
+/// Returns `Ok(())` only on a 2xx response so a workflow node can surface a
+/// failed delivery.
+pub async fn send_webhook_text(
+    http: &reqwest::Client,
+    url: &str,
+    text: &str,
+) -> Result<(), String> {
+    let body = json!({ "text": text, "content": text });
+    let resp = http
+        .post(url)
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| format!("webhook send failed: {e}"))?;
+    let status = resp.status();
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(format!("webhook returned HTTP {status}"))
+    }
+}
+
+/// Send a plain-text message via the Telegram Bot API (`sendMessage`). The raw
+/// send primitive behind the [`crate::workflow::NodeKind::ChannelSend`] node;
+/// returns `Ok(())` only on a 2xx so a workflow node can surface a failed send.
+pub async fn send_telegram_text(
+    http: &reqwest::Client,
+    bot_token: &str,
+    chat_id: &str,
+    text: &str,
+) -> Result<(), String> {
+    let api = format!("https://api.telegram.org/bot{bot_token}/sendMessage");
+    let resp = http
+        .post(&api)
+        .json(&json!({ "chat_id": chat_id, "text": text }))
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| format!("telegram send failed: {e}"))?;
+    let status = resp.status();
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(format!("telegram returned HTTP {status}"))
+    }
+}
+
 /// Send a single-recipient alert email over the shared BYO SMTP transport.
 /// Best-effort: with no transport configured, or on a send failure, this logs and
 /// drops the result — it never propagates and never blocks other targets.

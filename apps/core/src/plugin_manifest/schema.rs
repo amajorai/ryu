@@ -55,13 +55,106 @@ pub struct WorkflowConfig {
 
 /// Config for a `kind: "tool"` Runnable.
 ///
-/// A tool exposes a callable function to agents and workflows. Today tools live
-/// inside workflow graphs as `NodeKind::Tool`; standalone tool-as-Runnable
-/// wiring lands with the MCP/tool-registry units.
+/// A tool exposes a callable function to agents and workflows. The `backend`
+/// field selects HOW the tool executes — this is the "nothing hardcoded, the
+/// tool backend is a swappable config kind" seam:
+///
+///   - `alias` (default / absent): the legacy behavior — re-expose an existing
+///     registry tool named `slug` under the plugin's `app__<slug>` namespace.
+///     Ships no new behavior; dispatch re-enters the target tool.
+///   - `inline_deno`: the plugin ships NEW logic. `code` is a JS body run in the
+///     existing `tool_exec` Deno sandbox with the same grant model as a turn hook
+///     (`host.*` gated by the plugin's grants). Requires the `tool:execute` grant.
+///   - `http`: Core proxies the call to `url` with Gateway egress governance,
+///     gated by a `tool:http-egress:<domain>` grant.
+///
+/// Extra fields the SDK emits for Ryu-App widgets (`widget`, `input_schema`, …)
+/// are tolerated (serde ignores unknown keys) so a `defineApp` config still
+/// parses as an `alias` tool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolConfig {
-    /// MCP tool slug this Runnable wraps (e.g. `"web_search"`).
+    /// Tool slug. For an `alias` tool this is the target registry tool id it
+    /// wraps (e.g. `"web_search"`); for `inline_deno`/`http` it is the tool's own
+    /// name. The registered, callable id is always `app__<slug>`.
     pub slug: String,
+    /// Backend kind: `"alias"` (default when absent) | `"inline_deno"` | `"http"`.
+    #[serde(default)]
+    pub backend: Option<String>,
+    /// `inline_deno`: the self-contained JS body run in the sandbox. Invoked with
+    /// `input` (the call arguments) and `host` (the capability bridge) in scope,
+    /// exactly like a turn hook's `code`.
+    #[serde(default)]
+    pub code: Option<String>,
+    /// `http`: the endpoint URL Core proxies the call to (Gateway-governed).
+    #[serde(default)]
+    pub url: Option<String>,
+    /// `http`: the HTTP method (defaults to `POST`).
+    #[serde(default)]
+    pub method: Option<String>,
+    /// Optional human description surfaced in tool discovery (`/api/tools/search`).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Optional JSON Schema for the tool input, surfaced in discovery.
+    #[serde(default)]
+    pub input_schema: Option<serde_json::Value>,
+}
+
+/// The resolved, dispatch-ready backend of a [`ToolConfig`]. Produced by
+/// [`ToolConfig::resolve_backend`]; the dispatcher (`sidecar/mcp`) matches on it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolBackend {
+    /// Re-expose an existing registry tool named `target` (the legacy alias).
+    Alias { target: String },
+    /// Run `code` in the `tool_exec` Deno sandbox (grant: `tool:execute`).
+    InlineDeno { code: String },
+    /// Proxy the call to `url` with `method` (grant: `tool:http-egress:<domain>`).
+    Http { url: String, method: String },
+}
+
+impl ToolConfig {
+    /// Resolve the declared backend, validating that the required fields for the
+    /// chosen kind are present. `None`/`"alias"` → [`ToolBackend::Alias`] wrapping
+    /// `slug`, so an existing manifest with only `slug` is unchanged.
+    pub fn resolve_backend(&self) -> Result<ToolBackend, String> {
+        match self.backend.as_deref().map(str::trim).unwrap_or("alias") {
+            "" | "alias" => Ok(ToolBackend::Alias {
+                target: self.slug.clone(),
+            }),
+            "inline_deno" => {
+                let code = self
+                    .code
+                    .as_deref()
+                    .filter(|c| !c.trim().is_empty())
+                    .ok_or_else(|| {
+                        "tool backend 'inline_deno' requires a non-empty 'code'".to_owned()
+                    })?;
+                Ok(ToolBackend::InlineDeno {
+                    code: code.to_owned(),
+                })
+            }
+            "http" => {
+                let url = self
+                    .url
+                    .as_deref()
+                    .filter(|u| !u.trim().is_empty())
+                    .ok_or_else(|| "tool backend 'http' requires a non-empty 'url'".to_owned())?;
+                let method = self
+                    .method
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or("POST")
+                    .to_ascii_uppercase();
+                Ok(ToolBackend::Http {
+                    url: url.to_owned(),
+                    method,
+                })
+            }
+            other => Err(format!(
+                "unknown tool backend '{other}' (expected alias | inline_deno | http)"
+            )),
+        }
+    }
 }
 
 /// Config for a `kind: "skill"` Runnable.
@@ -109,6 +202,34 @@ pub struct CompanionConfig {
     /// battle-tested singlefile bundler instead of fighting the ESM-eval + CSP path.
     #[serde(default)]
     pub ui_format: Option<String>,
+
+    /// Optional per-app CSP allowlist (the OpenAI-Apps-SDK `_meta.ui.csp` model,
+    /// scoped for Ryu). When present, the Path-B host WIDENS the otherwise-locked
+    /// companion CSP for exactly these hosts: `connect_domains` extend `connect-src`
+    /// (fetch/XHR targets) and `resource_domains` extend `img-src`/`media-src`
+    /// (remote asset loads). The default remains `connect-src 'none'` — this is the
+    /// deliberate, declared exception (e.g. the canvas asset picker fetching
+    /// `api.iconify.design`/`api.svgl.app` directly instead of via a host round-trip).
+    /// SECURITY: this is a manifest CLAIM; only a trusted/approved manifest's `csp`
+    /// should be applied (built-in apps are trusted; third-party needs moderation,
+    /// like grants). Egress to these hosts is NOT Gateway-governed — keep the list to
+    /// keyless, read-only public asset CDNs, never anything carrying user data.
+    #[serde(default)]
+    pub csp: Option<CompanionCsp>,
+}
+
+/// A per-app CSP allowlist (see [`CompanionConfig::csp`]). Each entry is a host or
+/// full origin (e.g. `"https://api.iconify.design"`); the host sanitizes them to
+/// `https` origins before injecting.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CompanionCsp {
+    /// Hosts added to `connect-src` (the frame may `fetch()`/XHR these directly).
+    #[serde(default)]
+    pub connect_domains: Vec<String>,
+
+    /// Hosts added to `img-src`/`media-src` (remote asset/image loads).
+    #[serde(default)]
+    pub resource_domains: Vec<String>,
 }
 
 /// Config for a `kind: "channel"` Runnable.
@@ -193,6 +314,41 @@ pub struct ExternalRuntimeConfig {
     /// Health-check path on the runtime's server (e.g. `"/health"`).
     #[serde(default)]
     pub health_path: Option<String>,
+
+    /// Optional **source archive** to extract into the runtime dir before the venv
+    /// is built. Needed when the entry module is a *first-party package the plugin
+    /// ships* (not on PyPI): a `pip install -e ".[extra]"` needs the package's
+    /// `pyproject.toml` + sources on disk first. Single-file `assets` cannot deliver
+    /// a source tree; this does. Omit for a pure-PyPI runtime.
+    #[serde(default)]
+    pub source: Option<SourceArchiveSpec>,
+
+    /// Environment variables layered onto the runtime process at spawn. Values may
+    /// use `${RYU_DIR}` — expanded to the Core data dir (`~/.ryu`) at spawn — so a
+    /// runtime can point caches/outputs at Core-owned paths without hardcoding an
+    /// absolute path in the (portable) manifest. Nothing else is interpolated.
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+/// A source-tree archive an external runtime extracts into its runtime dir before
+/// provisioning (venv + `pip install -e .`). Distinct from [`AssetSpec`], which
+/// fetches a *single file* into `~/.ryu`; this delivers a whole package tree the
+/// plugin owns.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SourceArchiveSpec {
+    /// Direct **https** URL to the archive. Non-https is rejected by the SSRF egress
+    /// screen at download time.
+    pub url: String,
+
+    /// Optional lower-case-hex SHA-256 of the archive; when present the download is
+    /// verified and re-fetched on mismatch (fail-closed).
+    #[serde(default)]
+    pub sha256: Option<String>,
+
+    /// Archive format: `"tar.gz"` or `"zip"`. Extracted whole-tree into the runtime
+    /// dir so the package's `pyproject.toml` lands at its root.
+    pub format: String,
 }
 
 /// A single asset an external runtime needs, fetched before first run. Either a
@@ -478,6 +634,12 @@ pub fn capability_label(grant: &str) -> String {
         "hook:side-model" => "Second-model review".to_string(),
         "hook:run-agent" => "Runs sub-agents".to_string(),
         "hook:storage" => "Local storage".to_string(),
+        // Spaces + media capabilities (full-page companion apps).
+        "spaces:docs" => "Spaces documents".to_string(),
+        "storage:kv" => "Local storage".to_string(),
+        "core:list_agents" => "Lists agents & models".to_string(),
+        "media:generate" => "Generates images, video & speech".to_string(),
+        "media:transcribe" => "Transcribes audio".to_string(),
         // Common MCP tool grants.
         "mcp:web_search" => "Web search".to_string(),
         "mcp:web_scrape" => "Web scraping".to_string(),
@@ -612,6 +774,10 @@ pub fn validate_runnable(entry: &RunnableEntry) -> Result<(), String> {
                     entry.id
                 ));
             }
+            // Validate the backend so a manifest that declares `inline_deno`/`http`
+            // without the required `code`/`url` is rejected at load, not at dispatch.
+            cfg.resolve_backend()
+                .map_err(|e| format!("runnable '{}' (kind=tool): {e}", entry.id))?;
             Ok(())
         }
 
@@ -835,6 +1001,58 @@ mod tests {
     fn tool_with_slug_is_valid() {
         let cfg = json!({ "slug": "web_search" });
         assert!(validate_runnable(&entry("t", RunnableKind::Tool, Some(cfg))).is_ok());
+    }
+
+    #[test]
+    fn tool_backend_defaults_to_alias() {
+        // A bare `slug` config (the legacy shape, and what `defineApp` emits) must
+        // resolve to an Alias so existing plugins keep working unchanged.
+        let cfg: ToolConfig = serde_json::from_value(json!({ "slug": "web_search" })).unwrap();
+        assert_eq!(
+            cfg.resolve_backend().unwrap(),
+            ToolBackend::Alias {
+                target: "web_search".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn tool_backend_resolves_inline_deno_and_http() {
+        let deno: ToolConfig = serde_json::from_value(json!({
+            "slug": "weather",
+            "backend": "inline_deno",
+            "code": "return await ((input, host) => ({ ok: true }))(input, host);",
+        }))
+        .unwrap();
+        assert!(matches!(
+            deno.resolve_backend().unwrap(),
+            ToolBackend::InlineDeno { .. }
+        ));
+
+        let http: ToolConfig = serde_json::from_value(json!({
+            "slug": "quote",
+            "backend": "http",
+            "url": "https://api.example.com/quote",
+        }))
+        .unwrap();
+        // Method defaults to POST when unset.
+        assert_eq!(
+            http.resolve_backend().unwrap(),
+            ToolBackend::Http {
+                url: "https://api.example.com/quote".to_owned(),
+                method: "POST".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn tool_backend_rejects_missing_code_or_url() {
+        let no_code = json!({ "slug": "x", "backend": "inline_deno" });
+        assert!(validate_runnable(&entry("t", RunnableKind::Tool, Some(no_code))).is_err());
+        let no_url = json!({ "slug": "x", "backend": "http" });
+        assert!(validate_runnable(&entry("t", RunnableKind::Tool, Some(no_url))).is_err());
+        let bad_kind = json!({ "slug": "x", "backend": "carrier-pigeon" });
+        assert!(validate_runnable(&entry("t", RunnableKind::Tool, Some(bad_kind))).is_err());
     }
 
     // ── skill ─────────────────────────────────────────────────────────────────

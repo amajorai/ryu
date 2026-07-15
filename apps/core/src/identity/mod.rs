@@ -44,7 +44,7 @@ pub use elicitation::{needs_connection, to_envelope};
 pub use governed::{read_credential, IDENTITY_READ_SCOPE};
 pub use health::{HealthEngine, HealthEvent};
 pub use source::{
-    BrowserToolSource, ComposioSource, CredentialBackend, CredentialSource,
+    is_known_source, known_source_ids, CredentialBackend, CredentialSource,
     CredentialSourceRegistry, LoginFlow, LoginKind, ManualImport, DEFAULT_SOURCE_ENV,
 };
 pub use store::IdentityStore;
@@ -418,7 +418,7 @@ mod tests {
         store.create("prof_a", "a.example.com", None).await.unwrap();
         store.create("prof_a", "b.example.com", None).await.unwrap();
         store
-            .create("prof_b", "c.example.com", Some("composio"))
+            .create("prof_b", "c.example.com", Some("manual"))
             .await
             .unwrap();
 
@@ -432,7 +432,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(found.source, "composio");
+        assert_eq!(found.source, "manual");
     }
 
     #[tokio::test]

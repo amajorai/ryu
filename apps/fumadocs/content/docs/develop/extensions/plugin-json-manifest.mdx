@@ -39,8 +39,9 @@ installed before the apps-to-plugins rename.
 ## 2. Add your Runnables
 
 Each entry in `runnables` carries an `id`, a `name`, a `kind`, and an optional per-kind `config`.
-The four kinds you can ship today are `agent`, `workflow`, `tool`, and `skill`. The example below
-bundles one of each, taken from the built-in `sample.plugin.json` fixture.
+The TypeScript SDK's `RunnableKindSchema` enumerates five kinds — `agent`, `workflow`, `tool`,
+`skill`, and `companion` — of Core's eight (`channel`, `engine`, and `policy` are the three it does
+not yet type). The example below is taken from the built-in `sample.plugin.json` fixture.
 
 ```json
 {
@@ -123,9 +124,9 @@ manifests keep activating on enable.
   (`fire_activation_event`, called from `main.rs`), so a plugin declaring it is genuinely woken
   lazily. The wiring that fires `onChat` and `onCommand` from the chat and command-palette paths is
   a follow-on (`apps/core/src/runnable/mod.rs`). The TypeScript SDK's `RunnableKindSchema`
-  (`packages/sdk/src/manifest.ts`) only enums the four common kinds; if you author
-  companion/channel/engine/policy entries, write the `plugin.json` directly rather than relying on
-  the SDK type for those.
+  (`packages/sdk/src/manifest.ts`) enums five kinds (`agent`, `workflow`, `tool`, `skill`,
+  `companion`); if you author `channel`, `engine`, or `policy` entries — the three Core kinds it
+  does not type — write the `plugin.json` directly rather than relying on the SDK type for those.
 </Callout>
 
 ## Declare a managed sidecar

@@ -23,6 +23,13 @@ fn err(status: StatusCode, e: impl std::fmt::Display) -> (StatusCode, Json<Value
 }
 
 /// `GET /api/recipes` — list installed recipes (summary form).
+#[utoipa::path(
+    get,
+    path = "/api/recipes",
+    tag = "Recipes",
+    summary = "list installed recipes (summary form).",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_recipes(State(_state): State<ServerState>) -> (StatusCode, Json<Value>) {
     match crate::recipes::list() {
         Ok(recipes) => (StatusCode::OK, Json(json!({ "recipes": recipes }))),
@@ -31,6 +38,14 @@ pub async fn list_recipes(State(_state): State<ServerState>) -> (StatusCode, Jso
 }
 
 /// `GET /api/recipes/:name` — one recipe's full definition.
+#[utoipa::path(
+    get,
+    path = "/api/recipes/{name}",
+    tag = "Recipes",
+    summary = "one recipe's full definition.",
+    params(("name" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_recipe(
     State(_state): State<ServerState>,
     Path(name): Path<String>,
@@ -54,6 +69,14 @@ pub struct SaveRecipeBody {
 }
 
 /// `POST /api/recipes` — install (create or overwrite) a recipe.
+#[utoipa::path(
+    post,
+    path = "/api/recipes",
+    tag = "Recipes",
+    summary = "install (create or overwrite) a recipe.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn save_recipe(
     State(_state): State<ServerState>,
     Json(body): Json<SaveRecipeBody>,
@@ -78,6 +101,14 @@ pub async fn save_recipe(
 }
 
 /// `DELETE /api/recipes/:name` — remove a recipe.
+#[utoipa::path(
+    delete,
+    path = "/api/recipes/{name}",
+    tag = "Recipes",
+    summary = "remove a recipe.",
+    params(("name" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn delete_recipe(
     State(_state): State<ServerState>,
     Path(name): Path<String>,
@@ -99,6 +130,15 @@ pub struct RunRecipeBody {
 }
 
 /// `POST /api/recipes/:name/run` — replay a recipe against native apps.
+#[utoipa::path(
+    post,
+    path = "/api/recipes/{name}/run",
+    tag = "Recipes",
+    summary = "replay a recipe against native apps.",
+    params(("name" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn run_recipe(
     State(_state): State<ServerState>,
     Path(name): Path<String>,
@@ -119,6 +159,14 @@ pub struct RecordStartBody {
 }
 
 /// `POST /api/recipes/record/start` — begin observing user input.
+#[utoipa::path(
+    post,
+    path = "/api/recipes/record/start",
+    tag = "Recipes",
+    summary = "begin observing user input.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn record_start(
     State(_state): State<ServerState>,
     body: Option<Json<RecordStartBody>>,
@@ -131,6 +179,13 @@ pub async fn record_start(
 }
 
 /// `GET /api/recipes/record/status` — poll the active recording.
+#[utoipa::path(
+    get,
+    path = "/api/recipes/record/status",
+    tag = "Recipes",
+    summary = "poll the active recording.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn record_status(State(_state): State<ServerState>) -> (StatusCode, Json<Value>) {
     match crate::recipes::record_status().await {
         Ok(v) => (StatusCode::OK, Json(v)),
@@ -139,6 +194,14 @@ pub async fn record_status(State(_state): State<ServerState>) -> (StatusCode, Js
 }
 
 /// `POST /api/recipes/record/stop` — stop recording and return captured events.
+#[utoipa::path(
+    post,
+    path = "/api/recipes/record/stop",
+    tag = "Recipes",
+    summary = "stop recording and return captured events.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn record_stop(State(_state): State<ServerState>) -> (StatusCode, Json<Value>) {
     match crate::recipes::record_stop().await {
         Ok(v) => (StatusCode::OK, Json(v)),

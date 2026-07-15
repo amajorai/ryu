@@ -3,8 +3,11 @@
   "description": "OpenAI-compatible chat, image, and audio generation.",
   "pages": [
     "createChatCompletion",
+    "createCursorChatCompletion",
     "createImage",
     "createSpeech",
-    "createTranscription"
+    "createTranscription",
+    "createVideoGeneration",
+    "getVideoGeneration"
   ]
 }

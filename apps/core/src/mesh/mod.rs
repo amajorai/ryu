@@ -291,6 +291,157 @@ pub async fn funnel_url(port: u16) -> Option<String> {
     tailscale::funnel_url(port).await
 }
 
+// ── Peer token bridge (#478, P7 desktop NodeSelector handoff) ─────────────────
+//
+// Adding a mesh peer as a node is fail-closed: every exposed peer runs
+// `enforce_remote_auth`, so its protected routes 401 without a valid bearer. The
+// desktop's `addNode(name, url)` is tokenless, which is exactly why a freshly
+// added peer's requests bounce. This seam provides the bearer WITHOUT weakening
+// the peer's check: the peer still requires a valid token; we hand the caller one.
+//
+// The bearer we can offer is **this node's own `RYU_TOKEN`**. `require_auth` on the
+// peer is a string compare (`provided == expected`), and `enforce_remote_auth` on
+// the peer accepts any non-placeholder token at startup — so this node's token
+// authenticates on a peer **iff that peer was provisioned with the same
+// `RYU_TOKEN`** (the shared-fleet convention: a tailnet operator gives every node
+// the same node-admittance secret). The code cannot verify the peer's token, so
+// `bearer_source: "shared-mesh-token"` means "candidate bearer, valid on peers
+// sharing this RYU_TOKEN"; a peer running a distinct token still 401s and the
+// operator must supply that peer's token by hand. Returning this token is not a
+// disclosure: `/api/mesh/peers` sits behind `require_auth`, so only a caller who
+// already holds this node's `RYU_TOKEN` can read it back.
+
+/// How the offered bearer was derived, surfaced so the desktop (and a human) know
+/// whether the token is a real candidate or absent.
+pub const BEARER_SOURCE_SHARED: &str = "shared-mesh-token";
+pub const BEARER_SOURCE_NONE: &str = "none";
+
+/// Provisioning guidance returned when no usable bearer exists on this node. Names
+/// the EXACT secret a peer must share for the fail-closed check to pass.
+pub const BEARER_NONE_NOTE: &str =
+    "No usable RYU_TOKEN on this node. Provision every mesh node with the SAME strong \
+     RYU_TOKEN (the shared node-admittance secret) so a peer's require_auth accepts it; \
+     otherwise supply the target peer's own RYU_TOKEN when adding it.";
+
+/// The default Core listen port peers are assumed to serve on (`127.0.0.1:7980`
+/// default bind, reached over the tailnet on the same port). Overridable per
+/// deployment via `RYU_MESH_PEER_PORT` when the fleet binds a non-default port.
+const DEFAULT_CORE_PORT: u16 = 7980;
+
+/// Resolve the port peers are dialed on: `RYU_MESH_PEER_PORT` when set to a valid
+/// `u16`, else the default 7980.
+fn peer_core_port() -> u16 {
+    std::env::var("RYU_MESH_PEER_PORT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .unwrap_or(DEFAULT_CORE_PORT)
+}
+
+/// Build the URL the desktop should register for a peer. Prefers the MagicDNS
+/// name (stable, resolvable inside the tailnet), falling back to `host_or_dns`
+/// (which itself falls back to a Tailscale IP). `http://` is correct: the tailnet
+/// wire is WireGuard-encrypted and Core does not serve TLS itself.
+fn peer_url(peer: &MeshPeer, port: u16) -> String {
+    let host = if peer.magic_dns_name.is_empty() {
+        peer.host_or_dns.as_str()
+    } else {
+        peer.magic_dns_name.as_str()
+    };
+    format!("http://{host}:{port}")
+}
+
+/// Resolve the candidate bearer to hand the desktop from this node's node token
+/// (`RYU_TOKEN`, passed in). Returns `None` — meaning "no usable bearer" — when the
+/// token is absent, empty/whitespace, or a known insecure placeholder (a peer with
+/// a placeholder token refuses to start under mesh, so offering it would be a lie).
+///
+/// Pure + unit-testable: the returned string, when a peer runs the same token, is
+/// exactly what that peer's `enforce_remote_auth` accepts at startup and its
+/// `require_auth` compares equal against.
+pub fn resolve_mesh_bearer(node_token: Option<&str>) -> Option<String> {
+    let token = node_token?.trim();
+    if token.is_empty() || crate::server::is_insecure_auth_token_placeholder(token) {
+        return None;
+    }
+    Some(token.to_owned())
+}
+
+/// One peer entry in the `GET /api/mesh/peers` response.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MeshPeerEntry {
+    pub name: String,
+    /// The URL to register with `addNode` — `http://<magic_dns>:<port>`.
+    pub url: String,
+    pub magic_dns_name: String,
+    pub host_or_dns: String,
+    pub port: u16,
+    pub online: bool,
+    pub os: String,
+    /// Whether a candidate bearer is obtainable for this peer (true when this node
+    /// has a usable `RYU_TOKEN` under the shared-fleet convention).
+    pub bearer_available: bool,
+    /// The candidate bearer to attach when adding this peer, or `null`. Same shared
+    /// token for every peer; valid only on peers provisioned with this `RYU_TOKEN`.
+    pub bearer: Option<String>,
+}
+
+/// The `GET /api/mesh/peers` response (Contract 6 companion, P7). `enabled:false`
+/// ⇒ empty `peers`, `bearer_source:"none"`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MeshPeersResponse {
+    pub enabled: bool,
+    pub reachable: bool,
+    pub peers: Vec<MeshPeerEntry>,
+    /// `"shared-mesh-token"` when a candidate bearer is offered, else `"none"`.
+    pub bearer_source: String,
+    /// Present only when no bearer is available: names the exact secret to
+    /// provision. `null` when a bearer is offered.
+    pub note: Option<String>,
+}
+
+/// Build the peers response from a live [`MeshStatus`] and this node's token.
+///
+/// Pure so the token-resolution + URL shaping is unit-testable without shelling out
+/// to `tailscale`. Every reported peer is returned with its `online` flag (the
+/// desktop filters/labels), each carrying the same shared bearer when one exists.
+pub fn build_peers_response(status: &MeshStatus, node_token: Option<&str>) -> MeshPeersResponse {
+    let bearer = resolve_mesh_bearer(node_token);
+    let bearer_available = bearer.is_some();
+    let port = peer_core_port();
+
+    let peers = status
+        .peers
+        .iter()
+        .map(|p| MeshPeerEntry {
+            name: p.name.clone(),
+            url: peer_url(p, port),
+            magic_dns_name: p.magic_dns_name.clone(),
+            host_or_dns: p.host_or_dns.clone(),
+            port,
+            online: p.online,
+            os: p.os.clone(),
+            bearer_available,
+            bearer: bearer.clone(),
+        })
+        .collect();
+
+    MeshPeersResponse {
+        enabled: status.enabled,
+        reachable: status.reachable,
+        peers,
+        bearer_source: if bearer_available {
+            BEARER_SOURCE_SHARED.to_owned()
+        } else {
+            BEARER_SOURCE_NONE.to_owned()
+        },
+        note: if bearer_available {
+            None
+        } else {
+            Some(BEARER_NONE_NOTE.to_owned())
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,5 +621,74 @@ mod tests {
         let parsed = parse_peer(&peer);
         assert_eq!(parsed.host_or_dns, "100.64.0.9");
         assert!(!parsed.online);
+    }
+
+    #[test]
+    fn resolved_bearer_is_accepted_by_peer_enforce_remote_auth() {
+        // The bearer we hand the desktop must be EXACTLY what a peer provisioned
+        // with the same RYU_TOKEN accepts. `enforce_remote_auth(Some(t), mesh=on)`
+        // is the fail-closed gate the peer runs at startup; `require_auth` is then a
+        // string compare, so a token that passes the gate authenticates by
+        // construction.
+        let bearer = resolve_mesh_bearer(Some("ryu_shared_secret")).unwrap();
+        assert_eq!(bearer, "ryu_shared_secret");
+        let accepted = crate::server::enforce_remote_auth(Some(bearer.clone()), true, false);
+        assert_eq!(accepted.unwrap().as_deref(), Some("ryu_shared_secret"));
+    }
+
+    #[test]
+    fn resolve_bearer_rejects_absent_empty_and_placeholder() {
+        // These are the discriminating cases: none of them is a usable bearer, so
+        // offering one would be the "fake token that won't validate" the seam
+        // forbids. A placeholder peer refuses to start under mesh (asserted here via
+        // enforce_remote_auth), so a placeholder is never a valid bearer.
+        assert!(resolve_mesh_bearer(None).is_none());
+        assert!(resolve_mesh_bearer(Some("")).is_none());
+        assert!(resolve_mesh_bearer(Some("   ")).is_none());
+        assert!(resolve_mesh_bearer(Some("CHANGE_ME")).is_none());
+        assert!(resolve_mesh_bearer(Some("change_me")).is_none());
+        // Proof the placeholder rejection is not arbitrary: a peer with it refuses
+        // to start under mesh, so it could never authenticate anyway.
+        assert!(crate::server::enforce_remote_auth(Some("CHANGE_ME".to_owned()), true, false).is_err());
+    }
+
+    #[test]
+    fn peers_response_carries_shared_bearer_and_urls() {
+        let status = parse_status_json(true, &running_status_json());
+        let resp = build_peers_response(&status, Some("ryu_shared_secret"));
+        assert!(resp.enabled);
+        assert_eq!(resp.bearer_source, BEARER_SOURCE_SHARED);
+        assert!(resp.note.is_none());
+        assert_eq!(resp.peers.len(), 1);
+        let peer = &resp.peers[0];
+        assert_eq!(peer.name, "ryu-pi");
+        assert_eq!(peer.url, "http://ryu-pi.tailnet-x.ts.net:7980");
+        assert_eq!(peer.port, 7980);
+        assert!(peer.bearer_available);
+        assert_eq!(peer.bearer.as_deref(), Some("ryu_shared_secret"));
+    }
+
+    #[test]
+    fn peers_response_without_token_is_honest_and_documents_secret() {
+        let status = parse_status_json(true, &running_status_json());
+        let resp = build_peers_response(&status, None);
+        assert_eq!(resp.bearer_source, BEARER_SOURCE_NONE);
+        assert_eq!(resp.note.as_deref(), Some(BEARER_NONE_NOTE));
+        let peer = &resp.peers[0];
+        assert!(!peer.bearer_available);
+        assert!(peer.bearer.is_none());
+        // The peer is still returned (URL usable) so the desktop can add it and the
+        // operator can attach the peer's own token manually.
+        assert_eq!(peer.url, "http://ryu-pi.tailnet-x.ts.net:7980");
+    }
+
+    #[test]
+    fn disabled_mesh_yields_empty_peers() {
+        let resp = build_peers_response(&MeshStatus::default(), Some("ryu_shared_secret"));
+        assert!(!resp.enabled);
+        assert!(resp.peers.is_empty());
+        // A token exists, so the source still reflects a candidate bearer even with
+        // no peers to attach it to yet.
+        assert_eq!(resp.bearer_source, BEARER_SOURCE_SHARED);
     }
 }

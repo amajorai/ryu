@@ -1,0 +1,11 @@
+{
+  "title": "Sandboxes",
+  "description": "Sandboxes API endpoints.",
+  "pages": [
+    "get_sandbox_backend",
+    "set_sandbox_backend",
+    "list_sandboxes",
+    "destroy_sandbox",
+    "exec_sandbox"
+  ]
+}

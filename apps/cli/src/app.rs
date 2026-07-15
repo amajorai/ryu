@@ -89,6 +89,27 @@ pub struct RemoteCatalogItem {
     pub install_state: String,
 }
 
+/// One plugin (App) row from `GET /api/plugins`. A lean projection of Core's
+/// merged manifest + lifecycle record (`AppManifestWire` in
+/// `packages/core-client/src/plugins.ts`) — only the fields the CLI renders.
+/// `installed` distinguishes an installed plugin from an available-but-not-yet-
+/// installed one; both appear in the same list, so the Plugins tab drives
+/// install as well as enable/disable/uninstall off one endpoint.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct PluginRecord {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub installed: bool,
+    #[serde(default)]
+    pub built_in: bool,
+}
+
 pub async fn fetch_catalog(
     api_url: &str,
     token: Option<&str>,
@@ -502,6 +523,15 @@ pub struct App {
     pub catalog_items: Vec<RemoteCatalogItem>,
     /// List navigation state for the Apps tab.
     pub apps_list_state: ratatui::widgets::ListState,
+    /// Plugins (App manifests + lifecycle) fetched from `GET /api/plugins`,
+    /// filtered to the `cli` surface. Empty until first fetch.
+    pub plugins_list: Vec<PluginRecord>,
+    /// Selected row index on the Plugins tab.
+    pub plugins_tab_index: usize,
+    /// Last lifecycle-action status/refusal message for the Plugins tab
+    /// (e.g. "enabled X", or a typed 409 "needed by … — disable them first").
+    /// Rendered as a status line; `None` = no recent action.
+    pub plugins_status: Option<String>,
     /// Last fetched gateway status from `GET /api/gateway/status`.
     /// `None` = not yet fetched or Core unreachable.
     pub gateway_status: Option<GatewayStatus>,
@@ -598,6 +628,7 @@ pub enum SidebarTab {
     Services,
     Agents,
     Apps,
+    Plugins,
     Gateway,
     Workflows,
     Spaces,
@@ -622,6 +653,7 @@ pub const SIDEBAR_TABS: &[SidebarTab] = &[
     SidebarTab::Skills,
     SidebarTab::Tools,
     SidebarTab::Apps,
+    SidebarTab::Plugins,
     SidebarTab::Gateway,
     SidebarTab::Workflows,
     SidebarTab::Recipes,
@@ -653,6 +685,7 @@ impl SidebarTab {
             Self::Services => "Services",
             Self::Agents => "Agents",
             Self::Apps => "Apps",
+            Self::Plugins => "Plugins",
             Self::Gateway => "Gateway",
             Self::Workflows => "Workflows",
             Self::Spaces => "Spaces",
@@ -856,6 +889,9 @@ impl App {
             agent_detail_error: None,
             catalog_items: Vec::new(),
             apps_list_state: ratatui::widgets::ListState::default(),
+            plugins_list: Vec::new(),
+            plugins_tab_index: 0,
+            plugins_status: None,
             gateway_status: None,
             workflows_list: Vec::new(),
             workflows_tab_index: 0,

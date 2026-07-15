@@ -1,0 +1,54 @@
+{
+  "id": "com.example.__APP_NAME__",
+  "name": "__APP_DISPLAY_NAME__",
+  "version": "0.1.0",
+  "runnables": [
+    {
+      "id": "__APP_NAME____render",
+      "name": "render",
+      "kind": "tool",
+      "config": {
+        "slug": "__APP_NAME____render",
+        "description": "Render the __APP_DISPLAY_NAME__ widget inline in the chat reply.",
+        "widget": true,
+        "widget_accessible": false,
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Heading shown in the widget"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Rows to render"
+            }
+          },
+          "required": ["title"]
+        },
+        "invoking": "Rendering…",
+        "invoked": "Ready"
+      }
+    }
+  ],
+  "permission_grants": [],
+  "activation_events": ["*"],
+  "contributes": {
+    "turn_hooks": [],
+    "composer_controls": [],
+    "settings_tabs": [],
+    "slash_commands": [],
+    "widgets": [
+      {
+        "tool_id": "__APP_NAME____render",
+        "uri": "ui://widget/__APP_NAME__.html",
+        "ui_entry": "src/widget.tsx",
+        "mime": "text/html+skybridge",
+        "default_display_mode": "inline"
+      }
+    ]
+  }
+}

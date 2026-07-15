@@ -87,6 +87,13 @@ pub struct QuestBody {
 }
 
 /// `GET /api/quests` — list all quests.
+#[utoipa::path(
+    get,
+    path = "/api/quests",
+    tag = "Quests",
+    summary = "list all quests.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_quests(State(state): State<ServerState>) -> Json<serde_json::Value> {
     match state.quests.store.list_quests().await {
         Ok(quests) => Json(json!({ "quests": quests })),
@@ -95,6 +102,14 @@ pub async fn list_quests(State(state): State<ServerState>) -> Json<serde_json::V
 }
 
 /// `POST /api/quests` — create a quest (and its backing detection job).
+#[utoipa::path(
+    post,
+    path = "/api/quests",
+    tag = "Quests",
+    summary = "create a quest (and its backing detection job).",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn create_quest(
     State(state): State<ServerState>,
     Json(body): Json<QuestBody>,
@@ -137,6 +152,14 @@ pub async fn create_quest(
 }
 
 /// `GET /api/quests/:id` — one quest.
+#[utoipa::path(
+    get,
+    path = "/api/quests/{id}",
+    tag = "Quests",
+    summary = "one quest.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_quest(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -152,6 +175,15 @@ pub async fn get_quest(
 }
 
 /// `PUT /api/quests/:id` — edit a quest's title / detail / completion condition.
+#[utoipa::path(
+    put,
+    path = "/api/quests/{id}",
+    tag = "Quests",
+    summary = "edit a quest's title / detail / completion condition.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn update_quest(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -189,6 +221,14 @@ pub async fn update_quest(
 }
 
 /// `DELETE /api/quests/:id` — remove a quest, its history, and its job.
+#[utoipa::path(
+    delete,
+    path = "/api/quests/{id}",
+    tag = "Quests",
+    summary = "remove a quest, its history, and its job.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn delete_quest(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -205,6 +245,15 @@ pub async fn delete_quest(
 }
 
 /// `POST /api/quests/:id/judge` — run one detection pass immediately.
+#[utoipa::path(
+    post,
+    path = "/api/quests/{id}/judge",
+    tag = "Quests",
+    summary = "run one detection pass immediately.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn judge_quest(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -226,6 +275,15 @@ pub async fn judge_quest(
 
 /// `POST /api/quests/:id/complete` — mark a quest done (manual check-off). The
 /// backing job is disabled by re-syncing the now-done quest.
+#[utoipa::path(
+    post,
+    path = "/api/quests/{id}/complete",
+    tag = "Quests",
+    summary = "mark a quest done (manual check-off). The",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn complete_quest(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -234,6 +292,15 @@ pub async fn complete_quest(
 }
 
 /// `POST /api/quests/:id/suggestion/accept` — confirm a pending detection.
+#[utoipa::path(
+    post,
+    path = "/api/quests/{id}/suggestion/accept",
+    tag = "Quests",
+    summary = "confirm a pending detection.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn accept_suggestion(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -242,6 +309,15 @@ pub async fn accept_suggestion(
 }
 
 /// `POST /api/quests/:id/dismiss` — abandon a quest entirely.
+#[utoipa::path(
+    post,
+    path = "/api/quests/{id}/dismiss",
+    tag = "Quests",
+    summary = "abandon a quest entirely.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn dismiss_quest(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -251,6 +327,15 @@ pub async fn dismiss_quest(
 
 /// `POST /api/quests/:id/suggestion/dismiss` — reject the pending suggestion but
 /// keep the quest open (snoozes further detection for a while).
+#[utoipa::path(
+    post,
+    path = "/api/quests/{id}/suggestion/dismiss",
+    tag = "Quests",
+    summary = "reject the pending suggestion but",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn dismiss_suggestion(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -281,6 +366,13 @@ async fn finish(
 }
 
 /// `GET /api/quests/events` — SSE feed of quest events (suggested / completed).
+#[utoipa::path(
+    get,
+    path = "/api/quests/events",
+    tag = "Quests",
+    summary = "SSE feed of quest events (suggested / completed).",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn quest_events(
     State(state): State<ServerState>,
 ) -> axum::response::sse::Sse<
@@ -306,6 +398,13 @@ pub async fn quest_events(
 }
 
 /// `GET /api/quests/detection-config` — the current detection knobs.
+#[utoipa::path(
+    get,
+    path = "/api/quests/detection-config",
+    tag = "Quests",
+    summary = "the current detection knobs.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_detection_config(State(state): State<ServerState>) -> Json<serde_json::Value> {
     let mode = state.quests.detection_mode().await;
     let model = state
@@ -345,6 +444,14 @@ pub struct DetectionConfigBody {
 }
 
 /// `PUT /api/quests/detection-config` — set the detection mode + judge model.
+#[utoipa::path(
+    put,
+    path = "/api/quests/detection-config",
+    tag = "Quests",
+    summary = "set the detection mode + judge model.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn set_detection_config(
     State(state): State<ServerState>,
     Json(body): Json<DetectionConfigBody>,

@@ -44,11 +44,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{named_params, params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::registry::ModelRegistry;
+use crate::server::conversations::Tenancy;
 use crate::server::preferences::PreferencesStore;
 // Spaces reuse the async `Embedder` from the retrieval module (Local hashing +
 // Remote OpenAI-compatible `/v1/embeddings`). Sharing one embedder type means a
@@ -64,6 +65,205 @@ const CHUNK_CHAR_SIZE: usize = 1_000;
 /// with `meetings_api::MEETINGS_SPACE_NAME` and the desktop's spaces hide-filter.
 /// The danger-zone "delete all spaces" preserves and ignores this Space.
 const MEETINGS_SPACE_NAME: &str = "Meetings";
+
+// ── Per-resource tenancy (twin of conversations.rs) ──────────────────────────
+//
+// Spaces/documents mirror the conversation plane exactly (`conversations.rs`):
+//   - CREATE stamps an owner via the ONE choke point (`upsert_document_row` /
+//     `upsert_space_row`), which always emits the tenancy clause, so a future
+//     creation path cannot silently forget (the mandatory [`Tenancy`] enum, not an
+//     `Option`, is what makes "forgot to stamp" a compile error).
+//   - LIST/SEARCH visibility is expressed by ONE SQL predicate below, so the row
+//     gate (`server/mod.rs` `resource_access`, via `get_access_meta`) and the list
+//     gate can never drift.
+//   - a one-shot backfill (`SpaceStore::backfill_tenancy`) attributes pre-ACL
+//     NULL rows to the local owner once the node binds — WITHOUT it, the by-id ACL
+//     denies every untenanted document on a bound node (a lockout, not a leak).
+
+/// Document visibility filter — the SQL twin of `resource_access` for the
+/// `documents` table (alias `d`). Mirrors `conversations.rs::TENANCY_VISIBLE_PREDICATE`:
+///   - `:bound = 0` (node UNBOUND / personal): no restriction — one principal, the
+///     node token is the boundary. Byte-identical to the pre-ACL behaviour.
+///   - node ORG-BOUND: a document is visible iff the caller OWNS it, or it is
+///     explicitly shared (`visibility` in `org`/`team`) within the caller's org. An
+///     untenanted (NULL-owner) document is INVISIBLE on a bound node — matching the
+///     by-id ACL's fail-closed reading of an unattributable legacy row.
+const DOC_TENANCY_VISIBLE_PREDICATE: &str = "(
+        :bound = 0
+        OR (:uid IS NOT NULL AND d.owner_user_id = :uid)
+        OR (:uid IS NOT NULL AND :org IS NOT NULL AND d.org_id = :org
+            AND d.visibility IN ('org', 'team'))
+     )";
+
+/// Space visibility filter — the SQL twin for the `spaces` table (alias `s`).
+/// Identical to [`DOC_TENANCY_VISIBLE_PREDICATE`] PLUS `OR s.system = 1`: system
+/// spaces (Artifacts / Meetings / Canvas / Clips) are node singletons with no owner
+/// and MUST stay visible to every member, or the whole node loses them.
+const SPACE_TENANCY_VISIBLE_PREDICATE: &str = "(
+        s.system = 1
+        OR :bound = 0
+        OR (:uid IS NOT NULL AND s.owner_user_id = :uid)
+        OR (:uid IS NOT NULL AND :org IS NOT NULL AND s.org_id = :org
+            AND s.visibility IN ('org', 'team'))
+     )";
+
+/// The tenancy a BACKGROUND writer stamps — a path that creates a space/document
+/// with no HTTP caller (clips/meetings auto-file, the plugin bridge, canvas
+/// migration). Resolves EXACTLY as `SpaceStore::backfill_tenancy` /
+/// `ConversationStore::backfill_tenancy` do: on an org-bound node the local vault
+/// owner, on an unbound personal node [`Tenancy::Unattributed`] (byte-identical to
+/// pre-ACL). This is what stops a runtime-created background row on a bound node
+/// from being stranded (NULL tenancy → denied to everyone, including the owner —
+/// the one-shot open-time backfill cannot rescue a row created after it ran).
+pub fn background_tenancy() -> Tenancy {
+    let Some(org) = crate::sidecar::control_plane::registered_org() else {
+        return Tenancy::Unattributed;
+    };
+    match crate::auth::load_accounts().active() {
+        Some(acct) => Tenancy::Owned {
+            user_id: acct.user_id.clone(),
+            org_id: Some(org.id),
+        },
+        None => Tenancy::Unattributed,
+    }
+}
+
+/// The caller context a tenancy-filtered Spaces query is evaluated against. Cheap
+/// `Copy`; construct via [`DocFilter::unrestricted`] (in-process, full-trust) or
+/// [`DocFilter::for_caller`] (an HTTP request narrowed to this node's org).
+#[derive(Clone, Copy)]
+pub struct DocFilter<'a> {
+    /// Whether THIS node is bound to an org. Unbound → no filtering at all.
+    node_bound: bool,
+    /// The verified caller's user id, or `None` for an anonymous caller.
+    owner_user_id: Option<&'a str>,
+    /// The caller's org (already narrowed to this node's org by identity verify).
+    org_id: Option<&'a str>,
+}
+
+impl<'a> DocFilter<'a> {
+    /// The in-process, full-trust filter: every row on the node (used by internal
+    /// callers and by the unbound single-user path).
+    pub fn unrestricted() -> Self {
+        Self {
+            node_bound: false,
+            owner_user_id: None,
+            org_id: None,
+        }
+    }
+
+    /// The filter for an HTTP caller. `node_bound = false` collapses to
+    /// [`Self::unrestricted`] regardless of the ids, keeping the personal-node path
+    /// byte-identical.
+    pub fn for_caller(
+        owner_user_id: Option<&'a str>,
+        org_id: Option<&'a str>,
+        node_bound: bool,
+    ) -> Self {
+        Self {
+            node_bound,
+            owner_user_id,
+            org_id,
+        }
+    }
+
+    fn bound_flag(&self) -> i64 {
+        i64::from(self.node_bound)
+    }
+}
+
+/// **CHOKE POINT** — the one and only `INSERT INTO documents` in Core.
+///
+/// Every path that brings a document row into existence (`ingest_document`,
+/// `create_document_of_kind` and its `create_page`/`create_database`/
+/// `create_whiteboard`/`create_child_page`/`app_create_doc` callers, `create_file`)
+/// funnels through here, and this statement ALWAYS emits the tenancy clause. The
+/// mandatory [`Tenancy`] argument (no default) is what makes "a new creation path
+/// forgot to stamp its owner" a compile error rather than a silent lockout.
+///
+/// `ON CONFLICT` = COALESCE preserve-never-clobber + first-writer-wins, matching
+/// `conversations::upsert_conversation_row`. The caller has already inserted the
+/// document's non-tenancy columns in the same statement; this fn owns only the
+/// full row insert so the tenancy clause lives in exactly one place.
+fn upsert_document_row(
+    conn: &Connection,
+    document_id: &str,
+    space_id: &str,
+    title: &str,
+    now: i64,
+    source: &str,
+    kind: &str,
+    parent_id: Option<&str>,
+    mime: Option<&str>,
+    blob_sha256: Option<&str>,
+    byte_size: Option<i64>,
+    tenancy: &Tenancy,
+) -> Result<()> {
+    let (owner_user_id, org_id) = tenancy.parts();
+    conn.execute(
+        "INSERT INTO documents
+            (id, space_id, title, created_at, source, updated_at, kind, parent_id,
+             mime, blob_sha256, byte_size, owner_user_id, org_id)
+         VALUES (:id, :space_id, :title, :now, :source, :now, :kind, :parent_id,
+             :mime, :blob_sha256, :byte_size, :owner, :org)
+         ON CONFLICT(id) DO UPDATE SET
+             owner_user_id = COALESCE(documents.owner_user_id, excluded.owner_user_id),
+             org_id        = COALESCE(documents.org_id, excluded.org_id)",
+        named_params! {
+            ":id": document_id,
+            ":space_id": space_id,
+            ":title": title,
+            ":now": now,
+            ":source": source,
+            ":kind": kind,
+            ":parent_id": parent_id,
+            ":mime": mime,
+            ":blob_sha256": blob_sha256,
+            ":byte_size": byte_size,
+            ":owner": owner_user_id,
+            ":org": org_id,
+        },
+    )
+    .context("inserting document (choke point)")?;
+    Ok(())
+}
+
+/// **CHOKE POINT** — the one and only `INSERT INTO spaces` in Core. Twin of
+/// [`upsert_document_row`]; a system space passes [`Tenancy::Unattributed`] and sets
+/// `system = 1` so the visibility predicate keeps it shared.
+fn upsert_space_row(
+    conn: &Connection,
+    space_id: &str,
+    name: &str,
+    description: Option<&str>,
+    now: i64,
+    retrieval_mode: &str,
+    system: i64,
+    tenancy: &Tenancy,
+) -> Result<()> {
+    let (owner_user_id, org_id) = tenancy.parts();
+    conn.execute(
+        "INSERT INTO spaces
+            (id, name, description, created_at, updated_at, retrieval_mode, system,
+             owner_user_id, org_id)
+         VALUES (:id, :name, :description, :now, :now, :mode, :system, :owner, :org)
+         ON CONFLICT(id) DO UPDATE SET
+             owner_user_id = COALESCE(spaces.owner_user_id, excluded.owner_user_id),
+             org_id        = COALESCE(spaces.org_id, excluded.org_id)",
+        named_params! {
+            ":id": space_id,
+            ":name": name,
+            ":description": description,
+            ":now": now,
+            ":mode": retrieval_mode,
+            ":system": system,
+            ":owner": owner_user_id,
+            ":org": org_id,
+        },
+    )
+    .context("inserting space (choke point)")?;
+    Ok(())
+}
 
 // ── Retrieval mode ─────────────────────────────────────────────────────────────
 
@@ -745,6 +945,13 @@ impl SpaceStore {
         let conn = open_vec_connection(&path)?;
         apply_encryption(&conn, Some(&path))?;
         Self::init_schema(&conn, embed_dims)?;
+        // One-shot tenancy backfill for spaces/documents that pre-date the ACL.
+        // Deliberately NOT in `init_schema` (the in-memory test store runs that and
+        // must never read the real account vault) and best-effort: a failure here
+        // must never stop the node from opening its Spaces db.
+        if let Err(e) = Self::backfill_tenancy(&conn) {
+            tracing::warn!("spaces tenancy backfill skipped: {e:#}");
+        }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             embedder: Arc::new(Mutex::new(embedder)),
@@ -995,48 +1202,179 @@ impl SpaceStore {
         let _ =
             conn.execute_batch("ALTER TABLE spaces ADD COLUMN system INTEGER NOT NULL DEFAULT 0;");
 
+        // Multi-user tenancy for SPACES (collaboration epic). `documents` already
+        // carries this quartet (above); spaces did not. Guarded by a PRAGMA
+        // table_info existence check (mirroring the documents block) so each ALTER
+        // is a no-op when the column already exists and a real error surfaces
+        // otherwise. Enforcement is the visibility predicate + the choke point +
+        // the backfill; system spaces (`system = 1`) stay shared regardless.
+        let existing_space_columns: std::collections::HashSet<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(spaces)")?;
+            let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            names.filter_map(|r| r.ok()).collect()
+        };
+        for (col, ddl) in [
+            (
+                "owner_user_id",
+                "ALTER TABLE spaces ADD COLUMN owner_user_id TEXT",
+            ),
+            ("org_id", "ALTER TABLE spaces ADD COLUMN org_id TEXT"),
+            (
+                "visibility",
+                "ALTER TABLE spaces ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'",
+            ),
+            ("team_id", "ALTER TABLE spaces ADD COLUMN team_id TEXT"),
+        ] {
+            if !existing_space_columns.contains(col) {
+                conn.execute_batch(ddl)
+                    .with_context(|| format!("adding column {col} to spaces"))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Decide, once, what a pre-existing NULL-tenancy space/document row MEANS —
+    /// the exact twin of `ConversationStore::backfill_tenancy`.
+    ///
+    /// Before the per-resource ACL was populated, every space/document was created
+    /// with `owner_user_id`/`org_id` NULL. On an org-bound node the by-id ACL
+    /// (`resource_access`) reads an untenanted row as unattributable → DENIED to
+    /// EVERYONE, including the owner (a lockout). This attributes those rows to the
+    /// local owner so the owner keeps reaching their own data.
+    ///
+    ///   - **Node UNBOUND**: return immediately, stamp nothing (one principal; the
+    ///     node token is the boundary). The marker is NOT written, so this reruns
+    ///     if the node later joins an org.
+    ///   - **Node ORG-BOUND**: attribute every untenanted, NON-system space +
+    ///     document to the LOCAL OWNER (the signed-in vault account). System spaces
+    ///     (`system = 1`) are SKIPPED — they must stay shared, and the predicate's
+    ///     `OR s.system = 1` branch already keeps them (and their documents, via the
+    ///     document backfill leaving system-space docs owned by whoever created
+    ///     them) reachable. Idempotent via a `space_meta` marker.
+    ///   - **Node ORG-BOUND with no local account**: nobody to attribute to; leave
+    ///     NULL + warn. Fail closed (the ACL denies them).
+    fn backfill_tenancy(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS space_meta (key TEXT PRIMARY KEY, value TEXT)",
+        )
+        .context("creating space_meta")?;
+        let done: Option<String> = conn
+            .query_row(
+                "SELECT value FROM space_meta WHERE key = 'tenancy_backfill_v1'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if done.is_some() {
+            return Ok(());
+        }
+
+        // Unbound (personal) node: rows stay untenanted, by design. Not marked done.
+        let Some(org) = crate::sidecar::control_plane::registered_org() else {
+            return Ok(());
+        };
+
+        let Some(owner) = crate::auth::load_accounts()
+            .active()
+            .map(|a| a.user_id.clone())
+        else {
+            tracing::warn!(
+                "spaces tenancy backfill: org-bound node with no signed-in local account — \
+                 leaving pre-ACL spaces/documents untenanted (fail closed). Sign in and restart \
+                 to claim them."
+            );
+            return Ok(());
+        };
+
+        // Documents: attribute every untenanted document (system-space docs
+        // included — they belong to whoever created them, not "shared").
+        let docs = conn
+            .execute(
+                "UPDATE documents SET owner_user_id = ?1, org_id = ?2
+                 WHERE owner_user_id IS NULL AND org_id IS NULL",
+                params![owner, org.id],
+            )
+            .context("backfilling document tenancy")?;
+        // Spaces: attribute every untenanted NON-system space; system spaces stay
+        // shared via the predicate's `OR s.system = 1`.
+        let spaces = conn
+            .execute(
+                "UPDATE spaces SET owner_user_id = ?1, org_id = ?2
+                 WHERE owner_user_id IS NULL AND org_id IS NULL AND system = 0",
+                params![owner, org.id],
+            )
+            .context("backfilling space tenancy")?;
+        conn.execute(
+            "INSERT OR REPLACE INTO space_meta (key, value) VALUES ('tenancy_backfill_v1', ?1)",
+            params![owner],
+        )?;
+        tracing::info!(
+            "spaces tenancy backfill: attributed {docs} document(s) + {spaces} space(s) to the local owner"
+        );
         Ok(())
     }
 
     /// Create a new Space and return its id. The `retrieval_mode` defaults to
     /// `"vector"` (backward-compatible). Pass `Some(RetrievalMode::Graph)` to opt
     /// into graph retrieval for this Space.
-    pub async fn create_space(&self, name: &str, description: Option<&str>) -> Result<String> {
-        self.create_space_with_mode(name, description, RetrievalMode::Vector)
+    pub async fn create_space(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        tenancy: &Tenancy,
+    ) -> Result<String> {
+        self.create_space_with_mode(name, description, RetrievalMode::Vector, tenancy)
             .await
     }
 
-    /// Create a new Space with an explicit retrieval mode.
+    /// Create a new Space with an explicit retrieval mode, owned by `tenancy`.
     pub async fn create_space_with_mode(
         &self,
         name: &str,
         description: Option<&str>,
         mode: RetrievalMode,
+        tenancy: &Tenancy,
     ) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_millis();
         let conn = self.conn.lock().await;
-        conn.execute(
-            "INSERT INTO spaces (id, name, description, created_at, updated_at, retrieval_mode)
-             VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
-            params![id, name, description, now, mode.as_str()],
-        )
-        .context("creating space")?;
+        upsert_space_row(
+            &conn,
+            &id,
+            name,
+            description,
+            now,
+            mode.as_str(),
+            0,
+            tenancy,
+        )?;
         Ok(id)
     }
 
-    /// List all Spaces, most-recently-updated first, with document counts.
-    pub async fn list_spaces(&self) -> Result<Vec<Space>> {
+    /// List the Spaces the caller may READ, most-recently-updated first, with
+    /// document counts. The `filter` is the SQL twin of `resource_access`
+    /// ([`SPACE_TENANCY_VISIBLE_PREDICATE`]); pass [`DocFilter::unrestricted`] for
+    /// the in-process / unbound-node full-trust listing.
+    pub async fn list_spaces(&self, filter: DocFilter<'_>) -> Result<Vec<Space>> {
         let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT s.id, s.name, s.description, s.created_at, s.updated_at,
                     (SELECT COUNT(*) FROM documents d
                         WHERE d.space_id = s.id AND d.parent_id IS NULL),
                     s.retrieval_mode, s.system
              FROM spaces s
-             ORDER BY s.updated_at DESC",
-        )?;
-        let rows = stmt.query_map([], |row| {
+             WHERE {SPACE_TENANCY_VISIBLE_PREDICATE}
+             ORDER BY s.updated_at DESC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            named_params! {
+                ":bound": filter.bound_flag(),
+                ":uid": filter.owner_user_id,
+                ":org": filter.org_id,
+            },
+            |row| {
             let mode_str: String = row.get(6)?;
             Ok(Space {
                 id: row.get(0)?,
@@ -1056,18 +1394,34 @@ impl SpaceStore {
         Ok(out)
     }
 
-    /// List the documents in a Space with chunk counts.
-    pub async fn list_documents(&self, space_id: &str) -> Result<Vec<Document>> {
+    /// List the documents in a Space the caller may READ, with chunk counts. The
+    /// `filter` applies [`DOC_TENANCY_VISIBLE_PREDICATE`] so a member holding only
+    /// coarse `space.read` never sees another member's private document metadata;
+    /// pass [`DocFilter::unrestricted`] for the in-process / unbound full listing.
+    pub async fn list_documents(
+        &self,
+        space_id: &str,
+        filter: DocFilter<'_>,
+    ) -> Result<Vec<Document>> {
         let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT d.id, d.space_id, d.title, d.created_at,
                     (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id),
                     d.kind, d.parent_id, d.mime, d.byte_size
              FROM documents d
-             WHERE d.space_id = ?1 AND d.parent_id IS NULL
-             ORDER BY d.created_at ASC",
-        )?;
-        let rows = stmt.query_map([space_id], |row| {
+             WHERE d.space_id = :space_id AND d.parent_id IS NULL
+               AND {DOC_TENANCY_VISIBLE_PREDICATE}
+             ORDER BY d.created_at ASC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            named_params! {
+                ":space_id": space_id,
+                ":bound": filter.bound_flag(),
+                ":uid": filter.owner_user_id,
+                ":org": filter.org_id,
+            },
+            |row| {
             Ok(Document {
                 id: row.get(0)?,
                 space_id: row.get(1)?,
@@ -1095,6 +1449,7 @@ impl SpaceStore {
         space_id: &str,
         title: &str,
         content: &str,
+        tenancy: &Tenancy,
     ) -> Result<String> {
         let chunks = chunk_text(content);
         // Embed outside the lock — the embedder may do network I/O.
@@ -1123,12 +1478,10 @@ impl SpaceStore {
         let mode_str = mode_str.ok_or_else(|| anyhow::anyhow!("space '{space_id}' not found"))?;
         let mode = RetrievalMode::from_str(&mode_str);
 
-        tx.execute(
-            "INSERT INTO documents (id, space_id, title, created_at, source, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?4)",
-            params![document_id, space_id, title, now, content],
-        )
-        .context("inserting document")?;
+        upsert_document_row(
+            &tx, &document_id, space_id, title, now, content, "page", None, None, None, None,
+            tenancy,
+        )?;
 
         insert_chunks(
             &tx,
@@ -1159,8 +1512,13 @@ impl SpaceStore {
     /// Create an empty Notion-style page (document with no content yet) in a Space.
     /// Returns the new document id. The editor fills it in via `update_document`,
     /// which is what produces chunks + embeddings.
-    pub async fn create_page(&self, space_id: &str, title: &str) -> Result<String> {
-        self.create_document_of_kind(space_id, title, "page", None)
+    pub async fn create_page(
+        &self,
+        space_id: &str,
+        title: &str,
+        tenancy: &Tenancy,
+    ) -> Result<String> {
+        self.create_document_of_kind(space_id, title, "page", None, tenancy)
             .await
     }
 
@@ -1171,16 +1529,22 @@ impl SpaceStore {
         space_id: &str,
         title: &str,
         parent: &str,
+        tenancy: &Tenancy,
     ) -> Result<String> {
-        self.create_document_of_kind(space_id, title, "page", Some(parent))
+        self.create_document_of_kind(space_id, title, "page", Some(parent), tenancy)
             .await
     }
 
     /// Create an empty database (data-grid) document in a Space. Same lifecycle as
     /// a page — the editor fills its grid JSON in via `update_document`, which
     /// chunks + embeds the flattened cell text so the database stays searchable.
-    pub async fn create_database(&self, space_id: &str, title: &str) -> Result<String> {
-        self.create_document_of_kind(space_id, title, "database", None)
+    pub async fn create_database(
+        &self,
+        space_id: &str,
+        title: &str,
+        tenancy: &Tenancy,
+    ) -> Result<String> {
+        self.create_document_of_kind(space_id, title, "database", None, tenancy)
             .await
     }
 
@@ -1188,8 +1552,13 @@ impl SpaceStore {
     /// lifecycle as a page/database — the editor saves the Excalidraw scene JSON
     /// via `update_document`, which chunks + embeds the flattened element text so
     /// the board stays searchable.
-    pub async fn create_whiteboard(&self, space_id: &str, title: &str) -> Result<String> {
-        self.create_document_of_kind(space_id, title, "whiteboard", None)
+    pub async fn create_whiteboard(
+        &self,
+        space_id: &str,
+        title: &str,
+        tenancy: &Tenancy,
+    ) -> Result<String> {
+        self.create_document_of_kind(space_id, title, "whiteboard", None, tenancy)
             .await
     }
 
@@ -1219,7 +1588,10 @@ impl SpaceStore {
         title: &str,
     ) -> Result<String> {
         let kind = Self::app_kind(plugin_id);
-        self.create_document_of_kind(space_id, title, &kind, None)
+        // App-owned docs are created by the plugin bridge / migrations — no HTTP
+        // caller — so they attribute to the local owner on a bound node (else they
+        // would be stranded and vanish from `list_documents`).
+        self.create_document_of_kind(space_id, title, &kind, None, &background_tenancy())
             .await
     }
 
@@ -1322,6 +1694,7 @@ impl SpaceStore {
         title: &str,
         kind: &str,
         parent_id: Option<&str>,
+        tenancy: &Tenancy,
     ) -> Result<String> {
         let document_id = uuid::Uuid::new_v4().to_string();
         let now = now_millis();
@@ -1337,12 +1710,10 @@ impl SpaceStore {
         if exists.is_none() {
             anyhow::bail!("space '{space_id}' not found");
         }
-        conn.execute(
-            "INSERT INTO documents (id, space_id, title, created_at, source, updated_at, kind, parent_id)
-             VALUES (?1, ?2, ?3, ?4, '', ?4, ?5, ?6)",
-            params![document_id, space_id, title, now, kind, parent_id],
-        )
-        .context("inserting document")?;
+        upsert_document_row(
+            &conn, &document_id, space_id, title, now, "", kind, parent_id, None, None, None,
+            tenancy,
+        )?;
         conn.execute(
             "UPDATE spaces SET updated_at = ?1 WHERE id = ?2",
             params![now, space_id],
@@ -1375,12 +1746,19 @@ impl SpaceStore {
         }
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_millis();
-        conn.execute(
-            "INSERT INTO spaces (id, name, description, created_at, updated_at, retrieval_mode, system)
-             VALUES (?1, ?2, ?3, ?4, ?4, 'vector', 1)",
-            params![id, name, description, now],
-        )
-        .context("creating system space")?;
+        // System spaces are node singletons with no owner — Unattributed + system=1.
+        // The visibility predicate's `OR s.system = 1` keeps them shared to every
+        // member, and the backfill deliberately skips them.
+        upsert_space_row(
+            &conn,
+            &id,
+            name,
+            description,
+            now,
+            "vector",
+            1,
+            &Tenancy::Unattributed,
+        )?;
         Ok(id)
     }
 
@@ -1397,6 +1775,7 @@ impl SpaceStore {
         title: &str,
         bytes: &[u8],
         mime: &str,
+        tenancy: &Tenancy,
     ) -> Result<String> {
         // Persist the bytes first (content-addressed, deduped). Done outside the
         // db lock — filesystem I/O should not hold the sqlite mutex.
@@ -1426,23 +1805,20 @@ impl SpaceStore {
             anyhow::bail!("space '{space_id}' not found");
         }
         let tx = conn.transaction().context("starting file insert")?;
-        tx.execute(
-            "INSERT INTO documents
-               (id, space_id, title, created_at, source, updated_at, kind, parent_id,
-                mime, blob_sha256, byte_size)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?4, 'file', NULL, ?6, ?7, ?8)",
-            params![
-                document_id,
-                space_id,
-                title,
-                now,
-                descriptor,
-                mime,
-                sha,
-                byte_size
-            ],
-        )
-        .context("inserting file document")?;
+        upsert_document_row(
+            &tx,
+            &document_id,
+            space_id,
+            title,
+            now,
+            &descriptor,
+            "file",
+            None,
+            Some(mime),
+            Some(&sha),
+            Some(byte_size),
+            tenancy,
+        )?;
         // Store the single descriptor chunk + its vector so the file is retrievable.
         insert_chunks(
             &tx,
@@ -1858,17 +2234,23 @@ impl SpaceStore {
         query: &str,
         limit: usize,
     ) -> Result<Vec<ChunkMatch>> {
-        self.search_ext(space_id, query, limit, None).await
+        self.search_ext(space_id, query, limit, None, DocFilter::unrestricted())
+            .await
     }
 
     /// Like [`search`](Self::search) but with an explicit `link_expansion`
-    /// override (`None` = use the `RYU_SPACES_LINK_EXPANSION` default).
+    /// override (`None` = use the `RYU_SPACES_LINK_EXPANSION` default) and a
+    /// per-caller tenancy `filter`. On an org-bound node the returned chunks are
+    /// restricted to documents the caller may READ (so RAG search never leaks a
+    /// colleague's private document text); [`DocFilter::unrestricted`] keeps the
+    /// in-process / unbound path unchanged.
     pub async fn search_ext(
         &self,
         space_id: &str,
         query: &str,
         limit: usize,
         link_expansion: Option<bool>,
+        filter: DocFilter<'_>,
     ) -> Result<Vec<ChunkMatch>> {
         let mode = self.space_mode(space_id).await?;
         // Over-fetch candidates so the neural reranker (bge cross-encoder, served
@@ -1914,7 +2296,45 @@ impl SpaceStore {
             }
         }
 
+        // Per-resource tenancy: drop any candidate whose document the caller may not
+        // READ. On an unbound node (`filter` unrestricted → `bound = 0`) this loads
+        // every doc id and retains everything, so the path is byte-identical.
+        if !candidates.is_empty() {
+            let visible = self.visible_document_ids(space_id, filter).await?;
+            candidates.retain(|c| visible.contains(&c.document_id));
+        }
+
         Ok(self.apply_reranking(query, candidates, limit).await)
+    }
+
+    /// The ids of every document in `space_id` the caller may READ, using
+    /// [`DOC_TENANCY_VISIBLE_PREDICATE`]. Backs the search post-filter so RAG never
+    /// returns a chunk from a document the caller cannot open.
+    async fn visible_document_ids(
+        &self,
+        space_id: &str,
+        filter: DocFilter<'_>,
+    ) -> Result<std::collections::HashSet<String>> {
+        let conn = self.conn.lock().await;
+        let sql = format!(
+            "SELECT d.id FROM documents d
+             WHERE d.space_id = :space_id AND {DOC_TENANCY_VISIBLE_PREDICATE}"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            named_params! {
+                ":space_id": space_id,
+                ":bound": filter.bound_flag(),
+                ":uid": filter.owner_user_id,
+                ":org": filter.org_id,
+            },
+            |row| row.get::<_, String>(0),
+        )?;
+        let mut out = std::collections::HashSet::new();
+        for row in rows {
+            out.insert(row?);
+        }
+        Ok(out)
     }
 
     /// Re-score retrieval `candidates` with the neural reranker and truncate to
@@ -2895,6 +3315,116 @@ fn vec_to_bytes(vec: &[f32]) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    fn owned(uid: &str) -> Tenancy {
+        Tenancy::Owned {
+            user_id: uid.to_owned(),
+            org_id: Some("org1".to_owned()),
+        }
+    }
+
+    /// Per-caller tenancy for documents (the `DOC_TENANCY_VISIBLE_PREDICATE`): on a
+    /// bound node a private document is visible only to its owner in `list_documents`
+    /// and in RAG `search`, while its owner keeps full access (no lockout). Driven
+    /// with `DocFilter::for_caller(node_bound = true)` so no org registration is
+    /// needed — the caller tenancy is passed IN.
+    #[tokio::test]
+    async fn documents_are_filtered_per_owner_on_bound_node() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        // Alice owns the space + one document; Bob owns another document in it.
+        let space = store.create_space("Team", None, &owned("alice")).await.unwrap();
+        let alice_doc = store
+            .ingest_document(&space, "Alice secret", "the launch code is 42", &owned("alice"))
+            .await
+            .unwrap();
+        let bob_doc = store
+            .ingest_document(&space, "Bob secret", "the launch code is 42", &owned("bob"))
+            .await
+            .unwrap();
+
+        // list_documents: Bob sees only his own doc; Alice only hers.
+        let bob_view = store
+            .list_documents(&space, DocFilter::for_caller(Some("bob"), Some("org1"), true))
+            .await
+            .unwrap();
+        let bob_ids: Vec<&str> = bob_view.iter().map(|d| d.id.as_str()).collect();
+        assert!(bob_ids.contains(&bob_doc.as_str()));
+        assert!(!bob_ids.contains(&alice_doc.as_str()), "Bob must not see Alice's private document");
+
+        let alice_view = store
+            .list_documents(&space, DocFilter::for_caller(Some("alice"), Some("org1"), true))
+            .await
+            .unwrap();
+        let alice_ids: Vec<&str> = alice_view.iter().map(|d| d.id.as_str()).collect();
+        assert!(alice_ids.contains(&alice_doc.as_str()), "no lockout: Alice reaches her own document");
+        assert!(!alice_ids.contains(&bob_doc.as_str()));
+
+        // Spaces RAG search: a chunk from Alice's doc never surfaces for Bob.
+        let bob_hits = store
+            .search_ext(&space, "launch code", 10, Some(false), DocFilter::for_caller(Some("bob"), Some("org1"), true))
+            .await
+            .unwrap();
+        assert!(
+            bob_hits.iter().all(|c| c.document_id != alice_doc),
+            "RAG search must not leak Alice's document chunk to Bob"
+        );
+        // Unrestricted (unbound / in-process): both documents visible.
+        let all = store
+            .list_documents(&space, DocFilter::unrestricted())
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 2, "unbound/in-process listing sees every document");
+    }
+
+    /// By-id ACL link: the document choke point STAMPS the owner, and
+    /// `get_access_meta` (what `require_resource_read`/`_write` read) reads it back —
+    /// so the pre-tested `resource_access` matrix (mod.rs `resource_acl_tests`)
+    /// actually bites on a real document. A system space's document is still owned by
+    /// its creator (only the SPACE is shared), and an unattributed create leaves the
+    /// row NULL (which the by-id ACL denies on a bound node until backfill).
+    #[tokio::test]
+    async fn create_stamps_owner_for_the_by_id_acl() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let space = store.create_space("S", None, &owned("alice")).await.unwrap();
+
+        let alice_doc = store
+            .create_page(&space, "Owned", &owned("alice"))
+            .await
+            .unwrap();
+        let meta = store.get_access_meta(&alice_doc).await.unwrap().unwrap();
+        assert_eq!(meta.owner_user_id.as_deref(), Some("alice"));
+        assert_eq!(meta.org_id.as_deref(), Some("org1"));
+        assert_eq!(meta.visibility, "private");
+
+        // An unattributed create (unbound / system path) leaves the row NULL-owner —
+        // exactly what `resource_access` grants on an unbound node and denies (until
+        // backfill) on a bound one.
+        let anon_doc = store
+            .create_page(&space, "Legacy", &Tenancy::Unattributed)
+            .await
+            .unwrap();
+        let anon_meta = store.get_access_meta(&anon_doc).await.unwrap().unwrap();
+        assert!(anon_meta.owner_user_id.is_none());
+        assert!(anon_meta.org_id.is_none());
+    }
+
+    /// list_spaces filters by owner too, but system spaces (`system = 1`) stay
+    /// shared to every member (the `OR s.system = 1` predicate branch).
+    #[tokio::test]
+    async fn list_spaces_filters_owner_but_keeps_system_shared() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let alice_space = store.create_space("Alice", None, &owned("alice")).await.unwrap();
+        let _bob_space = store.create_space("Bob", None, &owned("bob")).await.unwrap();
+        let sys = store.ensure_system_space("Artifacts", None).await.unwrap();
+
+        let bob_view = store
+            .list_spaces(DocFilter::for_caller(Some("bob"), Some("org1"), true))
+            .await
+            .unwrap();
+        let ids: Vec<&str> = bob_view.iter().map(|s| s.id.as_str()).collect();
+        assert!(!ids.contains(&alice_space.as_str()), "Bob must not see Alice's private space");
+        assert!(ids.contains(&sys.as_str()), "system space stays shared to every member");
+    }
+
     // De-risk gate: proves the sqlite-vec C extension actually links and the
     // vec0 KNN path works on this platform (cargo check cannot verify linking).
     #[test]
@@ -2927,9 +3457,9 @@ mod tests {
     #[tokio::test]
     async fn clear_all_spaces_preserves_meetings_space() {
         let store = SpaceStore::open_in_memory().unwrap();
-        store.create_space("Notes", None).await.unwrap();
-        store.create_space("Research", None).await.unwrap();
-        store.create_space(MEETINGS_SPACE_NAME, None).await.unwrap();
+        store.create_space("Notes", None, &Tenancy::Unattributed).await.unwrap();
+        store.create_space("Research", None, &Tenancy::Unattributed).await.unwrap();
+        store.create_space(MEETINGS_SPACE_NAME, None, &Tenancy::Unattributed).await.unwrap();
 
         // The hidden Meetings space is excluded from the count.
         assert_eq!(store.count_spaces().await.unwrap(), 2);
@@ -2938,7 +3468,7 @@ mod tests {
         let removed = store.clear_all_spaces().await.unwrap();
         assert_eq!(removed, 2);
         assert_eq!(store.count_spaces().await.unwrap(), 0);
-        let remaining = store.list_spaces().await.unwrap();
+        let remaining = store.list_spaces(DocFilter::unrestricted()).await.unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].name, MEETINGS_SPACE_NAME);
     }
@@ -2969,13 +3499,13 @@ mod tests {
         // ensure_* is idempotent: same name reuses the row.
         let again = store.ensure_system_space("Artifacts", None).await.unwrap();
         assert_eq!(artifacts, again);
-        store.create_space("Notes", None).await.unwrap();
+        store.create_space("Notes", None, &Tenancy::Unattributed).await.unwrap();
         assert_eq!(store.count_spaces().await.unwrap(), 1, "system space uncounted");
 
         // A file document stores its bytes in the blob store and stays retrievable.
         let png = b"\x89PNG\r\n\x1a\n binary artifact bytes";
         let doc = store
-            .create_file(&artifacts, "chart.png", png, "image/png")
+            .create_file(&artifacts, "chart.png", png, "image/png", &Tenancy::Unattributed)
             .await
             .unwrap();
         let meta = store.get_file_meta(&doc).await.unwrap().unwrap();
@@ -2990,17 +3520,17 @@ mod tests {
         assert!(store.delete_space(&artifacts).await.is_err());
         // And bulk-clear leaves it intact.
         store.clear_all_spaces().await.unwrap();
-        let remaining = store.list_spaces().await.unwrap();
+        let remaining = store.list_spaces(DocFilter::unrestricted()).await.unwrap();
         assert!(remaining.iter().any(|s| s.id == artifacts));
     }
 
     #[tokio::test]
     async fn page_create_edit_search_delete() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Notes", None).await.unwrap();
+        let space = store.create_space("Notes", None, &Tenancy::Unattributed).await.unwrap();
 
         // New empty page.
-        let doc = store.create_page(&space, "Untitled").await.unwrap();
+        let doc = store.create_page(&space, "Untitled", &Tenancy::Unattributed).await.unwrap();
         let got = store.get_document(&doc).await.unwrap().unwrap();
         assert_eq!(got.title, "Untitled");
         assert_eq!(got.source, "");
@@ -3074,9 +3604,9 @@ mod tests {
     #[tokio::test]
     async fn wiki_links_resolve_and_backlinks_round_trip() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Wiki", None).await.unwrap();
-        let a = store.create_page(&space, "Alpha").await.unwrap();
-        let b = store.create_page(&space, "Bravo").await.unwrap();
+        let space = store.create_space("Wiki", None, &Tenancy::Unattributed).await.unwrap();
+        let a = store.create_page(&space, "Alpha", &Tenancy::Unattributed).await.unwrap();
+        let b = store.create_page(&space, "Bravo", &Tenancy::Unattributed).await.unwrap();
         store
             .update_document(&a, "Alpha", "Alpha links to [[Bravo]] here.")
             .await
@@ -3099,8 +3629,8 @@ mod tests {
     #[tokio::test]
     async fn pending_link_resolves_when_target_created() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Wiki", None).await.unwrap();
-        let a = store.create_page(&space, "Alpha").await.unwrap();
+        let space = store.create_space("Wiki", None, &Tenancy::Unattributed).await.unwrap();
+        let a = store.create_page(&space, "Alpha", &Tenancy::Unattributed).await.unwrap();
         store
             .update_document(&a, "Alpha", "Refers to [[Ghost]] which is missing.")
             .await
@@ -3114,7 +3644,7 @@ mod tests {
         assert!(graph.nodes.iter().any(|n| n.pending && n.title == "Ghost"));
 
         // Creating the target page back-fills the pending link.
-        let ghost = store.create_page(&space, "Ghost").await.unwrap();
+        let ghost = store.create_page(&space, "Ghost", &Tenancy::Unattributed).await.unwrap();
         let out = store.get_outgoing_links(&a).await.unwrap();
         assert_eq!(out[0].dst_doc_id.as_deref(), Some(ghost.as_str()));
         let graph = store.space_graph(&space).await.unwrap();
@@ -3124,9 +3654,9 @@ mod tests {
     #[tokio::test]
     async fn rename_target_unresolves_then_reresolves() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Wiki", None).await.unwrap();
-        let a = store.create_page(&space, "Alpha").await.unwrap();
-        let b = store.create_page(&space, "Bravo").await.unwrap();
+        let space = store.create_space("Wiki", None, &Tenancy::Unattributed).await.unwrap();
+        let a = store.create_page(&space, "Alpha", &Tenancy::Unattributed).await.unwrap();
+        let b = store.create_page(&space, "Bravo", &Tenancy::Unattributed).await.unwrap();
         store
             .update_document(&a, "Alpha", "Points at [[Bravo]].")
             .await
@@ -3151,9 +3681,9 @@ mod tests {
     #[tokio::test]
     async fn expand_by_links_reaches_linked_document_chunks() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Wiki", None).await.unwrap();
-        let a = store.create_page(&space, "Alpha").await.unwrap();
-        let b = store.create_page(&space, "Bravo").await.unwrap();
+        let space = store.create_space("Wiki", None, &Tenancy::Unattributed).await.unwrap();
+        let a = store.create_page(&space, "Alpha", &Tenancy::Unattributed).await.unwrap();
+        let b = store.create_page(&space, "Bravo", &Tenancy::Unattributed).await.unwrap();
         store
             .update_document(&a, "Alpha", "Alpha content links [[Bravo]].")
             .await
@@ -3178,9 +3708,9 @@ mod tests {
     #[tokio::test]
     async fn delete_document_turns_inbound_links_pending() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Wiki", None).await.unwrap();
-        let a = store.create_page(&space, "Alpha").await.unwrap();
-        let b = store.create_page(&space, "Bravo").await.unwrap();
+        let space = store.create_space("Wiki", None, &Tenancy::Unattributed).await.unwrap();
+        let a = store.create_page(&space, "Alpha", &Tenancy::Unattributed).await.unwrap();
+        let b = store.create_page(&space, "Bravo", &Tenancy::Unattributed).await.unwrap();
         store
             .update_document(&a, "Alpha", "See [[Bravo]].")
             .await
@@ -3198,8 +3728,8 @@ mod tests {
     #[tokio::test]
     async fn reindex_clears_pending_and_restamps_model() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("R", None).await.unwrap();
-        let doc = store.create_page(&space, "T").await.unwrap();
+        let space = store.create_space("R", None, &Tenancy::Unattributed).await.unwrap();
+        let doc = store.create_page(&space, "T", &Tenancy::Unattributed).await.unwrap();
         store
             .update_document(&doc, "T", "hello world content here")
             .await
@@ -3235,8 +3765,8 @@ mod tests {
     #[tokio::test]
     async fn reindex_recreates_vectors_on_dims_change() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("D", None).await.unwrap();
-        let doc = store.create_page(&space, "T").await.unwrap();
+        let space = store.create_space("D", None, &Tenancy::Unattributed).await.unwrap();
+        let doc = store.create_page(&space, "T", &Tenancy::Unattributed).await.unwrap();
         store
             .update_document(&doc, "T", "vectors of a different width")
             .await
@@ -3262,29 +3792,29 @@ mod tests {
     async fn create_ingest_list_and_search() {
         let store = SpaceStore::open_in_memory().unwrap();
         let space_id = store
-            .create_space("Docs", Some("test space"))
+            .create_space("Docs", Some("test space"), &Tenancy::Unattributed)
             .await
             .unwrap();
 
-        let spaces = store.list_spaces().await.unwrap();
+        let spaces = store.list_spaces(DocFilter::unrestricted()).await.unwrap();
         assert_eq!(spaces.len(), 1);
         assert_eq!(spaces[0].name, "Docs");
         assert_eq!(spaces[0].document_count, 0);
 
         store
-            .ingest_document(&space_id, "Cats", "Cats are small carnivorous mammals.")
+            .ingest_document(&space_id, "Cats", "Cats are small carnivorous mammals.", &Tenancy::Unattributed)
             .await
             .unwrap();
         store
-            .ingest_document(&space_id, "Rust", "Rust is a systems programming language.")
+            .ingest_document(&space_id, "Rust", "Rust is a systems programming language.", &Tenancy::Unattributed)
             .await
             .unwrap();
 
-        let docs = store.list_documents(&space_id).await.unwrap();
+        let docs = store.list_documents(&space_id, DocFilter::unrestricted()).await.unwrap();
         assert_eq!(docs.len(), 2);
         assert!(docs.iter().all(|d| d.chunk_count >= 1));
 
-        let spaces = store.list_spaces().await.unwrap();
+        let spaces = store.list_spaces(DocFilter::unrestricted()).await.unwrap();
         assert_eq!(spaces[0].document_count, 2);
 
         let results = store
@@ -3299,7 +3829,7 @@ mod tests {
     async fn ingest_into_missing_space_fails() {
         let store = SpaceStore::open_in_memory().unwrap();
         let err = store
-            .ingest_document("nope", "t", "body")
+            .ingest_document("nope", "t", "body", &Tenancy::Unattributed)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
@@ -3308,13 +3838,13 @@ mod tests {
     #[tokio::test]
     async fn delete_space_removes_documents() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space_id = store.create_space("Temp", None).await.unwrap();
+        let space_id = store.create_space("Temp", None, &Tenancy::Unattributed).await.unwrap();
         store
-            .ingest_document(&space_id, "Doc", "some content here")
+            .ingest_document(&space_id, "Doc", "some content here", &Tenancy::Unattributed)
             .await
             .unwrap();
         assert!(store.delete_space(&space_id).await.unwrap());
-        assert!(store.list_spaces().await.unwrap().is_empty());
+        assert!(store.list_spaces(DocFilter::unrestricted()).await.unwrap().is_empty());
         assert!(!store.delete_space(&space_id).await.unwrap());
     }
 
@@ -3356,7 +3886,7 @@ mod tests {
     #[tokio::test]
     async fn app_docs_are_kind_isolated_and_embed() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("AppSpace", None).await.unwrap();
+        let space = store.create_space("AppSpace", None, &Tenancy::Unattributed).await.unwrap();
 
         // App A creates and can read its own doc.
         let doc = store.app_create_doc("app.a", &space, "Doc A").await.unwrap();
@@ -3368,7 +3898,7 @@ mod tests {
         assert!(store.app_get_doc("app.b", &doc).await.unwrap().is_none());
 
         // A built-in page is invisible to any app.
-        let page = store.create_page(&space, "Builtin Page").await.unwrap();
+        let page = store.create_page(&space, "Builtin Page", &Tenancy::Unattributed).await.unwrap();
         assert!(store.app_get_doc("app.a", &page).await.unwrap().is_none());
 
         // App B cannot mutate app A's doc (kind-checked FIRST → error).
@@ -3411,12 +3941,12 @@ mod tests {
     #[tokio::test]
     async fn default_space_uses_vector_mode() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space_id = store.create_space("VectorSpace", None).await.unwrap();
-        let spaces = store.list_spaces().await.unwrap();
+        let space_id = store.create_space("VectorSpace", None, &Tenancy::Unattributed).await.unwrap();
+        let spaces = store.list_spaces(DocFilter::unrestricted()).await.unwrap();
         assert_eq!(spaces[0].retrieval_mode, RetrievalMode::Vector);
         // Confirm vector search works normally.
         store
-            .ingest_document(&space_id, "Doc", "Cats are small carnivorous mammals.")
+            .ingest_document(&space_id, "Doc", "Cats are small carnivorous mammals.", &Tenancy::Unattributed)
             .await
             .unwrap();
         let results = store.search(&space_id, "small mammals", 5).await.unwrap();
@@ -3451,21 +3981,21 @@ mod tests {
 
         // Create a GRAPH-mode Space.
         let graph_space = store
-            .create_space_with_mode("GraphSpace", None, RetrievalMode::Graph)
+            .create_space_with_mode("GraphSpace", None, RetrievalMode::Graph, &Tenancy::Unattributed)
             .await
             .unwrap();
 
         // Ingest three-chunk fixture.
         store
-            .ingest_document(&graph_space, "ChunkA", "Alice works at Acme.")
+            .ingest_document(&graph_space, "ChunkA", "Alice works at Acme.", &Tenancy::Unattributed)
             .await
             .unwrap();
         store
-            .ingest_document(&graph_space, "ChunkB", "Acme is based in Paris.")
+            .ingest_document(&graph_space, "ChunkB", "Acme is based in Paris.", &Tenancy::Unattributed)
             .await
             .unwrap();
         store
-            .ingest_document(&graph_space, "ChunkC", "Paris has the Eiffel Tower.")
+            .ingest_document(&graph_space, "ChunkC", "Paris has the Eiffel Tower.", &Tenancy::Unattributed)
             .await
             .unwrap();
 
@@ -3483,19 +4013,19 @@ mod tests {
         // not the nearest neighbor, proving graph traversal found something pure
         // nearest-neighbor search does not return when constrained to 1 result.
         let vector_space = store
-            .create_space_with_mode("VectorSpace", None, RetrievalMode::Vector)
+            .create_space_with_mode("VectorSpace", None, RetrievalMode::Vector, &Tenancy::Unattributed)
             .await
             .unwrap();
         store
-            .ingest_document(&vector_space, "ChunkA", "Alice works at Acme.")
+            .ingest_document(&vector_space, "ChunkA", "Alice works at Acme.", &Tenancy::Unattributed)
             .await
             .unwrap();
         store
-            .ingest_document(&vector_space, "ChunkB", "Acme is based in Paris.")
+            .ingest_document(&vector_space, "ChunkB", "Acme is based in Paris.", &Tenancy::Unattributed)
             .await
             .unwrap();
         store
-            .ingest_document(&vector_space, "ChunkC", "Paris has the Eiffel Tower.")
+            .ingest_document(&vector_space, "ChunkC", "Paris has the Eiffel Tower.", &Tenancy::Unattributed)
             .await
             .unwrap();
 

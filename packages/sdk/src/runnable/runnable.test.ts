@@ -16,7 +16,7 @@ import { describe, expect, it } from "bun:test";
 import { defineAgent } from "./agent.ts";
 import type { GatewayClient, RunnableContext } from "./runnable-types.ts";
 import { defineSkill } from "./skill.ts";
-import { defineTool } from "./tool.ts";
+import { defineTool, inlineToolRunnable } from "./tool.ts";
 import { defineWorkflow } from "./workflow.ts";
 
 // ── Mock gateway ──────────────────────────────────────────────────────────────
@@ -113,6 +113,37 @@ describe("defineTool", () => {
 		// ToolRunnable exposes schema
 		expect(tool.schema.type).toBe("object");
 		expect(tool.schema.properties.query?.type).toBe("string");
+	});
+
+	it("serializes the run body for Core's inline_deno backend (like defineTurnHook)", () => {
+		const tool = defineTool({
+			id: "weather",
+			name: "Weather",
+			schema: { type: "object", properties: {}, required: [] },
+			run(input, _ctx) {
+				return Promise.resolve({ echoed: input });
+			},
+		});
+		// The serialized code invokes the body with the sandbox globals (input+host),
+		// matching the turn-hook serialization approach.
+		expect(tool.code.startsWith("return await (")).toBe(true);
+		expect(tool.code).toContain("(input, host)");
+	});
+
+	it("inlineToolRunnable produces a shippable inline_deno tool config", () => {
+		const tool = defineTool({
+			id: "weather",
+			name: "Weather",
+			schema: { type: "object", properties: {}, required: [] },
+			run: (input) => Promise.resolve(input),
+		});
+		const meta = inlineToolRunnable(tool, { description: "Look up weather" });
+		expect(meta.kind).toBe("tool");
+		expect(meta.id).toBe("weather");
+		expect(meta.config?.slug).toBe("weather");
+		expect(meta.config?.backend).toBe("inline_deno");
+		expect(meta.config?.description).toBe("Look up weather");
+		expect(typeof meta.config?.code).toBe("string");
 	});
 });
 

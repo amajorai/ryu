@@ -4,6 +4,7 @@
   "pages": [
     "queryAudit",
     "ingestExecAudit",
-    "checkExecBudget"
+    "checkExecBudget",
+    "sandboxTick"
   ]
 }

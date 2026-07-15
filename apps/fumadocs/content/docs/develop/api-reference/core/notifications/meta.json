@@ -1,0 +1,16 @@
+{
+  "title": "Notifications",
+  "description": "Notifications API endpoints.",
+  "pages": [
+    "get_alert_delivery",
+    "put_alert_delivery",
+    "post_email_test",
+    "get_email_transport",
+    "put_email_transport",
+    "all_events_stream",
+    "list_notifications",
+    "notifications_stream",
+    "ack_notification",
+    "read_notification"
+  ]
+}

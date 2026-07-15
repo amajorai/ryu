@@ -22,6 +22,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
+use crate::win_process::NoWindow;
 
 /// Per-process counter giving each synthesis a unique temp output path.
 static TTS_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -162,6 +163,7 @@ pub async fn synthesize(text: &str) -> Result<Vec<u8>> {
         .arg(&out_path)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
+        .no_window()
         .status()
         .await
         .context("spawning llama-tts process")?;

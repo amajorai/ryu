@@ -27,10 +27,22 @@ use crate::sidecar::providers::llamacpp::{
 };
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 
-/// Loopback port the reranker server binds to. Distinct from the chat engine's
-/// 8080 and the embeddings server's 8081 so all three can run together.
-pub const RERANK_PORT: u16 = 8082;
-const RERANK_ADDR: &str = "127.0.0.1:8082";
+/// Canonical (release) loopback port the reranker server binds to. Distinct from
+/// the chat engine's 8080 and the embeddings server's 8081 so all three can run
+/// together. The concrete port is profile-aware — see [`rerank_port`].
+pub const RERANK_PORT_BASE: u16 = 8082;
+
+/// Profile-aware reranker port (release 8082, dev 9082, …). The RAG client that
+/// dials this resolves the SAME port via the `RYU_RERANKER_BASE_URL` env default
+/// that `profile::apply_env_defaults` seeds, so spawn and client never diverge.
+pub fn rerank_port() -> u16 {
+    crate::profile::port(RERANK_PORT_BASE)
+}
+
+/// Loopback `host:port` the reranker server binds to (profile-aware).
+fn rerank_addr() -> String {
+    format!("127.0.0.1:{}", rerank_port())
+}
 
 /// Lifecycle manager for the dedicated llama.cpp reranking sidecar.
 pub struct LlamaCppRerankManager {
@@ -77,7 +89,7 @@ impl LlamaCppRerankManager {
     /// `true` if a reranker server already answers on the port.
     async fn server_reachable(client: &reqwest::Client) -> bool {
         client
-            .get(format!("http://{RERANK_ADDR}/health"))
+            .get(format!("http://{}/health", rerank_addr()))
             .send()
             .await
             .map(|r| r.status().is_success())
@@ -107,13 +119,14 @@ impl Sidecar for LlamaCppRerankManager {
         let client = self.client.clone();
         let downloads = self.downloads.clone();
         Box::pin(async move {
+            let addr = rerank_addr();
             // Adopt an already-running reranker server rather than spawning a
             // competing process that would fail to bind the port.
             if Self::server_reachable(&client).await {
                 adopted_external.store(true, Ordering::Relaxed);
                 running.store(true, Ordering::Relaxed);
                 tracing::info!(
-                    "reranker server already running on {RERANK_ADDR} — adopting existing server"
+                    "reranker server already running on {addr} — adopting existing server"
                 );
                 return Ok(());
             }
@@ -142,10 +155,10 @@ impl Sidecar for LlamaCppRerankManager {
             }
             tracing::info!("reranker server will serve model: {}", model_path.display());
 
-            tracing::info!("llamacpp-rerank sidecar starting on {RERANK_ADDR}");
+            tracing::info!("llamacpp-rerank sidecar starting on {addr}");
             let mut proc = LlamaCppProcess::new(Self::binary_path());
             let opts = LlamaCppStartOptions {
-                port: RERANK_PORT,
+                port: rerank_port(),
                 model_path: Some(model_path),
                 // The reranker model is text-only — no vision adapter.
                 mmproj_path: None,
@@ -169,7 +182,7 @@ impl Sidecar for LlamaCppRerankManager {
             // seconds even for the ~438 MB reranker GGUF).
             tokio::time::timeout(std::time::Duration::from_secs(120), async {
                 loop {
-                    if tokio::net::TcpStream::connect(RERANK_ADDR).await.is_ok() {
+                    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -179,7 +192,7 @@ impl Sidecar for LlamaCppRerankManager {
             .context("llamacpp-rerank did not start within 120s")?;
 
             running.store(true, Ordering::Relaxed);
-            tracing::info!("llamacpp-rerank sidecar started on {RERANK_ADDR}");
+            tracing::info!("llamacpp-rerank sidecar started on {addr}");
             Ok(())
         })
     }
@@ -212,7 +225,7 @@ impl Sidecar for LlamaCppRerankManager {
                 return HealthStatus::Unhealthy("reranker process not running".into());
             }
             match client
-                .get(format!("http://{RERANK_ADDR}/health"))
+                .get(format!("http://{}/health", rerank_addr()))
                 .send()
                 .await
             {

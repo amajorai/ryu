@@ -39,6 +39,7 @@ use anyhow::Context;
 
 use crate::sidecar::process::ProcessHandle;
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
+use crate::win_process::NoWindow;
 
 /// Loopback address + port the userspace SOCKS5 proxy listens on. Clients (the
 /// CLI `mesh_client`, Core's own dials) point a `socks5h://` proxy at this.
@@ -142,6 +143,7 @@ fn restrict_keyfile_perms(path: &std::path::Path) {
             .arg("/inheritance:r")
             .arg("/grant:r")
             .arg(format!("{user}:F"))
+            .no_window()
             .output();
         match out {
             Ok(o) if !o.status.success() => tracing::warn!(
@@ -210,6 +212,7 @@ pub async fn status_json() -> anyhow::Result<serde_json::Value> {
         .arg(format!("--socket={}", socket_path().display()))
         .arg("status")
         .arg("--json")
+        .no_window()
         .output()
         .await
         .context("running `tailscale status --json`")?;
@@ -232,6 +235,7 @@ pub async fn ensure_funnel(port: u16) -> anyhow::Result<String> {
         .arg("funnel")
         .arg("--bg")
         .arg(port.to_string())
+        .no_window()
         .output()
         .await
         .context("running `tailscale funnel`")?;
@@ -402,6 +406,7 @@ impl Sidecar for TailscaleManager {
                 tracing::info!(bin = %bin, "tailscale: enrolling node (`tailscale up`)");
                 let out = tokio::process::Command::new(&bin)
                     .args(&up_args)
+                    .no_window()
                     .output()
                     .await
                     .with_context(|| format!("running `{bin} up`"))?;
@@ -432,6 +437,7 @@ impl Sidecar for TailscaleManager {
             let _ = tokio::process::Command::new(tailscale_bin())
                 .arg(format!("--socket={}", socket_path().display()))
                 .arg("down")
+                .no_window()
                 .output()
                 .await;
             daemon.stop().await?;

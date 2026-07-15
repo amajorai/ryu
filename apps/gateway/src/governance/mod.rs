@@ -30,10 +30,18 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, SECRE
 use serde_json::{Map, Value};
 
 /// Env var holding the ed25519 signing seed (32-byte secret), base64-encoded.
-/// When unset the Gateway generates an ephemeral key at startup so signing
-/// still works in dev (sign+verify within one process round-trips); set it in
-/// production so signatures survive restarts. No secret is ever in code.
+/// The production source of truth: set it and every gateway replica signs with
+/// the same key, so signatures survive restarts and horizontal scale. When
+/// unset the Gateway falls back to a **dev-persisted** key on disk (see
+/// [`signing_key`]) so signatures still survive a local restart. No secret is
+/// ever in code.
 const ENV_SIGNING_KEY: &str = "RYU_MARKETPLACE_SIGNING_KEY";
+
+/// Optional override for the on-disk dev-persisted signing key path. When unset
+/// the key lives at `$XDG_DATA_HOME/ryu/marketplace-signing-key` (mirrors the
+/// audit db location in `config.rs`). Only consulted when `ENV_SIGNING_KEY` is
+/// unset. No secret is ever in code.
+const ENV_SIGNING_KEY_PATH: &str = "RYU_MARKETPLACE_SIGNING_KEY_PATH";
 
 /// The signing algorithm advertised in responses and stored alongside a
 /// signature. Stable identifier so clients/verifiers can branch on it.
@@ -69,6 +77,13 @@ fn default_grant_allowlist() -> Vec<String> {
         // `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
         "browser.connect",
         "identity.read",
+        // Widget-render consent: a plugin (built-in Ryu App or third-party MCP
+        // server) that declares a `contributes.widgets[]` binding must hold this
+        // grant for its tool to auto-promote a sandboxed widget into chat. Gated
+        // in Core at the single widget-emit choke point; on the allowlist here so
+        // the lifecycle enable path (`/v1/grants/validate`) approves it instead of
+        // denying a widget-bearing plugin at enable.
+        "widget:render",
     ]
     .iter()
     .map(|s| (*s).to_string())
@@ -127,27 +142,138 @@ pub fn validate_grants(grants: &[String]) -> GrantDecision {
 
 // ── Signing ─────────────────────────────────────────────────────────────────
 
-/// Resolve the process signing key: from `RYU_MARKETPLACE_SIGNING_KEY` (base64
-/// 32-byte seed) when set, else an ephemeral key generated once at startup.
+/// Resolve the process signing key, in priority order:
+///   1. `RYU_MARKETPLACE_SIGNING_KEY` env (base64 32-byte seed) — the production
+///      source of truth. Stable across restarts and across replicas.
+///   2. A dev-persisted key file (`$XDG_DATA_HOME/ryu/marketplace-signing-key`,
+///      or `RYU_MARKETPLACE_SIGNING_KEY_PATH`): read it if present, else
+///      generate a fresh key AND write it there so it is stable across local
+///      restarts. This is what closes the "signatures die on every bounce" gap
+///      for a managed local gateway where no env key is configured.
+///   3. Only if disk persistence is impossible (no data dir / write fails) do we
+///      fall back to an ephemeral key, and we say so loudly.
+///
+/// The public half is always discoverable via [`public_key_b64`] (same process
+/// key), which is how the verify side (`POST /v1/manifests/verify` with no
+/// pinned `public_key`) checks a signature — so a persistent private key gives a
+/// persistent public key and prior signatures keep verifying.
 fn signing_key() -> &'static SigningKey {
     static KEY: OnceLock<SigningKey> = OnceLock::new();
     KEY.get_or_init(|| {
+        // 1. Configured production key (env).
         if let Ok(raw) = std::env::var(ENV_SIGNING_KEY) {
             if let Some(key) = signing_key_from_seed(raw.trim()) {
-                tracing::info!("governance: loaded marketplace signing key from env");
+                tracing::info!(
+                    "governance: marketplace signing key configured from {ENV_SIGNING_KEY} (production)"
+                );
                 return key;
             }
             tracing::warn!(
-                "governance: {ENV_SIGNING_KEY} set but not a valid base64 32-byte seed; using ephemeral key"
-            );
-        } else {
-            tracing::warn!(
-                "governance: {ENV_SIGNING_KEY} unset; using ephemeral signing key (signatures will not survive restart)"
+                "governance: {ENV_SIGNING_KEY} set but not a valid base64 32-byte seed; falling back to a dev-persisted key"
             );
         }
+
+        // 2. Dev-persisted key on disk (read existing, else generate + persist).
+        if let Some(path) = signing_key_path() {
+            if let Some(key) = read_persisted_signing_key(&path) {
+                tracing::info!(
+                    path = %path.display(),
+                    public_key = %B64.encode(key.verifying_key().to_bytes()),
+                    "governance: loaded dev-persisted marketplace signing key (set {ENV_SIGNING_KEY} for production)"
+                );
+                return key;
+            }
+            let mut csprng = rand::rngs::OsRng;
+            let key = SigningKey::generate(&mut csprng);
+            if persist_signing_key(&path, &key) {
+                tracing::warn!(
+                    path = %path.display(),
+                    public_key = %B64.encode(key.verifying_key().to_bytes()),
+                    "governance: generated and PERSISTED a dev marketplace signing key (stable across restarts; set {ENV_SIGNING_KEY} for production)"
+                );
+                return key;
+            }
+            tracing::error!(
+                path = %path.display(),
+                "governance: could not persist a dev signing key; using EPHEMERAL key (signatures will NOT survive restart — set {ENV_SIGNING_KEY})"
+            );
+            return key;
+        }
+
+        // 3. No data dir at all — ephemeral, loudly.
+        tracing::error!(
+            "governance: no data dir for a persisted signing key; using EPHEMERAL key (signatures will NOT survive restart — set {ENV_SIGNING_KEY})"
+        );
         let mut csprng = rand::rngs::OsRng;
         SigningKey::generate(&mut csprng)
     })
+}
+
+/// Resolve the on-disk path for the dev-persisted signing key: the
+/// `RYU_MARKETPLACE_SIGNING_KEY_PATH` override, else
+/// `$XDG_DATA_HOME/ryu/marketplace-signing-key` (mirrors the audit db location).
+/// `None` when no data dir can be resolved.
+fn signing_key_path() -> Option<std::path::PathBuf> {
+    if let Ok(raw) = std::env::var(ENV_SIGNING_KEY_PATH) {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return Some(std::path::PathBuf::from(trimmed));
+        }
+    }
+    dirs::data_local_dir().map(|d| d.join("ryu").join("marketplace-signing-key"))
+}
+
+/// Read a base64 32-byte seed from the persisted key file, if it exists and
+/// parses. Any read/parse error returns `None` (the caller then regenerates).
+fn read_persisted_signing_key(path: &std::path::Path) -> Option<SigningKey> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    signing_key_from_seed(raw.trim())
+}
+
+/// Persist a signing key's 32-byte seed (base64) to `path`, creating parent
+/// directories. Returns `true` on success. Never panics.
+///
+/// On Unix the file is created **atomically at mode `0600`** via an owner-only
+/// `open` (not written-then-chmod'd), so the private seed is never observable at
+/// a permissive umask, and the parent directory is tightened to `0700`. Closing
+/// the write-then-chmod TOCTOU window matters because this is an ed25519 signing
+/// key — a brief world-readable moment is a real disclosure.
+fn persist_signing_key(path: &std::path::Path, key: &SigningKey) -> bool {
+    if let Some(parent) = path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Best-effort: the file itself is created 0600 below regardless, so a
+            // failure to tighten the dir is not fatal — but do it so the key is
+            // not readable via a permissive parent.
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let seed_b64 = B64.encode(key.to_bytes());
+
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = match opts.open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "governance: could not create persisted signing key file");
+            return false;
+        }
+    };
+    use std::io::Write;
+    if let Err(e) = file.write_all(seed_b64.as_bytes()) {
+        tracing::warn!(path = %path.display(), error = %e, "governance: could not write persisted signing key");
+        return false;
+    }
+    true
 }
 
 /// Parse a base64-encoded 32-byte ed25519 seed into a signing key.
@@ -307,5 +433,36 @@ mod tests {
         let b64 = B64.encode(seed);
         assert!(signing_key_from_seed(&b64).is_some());
         assert!(signing_key_from_seed("not-base64!!!").is_none());
+    }
+
+    #[test]
+    fn persist_then_read_signing_key_roundtrips() {
+        // A generated key persisted to disk must read back as the SAME key, so a
+        // signature made before a restart still verifies after (the dev-persist
+        // path that closes the "ephemeral key dies on bounce" gap). We exercise
+        // the helpers directly since `signing_key()` is a process-wide OnceLock.
+        let mut csprng = rand::rngs::OsRng;
+        let key = SigningKey::generate(&mut csprng);
+        let dir = std::env::temp_dir().join(format!("ryu-govtest-{}", std::process::id()));
+        let path = dir.join("marketplace-signing-key");
+
+        assert!(persist_signing_key(&path, &key), "persist should succeed");
+        let loaded = read_persisted_signing_key(&path).expect("read back the key");
+
+        // Same public key ⇒ same verifying identity across a simulated restart.
+        assert_eq!(
+            loaded.verifying_key().to_bytes(),
+            key.verifying_key().to_bytes()
+        );
+        // A signature made with the original verifies against the reloaded key.
+        let manifest = json!({"id": "acme/widget", "version": "1.0.0"});
+        let sig = B64.encode(key.sign(&canonical_bytes(&manifest)).to_bytes());
+        assert!(verify_manifest(
+            &manifest,
+            &sig,
+            Some(&B64.encode(loaded.verifying_key().to_bytes()))
+        ));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

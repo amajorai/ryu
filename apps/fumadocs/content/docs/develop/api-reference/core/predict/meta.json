@@ -1,0 +1,9 @@
+{
+  "title": "Predict",
+  "description": "Predict API endpoints.",
+  "pages": [
+    "complete",
+    "get_config",
+    "put_config"
+  ]
+}

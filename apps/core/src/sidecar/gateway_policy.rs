@@ -1,14 +1,23 @@
 //! Gateway **policy plugin** flags (M2 / #447).
 //!
-//! Headroom compression proved the pattern: a Core `Policy` runnable is a thin
-//! on/off switch that flips a process-global flag which `gateway_spawn_env`
-//! reads to inject the corresponding `GATEWAY_*` env on the next gateway spawn,
-//! and a `gateway.refresh()` respawns the gateway to apply it. The gateway owns
-//! enforcement (firewall scanning, smart routing); Core only decides whether the
-//! feature is active for this install — the Core-vs-Gateway rule.
+//! A Core `Policy` runnable is a thin on/off switch: the gateway owns enforcement
+//! (firewall scanning, smart routing); Core only decides whether the feature is
+//! active for this install — the Core-vs-Gateway rule.
 //!
-//! This module generalises that pattern to the other boolean-shaped gateway
-//! policies so they can be declared as `Policy` runnables on the same contract:
+//! **Two apply mechanisms** (see [`crate::server`]`::apply_policy`):
+//! - **Live config-push (firewall, routing).** Toggling at RUNTIME builds a
+//!   `PUT /v1/config` patch and pushes it through the shared
+//!   [`crate::sidecar::gateway::push_config`] transport, which the gateway
+//!   HOT-SWAPS with no respawn and which reaches a remote gateway directly. The
+//!   flags below still exist because they seed `gateway_spawn_env` so the INITIAL
+//!   spawn (and any compression-triggered respawn) boots with the feature forced
+//!   on/off — but the runtime toggle no longer respawns. Firewall also carries a
+//!   **config-pack**: a pattern set declared in the plugin's `PolicyConfig.definition`
+//!   is pushed on enable / removed on disable via the same PUT.
+//! - **Respawn (compression).** Env-only config (`GATEWAY_COMPRESSION_*`, not in the
+//!   gateway's `ConfigPatch`), so it rides the spawn-env → `gateway.refresh()` path.
+//!   This is the *protocol-host seam*: the gateway hosts a protocol and the plugin
+//!   is an external service pointed at via `definition`.
 //!
 //! - **firewall** (`GATEWAY_FIREWALL_ENABLED`) — force the gateway firewall on.
 //! - **routing** (`GATEWAY_SMART_ROUTING_ENABLED`) — force smart (classifier)

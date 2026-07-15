@@ -16,6 +16,7 @@ use anyhow::{bail, Result};
 use tokio::process::Command;
 
 use crate::catalog::registry;
+use crate::win_process::NoWindow;
 use crate::sidecar::download_manager::VersionStore;
 
 /// Key under which the installed/adopted version is recorded in `versions.json`.
@@ -51,7 +52,12 @@ pub async fn omlx_binary() -> Option<String> {
     candidates.push("/usr/local/bin/omlx".to_string());
 
     for cand in candidates {
-        if let Ok(out) = Command::new(&cand).arg("--help").output().await {
+        if let Ok(out) = Command::new(&cand)
+            .arg("--help")
+            .no_window()
+            .output()
+            .await
+        {
             if out.status.success() {
                 return Some(cand);
             }
@@ -64,6 +70,7 @@ pub async fn omlx_binary() -> Option<String> {
 async fn brew_available() -> bool {
     Command::new("brew")
         .arg("--version")
+        .no_window()
         .output()
         .await
         .map(|o| o.status.success())
@@ -73,7 +80,12 @@ async fn brew_available() -> bool {
 /// Locate a usable Python interpreter (python3 or python) for the pip fallback.
 async fn python_cmd() -> Option<String> {
     for candidate in ["python3", "python"] {
-        if let Ok(output) = Command::new(candidate).args(["--version"]).output().await {
+        if let Ok(output) = Command::new(candidate)
+            .args(["--version"])
+            .no_window()
+            .output()
+            .await
+        {
             if output.status.success() {
                 return Some(candidate.to_string());
             }
@@ -102,10 +114,12 @@ pub async fn ensure_installed() -> Result<()> {
         tracing::info!("installing oMLX via Homebrew");
         let _ = Command::new("brew")
             .args(["tap", "jundot/omlx", GIT_URL])
+            .no_window()
             .status()
             .await;
         let status = Command::new("brew")
             .args(["install", "omlx"])
+            .no_window()
             .status()
             .await;
         if matches!(status, Ok(s) if s.success()) {
@@ -124,6 +138,7 @@ pub async fn ensure_installed() -> Result<()> {
         tracing::info!("installing oMLX via pip from {GIT_URL}");
         let status = Command::new(&python)
             .args(["-m", "pip", "install", &format!("git+{GIT_URL}")])
+            .no_window()
             .status()
             .await;
         if matches!(status, Ok(s) if s.success()) {

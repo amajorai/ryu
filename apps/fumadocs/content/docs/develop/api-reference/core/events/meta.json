@@ -1,0 +1,7 @@
+{
+  "title": "Events",
+  "description": "Events API endpoints.",
+  "pages": [
+    "notifications_stream"
+  ]
+}

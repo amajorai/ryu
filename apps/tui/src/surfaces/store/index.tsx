@@ -1,13 +1,14 @@
 /* @jsxImportSource @opentui/react */
 // Store surface - the unified catalog shell that mirrors apps/desktop StorePage.
-// One screen with a store-wide search box, a section tab-row (Plugins · Models ·
-// Skills · MCP · Agents · Engines · Fine-tune), and a body that swaps between the
-// active section's content and the aggregated search results.
+// One screen with a store-wide search box, a section tab-row (Plugins · Sidecars ·
+// Models · Skills · MCP · Agents · Engines · Fine-tune), and a body that swaps between
+// the active section's content and the aggregated search results.
 //
 // This is a SHELL + REGROUPING, not a rewrite: each section reuses an existing tab
-// content component unchanged (Plugins<-apps.tsx, Models<-models.tsx,
-// Skills<-skills.tsx, MCP<-tools.tsx, Agents<-agents.tsx, Engines<-engines.tsx),
-// while Fine-tune is a light fresh panel. Only the active section is mounted, so its
+// content component unchanged (Plugins<-plugins.tsx [the REAL /api/plugins lifecycle
+// surface], Sidecars<-apps.tsx [the /api/catalog binary catalog], Models<-models.tsx,
+// Skills<-skills.tsx, MCP<-tools.tsx, Agents<-agents.tsx, Engines<-engines.tsx), while
+// Fine-tune is a light fresh panel. Only the active section is mounted, so its
 // keyboard handler is the only child handler live.
 //
 // Keyboard ownership: the shell owns the search-focus toggle and section switching;
@@ -24,6 +25,7 @@ import { AgentsTab } from "../../tabs/agents.tsx";
 import { AppsTab } from "../../tabs/apps.tsx";
 import { EnginesTab } from "../../tabs/engines.tsx";
 import { ModelsTab } from "../../tabs/models.tsx";
+import { PluginsTab } from "../../tabs/plugins.tsx";
 import { SkillsTab } from "../../tabs/skills.tsx";
 import { ToolsTab } from "../../tabs/tools.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
@@ -208,6 +210,9 @@ function SectionContent({
 	active: boolean;
 	section: StoreSection;
 }): ReactNode {
+	if (section === "plugins") {
+		return <PluginsTab active={active} />;
+	}
 	if (section === "apps") {
 		return <AppsTab active={active} />;
 	}

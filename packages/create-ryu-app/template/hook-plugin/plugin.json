@@ -1,0 +1,27 @@
+{
+  "id": "com.example.__APP_NAME__",
+  "name": "__APP_DISPLAY_NAME__",
+  "version": "0.1.0",
+  "runnables": [],
+  "permission_grants": [],
+  "activation_events": ["*"],
+  "contributes": {
+    "turn_hooks": [
+      {
+        "id": "flag-terse",
+        "on": "post_assistant_turn",
+        "code": "return await ((ctx, host) => {\n  const last = ctx.transcript.at(-1);\n  if (last && last.role === \"assistant\" && last.content.trim().length < 40) {\n    host.log(\"terse reply flagged\");\n    return { kind: \"note\", text: \"That reply looked brief \\u2014 want more detail?\" };\n  }\n  return { kind: \"none\" };\n})(ctx, host);"
+      }
+    ],
+    "composer_controls": [
+      {
+        "id": "hook.toggle",
+        "type": "toggle",
+        "flag": "com.example.__APP_NAME__"
+      }
+    ],
+    "settings_tabs": [],
+    "slash_commands": [],
+    "widgets": []
+  }
+}

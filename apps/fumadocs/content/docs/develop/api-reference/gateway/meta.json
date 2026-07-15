@@ -6,7 +6,8 @@
     "evals",
     "governance",
     "audit",
-    "config",
-    "health"
+    "security",
+    "health",
+    "config"
   ]
 }

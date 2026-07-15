@@ -1,0 +1,13 @@
+{
+  "title": "Data",
+  "description": "Data API endpoints.",
+  "pages": [
+    "get_data_path",
+    "export_data_path",
+    "reset_data_path",
+    "switch_data_path",
+    "validate_data_path",
+    "data_clear",
+    "data_counts"
+  ]
+}

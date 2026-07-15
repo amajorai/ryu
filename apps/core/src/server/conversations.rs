@@ -20,11 +20,214 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{named_params, params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::runnable::RunnableKind;
+
+/// The SQL twin of `resource_access` (`server/mod.rs`) — the ONE place a tenancy
+/// read-filter is expressed for list/search queries, so the row gate and the list
+/// gate can never drift apart.
+///
+///   - `:bound = 0` (node UNBOUND / personal): no restriction. There is exactly one
+///     principal and the node token is the boundary — identical to the pre-ACL
+///     behaviour, and identical to `enforce_permission`'s unbound rule.
+///   - node ORG-BOUND: a row is visible iff the caller OWNS it, or it is explicitly
+///     shared (`visibility` in `org`/`team`) within the caller's org. An untenanted
+///     (NULL-owner) row is therefore INVISIBLE on a bound node — matching the ACL's
+///     fail-closed reading of an unattributable legacy row.
+///   - node ORG-BOUND + anonymous caller (`:uid IS NULL`): nothing matches → empty.
+const TENANCY_VISIBLE_PREDICATE: &str = "(
+        :bound = 0
+        OR (:uid IS NOT NULL AND c.owner_user_id = :uid)
+        OR (:uid IS NOT NULL AND :org IS NOT NULL AND c.org_id = :org
+            AND c.visibility IN ('org', 'team'))
+     )";
+
+/// The caller context a tenancy-filtered query is evaluated against.
+#[derive(Clone, Copy)]
+struct TenancyFilter<'a> {
+    /// Whether THIS node is bound to an org (a shared "company brain"). Unbound →
+    /// no filtering at all.
+    node_bound: bool,
+    /// The verified caller's user id, or `None` for an anonymous caller.
+    owner_user_id: Option<&'a str>,
+    /// The caller's org (already narrowed to this node's org by `identity_verify`).
+    org_id: Option<&'a str>,
+}
+
+impl TenancyFilter<'_> {
+    /// The in-process, full-trust filter: every row on the node.
+    fn unrestricted() -> Self {
+        Self {
+            node_bound: false,
+            owner_user_id: None,
+            org_id: None,
+        }
+    }
+
+    fn bound_flag(&self) -> i64 {
+        i64::from(self.node_bound)
+    }
+}
+
+/// The tenancy a conversation row is CREATED with — the explicit, mandatory
+/// principal every row-creating store call must supply.
+///
+/// Deliberately **not** an `Option<&str>` pair: an optional argument reads as "may
+/// be omitted", and omitting it is precisely the bug this type exists to make
+/// uncompilable. Stamping tenancy at a handful of handlers is what let rows born
+/// on other paths (the MCP `create_thread`/`fork_thread` tools, sync replay, the
+/// healing simulator) stay NULL-tenanted — and on an org-bound node a NULL-tenanted
+/// row is DENIED to everyone, locking an owner out of their own chat. With this
+/// type a future creation path must make a DELIBERATE choice; "silently forgot" no
+/// longer compiles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Tenancy {
+    /// Attribute the new row to this principal: an org-bound node with a verified
+    /// caller, or an in-process agent tool call whose HOST conversation resolved an
+    /// owner (see `sidecar::mcp::ToolPrincipal`).
+    Owned {
+        user_id: String,
+        org_id: Option<String>,
+    },
+    /// No principal. This is what an UNBOUND personal node passes: there is exactly
+    /// one principal and `RYU_TOKEN` is the boundary, so rows stay NULL-tenanted
+    /// exactly as they did before the ACL existed (no offline lockout). It is also
+    /// what a path writing into an ALREADY-EXISTING row passes — the choke point's
+    /// COALESCE preserves whatever owner is already stamped.
+    Unattributed,
+}
+
+impl Tenancy {
+    /// The `(owner_user_id, org_id)` column pair this tenancy writes. `pub(crate)`
+    /// so the Spaces / documents choke points (`spaces::upsert_document_row` /
+    /// `upsert_space_row`) can reuse this ONE tenancy type rather than defining a
+    /// parallel enum that could drift from the conversation plane's semantics.
+    pub(crate) fn parts(&self) -> (Option<&str>, Option<&str>) {
+        match self {
+            Self::Owned { user_id, org_id } => (Some(user_id.as_str()), org_id.as_deref()),
+            Self::Unattributed => (None, None),
+        }
+    }
+
+    /// Attribute to `user_id` unless it is absent, in which case the row is
+    /// unattributed. The one place `Option<VerifiedCaller>` is lowered to a
+    /// `Tenancy`.
+    pub fn owned_by(user_id: Option<&str>, org_id: Option<&str>) -> Self {
+        match user_id {
+            Some(uid) => Self::Owned {
+                user_id: uid.to_owned(),
+                org_id: org_id.map(str::to_owned),
+            },
+            None => Self::Unattributed,
+        }
+    }
+}
+
+/// How [`upsert_conversation_row`] treats `updated_at` when the row already exists.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Touch {
+    /// Leave `updated_at` alone (`ensure_conversation`, `add_participant`,
+    /// `create_session`, `claim_tenancy` — none of them is a new turn).
+    Keep,
+    /// Bump to the supplied timestamp (`append_message` — a real new turn).
+    Set,
+    /// `max(stored, incoming)` — the sync replay's last-writer-wins clock.
+    Max,
+}
+
+/// The non-tenancy columns a creation path may seed. Every field is EXISTING-WINS
+/// on conflict (except `agent_id`, which is NEW-wins, matching the pre-choke-point
+/// upserts), so a caller that leaves one `None` can never clobber a value another
+/// path already wrote.
+#[derive(Default)]
+struct ConvRow<'a> {
+    /// Already SEALED by the caller (`seal_opt`) — the choke point does no crypto.
+    title: Option<&'a str>,
+    agent_id: Option<&'a str>,
+    folder_path: Option<&'a str>,
+    branch: Option<&'a str>,
+    worktree_path: Option<&'a str>,
+    participants: Option<&'a str>,
+}
+
+/// **THE CHOKE POINT** — the one and only `INSERT INTO conversations` in Core.
+///
+/// Every path that can bring a conversation row into existence
+/// ([`ConversationStore::ensure_conversation`], [`ConversationStore::append_message_as`],
+/// [`ConversationStore::append_message_with_id`], [`ConversationStore::fork_conversation`],
+/// [`ConversationStore::add_participant`], [`ConversationStore::create_session`],
+/// [`ConversationStore::claim_tenancy`]) funnels through here, and this statement
+/// ALWAYS emits the tenancy clause. So "a new creation path forgot to stamp its
+/// owner" is not a mistake that can be made: `tenancy` is a mandatory argument with
+/// no default.
+///
+/// Three load-bearing properties, all in the `ON CONFLICT` clause:
+///   - **Stamp on create.** A brand-new row is born with its owner.
+///   - **Preserve, never clobber.** `owner_user_id`/`org_id` are
+///     `COALESCE(existing, excluded)`, so a later `append_message` (which passes
+///     `Unattributed`, the row already existing) can never wipe a claimed owner.
+///   - **First-writer-wins.** The same COALESCE means a row can never be
+///     RE-tenanted: a racing or deliberate second claimer cannot steal it.
+fn upsert_conversation_row(
+    conn: &Connection,
+    conversation_id: &str,
+    now: i64,
+    tenancy: &Tenancy,
+    row: &ConvRow<'_>,
+    touch: Touch,
+) -> Result<()> {
+    let (owner_user_id, org_id) = tenancy.parts();
+    let touch_flag: i64 = match touch {
+        Touch::Keep => 0,
+        Touch::Set => 1,
+        Touch::Max => 2,
+    };
+    conn.execute(
+        "INSERT INTO conversations
+            (id, title, agent_id, created_at, updated_at,
+             folder_path, branch, worktree_path, participants,
+             owner_user_id, org_id)
+         VALUES (:id, :title, :agent_id, :now, :now,
+                 :folder_path, :branch, :worktree_path,
+                 -- `participants` is NOT NULL DEFAULT '[]'; the choke point names it
+                 -- explicitly (so `fork` can carry the source's list), which bypasses
+                 -- the column default — restore it here for the callers that pass none.
+                 COALESCE(:participants, '[]'),
+                 :owner, :org)
+         ON CONFLICT(id) DO UPDATE SET
+             title         = COALESCE(conversations.title, excluded.title),
+             agent_id      = COALESCE(excluded.agent_id, conversations.agent_id),
+             updated_at    = CASE :touch
+                                 WHEN 1 THEN excluded.updated_at
+                                 WHEN 2 THEN max(conversations.updated_at, excluded.updated_at)
+                                 ELSE conversations.updated_at
+                             END,
+             folder_path   = COALESCE(conversations.folder_path, excluded.folder_path),
+             branch        = COALESCE(conversations.branch, excluded.branch),
+             worktree_path = COALESCE(conversations.worktree_path, excluded.worktree_path),
+             participants  = COALESCE(conversations.participants, excluded.participants),
+             owner_user_id = COALESCE(conversations.owner_user_id, excluded.owner_user_id),
+             org_id        = COALESCE(conversations.org_id, excluded.org_id)",
+        named_params! {
+            ":id": conversation_id,
+            ":title": row.title,
+            ":agent_id": row.agent_id,
+            ":now": now,
+            ":folder_path": row.folder_path,
+            ":branch": row.branch,
+            ":worktree_path": row.worktree_path,
+            ":participants": row.participants,
+            ":owner": owner_user_id,
+            ":org": org_id,
+            ":touch": touch_flag,
+        },
+    )
+    .context("upserting conversation row (choke point)")?;
+    Ok(())
+}
 
 /// A persisted chat message belonging to a conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -331,6 +534,13 @@ impl ConversationStore {
         let conn = Connection::open(&path)
             .with_context(|| format!("opening conversation db {}", path.display()))?;
         Self::init_schema(&conn)?;
+        // One-shot tenancy backfill for rows that pre-date the per-resource ACL.
+        // Deliberately NOT in `init_schema` (which the in-memory test store also
+        // runs — it must never read the real account vault) and best-effort: a
+        // failure here must never stop the node from opening its chat db.
+        if let Err(e) = Self::backfill_tenancy(&conn) {
+            tracing::warn!("conversation tenancy backfill skipped: {e:#}");
+        }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             cipher: crate::crypto::global_cipher()?,
@@ -339,6 +549,87 @@ impl ConversationStore {
             auto_title_tx: None,
             realtime: None,
         })
+    }
+
+    /// Decide, once, what a pre-existing NULL-tenancy conversation row MEANS.
+    ///
+    /// Before the per-resource ACL was populated, every conversation row was
+    /// created with `owner_user_id` and `org_id` NULL. `resource_access`
+    /// (`server/mod.rs`) reads an untenanted row as "the local single-user row":
+    /// full access on an UNBOUND node, DENIED on an ORG-BOUND (shared) one. So:
+    ///
+    ///   - **Node UNBOUND** (no `registered_org()`): return immediately, stamping
+    ///     nothing. There is exactly one principal on a personal node and the node
+    ///     token is the boundary (the same rule `enforce_permission` already
+    ///     applies), so scoping rows there would buy no security and would lock the
+    ///     owner out of their own chats whenever the control plane is unreachable
+    ///     and their JWT cannot be minted. The marker is NOT written, so this reruns
+    ///     (and does the real work) if the node later joins an org.
+    ///   - **Node ORG-BOUND**: attribute every untenanted row to the LOCAL OWNER —
+    ///     the signed-in account in the vault — because those chats were had by
+    ///     whoever was sitting at this node before it was shared. Idempotent via the
+    ///     `conv_meta` marker.
+    ///   - **Node ORG-BOUND with no local account**: there is nobody to attribute
+    ///     them to. Leave them NULL and warn. Combined with the ACL's
+    ///     untenanted-row-on-a-bound-node DENY they become unreachable (data intact
+    ///     on disk, recoverable by an explicit admin action) rather than readable by
+    ///     every member of the org. Fail closed.
+    fn backfill_tenancy(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS conv_meta (key TEXT PRIMARY KEY, value TEXT)",
+        )
+        .context("creating conv_meta")?;
+        let done: Option<String> = conn
+            .query_row(
+                "SELECT value FROM conv_meta WHERE key = 'tenancy_backfill_v1'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if done.is_some() {
+            return Ok(());
+        }
+
+        // Unbound (personal) node: rows stay untenanted, by design. Not marked done.
+        let Some(org) = crate::sidecar::control_plane::registered_org() else {
+            return Ok(());
+        };
+
+        let Some(owner) = crate::auth::load_accounts()
+            .active()
+            .map(|a| a.user_id.clone())
+        else {
+            let orphans: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM conversations
+                 WHERE owner_user_id IS NULL AND org_id IS NULL",
+                [],
+                |r| r.get(0),
+            )?;
+            if orphans > 0 {
+                tracing::warn!(
+                    "tenancy backfill: {orphans} pre-ACL conversation(s) on an org-bound node with \
+                     no signed-in local account to attribute them to — leaving them untenanted, \
+                     which the per-resource ACL denies (fail closed). Sign in and restart to claim them."
+                );
+            }
+            return Ok(());
+        };
+
+        let claimed = conn
+            .execute(
+                "UPDATE conversations SET owner_user_id = ?1, org_id = ?2
+                 WHERE owner_user_id IS NULL AND org_id IS NULL",
+                params![owner, org.id],
+            )
+            .context("backfilling conversation tenancy")?;
+        conn.execute(
+            "INSERT OR REPLACE INTO conv_meta (key, value) VALUES ('tenancy_backfill_v1', ?1)",
+            params![owner],
+        )?;
+        tracing::info!(
+            "tenancy backfill: attributed {claimed} pre-ACL conversation(s) to the local owner"
+        );
+        Ok(())
     }
 
     /// Wire the semantic message index (backing the `search_conversations` builtin
@@ -643,25 +934,33 @@ impl ConversationStore {
 
     /// Ensure a conversation row exists, creating it on first use. Optionally
     /// records the agent and a title (only set when not already present).
+    ///
+    /// `tenancy` stamps the row's owner **on creation** (see [`Tenancy`] and the
+    /// [`upsert_conversation_row`] choke point). Pass [`Tenancy::Unattributed`] on
+    /// an unbound personal node or when the row is already known to exist — the
+    /// choke point preserves any owner already stamped.
     pub async fn ensure_conversation(
         &self,
         conversation_id: &str,
         agent_id: Option<&str>,
         title: Option<&str>,
+        tenancy: Tenancy,
     ) -> Result<()> {
         let now = now_millis();
         let title = self.seal_opt(title)?;
         let conn = self.conn.lock().await;
-        conn.execute(
-            "INSERT INTO conversations (id, title, agent_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?4)
-             ON CONFLICT(id) DO UPDATE SET
-                 agent_id = COALESCE(excluded.agent_id, conversations.agent_id),
-                 title    = COALESCE(conversations.title, excluded.title)",
-            params![conversation_id, title, agent_id, now],
+        upsert_conversation_row(
+            &conn,
+            conversation_id,
+            now,
+            &tenancy,
+            &ConvRow {
+                title: title.as_deref(),
+                agent_id,
+                ..ConvRow::default()
+            },
+            Touch::Keep,
         )
-        .context("ensuring conversation")?;
-        Ok(())
     }
 
     /// Record run metadata (folder_path, branch, worktree_path) on the
@@ -877,8 +1176,14 @@ impl ConversationStore {
     }
 
     /// Append a message and bump the conversation's `updated_at`. Returns the new
-    /// message id. Creates the conversation if it does not exist yet.
-    pub async fn append_message(
+    /// message id. **Creates the conversation if it does not exist yet** — which is
+    /// why it takes a [`Tenancy`]: an append that mints a row on an org-bound node
+    /// must stamp its owner or the row is born invisible to everybody.
+    ///
+    /// Callers writing into a row that already exists pass [`Tenancy::Unattributed`];
+    /// the choke point's COALESCE preserves the owner already stamped (this is the
+    /// property `append_does_not_wipe_a_claimed_owner` asserts).
+    pub async fn append_message_as(
         &self,
         conversation_id: &str,
         role: &str,
@@ -886,6 +1191,7 @@ impl ConversationStore {
         agent_id: Option<&str>,
         author_user_id: Option<&str>,
         author_name: Option<&str>,
+        tenancy: Tenancy,
     ) -> Result<String> {
         let now = now_millis();
         let message_id = uuid::Uuid::new_v4().to_string();
@@ -935,16 +1241,18 @@ impl ConversationStore {
         } else {
             None
         };
-        conn.execute(
-            "INSERT INTO conversations (id, title, agent_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?4)
-             ON CONFLICT(id) DO UPDATE SET
-                 updated_at = ?4,
-                 agent_id   = COALESCE(excluded.agent_id, conversations.agent_id),
-                 title      = COALESCE(conversations.title, excluded.title)",
-            params![conversation_id, title, agent_id, now],
-        )
-        .context("upserting conversation on append")?;
+        upsert_conversation_row(
+            &conn,
+            conversation_id,
+            now,
+            &tenancy,
+            &ConvRow {
+                title: title.as_deref(),
+                agent_id,
+                ..ConvRow::default()
+            },
+            Touch::Set,
+        )?;
         // Version-tree linkage: if this conversation has been branched (its
         // `active_leaf_message_id` is set), attach the new turn beneath the
         // current leaf and advance the leaf to this message. Conversations that
@@ -1075,78 +1383,145 @@ impl ConversationStore {
         Ok(())
     }
 
-    /// List conversations, most-recently-updated first.
+    /// List conversations, most-recently-updated first. **Unfiltered** — every row
+    /// on the node. Kept for the in-process callers that legitimately need the full
+    /// set (sync replay, the learning pass, the MCP `threads` tool). Any HTTP
+    /// handler serving a remote caller must use [`Self::list_conversations_visible`].
     pub async fn list_conversations(&self) -> Result<Vec<ConversationSummary>> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT c.id, c.title, c.agent_id, c.created_at, c.updated_at,
-                    (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id),
-                    c.folder_path, c.branch, c.worktree_path, c.run_status,
-                    c.participants, c.pinned, c.archived
-             FROM conversations c
-             ORDER BY c.updated_at DESC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            let participants_json: Option<String> = row.get(10)?;
-            let participants = parse_participants_json(participants_json.as_deref());
-            Ok(ConversationSummary {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                agent_id: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-                message_count: row.get(5)?,
-                folder_path: row.get(6)?,
-                branch: row.get(7)?,
-                worktree_path: row.get(8)?,
-                run_status: row.get(9)?,
-                participants,
-                pinned: row.get::<_, i64>(11)? != 0,
-                archived: row.get::<_, i64>(12)? != 0,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            let mut summary = row?;
-            summary.title = self.open_opt(summary.title);
-            out.push(summary);
-        }
-        Ok(out)
+        self.list_summaries("", TenancyFilter::unrestricted()).await
+    }
+
+    /// List conversations this caller may READ, filtered in SQL.
+    ///
+    /// Replaces the handler-side N+1 (`get_access_meta` per row, each taking the
+    /// store mutex) with one query whose `WHERE` mirrors `resource_access`
+    /// (`server/mod.rs`) exactly. On an org-bound node an anonymous caller gets an
+    /// empty list rather than every user's chat titles.
+    pub async fn list_conversations_visible(
+        &self,
+        owner_user_id: Option<&str>,
+        org_id: Option<&str>,
+        node_bound: bool,
+    ) -> Result<Vec<ConversationSummary>> {
+        self.list_summaries(
+            "",
+            TenancyFilter {
+                node_bound,
+                owner_user_id,
+                org_id,
+            },
+        )
+        .await
     }
 
     /// List conversations that have an active or recently-finished run (i.e.
     /// run_status is not NULL), ordered most-recently-updated first.  Used by
     /// the background-runs view (issue #128) and the sidebar runs section.
+    /// **Unfiltered** — see [`Self::list_runs_visible`] for the caller-scoped form.
     pub async fn list_runs(&self) -> Result<Vec<ConversationSummary>> {
+        self.list_summaries("AND c.run_status IS NOT NULL", TenancyFilter::unrestricted())
+            .await
+    }
+
+    /// The tenancy-filtered twin of [`Self::list_runs`] — used by `GET /api/runs`
+    /// and the `/api/runs/stream` opening snapshot, which otherwise fan out every
+    /// run on the node to every holder of the node token.
+    pub async fn list_runs_visible(
+        &self,
+        owner_user_id: Option<&str>,
+        org_id: Option<&str>,
+        node_bound: bool,
+    ) -> Result<Vec<ConversationSummary>> {
+        self.list_summaries(
+            "AND c.run_status IS NOT NULL",
+            TenancyFilter {
+                node_bound,
+                owner_user_id,
+                org_id,
+            },
+        )
+        .await
+    }
+
+    /// The ids of every conversation this caller may READ. Feeds the
+    /// `conversation_ids` filter that [`Self::search_messages`] /
+    /// [`Self::fts_search_messages`] already accept, so semantic search can never
+    /// return a snippet from someone else's chat.
+    pub async fn visible_conversation_ids(
+        &self,
+        owner_user_id: Option<&str>,
+        org_id: Option<&str>,
+        node_bound: bool,
+    ) -> Result<Vec<String>> {
+        let filter = TenancyFilter {
+            node_bound,
+            owner_user_id,
+            org_id,
+        };
+        let sql = format!(
+            "SELECT c.id FROM conversations c WHERE {TENANCY_VISIBLE_PREDICATE}"
+        );
         let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            named_params! {
+                ":bound": filter.bound_flag(),
+                ":uid": filter.owner_user_id,
+                ":org": filter.org_id,
+            },
+            |row| row.get::<_, String>(0),
+        )?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Shared body of the conversation-summary listings. `extra` is an additional
+    /// `AND …` clause appended to the tenancy predicate.
+    async fn list_summaries(
+        &self,
+        extra: &str,
+        filter: TenancyFilter<'_>,
+    ) -> Result<Vec<ConversationSummary>> {
+        let sql = format!(
             "SELECT c.id, c.title, c.agent_id, c.created_at, c.updated_at,
                     (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id),
                     c.folder_path, c.branch, c.worktree_path, c.run_status,
                     c.participants, c.pinned, c.archived
              FROM conversations c
-             WHERE c.run_status IS NOT NULL
-             ORDER BY c.updated_at DESC",
+             WHERE {TENANCY_VISIBLE_PREDICATE} {extra}
+             ORDER BY c.updated_at DESC"
+        );
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            named_params! {
+                ":bound": filter.bound_flag(),
+                ":uid": filter.owner_user_id,
+                ":org": filter.org_id,
+            },
+            |row| {
+                let participants_json: Option<String> = row.get(10)?;
+                let participants = parse_participants_json(participants_json.as_deref());
+                Ok(ConversationSummary {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    agent_id: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                    message_count: row.get(5)?,
+                    folder_path: row.get(6)?,
+                    branch: row.get(7)?,
+                    worktree_path: row.get(8)?,
+                    run_status: row.get(9)?,
+                    participants,
+                    pinned: row.get::<_, i64>(11)? != 0,
+                    archived: row.get::<_, i64>(12)? != 0,
+                })
+            },
         )?;
-        let rows = stmt.query_map([], |row| {
-            let participants_json: Option<String> = row.get(10)?;
-            let participants = parse_participants_json(participants_json.as_deref());
-            Ok(ConversationSummary {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                agent_id: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-                message_count: row.get(5)?,
-                folder_path: row.get(6)?,
-                branch: row.get(7)?,
-                worktree_path: row.get(8)?,
-                run_status: row.get(9)?,
-                participants,
-                pinned: row.get::<_, i64>(11)? != 0,
-                archived: row.get::<_, i64>(12)? != 0,
-            })
-        })?;
         let mut out = Vec::new();
         for row in rows {
             let mut summary = row?;
@@ -1692,18 +2067,23 @@ impl ConversationStore {
         content: &str,
         agent_id: Option<&str>,
         created_at_ms: i64,
+        tenancy: Tenancy,
     ) -> Result<()> {
         let conn = self.conn.lock().await;
-        // Upsert the conversation row so the message FK is satisfied.
-        conn.execute(
-            "INSERT INTO conversations (id, agent_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?3)
-             ON CONFLICT(id) DO UPDATE SET
-                 agent_id   = COALESCE(excluded.agent_id, conversations.agent_id),
-                 updated_at = MAX(conversations.updated_at, excluded.updated_at)",
-            params![conversation_id, agent_id, created_at_ms],
-        )
-        .context("upserting conversation for append_with_id")?;
+        // Upsert the conversation row so the message FK is satisfied — through the
+        // choke point, so a replayed conversation is born owned rather than
+        // NULL-tenanted (and therefore invisible) on an org-bound node.
+        upsert_conversation_row(
+            &conn,
+            conversation_id,
+            created_at_ms,
+            &tenancy,
+            &ConvRow {
+                agent_id,
+                ..ConvRow::default()
+            },
+            Touch::Max,
+        )?;
 
         // INSERT OR IGNORE: skip when the message id already exists (idempotent).
         let sealed = self.cipher.seal(content)?;
@@ -1762,10 +2142,19 @@ impl ConversationStore {
     ///
     /// Returns the new conversation's summary, or `None` when the source does not
     /// exist or `up_to_message_id` is not a message of that conversation.
+    ///
+    /// Tenancy: the FORKER owns the copy (`owner_user_id` / `org_id` come from the
+    /// caller, NOT from the source row). Forking an org-visible chat therefore
+    /// produces a private branch owned by whoever forked it, and never silently
+    /// hands a copy of someone else's private chat to a new owner — the READ gate on
+    /// the source is what decides whether the fork may happen at all. Pass
+    /// [`Tenancy::Unattributed`] for the unbound/personal case (rows stay untenanted,
+    /// byte-identical to the pre-ACL behaviour).
     pub async fn fork_conversation(
         &self,
         source_id: &str,
         up_to_message_id: Option<&str>,
+        tenancy: Tenancy,
     ) -> Result<Option<ConversationSummary>> {
         // Read the source history (chronological) before taking the write lock so
         // the cut-point lookup stays simple.
@@ -1823,21 +2212,20 @@ impl ConversationStore {
         let forked_title_sealed = self.seal_opt(forked_title.as_deref())?;
         let participants_json = participants_json.unwrap_or_else(|| "[]".to_owned());
 
-        conn.execute(
-            "INSERT INTO conversations
-                (id, title, agent_id, created_at, updated_at,
-                 folder_path, branch, worktree_path, participants)
-             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                new_id,
-                forked_title_sealed,
-                agent_id,
-                now,
-                folder_path,
-                branch,
-                worktree_path,
-                participants_json
-            ],
+        upsert_conversation_row(
+            &conn,
+            &new_id,
+            now,
+            &tenancy,
+            &ConvRow {
+                title: forked_title_sealed.as_deref(),
+                agent_id: agent_id.as_deref(),
+                folder_path: folder_path.as_deref(),
+                branch: branch.as_deref(),
+                worktree_path: worktree_path.as_deref(),
+                participants: Some(participants_json.as_str()),
+            },
+            Touch::Keep,
         )
         .context("inserting forked conversation")?;
 
@@ -2138,15 +2526,22 @@ impl ConversationStore {
         &self,
         conversation_id: &str,
         agent_id: &str,
+        tenancy: Tenancy,
     ) -> Result<Vec<String>> {
         let now = now_millis();
         let conn = self.conn.lock().await;
-        // Ensure the conversation row exists.
-        conn.execute(
-            "INSERT INTO conversations (id, created_at, updated_at, participants)
-             VALUES (?1, ?2, ?2, '[]')
-             ON CONFLICT(id) DO NOTHING",
-            params![conversation_id, now],
+        // Ensure the conversation row exists — through the choke point, so a council
+        // chat created by adding its first participant is born owned.
+        upsert_conversation_row(
+            &conn,
+            conversation_id,
+            now,
+            &tenancy,
+            &ConvRow {
+                participants: Some("[]"),
+                ..ConvRow::default()
+            },
+            Touch::Keep,
         )
         .context("ensuring conversation for add_participant")?;
         // Load current participants.
@@ -2214,6 +2609,75 @@ impl ConversationStore {
             .optional()?
             .flatten();
         Ok(parse_participants_json(participants_json.as_deref()))
+    }
+
+    /// Stamp the verified human owner (and the node's org) onto a conversation,
+    /// creating the row if this is a brand-new chat. **This is the write that makes
+    /// the per-resource ACL non-vacuous** — before it existed every row was created
+    /// with NULL tenancy, which `resource_access` reads as "the untenanted local
+    /// row" and grants to everyone.
+    ///
+    /// **First-writer-wins**: `COALESCE(existing, new)` means a row that already has
+    /// an owner is NEVER re-tenanted, so a second caller racing on the same id (or a
+    /// deliberate re-POST with someone else's conversation id) can never STEAL a
+    /// conversation. The loser is simply denied by the ACL on their next request.
+    ///
+    /// Safe to front-run the lazy upserts in [`Self::ensure_conversation`] /
+    /// [`Self::append_message`]: their `ON CONFLICT` clauses touch only
+    /// `agent_id` / `title` / `updated_at`, never the tenancy columns, so the owner
+    /// stamped here survives the first message landing.
+    pub async fn claim_tenancy(
+        &self,
+        conversation_id: &str,
+        owner_user_id: &str,
+        org_id: Option<&str>,
+    ) -> Result<()> {
+        let now = now_millis();
+        let tenancy = Tenancy::Owned {
+            user_id: owner_user_id.to_owned(),
+            org_id: org_id.map(str::to_owned),
+        };
+        let conn = self.conn.lock().await;
+        upsert_conversation_row(
+            &conn,
+            conversation_id,
+            now,
+            &tenancy,
+            &ConvRow::default(),
+            Touch::Keep,
+        )
+        .context("claiming conversation tenancy")
+    }
+
+    /// The conversation a session hangs off, so a session-keyed route can be gated
+    /// on its PARENT conversation's tenancy (sessions carry no tenancy of their own).
+    /// `Ok(None)` when the session id is unknown.
+    pub async fn conversation_id_for_session(&self, session_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let id = conn
+            .query_row(
+                "SELECT conversation_id FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("resolving session's conversation")?;
+        Ok(id)
+    }
+
+    /// The conversation a `/btw` side entry (or subagent child run) hangs off — the
+    /// session-lookup's twin, for gating the btw routes on the parent's tenancy.
+    pub async fn conversation_id_for_btw(&self, btw_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let id = conn
+            .query_row(
+                "SELECT conversation_id FROM btw_entries WHERE id = ?1",
+                params![btw_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("resolving btw entry's conversation")?;
+        Ok(id)
     }
 
     /// Load the tenancy quartet (owner / org / visibility / team) for a
@@ -2416,6 +2880,36 @@ impl ConversationStore {
         Ok(removed as u64)
     }
 
+    /// The tenancy-scoped twin of [`Self::clear_all_conversations`]: delete ONLY the
+    /// conversations `owner_user_id` owns, plus their messages/sessions/side-chats.
+    ///
+    /// `POST /api/data/clear` used the unscoped truncate above with no ACL at all, so
+    /// on an org-bound node any holder of the node token could destroy EVERY user's
+    /// chats. On a bound node the danger-zone clear now routes here instead. Strict
+    /// owner-match on purpose: an org-visible chat owned by a colleague is NOT the
+    /// caller's to delete.
+    pub async fn clear_conversations_owned_by(&self, owner_user_id: &str) -> Result<u64> {
+        let conn = self.conn.lock().await;
+        let owned = "SELECT id FROM conversations WHERE owner_user_id = ?1";
+        conn.execute(
+            &format!("DELETE FROM messages WHERE conversation_id IN ({owned})"),
+            params![owner_user_id],
+        )?;
+        conn.execute(
+            &format!("DELETE FROM sessions WHERE conversation_id IN ({owned})"),
+            params![owner_user_id],
+        )?;
+        conn.execute(
+            &format!("DELETE FROM btw_entries WHERE conversation_id IN ({owned})"),
+            params![owner_user_id],
+        )?;
+        let removed = conn.execute(
+            "DELETE FROM conversations WHERE owner_user_id = ?1",
+            params![owner_user_id],
+        )?;
+        Ok(removed as u64)
+    }
+
     // ── Session methods ──────────────────────────────────────────────────────
 
     /// Create a new Session bound to a Runnable, reusing the existing
@@ -2427,6 +2921,7 @@ impl ConversationStore {
         runnable_kind: RunnableKind,
         agent_id: Option<&str>,
         title: Option<&str>,
+        tenancy: Tenancy,
     ) -> Result<Session> {
         let session_id = format!("sess_{}", uuid::Uuid::new_v4().simple());
         let conversation_id = format!("conv_{}", uuid::Uuid::new_v4().simple());
@@ -2436,11 +2931,17 @@ impl ConversationStore {
         let title = self.seal_opt(title)?;
         {
             let conn = self.conn.lock().await;
-            conn.execute(
-                "INSERT INTO conversations (id, title, agent_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?4)
-                 ON CONFLICT(id) DO NOTHING",
-                params![conversation_id, title, agent_id, now],
+            upsert_conversation_row(
+                &conn,
+                &conversation_id,
+                now,
+                &tenancy,
+                &ConvRow {
+                    title: title.as_deref(),
+                    agent_id,
+                    ..ConvRow::default()
+                },
+                Touch::Keep,
             )
             .context("creating conversation for session")?;
 
@@ -2611,9 +3112,90 @@ fn derive_title(content: &str) -> String {
     format!("{truncated}…")
 }
 
+/// Test-only conveniences.
+///
+/// `append_message` has ~55 call sites, nearly all of them tests that model an
+/// unbound personal node. Rather than churn them, the pre-tenancy signature lives
+/// on **only** in `cfg(test)`, hard-wired to [`Tenancy::Unattributed`]. Production
+/// code therefore has exactly one entry point — [`ConversationStore::append_message_as`],
+/// which cannot be called without choosing a `Tenancy`. A production caller that
+/// forgets fails `cargo check` (not `cargo test`), which is the whole point.
+#[cfg(test)]
+impl ConversationStore {
+    pub(crate) async fn append_message(
+        &self,
+        conversation_id: &str,
+        role: &str,
+        content: &str,
+        agent_id: Option<&str>,
+        author_user_id: Option<&str>,
+        author_name: Option<&str>,
+    ) -> Result<String> {
+        self.append_message_as(
+            conversation_id,
+            role,
+            content,
+            agent_id,
+            author_user_id,
+            author_name,
+            Tenancy::Unattributed,
+        )
+        .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The choke-point acceptance test** (task item 1).
+    ///
+    /// Reads this very source file and asserts there is exactly ONE
+    /// `INSERT INTO conversations` outside the test module — [`upsert_conversation_row`],
+    /// which always emits the tenancy clause. A future creation path that hand-rolls
+    /// its own INSERT (and therefore could forget to stamp an owner, locking that
+    /// owner out of their own chat on an org-bound node) fails HERE, in CI, rather
+    /// than silently in production.
+    #[test]
+    fn exactly_one_insert_into_conversations_in_the_whole_store() {
+        let src = include_str!("conversations.rs");
+        let test_mod = src
+            .find("\n#[cfg(test)]\nmod tests {")
+            .unwrap_or(src.len());
+        let production = &src[..test_mod];
+        // Matches every row-creating form, not just the one that exists today, so a
+        // future `INSERT OR IGNORE` / `INSERT OR REPLACE` / `REPLACE INTO` cannot slip
+        // a second, un-stamping creation path past this guard.
+        let hits: Vec<&str> = production
+            .lines()
+            .map(str::trim)
+            .filter(|l| {
+                let l = l.trim_start_matches('"');
+                (l.starts_with("INSERT") || l.starts_with("REPLACE"))
+                    && l.contains("INTO conversations")
+            })
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "every conversation row must be created by the ONE choke point \
+             (upsert_conversation_row), which always stamps tenancy; found {} raw INSERTs: {hits:?}",
+            hits.len()
+        );
+    }
+
+    /// The choke point's tenancy clause must be preserve-not-clobber AND
+    /// first-writer-wins. Asserted on the SQL text so a future edit that flips a
+    /// COALESCE direction (which would either wipe a claimed owner — re-opening the
+    /// leak — or let a row be re-tenanted — enabling theft) fails loudly.
+    #[test]
+    fn the_choke_point_always_coalesces_tenancy() {
+        let src = include_str!("conversations.rs");
+        assert!(src.contains(
+            "owner_user_id = COALESCE(conversations.owner_user_id, excluded.owner_user_id)"
+        ));
+        assert!(src.contains("org_id        = COALESCE(conversations.org_id, excluded.org_id)"));
+    }
 
     #[tokio::test]
     async fn append_message_publishes_live_event_to_room() {
@@ -3129,7 +3711,7 @@ mod tests {
             .unwrap();
 
         let forked = store
-            .fork_conversation("src", Some(&cut))
+            .fork_conversation("src", Some(&cut), Tenancy::Unattributed)
             .await
             .unwrap()
             .expect("fork should succeed");
@@ -3158,7 +3740,7 @@ mod tests {
     async fn fork_missing_source_or_message_returns_none() {
         let store = ConversationStore::open_in_memory().unwrap();
         assert!(store
-            .fork_conversation("nope", None)
+            .fork_conversation("nope", None, Tenancy::Unattributed)
             .await
             .unwrap()
             .is_none());
@@ -3167,7 +3749,7 @@ mod tests {
             .await
             .unwrap();
         assert!(store
-            .fork_conversation("src2", Some("not-a-real-id"))
+            .fork_conversation("src2", Some("not-a-real-id"), Tenancy::Unattributed)
             .await
             .unwrap()
             .is_none());
@@ -3208,6 +3790,7 @@ mod tests {
                 RunnableKind::Agent,
                 Some("agent-abc"),
                 Some("Test session"),
+                Tenancy::Unattributed,
             )
             .await
             .unwrap();
@@ -3255,7 +3838,7 @@ mod tests {
     async fn session_runnable_kind_round_trips_for_workflow() {
         let store = ConversationStore::open_in_memory().unwrap();
         let session = store
-            .create_session("wf-xyz", RunnableKind::Workflow, None, None)
+            .create_session("wf-xyz", RunnableKind::Workflow, None, None, Tenancy::Unattributed)
             .await
             .unwrap();
         let reloaded = store.get_session(&session.id).await.unwrap().unwrap();
@@ -3341,20 +3924,20 @@ mod tests {
 
         // Add two agents.
         let after_add1 = store
-            .add_participant("conv-multi", "agent-alpha")
+            .add_participant("conv-multi", "agent-alpha", Tenancy::Unattributed)
             .await
             .unwrap();
         assert_eq!(after_add1, vec!["agent-alpha"]);
 
         let after_add2 = store
-            .add_participant("conv-multi", "agent-beta")
+            .add_participant("conv-multi", "agent-beta", Tenancy::Unattributed)
             .await
             .unwrap();
         assert_eq!(after_add2, vec!["agent-alpha", "agent-beta"]);
 
         // Idempotent: adding agent-alpha again changes nothing.
         let after_dup = store
-            .add_participant("conv-multi", "agent-alpha")
+            .add_participant("conv-multi", "agent-alpha", Tenancy::Unattributed)
             .await
             .unwrap();
         assert_eq!(after_dup, vec!["agent-alpha", "agent-beta"]);
@@ -3461,11 +4044,11 @@ mod tests {
             .await
             .unwrap();
         store
-            .add_participant("conv-detail", "agent-x")
+            .add_participant("conv-detail", "agent-x", Tenancy::Unattributed)
             .await
             .unwrap();
         store
-            .add_participant("conv-detail", "agent-y")
+            .add_participant("conv-detail", "agent-y", Tenancy::Unattributed)
             .await
             .unwrap();
 
@@ -3601,5 +4184,415 @@ mod tests {
         assert_eq!(active[1].content, "a1-v2");
         assert_eq!(active[1].sibling_count, 2, "two assistant versions");
         assert_eq!(active[1].parent_message_id.as_deref(), Some(u.as_str()));
+    }
+
+    // ── Per-resource ACL: tenancy is actually POPULATED (the fix) ──────────────
+    //
+    // Before this, EVERY conversation row was created with `owner_user_id` and
+    // `org_id` NULL, and `resource_access` (server/mod.rs) read NULL tenancy as
+    // "the untenanted local row" and returned `Access::Write` unconditionally. The
+    // gate existed, looked real, and enforced nothing. These tests pin the write
+    // that makes it bite, and the SQL filter that mirrors it.
+
+    #[tokio::test]
+    async fn claim_tenancy_stamps_the_owner_on_a_brand_new_conversation() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .claim_tenancy("c1", "alice", Some("org1"))
+            .await
+            .unwrap();
+
+        let meta = store.get_access_meta("c1").await.unwrap().expect("row");
+        assert_eq!(meta.owner_user_id.as_deref(), Some("alice"));
+        assert_eq!(meta.org_id.as_deref(), Some("org1"));
+        assert_eq!(meta.visibility, "private");
+    }
+
+    #[tokio::test]
+    async fn claim_tenancy_never_steals_an_already_owned_conversation() {
+        // First-writer-wins. Two authenticated callers racing on the same id (or a
+        // deliberate re-POST with someone else's conversation id) must not be able to
+        // re-tenant a row — the loser is denied by the ACL on their next request.
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .claim_tenancy("c1", "alice", Some("org1"))
+            .await
+            .unwrap();
+        store
+            .claim_tenancy("c1", "mallory", Some("org1"))
+            .await
+            .unwrap();
+
+        let meta = store.get_access_meta("c1").await.unwrap().expect("row");
+        assert_eq!(
+            meta.owner_user_id.as_deref(),
+            Some("alice"),
+            "an owned conversation must never be re-tenanted"
+        );
+    }
+
+    #[tokio::test]
+    async fn appending_a_message_does_not_wipe_the_claimed_owner() {
+        // The silent-failure mode: `append_message` upserts the conversation row, so
+        // if its ON CONFLICT clause rewrote the tenancy columns the claim would be
+        // erased the moment the first message landed and the gate would go vacuous
+        // again with every test still green.
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .claim_tenancy("c1", "alice", Some("org1"))
+            .await
+            .unwrap();
+        store
+            .append_message("c1", "user", "hello", Some("ryu"), Some("alice"), None)
+            .await
+            .unwrap();
+
+        let meta = store.get_access_meta("c1").await.unwrap().expect("row");
+        assert_eq!(meta.owner_user_id.as_deref(), Some("alice"));
+        assert_eq!(meta.org_id.as_deref(), Some("org1"));
+    }
+
+    #[tokio::test]
+    async fn visible_lists_scope_to_the_caller_on_an_org_bound_node() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .claim_tenancy("alice-chat", "alice", Some("org1"))
+            .await
+            .unwrap();
+        store
+            .append_message("alice-chat", "user", "secret", None, None, None)
+            .await
+            .unwrap();
+        store
+            .claim_tenancy("bob-chat", "bob", Some("org1"))
+            .await
+            .unwrap();
+        store
+            .append_message("bob-chat", "user", "hi", None, None, None)
+            .await
+            .unwrap();
+        // A pre-ACL row: no owner, no org. On a bound node it is unattributable.
+        store
+            .ensure_conversation("legacy", None, None, Tenancy::Unattributed)
+            .await
+            .unwrap();
+
+        // Bob, on the org-bound node, sees only his own.
+        let bob = store
+            .list_conversations_visible(Some("bob"), Some("org1"), true)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = bob.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["bob-chat"], "bob must not see alice's chat");
+
+        // Anonymous on a bound node: nothing.
+        assert!(store
+            .list_conversations_visible(None, None, true)
+            .await
+            .unwrap()
+            .is_empty());
+
+        // The same node UNBOUND (personal, local-first): everything, unchanged.
+        assert_eq!(
+            store
+                .list_conversations_visible(None, None, false)
+                .await
+                .unwrap()
+                .len(),
+            3
+        );
+
+        // The search filter agrees with the list filter, so a semantic hit in
+        // alice's chat can never surface for bob.
+        let searchable = store
+            .visible_conversation_ids(Some("bob"), Some("org1"), true)
+            .await
+            .unwrap();
+        assert_eq!(searchable, vec!["bob-chat".to_owned()]);
+        assert!(store
+            .visible_conversation_ids(None, None, true)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_org_visible_conversation_is_listed_for_other_members() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .claim_tenancy("shared", "alice", Some("org1"))
+            .await
+            .unwrap();
+        {
+            let conn = store.conn.lock().await;
+            conn.execute(
+                "UPDATE conversations SET visibility = 'org' WHERE id = 'shared'",
+                [],
+            )
+            .unwrap();
+        }
+        let bob = store
+            .list_conversations_visible(Some("bob"), Some("org1"), true)
+            .await
+            .unwrap();
+        assert_eq!(bob.len(), 1, "an org-visible chat is shared with the org");
+
+        // …but not with a different org.
+        let outsider = store
+            .list_conversations_visible(Some("mallory"), Some("org2"), true)
+            .await
+            .unwrap();
+        assert!(outsider.is_empty(), "cross-org must never see the row");
+    }
+
+    #[tokio::test]
+    async fn a_fork_is_owned_by_the_forker_not_the_source_owner() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .claim_tenancy("src", "alice", Some("org1"))
+            .await
+            .unwrap();
+        store
+            .append_message("src", "user", "shared thought", None, None, None)
+            .await
+            .unwrap();
+
+        let forked = store
+            .fork_conversation(
+                "src",
+                None,
+                Tenancy::Owned { user_id: "bob".to_owned(), org_id: Some("org1".to_owned()) },
+            )
+            .await
+            .unwrap()
+            .expect("fork");
+        let meta = store
+            .get_access_meta(&forked.id)
+            .await
+            .unwrap()
+            .expect("row");
+        assert_eq!(meta.owner_user_id.as_deref(), Some("bob"));
+        assert_eq!(meta.org_id.as_deref(), Some("org1"));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // THE CHOKE POINT (task item 1): "no owner is ever locked out of their own
+    // conversation, whichever path created it".
+    //
+    // These are the tests that catch a fix which trades a leak for an OUTAGE. The
+    // regression they guard: tenancy used to be stamped at a handful of HANDLERS, so
+    // every other creation path (MCP `create_thread`/`fork_thread`, sync replay, the
+    // healing simulator, …) minted a NULL-tenanted row — and on an org-bound node
+    // NULL means DENIED TO EVERYONE, including the row's rightful owner.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    const ORG: &str = "org1";
+
+    fn alice() -> Tenancy {
+        Tenancy::Owned {
+            user_id: "alice".to_owned(),
+            org_id: Some(ORG.to_owned()),
+        }
+    }
+
+    /// The owner can actually SEE the row on a bound node (the same SQL predicate the
+    /// HTTP list/search and the MCP tools all filter with), and the row's stored
+    /// tenancy names them.
+    async fn assert_owner_can_reach(store: &ConversationStore, id: &str, path: &str) {
+        let meta = store
+            .get_access_meta(id)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("[{path}] no conversation row at all"));
+        assert_eq!(
+            meta.owner_user_id.as_deref(),
+            Some("alice"),
+            "[{path}] created an UNTENANTED row — on an org-bound node its own owner is locked out of it"
+        );
+        assert_eq!(meta.org_id.as_deref(), Some(ORG), "[{path}] org not stamped");
+
+        let visible = store
+            .visible_conversation_ids(Some("alice"), Some(ORG), true)
+            .await
+            .unwrap();
+        assert!(
+            visible.iter().any(|v| v == id),
+            "[{path}] the owner cannot see their own conversation on a bound node"
+        );
+
+        // …and a DIFFERENT user on the same org still cannot.
+        let bobs = store
+            .visible_conversation_ids(Some("bob"), Some(ORG), true)
+            .await
+            .unwrap();
+        assert!(
+            !bobs.iter().any(|v| v == id),
+            "[{path}] a private conversation leaked into another member's visible set"
+        );
+    }
+
+    /// EVERY creation path, table-driven. A future path added without a `Tenancy`
+    /// cannot compile; a future path added WITH the wrong one fails here.
+    #[tokio::test]
+    async fn every_creation_path_leaves_the_row_reachable_by_its_own_owner() {
+        // 1. ensure_conversation (MCP `create_thread`, sync replay, healing sim).
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .ensure_conversation("c-ensure", None, Some("t"), alice())
+            .await
+            .unwrap();
+        assert_owner_can_reach(&store, "c-ensure", "ensure_conversation").await;
+
+        // 2. append_message_as minting a fresh row (channel/bot ingress, import).
+        store
+            .append_message_as("c-append", "user", "hi", None, None, None, alice())
+            .await
+            .unwrap();
+        assert_owner_can_reach(&store, "c-append", "append_message_as").await;
+
+        // 3. append_message_with_id (the sync-replay insert).
+        store
+            .append_message_with_id("c-withid", "m1", "user", "hi", None, 1, alice())
+            .await
+            .unwrap();
+        assert_owner_can_reach(&store, "c-withid", "append_message_with_id").await;
+
+        // 4. add_participant (council chat's first agent).
+        store
+            .add_participant("c-part", "agent-a", alice())
+            .await
+            .unwrap();
+        assert_owner_can_reach(&store, "c-part", "add_participant").await;
+
+        // 5. create_session.
+        let session = store
+            .create_session("agent-a", RunnableKind::Agent, None, None, alice())
+            .await
+            .unwrap();
+        assert_owner_can_reach(&store, &session.conversation_id, "create_session").await;
+
+        // 6. fork_conversation (HTTP fork + the MCP `fork_thread` tool).
+        let forked = store
+            .fork_conversation("c-append", None, alice())
+            .await
+            .unwrap()
+            .expect("fork");
+        assert_owner_can_reach(&store, &forked.id, "fork_conversation").await;
+
+        // 7. claim_tenancy (the repair/backfill entry, still first-writer-wins).
+        store
+            .claim_tenancy("c-claim", "alice", Some(ORG))
+            .await
+            .unwrap();
+        assert_owner_can_reach(&store, "c-claim", "claim_tenancy").await;
+    }
+
+    /// The preserve-not-clobber half of the choke point, at every layer that upserts
+    /// an EXISTING row: none of them may wipe the owner already stamped.
+    #[tokio::test]
+    async fn no_upsert_path_can_wipe_or_steal_a_claimed_owner() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .ensure_conversation("c1", None, None, alice())
+            .await
+            .unwrap();
+
+        // Every path that upserts the same id with a DIFFERENT (or absent) tenancy.
+        store
+            .append_message_as("c1", "user", "hi", None, None, None, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        store
+            .ensure_conversation("c1", Some("a"), None, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        store
+            .append_message_with_id("c1", "m9", "user", "x", None, 2, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        store
+            .add_participant("c1", "agent-z", Tenancy::Unattributed)
+            .await
+            .unwrap();
+        // …and a deliberate STEAL attempt with a real, different principal.
+        store
+            .claim_tenancy("c1", "mallory", Some(ORG))
+            .await
+            .unwrap();
+        store
+            .append_message_as(
+                "c1",
+                "user",
+                "mine now",
+                None,
+                None,
+                None,
+                Tenancy::Owned {
+                    user_id: "mallory".to_owned(),
+                    org_id: Some(ORG.to_owned()),
+                },
+            )
+            .await
+            .unwrap();
+
+        let meta = store.get_access_meta("c1").await.unwrap().unwrap();
+        assert_eq!(
+            meta.owner_user_id.as_deref(),
+            Some("alice"),
+            "first-writer-wins broken: the conversation was re-tenanted / stolen"
+        );
+    }
+
+    /// UNBOUND PARITY: on a personal node nothing changes. Rows stay NULL-tenanted and
+    /// every one of them stays visible — no offline lockout, byte-identical to the
+    /// pre-ACL build.
+    #[tokio::test]
+    async fn an_unbound_personal_node_is_unchanged_on_every_creation_path() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .ensure_conversation("u1", None, None, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        store
+            .append_message_as("u2", "user", "hi", None, None, None, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        store
+            .append_message_with_id("u3", "m1", "user", "hi", None, 1, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        store
+            .add_participant("u4", "agent-a", Tenancy::Unattributed)
+            .await
+            .unwrap();
+        let session = store
+            .create_session("agent-a", RunnableKind::Agent, None, None, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        let forked = store
+            .fork_conversation("u2", None, Tenancy::Unattributed)
+            .await
+            .unwrap()
+            .expect("fork");
+
+        for id in ["u1", "u2", "u3", "u4"] {
+            let meta = store.get_access_meta(id).await.unwrap().unwrap();
+            assert_eq!(
+                meta.owner_user_id, None,
+                "an unbound node must not stamp tenancy on {id}"
+            );
+            assert_eq!(meta.org_id, None);
+        }
+
+        // node_bound = false ⇒ NO filtering at all: every row is visible, exactly as
+        // before the ACL existed.
+        let visible = store.visible_conversation_ids(None, None, false).await.unwrap();
+        for id in ["u1", "u2", "u3", "u4", &session.conversation_id, &forked.id] {
+            assert!(
+                visible.iter().any(|v| v == id),
+                "unbound node lost visibility of {id} — this is the offline-lockout regression"
+            );
+        }
+        assert_eq!(store.list_conversations().await.unwrap().len(), 6);
     }
 }

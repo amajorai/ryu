@@ -648,7 +648,7 @@ pub async fn apply_message_feedback(
             mem.author_agent_id = Some(agent.to_string());
             match state
                 .memory
-                .record_full(crate::server::memory::LOCAL_USER, agent, mem)
+                .record_full(&crate::server::background_memory_user_id(), agent, mem)
                 .await
             {
                 Ok(Some(id)) => {

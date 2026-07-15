@@ -33,21 +33,31 @@
 //! + rebroadcast on an inbound update, and [`DocRegistry::flush_and_drop`] +
 //! [`DocRegistry::materialize`] on last-leave / quiescence.
 //!
-//! ## Honesty note on [`DocRegistry::materialize`]
+//! ## `Y.Doc -> source` materialization (what is, and is not, projected)
 //!
 //! The handshake, the write-ACL, the append-log, compaction, and snapshot
-//! persistence are all LIVE. What is NOT live is the `Y.Doc -> source` decode:
-//! the canonical `Y.Doc <-> Slate/grid` encoding is defined by the client provider
-//! (a LATER batch), so `materialize` does NOT decode the doc into a page-markdown /
-//! database-JSON `source` projection — doing so would require guessing the client's
-//! root-type shape and would feed wrong data into RAG. `materialize` always
-//! persists the opaque snapshot + state vector (the real, round-trippable
-//! deliverable) and leaves `materialized_source` as `None`. The per-quiescence
-//! embed write-back path into `spaces.rs` is therefore WIRED but DORMANT: it fires
-//! on quiescence and is a no-op until `source` becomes `Some` (the client-provider
-//! batch). The crate-level `dead_code` allowance mirrors [`crate::realtime`] for
-//! the few helpers only the tests exercise.
+//! persistence are all LIVE. [`DocRegistry::materialize`] additionally decodes the
+//! doc into the plain `documents.source` text the non-collaborative readers need
+//! (RAG chunks, search snippets, backlinks, version snapshots), via
+//! [`projection::project`]. The per-quiescence embed write-back in
+//! [`crate::server::realtime_ws`] — previously wired but dormant — therefore now
+//! fires for real.
+//!
+//! It is deliberately **databases only**. A database's `source` is a data model
+//! (`{columns, rows, views}` JSON), so the projection is an exact transcription of
+//! the client's `snapshotDatabase` and semantic JSON equality is the whole
+//! contract. A **page's** `source` is markdown from Plate's client-side Slate ->
+//! markdown serializer; reimplementing that in Rust risks *silently rewriting the
+//! user's real body* on every quiescence (the write-back has no kind check, and
+//! that column also re-seeds fresh rooms and feeds version snapshots). Corrupt
+//! content is worse than a stale index, so pages project to `None` and their
+//! editor's own markdown PUT stays authoritative. See [`projection`].
+//!
+//! The crate-level `dead_code` allowance mirrors [`crate::realtime`] for the few
+//! helpers only the tests exercise.
 #![allow(dead_code)]
+
+pub mod projection;
 
 use std::{
     collections::HashMap,
@@ -217,19 +227,21 @@ pub fn classify_doc_sync(bytes: &[u8], can_write: bool) -> DocSyncAction {
 // ── Materialized projection ──────────────────────────────────────────────────
 
 /// The result of [`DocRegistry::materialize`]: the opaque CRDT snapshot (always
-/// produced + persisted) and a best-effort `source` projection.
-///
-/// `source` is `None` in this stage — see the module-level honesty note. The
-/// snapshot + state vector are the real, round-trippable deliverable.
+/// produced + persisted) and the decoded `source` projection.
 #[derive(Debug, Clone)]
 pub struct Materialized {
     /// Full-state Yjs update (`encode_state_as_update_v1` of empty SV).
     pub snapshot: Vec<u8>,
     /// Doc state vector (`StateVector::encode_v1`).
     pub state_vector: Vec<u8>,
-    /// The decoded page-markdown / database-JSON projection for the embed/search
-    /// readers. `None` until the client-provider batch pins the canonical
-    /// `Y.Doc <-> source` mapping (TODO).
+    /// The decoded `source` projection for the embed/search readers
+    /// ([`projection::project`]).
+    ///
+    /// `Some` for a database doc (its `{columns, rows, views}` JSON). `None` for a
+    /// page (Plate's markdown serializer stays authoritative — see [`projection`]),
+    /// for a whiteboard, and for an unseeded empty room. **`None` means "do not
+    /// write": the caller must leave `documents.source` untouched**, never
+    /// overwrite it with an empty projection.
     pub source: Option<String>,
 }
 
@@ -689,29 +701,35 @@ impl DocRegistry {
         self.store.write_snapshot_and_prune(doc_id, &sv, &snapshot)
     }
 
-    /// Persist the opaque snapshot + state vector and write the best-effort
-    /// `source` projection for the embed/search readers.
+    /// Persist the opaque snapshot + state vector and decode the `source`
+    /// projection for the embed/search readers ([`projection::project`]).
     ///
-    /// HONESTY: `source` is `None` in this stage — the canonical `Y.Doc <-> source`
-    /// decode is defined by the client provider (a later batch) and is deliberately
-    /// NOT guessed here. The snapshot + state vector ARE produced and persisted, so
-    /// the durable side is real and round-trippable; only the human-readable
-    /// projection is deferred. See [`Materialized`] / the module honesty note.
+    /// The snapshot + state vector are always produced. `source` is `Some` only
+    /// when the doc has a projection Core can produce **without risking the user's
+    /// content** — today that is database docs. A page/whiteboard/unseeded room
+    /// yields `None`, which the caller must treat as "leave `documents.source`
+    /// alone" (see [`Materialized::source`]).
+    ///
+    /// The projection runs under the SAME per-doc lock and its own read
+    /// transaction, and only ever uses non-mutating root getters — inspecting a
+    /// doc must never add root types to the state we are about to persist and
+    /// rebroadcast.
     pub fn materialize(&self, doc_id: &str) -> Result<Materialized> {
         let entry = self.entry(doc_id)?;
-        let (snapshot, sv) = {
+        let (snapshot, sv, source) = {
             let doc = entry.doc.lock().unwrap_or_else(|e| e.into_inner());
-            let txn = doc.transact();
-            (
-                txn.encode_state_as_update_v1(&StateVector::default()),
-                txn.state_vector().encode_v1(),
-            )
+            let (snapshot, sv) = {
+                let txn = doc.transact();
+                (
+                    txn.encode_state_as_update_v1(&StateVector::default()),
+                    txn.state_vector().encode_v1(),
+                )
+            };
+            // Separate read txn: `project` opens its own (yrs forbids two live
+            // transactions on one doc, so the encode txn above must drop first).
+            let source = projection::project(&doc);
+            (snapshot, sv, source)
         };
-        // TODO(client-provider batch): decode `snapshot` into the page-markdown /
-        // database-JSON `source` using the canonical client-defined Y.Doc shape,
-        // then pass `Some(&source)` here and (stage 3) write it back through the
-        // spaces update path so the embed/RAG pipeline runs once per quiescence.
-        let source: Option<String> = None;
         self.store
             .write_materialized(doc_id, &sv, &snapshot, source.as_deref())?;
         Ok(Materialized {
@@ -1212,11 +1230,13 @@ mod tests {
     }
 
     #[test]
-    fn materialize_persists_snapshot_with_todo_source() {
+    fn materialize_persists_snapshot_and_leaves_unprojectable_source_none() {
         let store = Arc::new(CollabStore::open_in_memory().unwrap());
         let reg = DocRegistry::new(Arc::clone(&store));
         let doc_id = "doc-materialize";
 
+        // A plain text root — not a database, so there is no projection Core can
+        // safely produce (this is the page/whiteboard shape).
         let u1 = make_text_update("name", 0, "content", &StateVector::default());
         reg.apply_remote_update(doc_id, &u1).unwrap();
 
@@ -1229,21 +1249,75 @@ mod tests {
             !mat.state_vector.is_empty(),
             "state vector is always produced"
         );
-        // Honest: no source projection in this stage.
+        // `None` = "do not write" — the caller must leave `documents.source` alone
+        // rather than clobber it with an empty projection.
         assert!(
             mat.source.is_none(),
-            "source projection deferred to client batch"
+            "a non-database doc has no Core-side projection"
         );
-        assert!(
-            store.load_materialized_source(doc_id).unwrap().is_none(),
-            "materialized_source persisted as NULL (TODO)"
-        );
+        assert!(store.load_materialized_source(doc_id).unwrap().is_none());
 
         // The persisted snapshot rehydrates to the same state vector.
         let reg2 = DocRegistry::new(store);
         assert_eq!(
             sv_norm(&reg2.state_vector(doc_id).unwrap()),
             sv_norm(&mat.state_vector)
+        );
+    }
+
+    #[test]
+    fn materialize_projects_a_database_doc_into_source() {
+        // The vertical slice: a collaborative database edit arrives as a CRDT
+        // update, and materialize decodes it into the `{columns, rows, views}` JSON
+        // that `documents.source` holds — which is what the desktop editor stops
+        // PUTting once the room goes collaborative, and what feeds RAG/search.
+        let store = Arc::new(CollabStore::open_in_memory().unwrap());
+        let reg = DocRegistry::new(Arc::clone(&store));
+        let doc_id = "doc-database";
+
+        // Author the update the way a client does: seed columns + one row.
+        let update = {
+            use yrs::{Any, Array, MapPrelim};
+            let doc = Doc::new();
+            let columns = doc.get_or_insert_array("columns");
+            let rows = doc.get_or_insert_array("rows");
+            let mut txn = doc.transact_mut();
+            columns.push_back(
+                &mut txn,
+                MapPrelim::from([
+                    ("id", Any::from("col_name")),
+                    ("label", Any::from("Name")),
+                    (
+                        "cell",
+                        Any::from_json(r#"{"variant":"short-text"}"#).unwrap(),
+                    ),
+                ]),
+            );
+            rows.push_back(
+                &mut txn,
+                MapPrelim::from([
+                    ("__id", Any::from("row_1")),
+                    ("__order", Any::from("a0")),
+                    ("col_name", Any::from("Ada")),
+                ]),
+            );
+            txn.encode_diff_v1(&StateVector::default())
+        };
+        reg.apply_remote_update(doc_id, &update).unwrap();
+
+        let mat = reg.materialize(doc_id).unwrap();
+        let source = mat.source.expect("a database doc must project a source");
+        let value: serde_json::Value = serde_json::from_str(&source).unwrap();
+        assert_eq!(value["columns"][0]["id"], "col_name");
+        assert_eq!(value["rows"][0]["col_name"], "Ada");
+        assert_eq!(value["views"][0]["kind"], "table");
+
+        // And it is durable: the projection is persisted alongside the snapshot, so
+        // the embed write-back and any later reader see the same text.
+        assert_eq!(
+            store.load_materialized_source(doc_id).unwrap().as_deref(),
+            Some(source.as_str()),
+            "the projection must be persisted, not just returned"
         );
     }
 }

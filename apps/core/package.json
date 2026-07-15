@@ -6,6 +6,7 @@
     "dev": "node scripts/dev.js",
     "dev:watch": "cargo watch -x 'run --features sandbox-wasmtime,voice-parakeet,voice-vad'",
     "build": "cargo build --release --features sandbox-wasmtime,voice-parakeet,voice-vad",
-    "check": "cargo check"
+    "check": "cargo check",
+    "generate:openapi": "cargo run --quiet -- --dump-openapi 2>/dev/null > ../fumadocs/specs/core-openapi.json && python3 ../../scripts/postprocess-core-openapi.py"
   }
 }

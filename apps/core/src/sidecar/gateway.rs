@@ -40,11 +40,16 @@ const DEFAULT_GATEWAY_BIN: &str = "ryu-gateway";
 const ENV_LOCAL_LLM_URL: &str = "LOCAL_LLM_URL";
 
 /// Base URL Core forwards chat completions to. Always non-empty.
+///
+/// Profile-aware default: release ⇒ `http://127.0.0.1:7981`, dev ⇒ `:8981`, ….
+/// (Under a non-release profile `profile::apply_env_defaults` also seeds
+/// `RYU_GATEWAY_URL`, so the env branch normally wins; the default is computed via
+/// the same `profile::port(7981)` so both agree.)
 pub fn gateway_url() -> String {
     std::env::var(ENV_GATEWAY_URL)
         .ok()
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| DEFAULT_GATEWAY_URL.to_owned())
+        .unwrap_or_else(|| format!("http://127.0.0.1:{}", crate::profile::port(7981)))
 }
 
 /// Optional bearer token Core presents to the gateway (only when the gateway
@@ -103,13 +108,110 @@ pub fn local_engine_gateway_url() -> Option<String> {
         }
     }
     if let Some(active) = ActiveEngineStore::load().active {
-        return local_engine_url(&active).map(str::to_owned);
+        return local_engine_url(&active);
     }
     let versions = crate::sidecar::download_manager::VersionStore::load();
     if versions.installed_version("llamacpp").is_some() {
-        return local_engine_url("llamacpp").map(str::to_owned);
+        return local_engine_url("llamacpp");
     }
     None
+}
+
+/// Build the `PUT {gateway}/v1/config` request for a config patch, carrying the
+/// gateway bearer when one is configured. Split out (base/token as params) so the
+/// auth-forwarding + URL shape are unit-testable against a local listener without
+/// mutating the process environment.
+fn gateway_config_request(
+    client: &reqwest::Client,
+    base: &str,
+    token: Option<&str>,
+    patch: &serde_json::Value,
+) -> reqwest::RequestBuilder {
+    let base = base.trim_end_matches('/');
+    let mut req = client
+        .put(format!("{base}/v1/config"))
+        .timeout(Duration::from_millis(5000))
+        .json(patch);
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    req
+}
+
+/// Push a `/v1/config` patch to the LIVE gateway (the hot-swap path).
+///
+/// This is the single config-push transport: the `PUT /api/gateway/config` proxy
+/// handler AND Core's policy-plugin toggles both route through it, so a firewall /
+/// routing toggle reconfigures the RUNNING gateway — local **or** remote (the PUT
+/// targets [`gateway_url`], and the gateway hot-swaps on `PUT /v1/config` with no
+/// respawn). Returns the gateway's `(status, body)` verbatim so callers can relay
+/// the exact status (the proxy) or inspect success (the policy path). Errs only on
+/// a transport failure.
+pub(crate) async fn push_config(
+    client: &reqwest::Client,
+    patch: &serde_json::Value,
+) -> anyhow::Result<(reqwest::StatusCode, serde_json::Value)> {
+    let base = gateway_url();
+    let resp = gateway_config_request(client, &base, gateway_token().as_deref(), patch)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("gateway config push failed: {e}"))?;
+    let status = resp.status();
+    let body = resp
+        .json::<serde_json::Value>()
+        .await
+        .unwrap_or_else(|_| serde_json::json!({}));
+    Ok((status, body))
+}
+
+/// Build the `GET {gateway}/v1/config` request, carrying the gateway bearer when
+/// one is configured. Split out (base/token as params) so the auth-forwarding +
+/// URL shape are unit-testable against a local listener without mutating the
+/// process environment. Mirrors [`gateway_config_request`] (the PUT builder).
+fn gateway_config_get_request(
+    client: &reqwest::Client,
+    base: &str,
+    token: Option<&str>,
+) -> reqwest::RequestBuilder {
+    let base = base.trim_end_matches('/');
+    let mut req = client
+        .get(format!("{base}/v1/config"))
+        .timeout(Duration::from_millis(5000));
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    req
+}
+
+/// Read the LIVE gateway config (`GET /v1/config`) as JSON — the `ConfigView` with
+/// the in-memory firewall/budget/routing state, reflecting any prior hot-swap.
+///
+/// This is the read half of the config plane; it is **not** a second config-*push*
+/// path ([`push_config`] remains the single PUT transport). A policy toggle uses it
+/// to read-modify-write the RUNNING gateway's firewall section — sourcing the full
+/// live object (`policy`, `locked_fields`, `inspector`, operator `custom_patterns`,
+/// …) so the PUT that follows preserves every field it does not intend to change,
+/// instead of reconstructing a partial section from Core's local disk (which is
+/// empty for a REMOTE gateway → a full-replacement PUT would clobber enforcement).
+/// Targets [`gateway_url`] and forwards [`gateway_token`] (the master key), so it
+/// works against a remote gateway exactly like the PUT. Errs on a transport failure
+/// or a non-2xx status.
+pub(crate) async fn fetch_config(
+    client: &reqwest::Client,
+) -> anyhow::Result<serde_json::Value> {
+    let base = gateway_url();
+    let resp = gateway_config_get_request(client, &base, gateway_token().as_deref())
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("gateway config read failed: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("gateway GET /v1/config returned {status}: {body}");
+    }
+    resp.json::<serde_json::Value>()
+        .await
+        .map_err(|e| anyhow::anyhow!("gateway config read: bad JSON: {e}"))
 }
 
 /// Environment overrides Core layers onto the spawned gateway so it routes the
@@ -609,11 +711,13 @@ fn sandbox_credits_spawn_env() -> Vec<(String, String)> {
 /// spawn path is sync (does not see Core's parsed args), so we read `RYU_BIND`
 /// directly. A wildcard bind host (`0.0.0.0` / `::`) is not a usable client
 /// host, so it is rewritten to loopback.
-fn core_self_url() -> String {
-    let bind = std::env::var("RYU_BIND").unwrap_or_else(|_| "127.0.0.1:7980".to_owned());
+pub(crate) fn core_self_url() -> String {
+    let default_bind = format!("127.0.0.1:{}", crate::profile::port(7980));
+    let bind = std::env::var("RYU_BIND").unwrap_or(default_bind);
+    let default_port = crate::profile::port(7980).to_string();
     let (host, port) = match bind.rsplit_once(':') {
         Some((h, p)) => (h, p),
-        None => (bind.as_str(), "7980"),
+        None => (bind.as_str(), default_port.as_str()),
     };
     let host = match host.trim() {
         "" | "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
@@ -1742,5 +1846,141 @@ mod tests {
         std::env::set_var(ENV_ALLOW_GATEWAY_FALLBACK, "1");
         let allowed = check_exec_scan("deno", "echo hi", None, None).await;
         assert_eq!(allowed, ExecScanOutcome::Allow);
+    }
+
+    /// The config-push transport must PUT `/v1/config` and forward the gateway
+    /// bearer (the master key on a remote gateway) so a remote/unmanaged gateway
+    /// toggle is actually authorized — the item-1 "verify the master-key auth is
+    /// sent" requirement. Drives a oneshot listener so no process env is touched.
+    #[tokio::test]
+    async fn config_request_puts_config_path_and_forwards_bearer() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind oneshot listener");
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            // Read until we have the full request (header block + JSON body). One
+            // small localhost request usually arrives at once, but loop with a
+            // short timeout so a split header/body still assembles.
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 2048];
+            loop {
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(500),
+                    sock.read(&mut buf),
+                )
+                .await
+                {
+                    Ok(Ok(0)) => break,
+                    Ok(Ok(n)) => {
+                        raw.extend_from_slice(&buf[..n]);
+                        // Stop once the body token has arrived.
+                        if String::from_utf8_lossy(&raw).contains("\"firewall\"") {
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            let _ = sock
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                .await;
+            String::from_utf8_lossy(&raw).into_owned()
+        });
+
+        let client = reqwest::Client::new();
+        let base = format!("http://{addr}");
+        let patch = serde_json::json!({ "firewall": { "enabled": true } });
+        let resp = gateway_config_request(&client, &base, Some("secret-master-key"), &patch)
+            .send()
+            .await
+            .expect("request sent to oneshot listener");
+        assert!(resp.status().is_success());
+
+        let raw = server.await.unwrap();
+        let lower = raw.to_ascii_lowercase();
+        assert!(
+            lower.contains("put /v1/config"),
+            "must target PUT /v1/config, got:\n{raw}"
+        );
+        assert!(
+            lower.contains("authorization: bearer secret-master-key"),
+            "must forward the master-key bearer, got:\n{raw}"
+        );
+        assert!(
+            raw.contains("\"firewall\""),
+            "must carry the config patch body, got:\n{raw}"
+        );
+    }
+
+    /// The live-config READ (the read-modify-write source for a firewall toggle)
+    /// must GET `/v1/config` and forward the gateway bearer, so a remote gateway's
+    /// live firewall section is actually readable (else the toggle fail-closed
+    /// no-ops remotely). Mirror of the PUT test, driven off a oneshot listener.
+    #[tokio::test]
+    async fn config_get_request_targets_config_path_and_forwards_bearer() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind oneshot listener");
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 2048];
+            loop {
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(500),
+                    sock.read(&mut buf),
+                )
+                .await
+                {
+                    Ok(Ok(0)) => break,
+                    Ok(Ok(n)) => {
+                        raw.extend_from_slice(&buf[..n]);
+                        // A GET has no body; stop as soon as the header block ends.
+                        if String::from_utf8_lossy(&raw).contains("\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            let body = b"{\"firewall\":{\"enabled\":true,\"policy\":\"block\"}}";
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+                body.len()
+            );
+            let _ = sock.write_all(head.as_bytes()).await;
+            let _ = sock.write_all(body).await;
+            String::from_utf8_lossy(&raw).into_owned()
+        });
+
+        let client = reqwest::Client::new();
+        let base = format!("http://{addr}");
+        let resp = gateway_config_get_request(&client, &base, Some("secret-master-key"))
+            .send()
+            .await
+            .expect("request sent to oneshot listener");
+        assert!(resp.status().is_success());
+        let cfg: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(cfg["firewall"]["policy"], serde_json::json!("block"));
+
+        let raw = server.await.unwrap();
+        let lower = raw.to_ascii_lowercase();
+        assert!(
+            lower.contains("get /v1/config"),
+            "must target GET /v1/config, got:\n{raw}"
+        );
+        assert!(
+            lower.contains("authorization: bearer secret-master-key"),
+            "must forward the master-key bearer, got:\n{raw}"
+        );
     }
 }

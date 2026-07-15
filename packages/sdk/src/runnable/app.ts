@@ -24,7 +24,9 @@
 import type {
 	Contributes,
 	PluginManifest,
+	Requires,
 	RunnableMeta,
+	Surface,
 	ToolAppConfig,
 	WidgetContribution,
 } from "../manifest.ts";
@@ -54,6 +56,18 @@ export interface AppToolSpec {
 	name: string;
 }
 
+/**
+ * The `requires` block as an AUTHOR writes it: both members optional. Distinct
+ * from the parsed {@link Requires} (where zod has applied its `[]` defaults, so
+ * both are present).
+ */
+export interface DefineAppRequires {
+	/** Plugins that must be installed + enabled before this app enables. */
+	apps?: Requires["apps"];
+	/** Grants implied by those dependencies (declaration only). */
+	grants?: string[];
+}
+
 /** Options for {@link defineApp}. */
 export interface DefineAppOptions {
 	/** VS-Code-style activation events. Empty = eager (default `["*"]`). */
@@ -66,6 +80,13 @@ export interface DefineAppOptions {
 	id: string;
 	/** Widget MIME dialect. Defaults to `text/html+skybridge`. */
 	mime?: string;
+	/**
+	 * Plugin-to-plugin dependencies. Core auto-enables them (in dependency order)
+	 * before this app, and refuses to disable one while this app still needs it.
+	 * Omit for the common case (no dependencies) — the key is then absent from the
+	 * emitted manifest entirely.
+	 */
+	requires?: DefineAppRequires;
 	/** MCP server namespace for the tool ids. Defaults to `slug`. */
 	server?: string;
 	/**
@@ -73,6 +94,11 @@ export interface DefineAppOptions {
 	 * `server` is omitted, the MCP server namespace that qualifies each tool id.
 	 */
 	slug: string;
+	/**
+	 * Host surfaces this app runs on. **Omitted/empty = every surface** (the
+	 * backward-compatible default); it never means "hidden".
+	 */
+	targets?: Surface[];
 	/** Human-readable display name shown in the app store / launcher. */
 	title: string;
 	/** The tools this app exposes (at least one render tool is expected). */
@@ -174,6 +200,20 @@ export function defineApp(options: DefineAppOptions): PluginManifest {
 		permission_grants: options.grants ?? [],
 		activation_events: options.activationEvents ?? ["*"],
 		contributes,
+		// `targets: []` means EVERY surface, so an app that declares none is
+		// unrestricted — the backward-compatible default.
+		targets: options.targets ?? [],
+		// `requires` stays ABSENT (not `{apps:[],grants:[]}`) when undeclared, so the
+		// emitted manifest carries no key at all — matching Core's
+		// `Option<Requires>` + `skip_serializing_if = "Option::is_none"`.
+		...(options.requires
+			? {
+					requires: {
+						apps: options.requires.apps ?? [],
+						grants: options.requires.grants ?? [],
+					},
+				}
+			: {}),
 	};
 
 	const result = PluginManifestSchema.safeParse(raw);

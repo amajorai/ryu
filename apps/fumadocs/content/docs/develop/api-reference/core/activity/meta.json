@@ -1,0 +1,9 @@
+{
+  "title": "Activity",
+  "description": "Activity API endpoints.",
+  "pages": [
+    "list_activity",
+    "create_activity",
+    "activity_stream"
+  ]
+}

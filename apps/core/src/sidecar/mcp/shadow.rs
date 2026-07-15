@@ -31,17 +31,18 @@ use super::RegistryTool;
 /// reserved (the built-in provider wins).
 pub const SERVER_NAME: &str = "shadow";
 
-/// Default Shadow base URL. Shadow listens on `127.0.0.1:3030` (overridable via
-/// its own `SHADOW_PORT`). Override the whole base here with `RYU_SHADOW_URL`.
-const DEFAULT_BASE_URL: &str = "http://127.0.0.1:3030";
-
 /// How long to wait for Shadow before declaring it unavailable. Kept short so a
 /// stopped Shadow doesn't stall an agent's turn.
 const REQUEST_TIMEOUT_SECS: u64 = 10;
 
-/// Resolve the Shadow base URL: `RYU_SHADOW_URL` if set, else the default.
+/// Resolve the Shadow base URL: `RYU_SHADOW_URL` if set, else the profile-aware
+/// default (`127.0.0.1:3030` on release, `:4030` on dev, …) matching the port the
+/// `ShadowManager` spawns on. `profile::apply_env_defaults` also seeds
+/// `RYU_SHADOW_URL` under a non-release profile, so this fallback and the env
+/// resolve to the same port either way.
 fn base_url() -> String {
-    std::env::var("RYU_SHADOW_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_owned())
+    std::env::var("RYU_SHADOW_URL")
+        .unwrap_or_else(|_| format!("http://127.0.0.1:{}", crate::profile::port(3030)))
 }
 
 /// The set of Shadow tools exposed through the registry. Each maps to a Shadow

@@ -86,6 +86,13 @@ fn default_true() -> bool {
 }
 
 /// `GET /api/monitors` — list all monitors.
+#[utoipa::path(
+    get,
+    path = "/api/monitors",
+    tag = "Monitors",
+    summary = "list all monitors.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_monitors(State(state): State<ServerState>) -> Json<serde_json::Value> {
     match state.monitors.store.list_monitors().await {
         Ok(monitors) => Json(json!({ "monitors": monitors })),
@@ -94,6 +101,14 @@ pub async fn list_monitors(State(state): State<ServerState>) -> Json<serde_json:
 }
 
 /// `POST /api/monitors` — create a monitor (and its backing scheduled job).
+#[utoipa::path(
+    post,
+    path = "/api/monitors",
+    tag = "Monitors",
+    summary = "create a monitor (and its backing scheduled job).",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn create_monitor(
     State(state): State<ServerState>,
     Json(body): Json<MonitorBody>,
@@ -133,6 +148,14 @@ pub async fn create_monitor(
 }
 
 /// `GET /api/monitors/:id` — one monitor.
+#[utoipa::path(
+    get,
+    path = "/api/monitors/{id}",
+    tag = "Monitors",
+    summary = "one monitor.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_monitor(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -148,6 +171,15 @@ pub async fn get_monitor(
 }
 
 /// `PUT /api/monitors/:id` — replace a monitor's definition.
+#[utoipa::path(
+    put,
+    path = "/api/monitors/{id}",
+    tag = "Monitors",
+    summary = "replace a monitor's definition.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn update_monitor(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -197,6 +229,14 @@ pub async fn update_monitor(
 }
 
 /// `DELETE /api/monitors/:id` — remove a monitor, its history, and its job.
+#[utoipa::path(
+    delete,
+    path = "/api/monitors/{id}",
+    tag = "Monitors",
+    summary = "remove a monitor, its history, and its job.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn delete_monitor(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -213,6 +253,15 @@ pub async fn delete_monitor(
 }
 
 /// `POST /api/monitors/:id/run` — run one check immediately and return the status.
+#[utoipa::path(
+    post,
+    path = "/api/monitors/{id}/run",
+    tag = "Monitors",
+    summary = "run one check immediately and return the status.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn run_monitor(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -224,6 +273,14 @@ pub async fn run_monitor(
 }
 
 /// `GET /api/monitors/:id/snapshots?limit=N` — recent check history.
+#[utoipa::path(
+    get,
+    path = "/api/monitors/{id}/snapshots",
+    tag = "Monitors",
+    summary = "recent check history.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_snapshots(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -241,6 +298,13 @@ pub async fn list_snapshots(
 }
 
 /// `GET /api/monitors/alerts?limit=N` and `GET /api/monitors/:id/alerts` — alerts.
+#[utoipa::path(
+    get,
+    path = "/api/monitors/alerts",
+    tag = "Monitors",
+    summary = "alerts.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_all_alerts(
     State(state): State<ServerState>,
     Query(params): Query<HashMap<String, String>>,
@@ -252,6 +316,14 @@ pub async fn list_all_alerts(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/monitors/{id}/alerts",
+    tag = "Monitors",
+    summary = "List alerts for one monitor",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_monitor_alerts(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -273,6 +345,15 @@ fn alerts_limit(params: &HashMap<String, String>) -> u32 {
 }
 
 /// `POST /api/monitors/alerts/:id/ack` — acknowledge an alert.
+#[utoipa::path(
+    post,
+    path = "/api/monitors/alerts/{id}/ack",
+    tag = "Monitors",
+    summary = "acknowledge an alert.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn ack_alert(
     State(state): State<ServerState>,
     Path(id): Path<i64>,
@@ -288,6 +369,13 @@ pub async fn ack_alert(
 }
 
 /// `GET /api/monitors/alerts/stream` — SSE feed of new alerts as they fire.
+#[utoipa::path(
+    get,
+    path = "/api/monitors/alerts/stream",
+    tag = "Monitors",
+    summary = "SSE feed of new alerts as they fire.",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn alerts_stream(
     State(state): State<ServerState>,
 ) -> axum::response::sse::Sse<
@@ -325,6 +413,14 @@ pub struct PushTokenBody {
 }
 
 /// `POST /api/monitors/push-tokens` — register a mobile Expo push token.
+#[utoipa::path(
+    post,
+    path = "/api/monitors/push-tokens",
+    tag = "Monitors",
+    summary = "register a mobile Expo push token.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn register_push_token(
     State(state): State<ServerState>,
     Json(body): Json<PushTokenBody>,
@@ -348,6 +444,14 @@ pub async fn register_push_token(
 }
 
 /// `DELETE /api/monitors/push-tokens/:token` — unregister a push token.
+#[utoipa::path(
+    delete,
+    path = "/api/monitors/push-tokens/{token}",
+    tag = "Monitors",
+    summary = "unregister a push token.",
+    params(("token" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn remove_push_token(
     State(state): State<ServerState>,
     Path(token): Path<String>,

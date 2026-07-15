@@ -191,7 +191,9 @@ impl Sidecar for LlamaCppManager {
             tracing::info!("llama.cpp sidecar starting");
             let mut proc = LlamaCppProcess::new(binary_path);
             let opts = process::LlamaCppStartOptions {
-                port: 8080,
+                // Profile-aware chat-engine port; the client resolves the same
+                // `profile::port(8080)` in `active_engine`.
+                port: crate::profile::port(8080),
                 model_path,
                 mmproj_path,
                 ctx_size: 0,
@@ -206,13 +208,13 @@ impl Sidecar for LlamaCppManager {
 
             // Wait for the HTTP port to accept connections. Model loading can be
             // slow (tens of seconds for a 806 MB Q4 file), so we allow up to
-            // 120 s before giving up.
+            // 120 s before giving up. Probe the SAME profile-aware port the engine
+            // was spawned on (release 8080, dev 9080, …) — a hardcoded :8080 here
+            // would hang forever under a non-release profile.
+            let health_addr = format!("127.0.0.1:{}", crate::profile::port(8080));
             tokio::time::timeout(std::time::Duration::from_secs(120), async {
                 loop {
-                    if tokio::net::TcpStream::connect("127.0.0.1:8080")
-                        .await
-                        .is_ok()
-                    {
+                    if tokio::net::TcpStream::connect(&health_addr).await.is_ok() {
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

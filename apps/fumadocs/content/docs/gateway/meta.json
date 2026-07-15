@@ -9,6 +9,7 @@
     "routing",
     "routing-planes",
     "gateway-for-any-agent",
+    "loopback-routes",
     "---Configuration & Security---",
     "configuration",
     "security",

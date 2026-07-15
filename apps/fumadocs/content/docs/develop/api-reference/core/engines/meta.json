@@ -4,6 +4,7 @@
   "pages": [
     "get_active_engine",
     "set_active_engine",
-    "list_engines"
+    "list_engines",
+    "engine_models"
   ]
 }

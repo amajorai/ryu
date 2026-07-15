@@ -66,6 +66,13 @@ fn bridge_path_for(method: &str) -> Option<&'static str> {
         "spaces.updateDoc" => Some("host.spaces_update_doc"),
         "spaces.listDocs" => Some("host.spaces_list_docs"),
         "spaces.deleteDoc" => Some("host.spaces_delete_doc"),
+        "finetune.capability" => Some("host.finetune_capability"),
+        "finetune.start" => Some("host.finetune_start"),
+        "finetune.list" => Some("host.finetune_list"),
+        "finetune.get" => Some("host.finetune_get"),
+        "finetune.cancel" => Some("host.finetune_cancel"),
+        "finetune.adapters" => Some("host.finetune_adapters"),
+        "finetune.merge" => Some("host.finetune_merge"),
         _ => None,
     }
 }
@@ -82,6 +89,14 @@ fn required_grant_for(method: &str) -> Option<&'static str> {
         | "spaces.updateDoc"
         | "spaces.listDocs"
         | "spaces.deleteDoc" => Some("spaces:docs"),
+        "finetune.capability"
+        | "finetune.start"
+        | "finetune.list"
+        | "finetune.get"
+        | "finetune.cancel"
+        | "finetune.adapters"
+        | "finetune.merge"
+        | "finetune.stream" => Some("finetune:runs"),
         _ => None,
     }
 }
@@ -108,6 +123,15 @@ pub struct HostDispatchBody {
 
 /// `POST /api/plugins/:plugin_id/host` — dispatch one host-capability call for an
 /// enabled app, gated by that app's Gateway-approved grants.
+#[utoipa::path(
+    post,
+    path = "/api/plugins/{id}/host",
+    tag = "Plugins",
+    summary = "dispatch one host-capability call for an",
+    params(("plugin_id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn plugin_bridge_dispatch(
     State(state): State<ServerState>,
     Path(plugin_id): Path<String>,
@@ -235,16 +259,25 @@ fn stream_frame_allowed(frame: &str) -> bool {
 /// view of the SSE (text/error/done only). Cancel = the frame aborts its fetch
 /// (drops the SSE); the detached turn then finishes server-side, exactly like a
 /// normal chat client disconnect. Only `agent.run` streams in v1.
+#[utoipa::path(
+    post,
+    path = "/api/plugins/{id}/host/stream",
+    tag = "Plugins",
+    summary = "stream a tool-using `agent.run` to a",
+    params(("plugin_id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn plugin_bridge_stream(
     State(state): State<ServerState>,
     Path(plugin_id): Path<String>,
     Json(body): Json<HostDispatchBody>,
 ) -> axum::response::Response {
-    if body.method != "agent.run" {
+    if body.method != "agent.run" && body.method != "finetune.stream" {
         return err_response(
             StatusCode::BAD_REQUEST,
             "invalid_args",
-            "only agent.run supports streaming".to_owned(),
+            "only agent.run and finetune.stream support streaming".to_owned(),
         );
     }
 
@@ -263,6 +296,36 @@ pub async fn plugin_bridge_stream(
         }
     };
     let grants: HashSet<String> = record.approved_grants.into_iter().collect();
+
+    // Fine-tune progress stream: the `com.ryu.finetune` app subscribes to a run's
+    // live SSE. Core owns the orchestration + the sidecar SSE; we proxy that stream
+    // verbatim (its frames are the app's OWN run data — step/loss/state — not another
+    // agent's internals, so no governance filter is applied). Gated on `finetune:runs`.
+    if body.method == "finetune.stream" {
+        if !grants.contains("finetune:runs") {
+            return err_response(
+                StatusCode::FORBIDDEN,
+                "denied",
+                "capability 'finetune:runs' not granted to this app".to_owned(),
+            );
+        }
+        let id = body
+            .args
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_owned();
+        if id.is_empty() {
+            return err_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_args",
+                "finetune.stream requires a non-empty 'id'".to_owned(),
+            );
+        }
+        return crate::server::finetune::stream_response(&state, &id).await;
+    }
+
     if !grants.contains("hook:run-agent") {
         return err_response(
             StatusCode::FORBIDDEN,
@@ -423,6 +486,16 @@ mod tests {
             bridge_path_for("spaces.deleteDoc"),
             Some("host.spaces_delete_doc")
         );
+        assert_eq!(
+            bridge_path_for("finetune.capability"),
+            Some("host.finetune_capability")
+        );
+        assert_eq!(bridge_path_for("finetune.start"), Some("host.finetune_start"));
+        assert_eq!(bridge_path_for("finetune.merge"), Some("host.finetune_merge"));
+        // `finetune.stream` is a STREAMING method — it has a required grant but no
+        // unary bridge path (it's handled by the stream endpoint, not dispatch).
+        assert_eq!(bridge_path_for("finetune.stream"), None);
+        assert_eq!(required_grant_for("finetune.stream"), Some("finetune:runs"));
         // Anything else — including a raw host.* path — is rejected.
         assert_eq!(bridge_path_for("host.sideModel"), None);
         assert_eq!(bridge_path_for("host.spaces_create_doc"), None);
@@ -441,6 +514,9 @@ mod tests {
         assert_eq!(required_grant_for("spaces.updateDoc"), Some("spaces:docs"));
         assert_eq!(required_grant_for("spaces.listDocs"), Some("spaces:docs"));
         assert_eq!(required_grant_for("spaces.deleteDoc"), Some("spaces:docs"));
+        assert_eq!(required_grant_for("finetune.capability"), Some("finetune:runs"));
+        assert_eq!(required_grant_for("finetune.start"), Some("finetune:runs"));
+        assert_eq!(required_grant_for("finetune.get"), Some("finetune:runs"));
         assert_eq!(required_grant_for("nope"), None);
     }
 
@@ -458,6 +534,13 @@ mod tests {
             "spaces.updateDoc",
             "spaces.listDocs",
             "spaces.deleteDoc",
+            "finetune.capability",
+            "finetune.start",
+            "finetune.list",
+            "finetune.get",
+            "finetune.cancel",
+            "finetune.adapters",
+            "finetune.merge",
         ] {
             assert!(bridge_path_for(method).is_some());
             assert!(required_grant_for(method).is_some());

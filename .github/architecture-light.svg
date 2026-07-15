@@ -80,9 +80,6 @@
   </g>
   <text x="328" y="139" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10.5" font-weight="700" fill="#aaa7b3" letter-spacing="1.4" text-anchor="start">CONTROL</text>
   <text x="328" y="158" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="21" font-weight="700" fill="#ffffff" text-anchor="start">Ryu Gateway</text>
-  <rect x="456" y="126" width="78" height="24" rx="12" fill="none" stroke="#bbb8c4" stroke-width="1.2" />
-  <text x="495" y="142" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#bbb8c4" text-anchor="middle">the moat</text>
-  <text x="292" y="194" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#aaa7b3" text-anchor="start">decides what's allowed, shared, measured &amp; paid for</text>
   <rect x="290" y="246" width="115" height="36" rx="9" fill="#ffffff" />
   <text x="347.5" y="268.5" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="600" fill="#17161b" text-anchor="middle">Routing</text>
   <rect x="417" y="246" width="115" height="36" rx="9" fill="#ffffff" />
@@ -105,7 +102,6 @@
   </g>
   <text x="686" y="139" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10.5" font-weight="700" fill="#6c6873" letter-spacing="1.4" text-anchor="start">ORCHESTRATION</text>
   <text x="686" y="158" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="21" font-weight="700" fill="#17161b" text-anchor="start">Ryu Core</text>
-  <text x="650" y="194" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="12.5" font-weight="500" fill="#6c6873" text-anchor="start">decides what runs, then calls the Gateway</text>
   <rect x="648" y="246" width="115" height="36" rx="9" fill="#f2f0f6" />
   <text x="705.5" y="268.5" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="600" fill="#3b3843" text-anchor="middle">Sessions</text>
   <rect x="775" y="246" width="115" height="36" rx="9" fill="#f2f0f6" />
@@ -118,5 +114,4 @@
   <text x="705.5" y="368.5" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="600" fill="#3b3843" text-anchor="middle">Sub-agents</text>
   <rect x="775" y="346" width="115" height="36" rx="9" fill="#f2f0f6" />
   <text x="832.5" y="368.5" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="600" fill="#3b3843" text-anchor="middle">Sidecars</text>
-  <text x="590" y="514" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="500" fill="#6c6873" text-anchor="middle">A request flows from any surface → Gateway → Core → engine, and back. One layer owns every concern.</text>
 </svg>

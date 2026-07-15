@@ -1,0 +1,49 @@
+{
+  "id": "com.ryu.canvas",
+  "name": "Canvas",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "canvas-companion",
+      "name": "Canvas",
+      "kind": "companion",
+      "config": {
+        "label": "Canvas",
+        "ui_entry": "./dist/index.html",
+        "ui_format": "html",
+        "csp": {
+          "connect_domains": [
+            "https://api.iconify.design",
+            "https://api.svgl.app",
+            "https://svgl.app"
+          ],
+          "resource_domains": [
+            "https://api.iconify.design",
+            "https://api.svgl.app",
+            "https://svgl.app"
+          ]
+        }
+      }
+    }
+  ],
+  "requires": {
+    "apps": [
+      {
+        "id": "com.ryu.spaces"
+      }
+    ],
+    "grants": ["spaces:docs"]
+  },
+  "permission_grants": [
+    "spaces:docs",
+    "core:list_agents",
+    "media:generate",
+    "media:transcribe",
+    "hook:run-agent",
+    "hook:side-model"
+  ],
+  "companion": {
+    "label": "Canvas",
+    "icon": "ai-image"
+  }
+}

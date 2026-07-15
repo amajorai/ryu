@@ -33,21 +33,27 @@ export {
 	workflow,
 } from "./builder.ts";
 export type {
+	AppDependency,
 	CompanionSurface,
 	Contributes,
 	PluginManifest,
+	Requires,
 	RunnableKind,
 	RunnableMeta,
+	Surface,
 	ToolAppConfig,
 	TurnHookContribution,
 	WidgetContribution,
 } from "./manifest.ts";
 export {
+	AppDependencySchema,
 	CompanionSurfaceSchema,
 	coreManifestJsonSchema,
 	PluginManifestSchema,
+	RequiresSchema,
 	RunnableKindSchema,
 	RunnableMetaSchema,
+	SurfaceSchema,
 	ToolAppConfigSchema,
 	validateManifestStrict,
 	validatePluginId,
@@ -68,7 +74,11 @@ export {
 } from "./model/gateway.ts";
 export type { AgentOptions } from "./runnable/agent.ts";
 export { defineAgent } from "./runnable/agent.ts";
-export type { AppToolSpec, DefineAppOptions } from "./runnable/app.ts";
+export type {
+	AppToolSpec,
+	DefineAppOptions,
+	DefineAppRequires,
+} from "./runnable/app.ts";
 export { appToolId, defineApp } from "./runnable/app.ts";
 export type {
 	GatewayClient,
@@ -83,7 +93,7 @@ export type {
 	ToolRunnable,
 	ToolSchema,
 } from "./runnable/tool.ts";
-export { defineTool } from "./runnable/tool.ts";
+export { defineTool, inlineToolRunnable } from "./runnable/tool.ts";
 export type {
 	DefinePluginOptions,
 	DefineTurnHookOptions,

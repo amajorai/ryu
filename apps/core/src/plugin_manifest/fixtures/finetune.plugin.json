@@ -1,0 +1,45 @@
+{
+  "id": "com.ryu.finetune",
+  "name": "Fine-tuning",
+  "version": "1.0.0",
+  "runnables": [
+    {
+      "id": "finetune-companion",
+      "name": "Fine-tuning",
+      "kind": "companion",
+      "config": {
+        "label": "Fine-tuning",
+        "ui_entry": "./dist/index.html",
+        "ui_format": "html"
+      }
+    }
+  ],
+  "permission_grants": ["finetune:runs", "sidecar:process"],
+  "companion": {
+    "label": "Fine-tuning",
+    "icon": "sparkles"
+  },
+  "sidecars": [
+    {
+      "name": "unsloth",
+      "port": 8086,
+      "health_path": "/health",
+      "process": {
+        "kind": "python",
+        "entry": "ryu_unsloth",
+        "python_version": "3.11",
+        "pyproject_extra": "train",
+        "source": {
+          "url": "https://github.com/amajorai/ryu/releases/download/unsloth-sidecar-v1/ryu-unsloth-sidecar.tar.gz",
+          "format": "tar.gz"
+        },
+        "env": {
+          "RYU_UNSLOTH_HOST": "127.0.0.1",
+          "RYU_UNSLOTH_PORT": "8086",
+          "HF_HOME": "${RYU_DIR}/models/hf",
+          "RYU_UNSLOTH_OUTPUT_DIR": "${RYU_DIR}/models"
+        }
+      }
+    }
+  ]
+}

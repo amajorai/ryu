@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 
 use crate::downloads::{DownloadKind, DownloadSpec, VersionRecord};
 use crate::sidecar::download_manager::{compute_sha256, VersionStore};
+use crate::win_process::NoWindow;
 
 /// Pinned default yt-dlp release. A date-based tag that exists on GitHub; update
 /// here to move the bundled default, or override per-install with
@@ -137,6 +138,7 @@ impl YtDlpDownloader {
         // Best-effort: record the real reported version over the requested tag.
         if let Ok(out) = tokio::process::Command::new(&dest)
             .arg("--version")
+            .no_window()
             .output()
             .await
         {

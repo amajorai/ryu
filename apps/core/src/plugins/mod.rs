@@ -20,7 +20,9 @@
 pub mod app_contrib;
 pub mod builtins;
 pub mod catalog;
+pub mod graph;
 pub mod lifecycle;
+pub mod seed;
 
 use std::path::PathBuf;
 use std::sync::Arc;

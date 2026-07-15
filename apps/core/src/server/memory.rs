@@ -57,6 +57,49 @@ pub const DEFAULT_IMPORTANCE: i32 = 3;
 /// introduced this constant becomes the request's user id.
 pub const LOCAL_USER: &str = "local";
 
+/// The SQL twin of the memory per-caller ACL — the ONE place memory read
+/// visibility is expressed (mirrors `conversations.rs::TENANCY_VISIBLE_PREDICATE`,
+/// but keyed on SCOPE, since memory sharing is scope-based, not org/visibility-based):
+///   - `:bound = 0` (node UNBOUND / personal): no restriction. One principal; the
+///     node token is the boundary — byte-identical to the pre-ACL behaviour.
+///   - node ORG-BOUND: a `user`-scope fact is PRIVATE — visible only to its owner
+///     (`user_id = :uid`). `node`/`project`-scope facts are the shared "company
+///     brain" — visible to every member. A `user`-scope row whose `user_id` is the
+///     legacy `'local'` sentinel matches no real caller (fail closed) until the
+///     bind-time backfill re-stamps it to the real owner.
+const MEMORY_VISIBLE_PREDICATE: &str = "(
+        :bound = 0
+        OR scope IN ('node', 'project')
+        OR (:uid IS NOT NULL AND scope = 'user' AND user_id = :uid)
+     )";
+
+/// The caller context a tenancy-filtered memory query is evaluated against.
+#[derive(Clone, Copy)]
+pub struct MemoryVisibility<'a> {
+    /// Whether THIS node is bound to an org. Unbound → no filtering.
+    pub node_bound: bool,
+    /// The verified caller's user id, or `None` for an anonymous caller.
+    pub caller_user_id: Option<&'a str>,
+}
+
+impl<'a> MemoryVisibility<'a> {
+    /// The in-process, full-trust filter (used internally / on an unbound node).
+    pub fn unrestricted() -> Self {
+        Self {
+            node_bound: false,
+            caller_user_id: None,
+        }
+    }
+
+    /// The filter for an HTTP caller on a possibly-bound node.
+    pub fn for_caller(caller_user_id: Option<&'a str>, node_bound: bool) -> Self {
+        Self {
+            node_bound,
+            caller_user_id,
+        }
+    }
+}
+
 /// How broadly a long-term fact applies. Serialized snake_case (`"user"`,
 /// `"node"`, `"project"`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,6 +229,13 @@ pub struct LongTermEntry {
     /// The agent that recorded this fact (provenance only, not an access filter).
     #[serde(default)]
     pub author_agent_id: Option<String>,
+    /// The verified human OWNER of this fact (the `memory_entries.user_id` column).
+    /// This is the per-user tenancy key: on an org-bound node a `User`-scope fact is
+    /// private to this owner (a `Node`/`Project`-scope fact is shared). `"local"` is
+    /// the pre-attribution sentinel (unbound / single-user), which the bind-time
+    /// backfill re-stamps to the real owner. Provenance for the ACL, not display.
+    #[serde(default)]
+    pub owner_user_id: Option<String>,
     /// Unix milliseconds.
     pub created_at: i64,
     /// Unix milliseconds of the last edit (equals `created_at` when never edited).
@@ -314,10 +364,75 @@ impl MemoryStore {
         let conn = Connection::open(&db_path)
             .with_context(|| format!("opening memory db {}", db_path.display()))?;
         Self::init_schema(&conn)?;
+        // One-shot owner backfill: pre-ACL memory rows carry `user_id = 'local'`.
+        // Best-effort; never blocks opening the store. Deliberately NOT in
+        // `init_schema` (the in-memory test store runs that and must never read the
+        // real account vault).
+        if let Err(e) = Self::backfill_owner(&conn) {
+            tracing::warn!("memory owner backfill skipped: {e:#}");
+        }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             cipher: crate::crypto::global_cipher()?,
         })
+    }
+
+    /// Attribute pre-ACL `user_id = 'local'` memory rows to the local owner once the
+    /// node binds — the memory twin of `ConversationStore::backfill_tenancy`. Note
+    /// the transition is `'local' → owner` (memory's single-user sentinel), NOT
+    /// `NULL → owner` (memory's `user_id` is NOT NULL).
+    ///
+    ///   - **Node UNBOUND**: return immediately (no marker). One principal; the node
+    ///     token is the boundary — the `'local'` rows stay as they are, and
+    ///     `MEMORY_VISIBLE_PREDICATE` (`:bound = 0`) shows them all. Reruns if the
+    ///     node later joins an org.
+    ///   - **Node ORG-BOUND**: `UPDATE memory_entries SET user_id = <owner> WHERE
+    ///     user_id = 'local'`, so the owner keeps recalling their own facts (else a
+    ///     `user`-scope `'local'` row matches no real caller → lockout). Idempotent
+    ///     via a `memory_meta` marker.
+    ///   - **Node ORG-BOUND with no local account**: leave them + warn. Fail closed.
+    fn backfill_owner(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS memory_meta (key TEXT PRIMARY KEY, value TEXT)",
+        )
+        .context("creating memory_meta")?;
+        let done: Option<String> = {
+            let mut stmt = conn.prepare("SELECT value FROM memory_meta WHERE key = 'owner_backfill_v1'")?;
+            let mut rows = stmt.query([])?;
+            match rows.next()? {
+                Some(r) => Some(r.get(0)?),
+                None => None,
+            }
+        };
+        if done.is_some() {
+            return Ok(());
+        }
+        let Some(org) = crate::sidecar::control_plane::registered_org() else {
+            return Ok(());
+        };
+        let Some(owner) = crate::auth::load_accounts()
+            .active()
+            .map(|a| a.user_id.clone())
+        else {
+            tracing::warn!(
+                "memory owner backfill: org-bound node with no signed-in local account — \
+                 leaving pre-ACL 'local' memory rows unattributed (fail closed)."
+            );
+            return Ok(());
+        };
+        let _ = org; // org is not stored on memory rows (scope-based, not org-based).
+        let claimed = conn
+            .execute(
+                "UPDATE memory_entries SET user_id = ?1 WHERE user_id = ?2",
+                params![owner, LOCAL_USER],
+            )
+            .context("backfilling memory owner")?;
+        conn.execute(
+            "INSERT OR REPLACE INTO memory_meta (key, value) VALUES ('owner_backfill_v1', ?1)",
+            params![owner],
+        )?;
+        tracing::info!("memory owner backfill: attributed {claimed} pre-ACL memory row(s)");
+        Ok(())
     }
 
     /// Open an in-memory store with an ephemeral key (used by tests). Never
@@ -465,7 +580,7 @@ impl MemoryStore {
             let conn = self.conn.lock().await;
             let mut stmt = conn.prepare(
                 "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
-                        category, importance, tags, agent_id, updated_at
+                        category, importance, tags, agent_id, updated_at, user_id
                  FROM memory_entries
                  WHERE user_id = ?1 AND agent_id = ?2
                  ORDER BY created_at DESC, rowid DESC
@@ -498,7 +613,7 @@ impl MemoryStore {
             .join(", ");
         let sql = format!(
             "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
-                    category, importance, tags, agent_id, updated_at
+                    category, importance, tags, agent_id, updated_at, user_id
              FROM memory_entries
              WHERE scope IN ({level_list})
                AND (scope != 'project' OR scope_id IS ?1)
@@ -520,7 +635,7 @@ impl MemoryStore {
             let conn = self.conn.lock().await;
             let mut stmt = conn.prepare(
                 "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
-                        category, importance, tags, agent_id, updated_at
+                        category, importance, tags, agent_id, updated_at, user_id
                  FROM memory_entries
                  ORDER BY created_at DESC, rowid DESC
                  LIMIT ?1",
@@ -530,29 +645,49 @@ impl MemoryStore {
         Ok(self.decrypt_rows(rows))
     }
 
-    /// List entries for the management UI, filtered and newest-first.
+    /// List entries for the management UI, filtered and newest-first. **Unfiltered
+    /// by tenancy** — the in-process / unbound full listing. See
+    /// [`list_visible`](Self::list_visible) for the per-caller form.
     pub async fn list(&self, filter: &MemoryFilter) -> Result<Vec<LongTermEntry>> {
+        self.list_visible(filter, MemoryVisibility::unrestricted())
+            .await
+    }
+
+    /// List entries the caller may READ, applying [`MEMORY_VISIBLE_PREDICATE`].
+    /// On an UNBOUND node this is byte-identical to [`list`](Self::list) (`:bound = 0`
+    /// disables the owner filter). On a BOUND node a `user`-scope fact is returned
+    /// only to its owner; `node`/`project`-scope facts stay visible to every member
+    /// (the shared "company brain").
+    pub async fn list_visible(
+        &self,
+        filter: &MemoryFilter,
+        vis: MemoryVisibility<'_>,
+    ) -> Result<Vec<LongTermEntry>> {
         let limit = filter.limit.unwrap_or(500) as i64;
+        let sql = format!(
+            "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
+                    category, importance, tags, agent_id, updated_at, user_id
+             FROM memory_entries
+             WHERE (:scope IS NULL OR scope = :scope)
+               AND (:scope_id IS NULL OR scope_id = :scope_id)
+               AND (:category IS NULL OR category = :category)
+               AND {MEMORY_VISIBLE_PREDICATE}
+             ORDER BY created_at DESC, rowid DESC
+             LIMIT :limit"
+        );
         let rows = {
             let conn = self.conn.lock().await;
-            let mut stmt = conn.prepare(
-                "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
-                        category, importance, tags, agent_id, updated_at
-                 FROM memory_entries
-                 WHERE (?1 IS NULL OR scope = ?1)
-                   AND (?2 IS NULL OR scope_id = ?2)
-                   AND (?3 IS NULL OR category = ?3)
-                 ORDER BY created_at DESC, rowid DESC
-                 LIMIT ?4",
-            )?;
+            let mut stmt = conn.prepare(&sql)?;
             Self::collect_rows(
                 &mut stmt,
-                params![
-                    filter.scope.map(|s| s.as_str()),
-                    filter.scope_id,
-                    filter.category.map(|c| c.as_str()),
-                    limit,
-                ],
+                rusqlite::named_params! {
+                    ":scope": filter.scope.map(|s| s.as_str()),
+                    ":scope_id": filter.scope_id,
+                    ":category": filter.category.map(|c| c.as_str()),
+                    ":bound": i64::from(vis.node_bound),
+                    ":uid": vis.caller_user_id,
+                    ":limit": limit,
+                },
             )?
         };
         Ok(self.decrypt_rows(rows))
@@ -564,7 +699,7 @@ impl MemoryStore {
             let conn = self.conn.lock().await;
             let mut stmt = conn.prepare(
                 "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
-                        category, importance, tags, agent_id, updated_at
+                        category, importance, tags, agent_id, updated_at, user_id
                  FROM memory_entries WHERE id = ?1",
             )?;
             Self::collect_rows(&mut stmt, params![id])?
@@ -692,6 +827,7 @@ impl MemoryStore {
                 tags: row.get(8)?,
                 author_agent_id: row.get(9)?,
                 updated_at: row.get(10)?,
+                owner_user_id: row.get(11)?,
             })
         })?;
         let mut out = Vec::new();
@@ -718,6 +854,7 @@ impl MemoryStore {
                         when_to_use,
                         tags: decode_tags(&r.tags),
                         author_agent_id: r.author_agent_id,
+                        owner_user_id: r.owner_user_id,
                         created_at: r.created_at,
                         updated_at: if r.updated_at == 0 {
                             r.created_at
@@ -754,6 +891,7 @@ struct EncryptedRow {
     tags: String,
     author_agent_id: Option<String>,
     updated_at: i64,
+    owner_user_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -942,6 +1080,107 @@ mod tests {
 
         assert!(store.delete(&id).await.unwrap());
         assert!(store.get(&id).await.unwrap().is_none());
+    }
+
+    /// Per-caller tenancy (the `MEMORY_VISIBLE_PREDICATE`): on a bound node a
+    /// `user`-scope fact is private to its owner while `node`/`project` facts stay
+    /// shared. Driven with `MemoryVisibility::for_caller(node_bound = true)` so no
+    /// org registration is needed (the caller tenancy is passed IN).
+    #[tokio::test]
+    async fn list_visible_scopes_user_facts_per_owner_on_bound_node() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        // Alice's private user fact.
+        store
+            .record_full("alice", "a", NewMemory::user_fact("alice private secret"))
+            .await
+            .unwrap();
+        // Bob's private user fact.
+        store
+            .record_full("bob", "a", NewMemory::user_fact("bob private secret"))
+            .await
+            .unwrap();
+        // A shared node-scope fact (the company brain).
+        store
+            .record_full("alice", "a", {
+                let mut m = NewMemory::user_fact("shared org policy");
+                m.scope = MemoryScope::Node;
+                m
+            })
+            .await
+            .unwrap();
+
+        let filter = MemoryFilter::default();
+
+        // Bob (bound node): sees his own user fact + the shared node fact, NOT Alice's.
+        let bob = store
+            .list_visible(&filter, MemoryVisibility::for_caller(Some("bob"), true))
+            .await
+            .unwrap();
+        let bob_contents: Vec<&str> = bob.iter().map(|e| e.content.as_str()).collect();
+        assert!(!bob_contents.contains(&"alice private secret"), "Bob must not read Alice's user memory");
+        assert!(bob_contents.contains(&"bob private secret"));
+        assert!(bob_contents.contains(&"shared org policy"), "node-scope memory is shared");
+
+        // Alice (bound node): her own + shared, not Bob's — no lockout on her data.
+        let alice = store
+            .list_visible(&filter, MemoryVisibility::for_caller(Some("alice"), true))
+            .await
+            .unwrap();
+        let alice_contents: Vec<&str> = alice.iter().map(|e| e.content.as_str()).collect();
+        assert!(alice_contents.contains(&"alice private secret"));
+        assert!(alice_contents.contains(&"shared org policy"));
+        assert!(!alice_contents.contains(&"bob private secret"));
+
+        // UNBOUND node: byte-identical — every fact visible regardless of owner.
+        let unbound = store
+            .list_visible(&filter, MemoryVisibility::unrestricted())
+            .await
+            .unwrap();
+        assert_eq!(unbound.len(), 3, "unbound node sees all facts (no filtering)");
+    }
+
+    /// The bind-time `'local' → owner` backfill (the memory twin of the conversation
+    /// backfill). Driven directly against the SQL so it needs no org registration:
+    /// a pre-ACL `'local'` user row is invisible to a real caller until re-stamped.
+    #[tokio::test]
+    async fn local_rows_backfill_to_owner() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let id = store
+            .record(LOCAL_USER, "a", "legacy fact recorded before ACL")
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Before backfill, a bound-node caller "alice" cannot see the 'local' row.
+        let before = store
+            .list_visible(
+                &MemoryFilter::default(),
+                MemoryVisibility::for_caller(Some("alice"), true),
+            )
+            .await
+            .unwrap();
+        assert!(before.is_empty(), "pre-backfill 'local' user row is invisible to a real caller (fail closed)");
+
+        // Simulate the backfill's UPDATE ('local' → the local owner) directly.
+        {
+            let conn = store.conn.lock().await;
+            conn.execute(
+                "UPDATE memory_entries SET user_id = ?1 WHERE user_id = ?2",
+                params!["alice", LOCAL_USER],
+            )
+            .unwrap();
+        }
+
+        let after = store
+            .list_visible(
+                &MemoryFilter::default(),
+                MemoryVisibility::for_caller(Some("alice"), true),
+            )
+            .await
+            .unwrap();
+        assert_eq!(after.len(), 1, "after backfill the owner reaches their legacy fact");
+        assert_eq!(after[0].id, id);
+        assert_eq!(after[0].owner_user_id.as_deref(), Some("alice"));
     }
 
     #[test]

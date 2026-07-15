@@ -48,11 +48,24 @@ fn local_capability(dev: &DeviceInfo) -> (bool, String) {
 /// gating UI. Combines Core's device probe (authoritative for the *local* gate)
 /// with the sidecar's `/health` (authoritative for CUDA-capability + whether the
 /// training deps are installed), when the sidecar is reachable.
+#[utoipa::path(
+    get,
+    path = "/api/finetune/capability",
+    tag = "Finetune",
+    summary = "what this node can train, for the desktop's",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn capability(State(state): State<ServerState>) -> impl IntoResponse {
+    Json(capability_value(&state).await)
+}
+
+/// Shared capability probe — the value both the HTTP handler and the plugin-host
+/// bridge (`host.finetune_capability`) return, so they never drift.
+pub(crate) async fn capability_value(state: &ServerState) -> Value {
     let dev = DeviceInfo::detect();
     let (can_local, reason) = local_capability(&dev);
     let sidecar = unsloth::health(&state.client).await.ok();
-    Json(json!({
+    json!({
         "can_train_local": can_local,
         "gpu": dev.gpu_name,
         "vram_bytes": dev.vram_bytes,
@@ -61,7 +74,7 @@ pub async fn capability(State(state): State<ServerState>) -> impl IntoResponse {
         "os": dev.os,
         "reason": reason,
         "sidecar": sidecar,
-    }))
+    })
 }
 
 /// `POST /api/finetune/start` — start a fine-tune job. Gates local training on
@@ -69,6 +82,14 @@ pub async fn capability(State(state): State<ServerState>) -> impl IntoResponse {
 /// records the job. Body is forwarded verbatim to the sidecar (see
 /// `apps/unsloth-sidecar` for the schema) plus an optional `target`
 /// (`local` | `remote`).
+#[utoipa::path(
+    post,
+    path = "/api/finetune/start",
+    tag = "Finetune",
+    summary = "start a fine-tune job. Gates local training on",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn start(State(state): State<ServerState>, Json(body): Json<Value>) -> Response {
     match dispatch(&state, body).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
@@ -118,8 +139,10 @@ pub(crate) async fn dispatch(
         ));
     }
 
-    // The Unsloth sidecar is opt-in (not in startup_order) — ensure it's up.
-    if let Err(e) = state.manager.start_sidecar("unsloth").await {
+    // The Unsloth sidecar is now owned by the `com.ryu.finetune` app (a
+    // manifest-declared managed sidecar), started on plugin-enable + boot-reconcile.
+    // Best-effort ensure it's up before starting a job.
+    if let Err(e) = ensure_sidecar(&state).await {
         tracing::warn!("could not start unsloth sidecar before finetune: {e:#}");
     }
 
@@ -316,29 +339,67 @@ async fn persist_from_snapshot(state: &ServerState, id: &str, snap: &Value) {
 /// `GET /api/finetune/list` — the durable job list. Refreshes each job's state
 /// from the sidecar when reachable (so running jobs show live state), then
 /// returns the persisted records.
+#[utoipa::path(
+    get,
+    path = "/api/finetune/list",
+    tag = "Finetune",
+    summary = "the durable job list. Refreshes each job's state",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list(State(state): State<ServerState>) -> impl IntoResponse {
-    // Best-effort live sync: overlay sidecar snapshots onto the store.
-    if let Ok(Value::Array(snaps)) = unsloth::list_jobs(&state.client).await {
-        for snap in &snaps {
-            if let Some(id) = snap.get("id").and_then(Value::as_str) {
-                persist_from_snapshot(&state, id, snap).await;
-            }
-        }
-    }
-    match state.finetune.list().await {
-        Ok(jobs) => (StatusCode::OK, Json(json!({ "jobs": jobs }))).into_response(),
+    match list_value(&state).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("{e:#}") })),
+            Json(json!({ "error": e })),
         )
             .into_response(),
     }
 }
 
+/// Shared job-list logic (`{ jobs: [...] }`) for the HTTP handler and the
+/// plugin-host bridge. Overlays live sidecar snapshots onto the durable store.
+pub(crate) async fn list_value(state: &ServerState) -> Result<Value, String> {
+    if let Ok(Value::Array(snaps)) = unsloth::list_jobs(&state.client).await {
+        for snap in &snaps {
+            if let Some(id) = snap.get("id").and_then(Value::as_str) {
+                persist_from_snapshot(state, id, snap).await;
+            }
+        }
+    }
+    state
+        .finetune
+        .list()
+        .await
+        .map(|jobs| json!({ "jobs": jobs }))
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// `GET /api/finetune/:id` — one job. Prefers the sidecar's live snapshot (and
 /// persists it); falls back to the stored record when the sidecar is unreachable.
+#[utoipa::path(
+    get,
+    path = "/api/finetune/{id}",
+    tag = "Finetune",
+    summary = "one job. Prefers the sidecar's live snapshot (and",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get(State(state): State<ServerState>, Path(id): Path<String>) -> Response {
-    if let Some((base, token)) = remote_of(&state, &id).await {
+    match get_value(&state, &id).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err((code, body)) => (code, Json(body)).into_response(),
+    }
+}
+
+/// Shared single-job snapshot for the HTTP handler and the plugin-host bridge.
+/// Prefers the sidecar's (or remote node's) live snapshot, persisting it; falls
+/// back to the stored record.
+pub(crate) async fn get_value(
+    state: &ServerState,
+    id: &str,
+) -> Result<Value, (StatusCode, Value)> {
+    if let Some((base, token)) = remote_of(state, id).await {
         // Remote job: proxy the snapshot from the remote node's Core.
         let mut req = state.client.get(format!("{base}/api/finetune/{id}"));
         if let Some(t) = &token {
@@ -347,35 +408,58 @@ pub async fn get(State(state): State<ServerState>, Path(id): Path<String>) -> Re
         if let Ok(resp) = req.send().await {
             if resp.status().is_success() {
                 if let Ok(snap) = resp.json::<Value>().await {
-                    persist_from_snapshot(&state, &id, &snap).await;
-                    return (StatusCode::OK, Json(snap)).into_response();
+                    persist_from_snapshot(state, id, &snap).await;
+                    return Ok(snap);
                 }
             }
         }
         // Remote unreachable — fall through to the stored record below.
-    } else if let Ok(snap) = unsloth::get_job(&state.client, &id).await {
-        persist_from_snapshot(&state, &id, &snap).await;
-        return (StatusCode::OK, Json(snap)).into_response();
+    } else if let Ok(snap) = unsloth::get_job(&state.client, id).await {
+        persist_from_snapshot(state, id, &snap).await;
+        return Ok(snap);
     }
-    match state.finetune.get(&id).await {
-        Ok(Some(job)) => (StatusCode::OK, Json(job)).into_response(),
-        Ok(None) => (
+    match state.finetune.get(id).await {
+        Ok(Some(job)) => serde_json::to_value(job).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({ "error": format!("{e:#}") }),
+            )
+        }),
+        Ok(None) => Err((
             StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("unknown job '{id}'") })),
-        )
-            .into_response(),
-        Err(e) => (
+            json!({ "error": format!("unknown job '{id}'") }),
+        )),
+        Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("{e:#}") })),
-        )
-            .into_response(),
+            json!({ "error": format!("{e:#}") }),
+        )),
     }
 }
 
 /// `DELETE /api/finetune/:id` — cooperative cancel. Proxies to the sidecar and
 /// marks the stored record cancelled.
+#[utoipa::path(
+    delete,
+    path = "/api/finetune/{id}",
+    tag = "Finetune",
+    summary = "cooperative cancel. Proxies to the sidecar and",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn cancel(State(state): State<ServerState>, Path(id): Path<String>) -> Response {
-    if let Some((base, token)) = remote_of(&state, &id).await {
+    match cancel_value(&state, &id).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err((code, body)) => (code, Json(body)).into_response(),
+    }
+}
+
+/// Shared cooperative-cancel for the HTTP handler and the plugin-host bridge.
+/// Proxies to the sidecar (or remote node) and marks the stored record cancelled.
+pub(crate) async fn cancel_value(
+    state: &ServerState,
+    id: &str,
+) -> Result<Value, (StatusCode, Value)> {
+    if let Some((base, token)) = remote_of(state, id).await {
         let mut req = state.client.delete(format!("{base}/api/finetune/{id}"));
         if let Some(t) = &token {
             req = req.bearer_auth(t);
@@ -389,41 +473,45 @@ pub async fn cancel(State(state): State<ServerState>, Path(id): Path<String>) ->
                 let now = chrono::Utc::now().to_rfc3339();
                 let _ = state
                     .finetune
-                    .update_state(&id, "cancelled", None, None, &now)
+                    .update_state(id, "cancelled", None, None, &now)
                     .await;
-                (StatusCode::OK, Json(body)).into_response()
+                Ok(body)
             }
-            Ok(resp) => (
+            Ok(resp) => Err((
                 StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": format!("remote node returned {}", resp.status()) })),
-            )
-                .into_response(),
-            Err(e) => (
+                json!({ "error": format!("remote node returned {}", resp.status()) }),
+            )),
+            Err(e) => Err((
                 StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": format!("remote node unreachable: {e}") })),
-            )
-                .into_response(),
+                json!({ "error": format!("remote node unreachable: {e}") }),
+            )),
         };
     }
-    match unsloth::cancel_job(&state.client, &id).await {
+    match unsloth::cancel_job(&state.client, id).await {
         Ok(resp) => {
             let now = chrono::Utc::now().to_rfc3339();
             let _ = state
                 .finetune
-                .update_state(&id, "cancelled", None, None, &now)
+                .update_state(id, "cancelled", None, None, &now)
                 .await;
-            (StatusCode::OK, Json(resp)).into_response()
+            Ok(resp)
         }
-        Err(e) => (
+        Err(e) => Err((
             StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": format!("{e:#}") })),
-        )
-            .into_response(),
+            json!({ "error": format!("{e:#}") }),
+        )),
     }
 }
 
 /// `GET /api/finetune/adapters` — the installed trained adapters (Unit 3), with
 /// provenance (base model + producing job).
+#[utoipa::path(
+    get,
+    path = "/api/finetune/adapters",
+    tag = "Finetune",
+    summary = "the installed trained adapters (Unit 3), with",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_adapters(State(_state): State<ServerState>) -> impl IntoResponse {
     Json(json!({ "adapters": adapters::load_present() }))
 }
@@ -432,18 +520,37 @@ pub async fn list_adapters(State(_state): State<ServerState>) -> impl IntoRespon
 /// then register it as an installed model so it is selectable as the active chat
 /// model via the existing `POST /api/models/active` (llama.cpp) path. Body:
 /// `{ adapter_name | adapter_path, output_name?, base_model_id?, quantization_method? }`.
+#[utoipa::path(
+    post,
+    path = "/api/finetune/merge",
+    tag = "Finetune",
+    summary = "merge a trained adapter into a GGUF (Unit 4),",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn merge(State(state): State<ServerState>, Json(body): Json<Value>) -> Response {
+    match merge_value(&state, body).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err((code, body)) => (code, Json(body)).into_response(),
+    }
+}
+
+/// Shared adapter→GGUF merge for the HTTP handler and the plugin-host bridge.
+/// Registers the merged GGUF as an installed model on success.
+pub(crate) async fn merge_value(
+    state: &ServerState,
+    body: Value,
+) -> Result<Value, (StatusCode, Value)> {
     if body.get("adapter_name").and_then(Value::as_str).is_none()
         && body.get("adapter_path").and_then(Value::as_str).is_none()
     {
-        return (
+        return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "need `adapter_name` or `adapter_path`" })),
-        )
-            .into_response();
+            json!({ "error": "need `adapter_name` or `adapter_path`" }),
+        ));
     }
 
-    if let Err(e) = state.manager.start_sidecar("unsloth").await {
+    if let Err(e) = ensure_sidecar(state).await {
         tracing::warn!("could not start unsloth sidecar before merge: {e:#}");
     }
 
@@ -473,23 +580,47 @@ pub async fn merge(State(state): State<ServerState>, Json(body): Json<Value>) ->
                     tracing::warn!("recording merged model '{stem}' failed: {e:#}");
                 }
             }
-            (StatusCode::OK, Json(resp)).into_response()
+            Ok(resp)
         }
-        Err(e) => (
+        Err(e) => Err((
             StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": format!("{e:#}") })),
-        )
-            .into_response(),
+            json!({ "error": format!("{e:#}") }),
+        )),
     }
+}
+
+/// Best-effort check that the Unsloth training sidecar is reachable before a
+/// job/merge. It is a manifest-declared sidecar owned by the `com.ryu.finetune`
+/// app (registered under the namespaced key `<plugin_id>/unsloth`), started on
+/// plugin-enable + boot-reconcile — so Core no longer starts it inline. This is a
+/// warn-only health probe; if it's down, the subsequent sidecar call returns a
+/// clear error with an install/dev hint.
+pub(crate) async fn ensure_sidecar(state: &ServerState) -> anyhow::Result<()> {
+    unsloth::health(&state.client).await.map(|_| ())
 }
 
 /// `GET /api/finetune/:id/stream` — proxy the sidecar's SSE progress stream
 /// straight through as `text/event-stream` (no re-parsing of frames).
+#[utoipa::path(
+    get,
+    path = "/api/finetune/{id}/stream",
+    tag = "Finetune",
+    summary = "proxy the sidecar's SSE progress stream",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn stream(State(state): State<ServerState>, Path(id): Path<String>) -> Response {
+    stream_response(&state, &id).await
+}
+
+/// Shared SSE proxy for a job's progress stream — used by the HTTP handler and by
+/// the plugin-host streaming bridge (`finetune.stream`). Streams the sidecar's (or
+/// remote node's) `text/event-stream` frames through verbatim.
+pub(crate) async fn stream_response(state: &ServerState, id: &str) -> Response {
     // Remote jobs stream from the remote node's Core; local jobs from the sidecar.
-    let (url, token) = match remote_of(&state, &id).await {
+    let (url, token) = match remote_of(state, id).await {
         Some((base, token)) => (format!("{base}/api/finetune/{id}/stream"), token),
-        None => (unsloth::stream_url(&id), None),
+        None => (unsloth::stream_url(id), None),
     };
     let mut req = state.client.get(&url);
     if let Some(t) = &token {

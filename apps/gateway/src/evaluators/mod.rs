@@ -173,6 +173,29 @@ pub enum EvaluatorImpl {
     Code { lang: CodeLang, source: String },
     /// A named built-in detector wired elsewhere in the gateway.
     Builtin { detector: String },
+    /// Untrusted third-party **policy code** running IN-PROCESS in the gateway,
+    /// compiled to WebAssembly and executed in the hardened wasmtime sandbox
+    /// ([`crate::wasm_policy`]). The gateway hands the guest the prompt/response
+    /// excerpt and enforces its `allow | deny{reason}` verdict via the same
+    /// Block/Sanitize/Warn machinery as every other inline evaluator. This is the
+    /// in-process sibling of the external-service policy seam (`compression.rs`).
+    ///
+    /// Security posture (see the `wasm_policy` module + threat model): zero host
+    /// functions, no WASI, fuel + epoch + memory bounded, fresh Store per call.
+    /// `fail_open` is the DECLARED fail direction — the default (`false`) is
+    /// CLOSED, so a firewall-class plugin that traps / OOMs / times out BLOCKS the
+    /// request instead of silently allowing it. An enrichment-style plugin may set
+    /// `fail_open = true` to be skipped on failure. Transform/patch verdicts and
+    /// output-target scanning are deliberate v1 boundaries (allow/deny only).
+    Wasm {
+        /// The policy module as standard-base64-encoded wasm **binary** (never wat
+        /// text). Size-capped and import-validated at declaration + load.
+        module_base64: String,
+        /// Declared fail direction. `false` (default) = fail CLOSED (block on any
+        /// sandbox failure) — the safe default for a security policy.
+        #[serde(default)]
+        fail_open: bool,
+    },
 }
 
 /// Language for a [`EvaluatorImpl::Code`] evaluator.

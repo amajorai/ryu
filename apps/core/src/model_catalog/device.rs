@@ -19,6 +19,8 @@ use std::process::Command;
 
 use serde::Serialize;
 
+use crate::win_process::NoWindow;
+
 /// What we know about the user's machine, for the model-fit estimate.
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceInfo {
@@ -240,6 +242,7 @@ fn total_ram_bytes() -> Option<u64> {
             "-Command",
             "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
         ])
+        .no_window()
         .output()
         .ok()?;
     String::from_utf8_lossy(&out.stdout)
@@ -264,6 +267,7 @@ fn total_ram_bytes() -> Option<u64> {
 fn total_ram_bytes() -> Option<u64> {
     let out = Command::new("sysctl")
         .args(["-n", "hw.memsize"])
+        .no_window()
         .output()
         .ok()?;
     String::from_utf8_lossy(&out.stdout)
@@ -311,6 +315,7 @@ fn nvidia_gpu() -> Option<GpuInfo> {
             "--query-gpu=memory.total,name",
             "--format=csv,noheader,nounits",
         ])
+        .no_window()
         .output()
         .ok()?;
     if !out.status.success() {

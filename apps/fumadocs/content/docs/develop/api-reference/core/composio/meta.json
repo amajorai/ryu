@@ -1,0 +1,17 @@
+{
+  "title": "Composio",
+  "description": "Composio API endpoints.",
+  "pages": [
+    "composio_actions",
+    "composio_connections",
+    "composio_connection_initiate",
+    "composio_connection_status",
+    "composio_status",
+    "composio_toolkits",
+    "composio_trigger_list",
+    "composio_trigger_delete",
+    "composio_triggers",
+    "composio_trigger_subscribe",
+    "composio_webhook"
+  ]
+}

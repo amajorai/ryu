@@ -199,7 +199,8 @@ pub fn interval_setting() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identity::{BrowserToolSource, SecretState};
+    use crate::identity::source::AlwaysStale;
+    use crate::identity::SecretState;
 
     /// Seed the process-global cipher with a deterministic test key so
     /// `seal`/`open` work without an OS keychain (mirrors Unit 0's helper).
@@ -215,10 +216,12 @@ mod tests {
     /// An `AUTHENTICATED` connection whose backend can no longer produce sealed
     /// state must be flipped to `NEEDS_AUTH` by a sweep, and the flip must be
     /// broadcast. We drive the stale signal deterministically by overriding the
-    /// connection's domain to the `browser-tool` stub backend, whose
-    /// `fetch_state` bails (`NotImplemented`) — standing in for a real backend
-    /// that has lost the live session. The engine holds its own in-memory store
-    /// so the test never depends on the set-once process-global.
+    /// connection's domain to the test-only [`AlwaysStale`] backend, whose
+    /// `fetch_state` always errors — standing in for a real backend that has
+    /// lost the live session. (It is `#[cfg(test)]`, so unlike the retired
+    /// `browser-tool` stub it can never be selected in a real binary.) The
+    /// engine holds its own in-memory store so the test never depends on the
+    /// set-once process-global.
     #[tokio::test]
     async fn stale_connection_flips_to_needs_auth() {
         ensure_test_cipher();
@@ -241,7 +244,7 @@ mod tests {
         // Resolve this domain to a backend whose `fetch_state` errors, simulating
         // a session that lapsed upstream.
         let registry = CredentialSourceRegistry::with_default("manual")
-            .with_override("stale.example.com", BrowserToolSource::ID)
+            .with_override("stale.example.com", AlwaysStale::ID)
             .unwrap();
         let engine = HealthEngine::new(store.clone(), registry);
         let mut events = engine.subscribe();
@@ -282,7 +285,7 @@ mod tests {
         // because the sweep skips non-AUTHENTICATED rows before resolving a
         // backend.
         let registry = CredentialSourceRegistry::with_default("manual")
-            .with_override("pending.example.com", BrowserToolSource::ID)
+            .with_override("pending.example.com", AlwaysStale::ID)
             .unwrap();
         let engine = HealthEngine::new(store.clone(), registry);
         let flipped = engine.run_sweep().await.unwrap();

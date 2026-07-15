@@ -4,6 +4,8 @@ import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { usePathname } from "next/navigation";
 import type { ComponentProps, ReactNode } from "react";
 
+import { realmTabTitle } from "@/components/realm-alpha-badge";
+
 /*
  * Per-root theming, matching the official Fumadocs docs site.
  *
@@ -45,9 +47,12 @@ export function DocsLayoutClient({
         sidebar={{
           tabs: {
             transform(option, node) {
-              const color = rootColor(rootSegment(option.url));
+              const segment = rootSegment(option.url);
+              const color = rootColor(segment);
               return {
                 ...option,
+                description: undefined,
+                title: realmTabTitle(option.title, segment),
                 icon: (
                   <div
                     className="size-full rounded-md p-1 [&_svg]:size-full max-md:p-1.5"

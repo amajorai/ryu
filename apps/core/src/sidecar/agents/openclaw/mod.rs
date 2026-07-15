@@ -2,6 +2,7 @@ pub mod installer;
 pub mod process;
 
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
+use crate::win_process::NoWindow;
 use process::ProcessHandle;
 
 pub struct OpenClawManager {
@@ -69,6 +70,7 @@ impl Sidecar for OpenClawManager {
             tracing::info!("removing openclaw npm package from {prefix_str}");
             match tokio::process::Command::new("npm")
                 .args(["uninstall", "--prefix", &prefix_str, "openclaw"])
+                .no_window()
                 .status()
                 .await
             {

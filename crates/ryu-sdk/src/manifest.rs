@@ -43,12 +43,97 @@ pub struct PluginManifest {
     /// Optional Companion surface (an in-desktop overlay or sidebar panel).
     #[serde(default)]
     pub companion: Option<CompanionSurface>,
+    /// Plugin-to-plugin dependencies. Absent means *no dependencies* — the plugin
+    /// enables standalone, which is the behaviour of every manifest predating this
+    /// field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requires: Option<Requires>,
+    /// Host surfaces this plugin runs on. An **empty/absent** list means the plugin
+    /// runs on *every* surface — the backward-compatible default, which MUST NOT be
+    /// read as "hidden".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<Surface>,
+}
+
+/// Plugin-to-plugin dependencies, resolved into a topological enable order by Core.
+///
+/// Distinct from the `engines.ryu` requirement, which constrains plugin→**Core**;
+/// `requires` constrains plugin→**plugin**.
+///
+/// Mirrors `Requires` in `apps/core/src/plugin_manifest/mod.rs`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct Requires {
+    /// Other plugins that must be installed (and are auto-enabled, in dependency
+    /// order) before this one can enable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<AppDependency>,
+    /// Permission grants implied by the dependencies. Declaration only — the Gateway
+    /// remains the sole authority on what a grant *allows*.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grants: Vec<String>,
+}
+
+/// A single plugin-to-plugin dependency edge.
+///
+/// Mirrors `AppDependency` in `apps/core/src/plugin_manifest/mod.rs`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AppDependency {
+    /// The `id` of the plugin this one depends on.
+    pub id: String,
+    /// Optional **minimum** version the dependency must satisfy.
+    ///
+    /// A bare version (`"1.2.0"`) is a *minimum*, i.e. `">=1.2.0"` — deliberately NOT
+    /// semver's default caret (`^1.2.0`), which would reject `2.0.0`. Explicit
+    /// comparator syntax (`">=1.2, <2"`, `"^1.2"`, `"~1.2"`) is honoured verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_version: Option<String>,
+}
+
+/// A host surface a plugin can declare support for via `targets`.
+///
+/// `core` is the headless node (a Core running with no UI at all).
+///
+/// Mirrors `Surface` in `apps/core/src/plugin_manifest/mod.rs`. The kebab-case tokens
+/// are the wire format and must stay byte-identical to Core's.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum Surface {
+    /// The Ryu Gateway.
+    Gateway,
+    /// A headless Core node (no UI).
+    Core,
+    /// The Tauri desktop app.
+    Desktop,
+    /// The Electron dynamic-island companion.
+    Island,
+    /// The Expo/React-Native mobile app.
+    Mobile,
+    /// The browser extension.
+    Extension,
+    /// The Next.js web app.
+    Web,
+    /// The terminal client.
+    Cli,
 }
 
 impl PluginManifest {
     /// The bundled Runnable entries.
     pub fn runnables(&self) -> &[RunnableEntry] {
         &self.runnables
+    }
+
+    /// The plugin-to-plugin dependency edges this manifest declares.
+    pub fn dependencies(&self) -> &[AppDependency] {
+        self.requires.as_ref().map_or(&[], |r| r.apps.as_slice())
+    }
+
+    /// Whether this plugin runs on `surface`.
+    ///
+    /// An empty `targets` means *every* surface — never "none".
+    pub fn supports_surface(&self, surface: Surface) -> bool {
+        self.targets.is_empty() || self.targets.contains(&surface)
     }
 
     /// Only the bundled Runnables of a specific kind.
@@ -271,5 +356,87 @@ mod tests {
         let serialized = serde_json::to_string(&m).expect("serialize");
         let round = PluginManifest::parse_and_validate(&serialized).expect("roundtrip");
         assert_eq!(m, round);
+    }
+
+    /// `requires` and `targets` must survive a parse round-trip verbatim. This crate
+    /// is a hand-maintained mirror of Core's `PluginManifest` and has drifted before,
+    /// so a silent strip here would make an SDK-authored dependency simply vanish.
+    #[test]
+    fn requires_and_targets_survive_a_round_trip() {
+        let raw = r#"{
+            "id": "com.example.meetings",
+            "name": "Meetings",
+            "version": "1.0.0",
+            "runnables": [],
+            "requires": {
+                "apps": [{ "id": "com.ryu.spaces", "min_version": "1.0.0" }],
+                "grants": ["spaces:docs"]
+            },
+            "targets": ["core", "desktop"]
+        }"#;
+
+        let m = PluginManifest::parse_and_validate(raw).expect("parse");
+        assert_eq!(m.dependencies().len(), 1);
+        assert_eq!(m.dependencies()[0].id, "com.ryu.spaces");
+        assert_eq!(m.dependencies()[0].min_version.as_deref(), Some("1.0.0"));
+        assert!(m.supports_surface(Surface::Desktop));
+        assert!(!m.supports_surface(Surface::Gateway));
+
+        let round = PluginManifest::parse_and_validate(
+            &serde_json::to_string(&m).expect("serialize"),
+        )
+        .expect("roundtrip");
+        assert_eq!(m, round);
+    }
+
+    /// The backward-compatibility invariant: a manifest declaring neither field parses,
+    /// has no dependencies, and runs on EVERY surface. If absent `targets` ever came to
+    /// mean "matches nothing", every shipped plugin would vanish from every host.
+    #[test]
+    fn absent_requires_and_targets_mean_no_deps_and_all_surfaces() {
+        let raw = r#"{
+            "id": "com.example.legacy",
+            "name": "Legacy",
+            "version": "1.0.0",
+            "runnables": []
+        }"#;
+
+        let m = PluginManifest::parse_and_validate(raw).expect("parse");
+        assert!(m.requires.is_none());
+        assert!(m.dependencies().is_empty());
+        assert!(m.targets.is_empty());
+        for s in [
+            Surface::Gateway,
+            Surface::Core,
+            Surface::Desktop,
+            Surface::Island,
+            Surface::Mobile,
+            Surface::Extension,
+            Surface::Web,
+            Surface::Cli,
+        ] {
+            assert!(m.supports_surface(s), "absent targets must mean {s:?} too");
+        }
+    }
+
+    /// The kebab-case tokens are the wire format shared with Core and the
+    /// `x-ryu-surface` header. A drift here is a silent no-match, not an error.
+    #[test]
+    fn surface_tokens_match_cores_kebab_case_wire_format() {
+        let json = serde_json::to_string(&vec![
+            Surface::Gateway,
+            Surface::Core,
+            Surface::Desktop,
+            Surface::Island,
+            Surface::Mobile,
+            Surface::Extension,
+            Surface::Web,
+            Surface::Cli,
+        ])
+        .expect("serialize");
+        assert_eq!(
+            json,
+            r#"["gateway","core","desktop","island","mobile","extension","web","cli"]"#
+        );
     }
 }

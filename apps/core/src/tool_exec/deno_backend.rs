@@ -26,6 +26,8 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 
+use crate::win_process::NoWindow;
+
 use super::parked::ParkedStore;
 use super::{
     Elicitation, ExecOutcome, InvokeOutcome, ResumeDecision, SandboxToolInvoker, ToolInvocation,
@@ -83,6 +85,7 @@ pub fn deno_on_path() -> bool {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .stdin(Stdio::null())
+        .no_window()
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -503,6 +506,7 @@ fn spawn_deno(script_path: &std::path::Path) -> std::io::Result<Child> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
+        .no_window()
         .spawn()
 }
 

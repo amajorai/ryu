@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
+use crate::win_process::NoWindow;
 
 pub struct HermesManager {
     process: ProcessHandle,
@@ -82,6 +83,7 @@ impl Sidecar for HermesManager {
             let needs_install = if binary == PathBuf::from("hermes") {
                 tokio::process::Command::new("hermes")
                     .arg("--version")
+                    .no_window()
                     .output()
                     .await
                     .map(|o| !o.status.success())
@@ -97,6 +99,7 @@ impl Sidecar for HermesManager {
                         "-c",
                         "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
                     ])
+                    .no_window()
                     .status()
                     .await
                     .map_err(|e| anyhow::anyhow!("install script failed: {e}"))?;

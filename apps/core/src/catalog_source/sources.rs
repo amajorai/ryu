@@ -630,6 +630,21 @@ struct MarketplacePlugin {
     terms_of_service_url: Option<String>,
     #[serde(default)]
     setup: Option<serde_json::Value>,
+    // ── Dependency + surface contract ─────────────────────────────────────────
+    /// The plugins this entry depends on (`{ apps: [{ id, min_version }] }`) and
+    /// the host surfaces it targets — mirrored from the plugin's manifest by the
+    /// marketplace author, so a card can disclose the install closure up front.
+    ///
+    /// Both are carried as RAW JSON / plain strings rather than the typed
+    /// `Requires` / `Surface`: a git marketplace is untrusted third-party data, and
+    /// one entry with a typo'd surface token must not fail the parse of the WHOLE
+    /// marketplace. The typed contract is enforced where it is load-bearing — on
+    /// the real `plugin.json` at install time, by the manifest loader and the
+    /// install-closure resolver.
+    #[serde(default)]
+    requires: Option<serde_json::Value>,
+    #[serde(default)]
+    targets: Vec<String>,
 }
 
 /// The rich detail metadata carried from a [`MarketplacePlugin`] onto each
@@ -652,6 +667,8 @@ struct MarketplaceItemMeta {
     privacy_policy_url: Option<String>,
     terms_of_service_url: Option<String>,
     setup: Option<serde_json::Value>,
+    requires: Option<serde_json::Value>,
+    targets: Vec<String>,
 }
 
 impl MarketplacePlugin {
@@ -673,6 +690,8 @@ impl MarketplacePlugin {
             privacy_policy_url: self.privacy_policy_url.clone(),
             terms_of_service_url: self.terms_of_service_url.clone(),
             setup: self.setup.clone(),
+            requires: self.requires.clone(),
+            targets: self.targets.clone(),
         }
     }
 }
@@ -819,14 +838,29 @@ impl MarketplaceSource {
                 "installs": 0,
                 "installed": false,
             }),
-            _ => serde_json::json!({
-                "id": item.id,
-                "source": self.display_name,
-                "name": name,
-                "description": item.description,
-                "install_source": item.install_source,
-                "installed": false,
-            }),
+            _ => {
+                let mut card = serde_json::json!({
+                    "id": item.id,
+                    "source": self.display_name,
+                    "name": name,
+                    "description": item.description,
+                    "install_source": item.install_source,
+                    "installed": false,
+                });
+                // Dependency + surface disclosure, when the entry declared it. Only
+                // emitted when non-empty: an absent `requires` means no
+                // dependencies, and an EMPTY `targets` means every surface, so
+                // emitting `[]` would read as "no surfaces".
+                if let Some(obj) = card.as_object_mut() {
+                    if let Some(requires) = item.meta.requires.clone().filter(|v| !v.is_null()) {
+                        obj.insert("requires".to_owned(), requires);
+                    }
+                    if !item.meta.targets.is_empty() {
+                        obj.insert("targets".to_owned(), serde_json::json!(item.meta.targets));
+                    }
+                }
+                card
+            }
         }
     }
 }
@@ -924,6 +958,15 @@ impl CatalogSource for MarketplaceSource {
         }
         if !meta.capabilities.is_empty() {
             detail.insert("capabilities".to_owned(), serde_json::json!(meta.capabilities));
+        }
+        // The install closure this plugin pulls in, and the surfaces it runs on.
+        // Same emit rule as the card: absent `requires` = no dependencies, empty
+        // `targets` = every surface (so never emit an empty list).
+        if let Some(requires) = meta.requires.clone().filter(|v| !v.is_null()) {
+            detail.insert("requires".to_owned(), requires);
+        }
+        if !meta.targets.is_empty() {
+            detail.insert("targets".to_owned(), serde_json::json!(meta.targets));
         }
         if !meta.example_prompts.is_empty() {
             detail.insert("examplePrompts".to_owned(), serde_json::json!(meta.example_prompts));
@@ -1867,11 +1910,17 @@ impl CatalogSource for StubSource {
 // ── Ryu Marketplace source (#467) ────────────────────────────────────────────
 
 /// Env override for the Ryu Marketplace API base URL ("nothing hardcoded").
-/// Defaults to the localhost control-plane server in dev.
+/// A shipped build hits the hosted Ryu marketplace by default; a self-host or
+/// local dev overrides this (e.g. `RYU_MARKETPLACE_API_URL=http://localhost:3000`).
 pub const RYU_MARKETPLACE_API_ENV: &str = "RYU_MARKETPLACE_API_URL";
 
-/// The dev default base URL: the `apps/server` Hono control plane on :3000.
-const RYU_MARKETPLACE_DEFAULT_BASE: &str = "http://localhost:3000";
+/// The default base URL: the hosted Ryu control plane (`apps/server`) that
+/// serves `GET /api/marketplace/*` in production. A non-localhost default so an
+/// installed build reaches the real marketplace out of the box; overridable via
+/// [`RYU_MARKETPLACE_API_ENV`] for self-host / local dev (point it at
+/// `http://localhost:3000`). The caller appends `/api/marketplace/...`, so this
+/// carries no `/api` suffix.
+const RYU_MARKETPLACE_DEFAULT_BASE: &str = "https://api.ryuhq.com";
 
 /// Env var carrying a control-plane bearer (Better Auth / OAuth session token)
 /// to forward on the marketplace install handoff so a PAID item's entitlement
@@ -1926,9 +1975,10 @@ fn marketplace_buyer_token() -> Option<String> {
 /// that spans **all four kinds**: a [`kind`](Self::kind) field discriminates,
 /// and the source is registered once per kind in `builtin_sources`. It fetches
 /// the first-party marketplace API (`GET /api/marketplace/catalog{,/detail}`)
-/// over a **plain reqwest client** (the endpoint is trusted first-party, and is
-/// localhost in dev, so it must NOT go through the SSRF `guarded_get` that
-/// blocks loopback) and maps each item onto Core's per-kind install path.
+/// over a **plain reqwest client** (the endpoint is trusted first-party — the
+/// hosted marketplace by default, or loopback when self-hosting — so it must NOT
+/// go through the SSRF `guarded_get` that blocks loopback) and maps each item
+/// onto Core's per-kind install path.
 ///
 /// Cross-kind design (the crux): unlike every other `Source` variant (whose
 /// variant == its kind), this one variant serves 4 kinds, so **every method
@@ -1952,7 +2002,7 @@ pub struct RyuMarketplaceSource {
     pub display_name: String,
     pub kind: CatalogKind,
     /// Optional base URL override. `None` ⇒ env (`RYU_MARKETPLACE_API_URL`) or
-    /// the localhost dev default.
+    /// the hosted-marketplace default.
     pub base_url: Option<String>,
 }
 
@@ -1979,6 +2029,15 @@ struct MarketplaceCard {
     rating_average: Option<f64>,
     #[serde(default, rename = "ratingCount")]
     rating_count: Option<u64>,
+    /// The plugin's declared dependency closure + host surfaces, when the
+    /// marketplace server exposes them on the card. Raw JSON, and `Option` so an
+    /// older server that omits the columns still parses (the fields survive inside
+    /// the signed manifest regardless — the card copy is a browse-time convenience,
+    /// and the install path reads the manifest, never this).
+    #[serde(default)]
+    requires: Option<Value>,
+    #[serde(default)]
+    targets: Option<Value>,
 }
 
 /// The marketplace `GET /catalog` envelope.
@@ -2000,8 +2059,9 @@ impl RyuMarketplaceSource {
         }
     }
 
-    /// Resolve the API base URL: an explicit `base_url`, else the env override,
-    /// else the localhost dev default. Trailing slash trimmed.
+    /// Resolve the API base URL: an explicit `base_url`, else the env override
+    /// (`RYU_MARKETPLACE_API_URL`), else the hosted-marketplace default. Trailing
+    /// slash trimmed.
     fn resolve_base(&self) -> String {
         let raw = self
             .base_url
@@ -2260,19 +2320,39 @@ impl RyuMarketplaceSource {
                 "rating_average": card.rating_average.unwrap_or(0.0),
                 "rating_count": card.rating_count.unwrap_or(0),
             }),
-            CatalogKind::Plugin => serde_json::json!({
-                "id": card.id,
-                "name": card.name,
-                "description": card.description,
-                "author": card.author,
-                "version": card.version,
-                "install_source": card.install_source,
-                "installed": false,
-                "icon_url": card.icon_url,
-                "category": card.category,
-                "rating_average": card.rating_average.unwrap_or(0.0),
-                "rating_count": card.rating_count.unwrap_or(0),
-            }),
+            CatalogKind::Plugin => {
+                let mut value = serde_json::json!({
+                    "id": card.id,
+                    "name": card.name,
+                    "description": card.description,
+                    "author": card.author,
+                    "version": card.version,
+                    "install_source": card.install_source,
+                    "installed": false,
+                    "icon_url": card.icon_url,
+                    "category": card.category,
+                    "rating_average": card.rating_average.unwrap_or(0.0),
+                    "rating_count": card.rating_count.unwrap_or(0),
+                });
+                // The dependency closure + surfaces, when the marketplace server
+                // exposes them on the card. Emitted only when present/non-empty
+                // (empty `targets` = every surface). Display only — the install path
+                // reads the SIGNED manifest, never the card.
+                if let Some(obj) = value.as_object_mut() {
+                    if let Some(requires) = card.requires.clone().filter(|v| !v.is_null()) {
+                        obj.insert("requires".to_owned(), requires);
+                    }
+                    if let Some(targets) = card
+                        .targets
+                        .as_ref()
+                        .and_then(|v| v.as_array())
+                        .filter(|a| !a.is_empty())
+                    {
+                        obj.insert("targets".to_owned(), serde_json::json!(targets));
+                    }
+                }
+                value
+            }
             CatalogKind::Knowledge => serde_json::json!({
                 "id": card.id,
                 "name": card.name,
@@ -3931,7 +4011,7 @@ mod tests {
         };
         assert_eq!(src.resolve_base(), "https://market.example");
 
-        // With no explicit base and no env override, the localhost dev default.
+        // With no explicit base and no env override, the hosted-marketplace default.
         if std::env::var(RYU_MARKETPLACE_API_ENV).is_err() {
             let default_src = RyuMarketplaceSource::builtin(CatalogKind::Plugin);
             assert_eq!(default_src.resolve_base(), RYU_MARKETPLACE_DEFAULT_BASE);

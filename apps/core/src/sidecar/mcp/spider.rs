@@ -30,6 +30,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::RegistryTool;
+use crate::win_process::NoWindow;
 
 const CRAWL_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -171,6 +172,7 @@ async fn do_crawl(arguments: Value) -> Result<Value> {
             "--",
             &url,
         ])
+        .no_window()
         .output();
 
     let output = match tokio::time::timeout(CRAWL_TIMEOUT, cmd).await {

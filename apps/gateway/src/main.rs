@@ -20,6 +20,7 @@ mod passthrough;
 mod pipeline;
 mod policy;
 mod policy_alert;
+mod profile;
 mod providers;
 mod quota;
 mod rate_limit;
@@ -31,6 +32,7 @@ mod state;
 mod telemetry;
 mod tools;
 mod untrusted;
+mod wasm_policy;
 
 use std::{sync::Arc, time::Duration};
 

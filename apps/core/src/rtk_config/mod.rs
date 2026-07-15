@@ -25,6 +25,8 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::win_process::NoWindow;
+
 /// Preference key for auto-wrapping the flagship Ryu (Pi) agent.
 pub const WRAP_PI_PREF_KEY: &str = "rtk-wrap-pi";
 /// Preference key for auto-wrapping the Claude Code agent.
@@ -150,6 +152,7 @@ pub async fn configure(agent: WrapAgent, enable: bool) -> anyhow::Result<()> {
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    cmd.no_window();
 
     let status = cmd
         .status()

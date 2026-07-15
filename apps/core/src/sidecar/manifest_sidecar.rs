@@ -316,7 +316,16 @@ impl Sidecar for ManifestSidecar {
                             .await
                             .map_err(|e| anyhow::anyhow!("python provisioning failed: {e}"))?;
                     let args = vec!["-m".to_owned(), rt.entry.clone()];
-                    spawn(&handle, &python.to_string_lossy(), &args, &BTreeMap::new()).await?;
+                    // Layer the manifest-declared env, expanding `${RYU_DIR}` so a
+                    // runtime can target Core-owned cache/output paths portably.
+                    let ryu_dir = crate::paths::ryu_dir();
+                    let ryu_dir_str = ryu_dir.to_string_lossy();
+                    let env: BTreeMap<String, String> = rt
+                        .env
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.replace("${RYU_DIR}", &ryu_dir_str)))
+                        .collect();
+                    spawn(&handle, &python.to_string_lossy(), &args, &env).await?;
                 }
             }
             tracing::info!("manifest sidecar '{name}' started");

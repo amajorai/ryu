@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use tokio::process::Command;
 
 use crate::sidecar::download_manager::{ryu_dir, ProgressCallback, ProgressEvent, VersionStore};
+use crate::win_process::NoWindow;
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -69,6 +70,7 @@ impl ScreenpipeDownloader {
                 "screenpipe@latest",
                 "--ignore-scripts",
             ])
+            .no_window()
             .status()
             .await
             .context("running `npm install --prefix ~/.ryu screenpipe@latest --ignore-scripts`")?;
@@ -80,6 +82,7 @@ impl ScreenpipeDownloader {
         // Query the installed version from npm.
         let version = Command::new("npm")
             .args(["view", "screenpipe", "version"])
+            .no_window()
             .output()
             .await
             .ok()

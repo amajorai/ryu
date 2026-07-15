@@ -55,7 +55,11 @@ impl ShadowManager {
                 .timeout(Duration::from_secs(3))
                 .build()
                 .expect("reqwest client"),
-            port: 3030,
+            // Profile-aware Shadow port (release 3030, dev 4030, …). Every Shadow
+            // CLIENT (`server/clips`, `sidecar/mcp/shadow`, `meetings`) dials the
+            // same port via the `RYU_SHADOW_URL` env default that
+            // `profile::apply_env_defaults` seeds, so spawn and clients agree.
+            port: crate::profile::port(3030),
             downloads: None,
         };
         manager.ensure_liveness_probe();

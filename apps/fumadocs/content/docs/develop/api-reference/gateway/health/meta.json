@@ -1,7 +1,13 @@
 {
   "title": "Health",
-  "description": "Liveness and provider status.",
+  "description": "Liveness, provider status, and observability metrics.",
   "pages": [
+    "getMetrics",
+    "getConcurrency",
+    "getCommunitySavings",
+    "health_alias",
+    "getMetrics_alias",
+    "getCommunitySavings_alias",
     "health"
   ]
 }

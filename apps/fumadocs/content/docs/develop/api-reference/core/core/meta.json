@@ -1,0 +1,9 @@
+{
+  "title": "Core",
+  "description": "Core API endpoints.",
+  "pages": [
+    "list_btw_handler",
+    "realtime_ws",
+    "whiteboard_generate_handler"
+  ]
+}

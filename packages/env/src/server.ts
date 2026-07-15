@@ -25,7 +25,9 @@ export const env = createEnv({
 			.default("development"),
 		// Server-managed field encryption for the control-plane MongoDB
 		// (docs/encryption-at-rest.md slice 4). Base64 of exactly 32 random
-		// bytes. Required for production secret writes; legacy plaintext rows
+		// bytes. Optional in the schema so Docker builds can set
+		// SKIP_ENV_VALIDATION; **required at runtime when NODE_ENV=production**
+		// (enforced after createEnv — see the throw below). Legacy plaintext rows
 		// still read once a key is configured so lazy migration can upgrade them
 		// on the next write.
 		RYU_DB_MASTER_KEY: z.string().optional(),
@@ -41,6 +43,30 @@ export const env = createEnv({
 		USESEND_CONTACT_BOOK_ID: z.string().optional(),
 		FROM_EMAIL: z.string().email().optional(),
 		FRONTEND_URL: z.string().optional(),
+		// Server-side control-plane base URL (non-public). Used when code must
+		// reach the Hono server without going through the browser bundle's
+		// NEXT_PUBLIC_SERVER_URL (e.g. SSR cert pages, Composio relay fallback).
+		// Optional: falls back to NEXT_PUBLIC_SERVER_URL / BETTER_AUTH_URL in
+		// each call site.
+		SERVER_URL: z.string().optional(),
+		// Public URL Composio relay webhooks advertise to Composio (must be
+		// reachable from the internet in production). Optional: falls back to
+		// BETTER_AUTH_URL, then SERVER_URL, then http://localhost:3000.
+		RYU_PUBLIC_URL: z.string().optional(),
+		// Marketing web origin for server-side billing/email redirects when the
+		// API router builds a profile URL. Optional: defaults to
+		// http://localhost:3001 (same as FRONTEND_URL in dev).
+		NEXT_PUBLIC_FRONTEND_URL: z.string().optional(),
+		// Waitlist admins (comma-separated emails). Empty = waitlist bypassed on
+		// self-hosted installs (see packages/auth/lib/waitlist.ts). Cloud sets
+		// this to a non-empty allowlist so the queue is fail-closed.
+		ADMIN_EMAILS: z.string().optional(),
+		// Rough waitlist throughput estimate (invites per week). Optional:
+		// packages/auth defaults to 50 when unset or invalid.
+		WAITLIST_INVITES_PER_WEEK: z.string().optional(),
+		// Chrome extension origin trusted by Better Auth CORS (device-auth flow).
+		// Optional: defaults to chrome-extension://<NEXT_PUBLIC_EXTENSION_ID>.
+		EXTENSION_ORIGIN: z.string().optional(),
 		// Auth providers
 		GOOGLE_CLIENT_ID: z.string().optional(),
 		GOOGLE_CLIENT_SECRET: z.string().optional(),
@@ -97,6 +123,18 @@ export const env = createEnv({
 		// the env schema is complete and nothing crashes when they are present.
 		STRIPE_CONNECT_CLIENT_ID: z.string().optional(),
 		STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
+		// Marketplace direct-charge migration flag (#490,
+		// docs/stripe-connect-direct-charges-migration.md). DEFAULT OFF: absent /
+		// anything but "true" keeps the destination-charge path (charge on the
+		// PLATFORM, seller SG-only). Set "true" to charge ON the seller's connected
+		// account (direct charge → 46 seller countries), keeping the platform fee.
+		// BEFORE flipping true you MUST (a) subscribe checkout.session.completed /
+		// payment_intent.succeeded / charge.refunded / charge.dispute.created on the
+		// Connect webhook endpoint (direct-charge success events fire there with
+		// `event.account` set — a platform endpoint never sees them, so licenses
+		// silently stop being written), and (b) re-onboard existing sellers for the
+		// `card_payments` capability + let `account.updated` backfill chargesEnabled.
+		MARKETPLACE_DIRECT_CHARGE: z.string().optional(),
 		// Secret shared with the gateway so the internal debit endpoint can be
 		// called service-to-service (the gateway debits arbitrary orgs). Optional:
 		// when unset, debit falls back to an authenticated user session.
@@ -162,9 +200,24 @@ export const env = createEnv({
 		SENTRY_DSN: z.string().optional(),
 		RYU_SENTRY_DSN: z.string().optional(),
 		RYU_CRASH_REPORTS_ENABLED: z.string().optional(),
+		// Sentry release tag for server-side crash reports (instrument.ts). Also
+		// read by the web app when NEXT_PUBLIC_APP_VERSION is unset. Optional.
+		RYU_RELEASE: z.string().optional(),
 		// Axiom dataset the wide events land in (sent as the X-Axiom-Dataset
 		// header). Required by Axiom; ignored by a generic OTLP Collector.
 		AXIOM_DATASET: z.string().optional(),
+		// Composio relay ingress (packages/api composio-relay router). Optional:
+		// when unset the ingress rejects all webhooks (fail-closed).
+		COMPOSIO_WEBHOOK_SECRET: z.string().optional(),
+		// Marketplace staff-picks + affiliate admin allowlist (comma-separated
+		// emails). Optional: unset denies everyone (see marketplace.ts).
+		RYU_MARKETPLACE_ADMIN_EMAILS: z.string().optional(),
+		// Catalog / marketplace federation upstreams (packages/api federation.ts).
+		// All optional — each falls back to the live public default.
+		RYU_HF_API_URL: z.string().optional(),
+		RYU_HF_HOST: z.string().optional(),
+		SKILLS_SH_API_URL: z.string().optional(),
+		RYU_MCP_REGISTRY_URL: z.string().optional(),
 		// --- Ryu Managed Cloud, WS6 (docs/managed-cloud-spec.md) ---------------
 		// MASTER SAFETY FLAG for live Hetzner infrastructure. Default OFF: with
 		// this unset/"false" the servers router records DB state and LOGS what it

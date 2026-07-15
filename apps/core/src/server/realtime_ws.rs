@@ -117,6 +117,13 @@ struct JoinFrame {
 /// `GET /api/realtime/ws` — upgrade to the room gateway. Node admittance + the
 /// optional user identity are resolved here (pre-upgrade); the room access
 /// decision happens inside the socket task after the `join` frame.
+#[utoipa::path(
+    get,
+    path = "/api/realtime/ws",
+    tag = "Core",
+    summary = "upgrade to the room gateway. Node admittance + the",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn realtime_ws(
     ws: WebSocketUpgrade,
     State(state): State<ServerState>,

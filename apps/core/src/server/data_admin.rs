@@ -14,7 +14,7 @@
 //! created. Per the Core-vs-Gateway rule this is all "what runs" data → Core; no
 //! policy decision, so no Gateway involvement.
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, http::StatusCode, Extension, Json};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -103,22 +103,66 @@ pub async fn data_counts(State(state): State<ServerState>) -> Json<serde_json::V
 )]
 pub async fn data_clear(
     State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(req): Json<ClearRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let result: Result<u64, String> = match req.category {
-        DataCategory::Chats => state
+    // ── ACL ──────────────────────────────────────────────────────────────────
+    // This handler took NO caller: on an org-bound node any holder of the shared node
+    // token could truncate EVERY user's chats, spaces, memory, monitors and meetings.
+    //
+    //   - Node UNBOUND (personal): one principal, `RYU_TOKEN` is the boundary. The
+    //     danger zone behaves EXACTLY as before — an unscoped truncate of the user's
+    //     own machine, which is the whole point of the feature.
+    //   - Node ORG-BOUND: an unscoped truncate is never acceptable. `Chats` is scoped
+    //     to the caller's OWN conversations. Every other category has no per-user
+    //     tenancy in the store yet (spaces/documents carry no owner columns — see the
+    //     Spaces deferral), so there is nothing to scope by and a truncate would
+    //     destroy other users' data: REFUSE rather than half-scope it.
+    let bound_owner: Option<String> = match super::node_org_id() {
+        None => None,
+        Some(_) => match caller.as_ref() {
+            Some(c) => Some(c.user_id.clone()),
+            None => {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "error": "forbidden: a signed-in user is required to clear data on a shared node"
+                    })),
+                );
+            }
+        },
+    };
+
+    let result: Result<u64, String> = match (req.category, bound_owner.as_deref()) {
+        // ── Unbound personal node: unchanged behaviour ───────────────────────
+        (DataCategory::Chats, None) => state
             .conversations
             .clear_all_conversations()
             .await
             .map_err(|e| e.to_string()),
-        DataCategory::Spaces => state
+        (DataCategory::Spaces, None) => state
             .spaces
             .clear_all_spaces()
             .await
             .map_err(|e| e.to_string()),
-        DataCategory::Memory => state.memory.clear_all().await.map_err(|e| e.to_string()),
-        DataCategory::Monitors => clear_all_monitors(&state).await,
-        DataCategory::Meetings => clear_all_meetings(&state).await,
+        (DataCategory::Memory, None) => state.memory.clear_all().await.map_err(|e| e.to_string()),
+        (DataCategory::Monitors, None) => clear_all_monitors(&state).await,
+        (DataCategory::Meetings, None) => clear_all_meetings(&state).await,
+
+        // ── Org-bound node: scope, or refuse ─────────────────────────────────
+        (DataCategory::Chats, Some(owner)) => state
+            .conversations
+            .clear_conversations_owned_by(owner)
+            .await
+            .map_err(|e| e.to_string()),
+        (DataCategory::Spaces | DataCategory::Memory | DataCategory::Monitors | DataCategory::Meetings, Some(_)) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "forbidden: this category cannot be cleared on a shared (org-bound) node —                               it carries no per-user ownership, so clearing it would destroy other users' data"
+                })),
+            );
+        }
     };
 
     match result {

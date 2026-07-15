@@ -3,6 +3,7 @@
   "description": "Download center.",
   "pages": [
     "list_downloads",
+    "downloads_history",
     "downloads_stream",
     "download_clear",
     "download_cancel",

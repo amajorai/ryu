@@ -99,6 +99,14 @@ const LOCAL_VIDEO_EXTS: &[&str] = &["mp4", "mov", "mkv", "webm"];
 /// build are "what runs" → Core/Shadow. Routing the Whisper model call is "what
 /// is measured/paid" → the Gateway (Shadow selects `sttEngine`; Core only emits
 /// slot headers in `voice::transcribe_wav`).
+#[utoipa::path(
+    post,
+    path = "/api/clips/ingest",
+    tag = "Clips",
+    summary = "turn a watched URL or a local video file into a clip",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn ingest(
     State(state): State<ServerState>,
     Json(body): Json<IngestBody>,
@@ -276,6 +284,13 @@ pub async fn ingest(
 }
 
 /// GET /api/clips — list clips (proxied from Shadow).
+#[utoipa::path(
+    get,
+    path = "/api/clips",
+    tag = "Clips",
+    summary = "list clips (proxied from Shadow).",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn list_clips(State(state): State<ServerState>) -> Json<Value> {
     let url = format!("{}/clips", shadow_base());
     let resp = state
@@ -295,6 +310,14 @@ pub async fn list_clips(State(state): State<ServerState>) -> Json<Value> {
 }
 
 /// POST /api/clips/start — start a clip (proxied from Shadow).
+#[utoipa::path(
+    post,
+    path = "/api/clips/start",
+    tag = "Clips",
+    summary = "start a clip (proxied from Shadow).",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn start_clip(
     State(state): State<ServerState>,
     Json(body): Json<Value>,
@@ -326,6 +349,15 @@ pub async fn start_clip(
 }
 
 /// POST /api/clips/:id/stop — finalize a clip; rewrites `framesEndpoint`.
+#[utoipa::path(
+    post,
+    path = "/api/clips/{id}/stop",
+    tag = "Clips",
+    summary = "finalize a clip; rewrites `framesEndpoint`.",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn stop_clip(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -364,6 +396,15 @@ pub async fn stop_clip(
 }
 
 /// POST /api/clips/:id/pause — pause the in-progress clip (proxied from Shadow).
+#[utoipa::path(
+    post,
+    path = "/api/clips/{id}/pause",
+    tag = "Clips",
+    summary = "pause the in-progress clip (proxied from Shadow).",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn pause_clip(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -372,6 +413,15 @@ pub async fn pause_clip(
 }
 
 /// POST /api/clips/:id/resume — resume a paused clip (proxied from Shadow).
+#[utoipa::path(
+    post,
+    path = "/api/clips/{id}/resume",
+    tag = "Clips",
+    summary = "resume a paused clip (proxied from Shadow).",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn resume_clip(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -408,6 +458,13 @@ async fn proxy_clip_post(state: &ServerState, path: &str) -> (StatusCode, Json<V
 
 /// GET /api/clips/sources — the displays + windows a clip can capture from
 /// (proxied from Shadow). Fail-soft like `list_clips`.
+#[utoipa::path(
+    get,
+    path = "/api/clips/sources",
+    tag = "Clips",
+    summary = "the displays + windows a clip can capture from",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_sources(State(state): State<ServerState>) -> Json<Value> {
     let url = format!("{}/clips/sources", shadow_base());
     let resp = state
@@ -427,6 +484,14 @@ pub async fn get_sources(State(state): State<ServerState>) -> Json<Value> {
 }
 
 /// GET /api/clips/:id/context — the clip manifest; rewrites `framesEndpoint`.
+#[utoipa::path(
+    get,
+    path = "/api/clips/{id}/context",
+    tag = "Clips",
+    summary = "the clip manifest; rewrites `framesEndpoint`.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_context(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -467,6 +532,14 @@ pub struct FrameQuery {
 }
 
 /// GET /api/clips/:id/frame?atMs= — stream a JPEG frame from Shadow.
+#[utoipa::path(
+    get,
+    path = "/api/clips/{id}/frame",
+    tag = "Clips",
+    summary = "stream a JPEG frame from Shadow.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_frame(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -486,6 +559,14 @@ pub async fn get_frame(
 }
 
 /// GET /api/clips/:id/file — stream the clip.mp4 bytes from Shadow.
+#[utoipa::path(
+    get,
+    path = "/api/clips/{id}/file",
+    tag = "Clips",
+    summary = "stream the clip.mp4 bytes from Shadow.",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn get_file(State(state): State<ServerState>, Path(id): Path<String>) -> Response {
     let url = format!("{}/clips/{id}/file", shadow_base());
     proxy_bytes(
@@ -500,6 +581,15 @@ pub async fn get_file(State(state): State<ServerState>, Path(id): Path<String>) 
 }
 
 /// POST /api/clips/:id/diagnostics — append diagnostics (proxied from Shadow).
+#[utoipa::path(
+    post,
+    path = "/api/clips/{id}/diagnostics",
+    tag = "Clips",
+    summary = "append diagnostics (proxied from Shadow).",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn post_diagnostics(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -542,6 +632,13 @@ pub struct RecentActivityQuery {
 /// "last N minutes" keyframe bundle straight through (nothing persisted). Core
 /// only clamps `minutes` to 1..=15 (default 3) and passes the JSON unchanged.
 /// Fail-soft like the other clips proxies.
+#[utoipa::path(
+    get,
+    path = "/api/clips/recent-activity",
+    tag = "Clips",
+    summary = "proxy Shadow's ephemeral",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
 pub async fn recent_activity(
     State(state): State<ServerState>,
     Query(q): Query<RecentActivityQuery>,
@@ -618,7 +715,13 @@ async fn file_clip_into_space(state: ServerState, bundle: Value) {
                 let fname = format!("{title}.mp4");
                 if let Err(e) = state
                     .spaces
-                    .create_file(&space_id, &fname, &bytes, "video/mp4")
+                    .create_file(
+                        &space_id,
+                        &fname,
+                        &bytes,
+                        "video/mp4",
+                        &crate::server::spaces::background_tenancy(),
+                    )
                     .await
                 {
                     tracing::warn!("clips auto-file: create_file failed: {e:#}");
@@ -635,7 +738,12 @@ async fn file_clip_into_space(state: ServerState, bundle: Value) {
     let summary = build_clip_summary_md(&title, duration_ms, &bundle);
     if let Err(e) = state
         .spaces
-        .ingest_document(&space_id, &title, &summary)
+        .ingest_document(
+            &space_id,
+            &title,
+            &summary,
+            &crate::server::spaces::background_tenancy(),
+        )
         .await
     {
         tracing::warn!("clips auto-file: ingest_document failed: {e:#}");

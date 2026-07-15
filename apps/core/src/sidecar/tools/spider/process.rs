@@ -9,6 +9,8 @@ use std::process::Child;
 
 use anyhow::{Context, Result};
 
+use crate::win_process::NoWindow;
+
 pub struct SpiderProcess {
     binary_path: PathBuf,
     child: Option<Child>,
@@ -31,6 +33,7 @@ impl SpiderProcess {
             move || {
                 std::process::Command::new(&binary_path)
                     .arg("--version")
+                    .no_window()
                     .output()
             }
         })

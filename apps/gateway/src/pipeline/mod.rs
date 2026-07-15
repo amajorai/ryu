@@ -486,8 +486,12 @@ async fn apply_smart_routing(state: &AppState, ctx: &RequestContext, body: &mut 
     // config gets one cached ephemeral `SmartRouter` (keyed by a hash of its JSON)
     // so its rule-embedding + per-session caches persist across the agent's turns.
     // The private field is always stripped before the body reaches the provider.
-    let router = per_request_smart_router(state, body);
-    let router = router.as_deref().unwrap_or(&state.smart_router);
+    let per_agent = per_request_smart_router(state, body);
+    // Clone the global smart router Arc out of the hot-swap lock so it survives the
+    // classifier `.await` below (PUT /v1/config can swap it concurrently); a per-agent
+    // override still wins over the global default.
+    let global = state.smart_router();
+    let router = per_agent.as_deref().unwrap_or(global.as_ref());
 
     if !router.is_active() {
         return false;
@@ -869,29 +873,53 @@ fn inline_action_for(binding: &crate::evaluators::EvaluatorBinding, ev: &Evaluat
         .unwrap_or(FirewallPolicy::WarnAndContinue)
 }
 
-/// Evaluate ONE enabled inline binding against `text`. `Some((flagged, reason))`
-/// when it actually ran; `None` when the impl is not enforceable this phase (a
-/// `Code` evaluator — P4; a `Builtin`; or an empty-rubric Custom template) — an
-/// honest, logged no-op, never a faked verdict. Fail-open on the judge is handled
-/// inside [`InspectorClient::inspect_rubric`].
+/// The result of evaluating one inline binding. Distinguishes a legitimate
+/// `(flagged, reason)` verdict — which flows through the binding's action map
+/// ([`inline_outcome`]) — from a fail-closed short-circuit that must BLOCK the
+/// turn regardless of the configured action. The latter is the wasm-policy
+/// fail-direction control (threat model item F): a security plugin that
+/// traps/OOMs/times-out must never be silently skipped (old `None`) nor merely
+/// warned (if bound to `Warn`); it blocks.
+enum InlineFlag {
+    /// The impl is not enforceable this phase, or this binding is skipped — an
+    /// honest, logged no-op (formerly `None`).
+    Skip,
+    /// The evaluator ran: `(flagged, reason)` feeds the normal action map.
+    Ran { flagged: bool, reason: String },
+    /// A security policy failed closed (trap / OOM / timeout / invalid output with
+    /// `fail_open = false`): block the turn directly, bypassing the action map.
+    ForceBlock { reason: String },
+}
+
+/// Evaluate ONE enabled inline binding against `text`. Returns [`InlineFlag`]:
+/// `Ran` when it produced a verdict; `Skip` when the impl is not enforceable this
+/// phase (a `Code` evaluator — P4; a `Builtin`; or an empty-rubric Custom
+/// template) — an honest, logged no-op, never a faked verdict; `ForceBlock` when a
+/// fail-closed wasm policy must short-circuit to a block. Fail-open on the judge is
+/// handled inside [`InspectorClient::inspect_rubric`].
 async fn flag_inline_binding(
     ev: &Evaluator,
     scanner: &FirewallScanner,
     text: &str,
     state: &AppState,
-) -> Option<(bool, String)> {
+) -> InlineFlag {
     match &ev.impl_ {
         EvaluatorImpl::Regex { .. } | EvaluatorImpl::Heuristic => {
-            let kind = inline_detection_kind(&ev.id)?;
+            let Some(kind) = inline_detection_kind(&ev.id) else {
+                return InlineFlag::Skip;
+            };
             match scanner.scan_kind(text, kind) {
-                Some(m) => Some((true, format!("{}:{}", m.kind.as_str(), m.pattern_name))),
-                None => Some((false, String::new())),
+                Some(m) => InlineFlag::Ran {
+                    flagged: true,
+                    reason: format!("{}:{}", m.kind.as_str(), m.pattern_name),
+                },
+                None => InlineFlag::Ran { flagged: false, reason: String::new() },
             }
         }
         EvaluatorImpl::LlmJudge { rubric } => {
             if rubric.trim().is_empty() {
                 debug!(evaluator = %ev.id, "inline evaluator: empty rubric — no-op");
-                return None;
+                return InlineFlag::Skip;
             }
             let ins = &scanner.config().inspector;
             let timeout = if ins.timeout_ms == 0 { 1500 } else { ins.timeout_ms };
@@ -926,16 +954,68 @@ async fn flag_inline_binding(
             };
             let flagged = backstop_flag(verdict.available, verdict.flagged, seed_hit);
             let reason = if seed_hit { seed_reason } else { verdict.reason };
-            Some((flagged, reason))
+            InlineFlag::Ran { flagged, reason }
         }
         EvaluatorImpl::Code { .. } => {
             debug!(evaluator = %ev.id, "inline evaluator: code impl deferred to P4 — no-op");
-            None
+            InlineFlag::Skip
         }
         EvaluatorImpl::Builtin { detector } => {
             debug!(evaluator = %ev.id, %detector, "inline evaluator: builtin impl not wired — no-op");
-            None
+            InlineFlag::Skip
         }
+        EvaluatorImpl::Wasm { module_base64, fail_open } => {
+            flag_wasm_binding(ev, module_base64, *fail_open, text, state).await
+        }
+    }
+}
+
+/// Run an untrusted WASM policy plugin over `text` and translate its verdict into
+/// an [`InlineFlag`]. The whole point of this arm is the fail-direction contract:
+///   * guest `allow`  → `Ran { flagged: false }` (proceed);
+///   * guest `deny`   → `Ran { flagged: true, reason }` (flows through the binding's
+///     action map, so an operator may bind a deny-capable policy as Block / Sanitize
+///     / Warn);
+///   * sandbox `Fail` (trap / fuel / epoch / OOM / invalid output / bad module /
+///     host unavailable) → if `fail_open` then `Ran { flagged: false }` (declared,
+///     logged) else `ForceBlock` (default CLOSED — never a silent allow).
+async fn flag_wasm_binding(
+    ev: &Evaluator,
+    module_base64: &str,
+    fail_open: bool,
+    text: &str,
+    state: &AppState,
+) -> InlineFlag {
+    use base64::Engine as _;
+
+    // Fail (fail-closed unless the plugin declared open) helper.
+    let fail = |reason: String| -> InlineFlag {
+        if fail_open {
+            warn!(evaluator = %ev.id, %reason, "wasm policy failed OPEN (declared) — allowing");
+            InlineFlag::Ran { flagged: false, reason: String::new() }
+        } else {
+            warn!(evaluator = %ev.id, %reason, "wasm policy failed CLOSED — blocking");
+            InlineFlag::ForceBlock {
+                reason: format!("wasm policy '{}' failed closed: {reason}", ev.id),
+            }
+        }
+    };
+
+    // Cap the base64 payload before decoding (bounds the decode work itself).
+    if module_base64.len() > crate::wasm_policy::MAX_MODULE_B64_LEN {
+        return fail("module payload too large".to_string());
+    }
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(module_base64.as_bytes()) {
+        Ok(b) => b,
+        Err(e) => return fail(format!("invalid base64 module: {e}")),
+    };
+    let Some(host) = state.wasm_host() else {
+        return fail("wasm policy host unavailable".to_string());
+    };
+    match host.evaluate(&bytes, text).await {
+        crate::wasm_policy::WasmVerdict::Allow => InlineFlag::Ran { flagged: false, reason: String::new() },
+        crate::wasm_policy::WasmVerdict::Deny { reason } => InlineFlag::Ran { flagged: true, reason },
+        crate::wasm_policy::WasmVerdict::Fail { reason } => fail(reason),
     }
 }
 
@@ -1015,9 +1095,26 @@ async fn apply_inline_input_evaluators(
         if !ev.capabilities.inline || ev.target != EvaluatorTarget::Input {
             continue;
         }
-        let Some((flagged, reason)) = flag_inline_binding(ev, scanner, prompt_text, state).await
-        else {
-            continue;
+        let (flagged, reason) = match flag_inline_binding(ev, scanner, prompt_text, state).await {
+            InlineFlag::Skip => continue,
+            InlineFlag::Ran { flagged, reason } => (flagged, reason),
+            InlineFlag::ForceBlock { reason } => {
+                // Fail-closed short-circuit: block regardless of the binding's
+                // configured action (the wasm-policy fail-direction control).
+                let model = body["model"].as_str().unwrap_or("unknown");
+                state.metrics.inc_firewall_blocked();
+                audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
+                warn!(
+                    request_id = %ctx.request_id,
+                    evaluator = %ev.id,
+                    %reason,
+                    "inline evaluator: fail-closed block (inbound)"
+                );
+                return Err(GatewayError::FirewallBlocked(
+                    format!("Inbound content blocked by evaluator '{}': {}", ev.id, reason),
+                    firewall_policy_alert(scanner.config(), ctx, "block"),
+                ));
+            }
         };
         let action = inline_action_for(binding, ev);
         match inline_outcome(flagged, &action) {
@@ -1095,11 +1192,28 @@ async fn apply_inline_output_evaluators(
         if !ev.capabilities.inline || ev.target != EvaluatorTarget::Output {
             continue;
         }
-        let Some((flagged, reason)) =
-            flag_inline_binding(ev, scanner.as_ref(), &response_text, state).await
-        else {
-            continue;
-        };
+        let (flagged, reason) =
+            match flag_inline_binding(ev, scanner.as_ref(), &response_text, state).await {
+                InlineFlag::Skip => continue,
+                InlineFlag::Ran { flagged, reason } => (flagged, reason),
+                InlineFlag::ForceBlock { reason } => {
+                    // Fail-closed short-circuit on the outbound path too (a wasm
+                    // policy may be bound Output-target). Block regardless of action.
+                    let model = response["model"].as_str().unwrap_or("unknown");
+                    state.metrics.inc_firewall_blocked();
+                    audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
+                    warn!(
+                        request_id = %ctx.request_id,
+                        evaluator = %ev.id,
+                        %reason,
+                        "inline evaluator: fail-closed block (outbound)"
+                    );
+                    return Err(GatewayError::FirewallBlocked(
+                        format!("Outbound response blocked by evaluator '{}': {}", ev.id, reason),
+                        firewall_policy_alert(scanner.config(), ctx, "block"),
+                    ));
+                }
+            };
         let action = inline_action_for(binding, ev);
         match inline_outcome(flagged, &action) {
             InlineOutcome::Allow | InlineOutcome::Warn => {
@@ -1191,8 +1305,14 @@ async fn evaluate_output_inline_stream(
         if !ev.capabilities.inline || ev.target != EvaluatorTarget::Output {
             continue;
         }
-        let Some((flagged, r)) = flag_inline_binding(ev, scanner, assembled, state).await else {
-            continue;
+        let (flagged, r) = match flag_inline_binding(ev, scanner, assembled, state).await {
+            InlineFlag::Skip => continue,
+            InlineFlag::Ran { flagged, reason } => (flagged, reason),
+            InlineFlag::ForceBlock { reason: fc_reason } => {
+                // Fail-closed → Block is the strictest possible streamed outcome;
+                // nothing can outrank it, so short-circuit.
+                return (InlineOutcome::Block, format!("{}: {fc_reason}", ev.id));
+            }
         };
         let outcome = inline_outcome(flagged, &inline_action_for(binding, ev));
         if inline_outcome_rank(outcome) > inline_outcome_rank(strictest) {
@@ -5359,5 +5479,176 @@ mod tests {
         let text = response_to_text(&multi);
         assert!(text.contains("benign first choice"));
         assert!(text.contains("piece of shit"), "second choice must be extracted");
+    }
+
+    // ── WASM policy tier: end-to-end pipeline enforcement (gateway plugin plane) ──
+    //
+    // Proves the full vertical slice: a manifest declares a `Wasm` policy evaluator
+    // → the pipeline loads it sandboxed → `apply_inline_input_evaluators` calls it →
+    // the verdict is enforced via the SAME Block/Sanitize/Warn machinery → a
+    // misbehaving module FAILS CLOSED (blocks) even when the binding action is Warn
+    // (threat-model item F: a trap must never be a silent bypass).
+
+    /// Always-DENY guest (decision byte 1, reason "denied").
+    const E2E_DENY_WAT: &str = r#"
+      (module
+        (memory (export "memory") 1)
+        (data (i32.const 2100) "\01denied")
+        (func (export "ryu_alloc") (param i32) (result i32) i32.const 1024)
+        (func (export "ryu_policy_eval") (param i32) (param i32) (result i64)
+          (i64.const 0x0000_0834_0000_0007)))
+    "#;
+
+    /// Always-ALLOW guest (decision byte 0).
+    const E2E_ALLOW_WAT: &str = r#"
+      (module
+        (memory (export "memory") 1)
+        (data (i32.const 2048) "\00")
+        (func (export "ryu_alloc") (param i32) (result i32) i32.const 1024)
+        (func (export "ryu_policy_eval") (param i32) (param i32) (result i64)
+          (i64.const 0x0000_0800_0000_0001)))
+    "#;
+
+    /// Infinite-loop guest — trapped by fuel/epoch, must fail closed.
+    const E2E_LOOP_WAT: &str = r#"
+      (module
+        (memory (export "memory") 1)
+        (func (export "ryu_alloc") (param i32) (result i32) i32.const 1024)
+        (func (export "ryu_policy_eval") (param i32) (param i32) (result i64)
+          (loop $l (br $l)) (i64.const 0)))
+    "#;
+
+    fn wasm_b64(wat: &str) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(wat::parse_str(wat).expect("wat compiles"))
+    }
+
+    /// A custom input-target WASM policy evaluator declaration.
+    fn wasm_evaluator(id: &str, wat: &str, fail_open: bool) -> Evaluator {
+        Evaluator {
+            id: id.to_string(),
+            name: format!("wasm {id}"),
+            description: "e2e wasm policy".to_string(),
+            category: crate::evaluators::EvaluatorCategory::Security,
+            target: EvaluatorTarget::Input,
+            capabilities: crate::evaluators::Capabilities { inline: true, offline: false },
+            impl_: EvaluatorImpl::Wasm { module_base64: wasm_b64(wat), fail_open },
+            inline: Some(crate::evaluators::InlineConfig { action: FirewallPolicy::Block }),
+            offline: None,
+            builtin: false,
+            enforced: true,
+            higher_is_better: true,
+        }
+    }
+
+    fn wasm_state(evaluator: Evaluator) -> Arc<AppState> {
+        let config = crate::config::GatewayConfig {
+            custom_evaluators: vec![evaluator],
+            ..crate::config::GatewayConfig::default()
+        };
+        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit");
+        let evals = crate::evals::EvalsRunner::new(crate::config::EvalsConfig::default());
+        Arc::new(AppState::new_for_test(config, audit, evals))
+    }
+
+    fn wasm_ctx() -> RequestContext {
+        signal_ctx(None, false, false)
+    }
+
+    /// Run the input inline-evaluator stage with one enabled binding for `eval_id`
+    /// at `action`, returning the pipeline result.
+    async fn run_input_wasm(
+        state: &AppState,
+        eval_id: &str,
+        action: FirewallPolicy,
+    ) -> Result<Option<PolicyAlert>, GatewayError> {
+        let scanner = scanner_with_bindings(vec![binding(eval_id, true, Some(action))]);
+        let ctx = wasm_ctx();
+        let mut body = serde_json::json!({ "model": "gpt-4o", "messages": [] });
+        apply_inline_input_evaluators(state, &ctx, &mut body, &scanner, "hello there").await
+    }
+
+    #[tokio::test]
+    async fn e2e_wasm_deny_blocks_request() {
+        let state = wasm_state(wasm_evaluator("wasm_deny", E2E_DENY_WAT, false));
+        let res = run_input_wasm(&state, "wasm_deny", FirewallPolicy::Block).await;
+        assert!(
+            matches!(res, Err(GatewayError::FirewallBlocked(_, _))),
+            "a wasm DENY verdict bound to Block must 403, got {res:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_wasm_allow_passes_request() {
+        let state = wasm_state(wasm_evaluator("wasm_allow", E2E_ALLOW_WAT, false));
+        let res = run_input_wasm(&state, "wasm_allow", FirewallPolicy::Block).await;
+        assert!(res.is_ok(), "a wasm ALLOW verdict must let the turn proceed, got {res:?}");
+    }
+
+    /// The critical fail-direction control: a trapping guest with `fail_open = false`
+    /// BLOCKS even when the binding's action is only `WarnAndContinue`. This is the
+    /// exact bypass the threat model (item F) calls out — a misconfigured Warn action
+    /// must NOT let a failed security policy through.
+    #[tokio::test]
+    async fn e2e_wasm_trap_fails_closed_even_when_action_is_warn() {
+        let state = wasm_state(wasm_evaluator("wasm_loop", E2E_LOOP_WAT, false));
+        let res = run_input_wasm(&state, "wasm_loop", FirewallPolicy::WarnAndContinue).await;
+        assert!(
+            matches!(res, Err(GatewayError::FirewallBlocked(_, _))),
+            "a trapping fail-closed wasm policy must BLOCK regardless of Warn action, got {res:?}"
+        );
+    }
+
+    /// An enrichment-style plugin may DECLARE `fail_open = true`; a trap then skips
+    /// (allows) instead of blocking — the declared, non-default direction.
+    #[tokio::test]
+    async fn e2e_wasm_trap_fail_open_allows() {
+        let state = wasm_state(wasm_evaluator("wasm_loop_open", E2E_LOOP_WAT, true));
+        let res = run_input_wasm(&state, "wasm_loop_open", FirewallPolicy::Block).await;
+        assert!(
+            res.is_ok(),
+            "a fail_open=true wasm policy must ALLOW on trap (declared direction), got {res:?}"
+        );
+    }
+
+    /// Output-target symmetry: the same host + verdict + fail-direction machinery
+    /// enforces on the non-streaming RESPONSE path (`apply_inline_output_evaluators`
+    /// resolves its scanner from `ctx`, so the binding is seeded into the node
+    /// firewall config the resolver reads). A wasm policy declared `target: Output`
+    /// and bound Block denies the assembled response.
+    #[tokio::test]
+    async fn e2e_wasm_output_target_deny_blocks_response() {
+        let mut ev = wasm_evaluator("wasm_out_deny", E2E_DENY_WAT, false);
+        ev.target = EvaluatorTarget::Output;
+        let config = crate::config::GatewayConfig {
+            custom_evaluators: vec![ev],
+            firewall: FirewallConfig {
+                evaluators: vec![binding("wasm_out_deny", true, Some(FirewallPolicy::Block))],
+                ..FirewallConfig::default()
+            },
+            ..crate::config::GatewayConfig::default()
+        };
+        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit");
+        let evals = crate::evals::EvalsRunner::new(crate::config::EvalsConfig::default());
+        let state = Arc::new(AppState::new_for_test(config, audit, evals));
+
+        let ctx = wasm_ctx();
+        let mut response = serde_json::json!({
+            "model": "gpt-4o",
+            "choices": [{ "message": { "role": "assistant", "content": "some reply" } }]
+        });
+        let res = apply_inline_output_evaluators(&state, &ctx, &mut response).await;
+        assert!(
+            matches!(res, Err(GatewayError::FirewallBlocked(_, _))),
+            "an output-target wasm DENY bound to Block must block the response, got {res:?}"
+        );
     }
 }

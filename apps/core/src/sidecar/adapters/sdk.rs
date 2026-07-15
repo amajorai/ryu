@@ -60,13 +60,26 @@ use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 pub const ENV_SDK_APP_PORT: &str = "RYU_SDK_APP_PORT";
 /// Env var: override the full base URL for a running SDK app (no `/v1` suffix).
 pub const ENV_SDK_APP_URL: &str = "RYU_SDK_APP_URL";
-/// Default loopback port for SDK apps.
+/// Canonical (release) loopback port for SDK apps. The concrete default is
+/// profile-aware — see [`resolved_sdk_app_port`].
 pub const DEFAULT_SDK_APP_PORT: u16 = 3200;
+
+/// The port an SDK app is expected on: an explicit `RYU_SDK_APP_PORT` wins,
+/// otherwise the profile-aware default (release 3200, dev 4200, …). Both the
+/// CLIENT ([`sdk_app_base_url`]) and the SPAWN ([`sdk_app_spawn_parts`], which
+/// injects `RYU_SDK_APP_PORT` into the child so it binds here) use this, so the
+/// two sides never diverge under a profile.
+pub fn resolved_sdk_app_port() -> u16 {
+    std::env::var(ENV_SDK_APP_PORT)
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or_else(|| crate::profile::port(DEFAULT_SDK_APP_PORT))
+}
 
 /// Resolve the base URL for an SDK app. Resolution order:
 ///   1. `RYU_SDK_APP_URL` (full override, no port needed)
 ///   2. `127.0.0.1:<RYU_SDK_APP_PORT>` (port override)
-///   3. `127.0.0.1:3200` (default)
+///   3. `127.0.0.1:<profile default>` (3200 on release, 4200 on dev, …)
 ///
 /// Returns the URL without a trailing slash or `/v1` — callers append `/v1/...`
 /// themselves (consistent with `active_engine.rs` conventions).
@@ -76,11 +89,7 @@ pub fn sdk_app_base_url() -> String {
             return url.trim_end_matches('/').to_owned();
         }
     }
-    let port = std::env::var(ENV_SDK_APP_PORT)
-        .ok()
-        .and_then(|s| s.parse::<u16>().ok())
-        .unwrap_or(DEFAULT_SDK_APP_PORT);
-    format!("http://127.0.0.1:{port}")
+    format!("http://127.0.0.1:{}", resolved_sdk_app_port())
 }
 
 /// Build the gateway-injected env overrides and the `bunx <package>` args for
@@ -101,6 +110,13 @@ pub fn sdk_app_spawn_parts(package: &str) -> (String, Vec<String>, Vec<(String, 
     let env = vec![
         ("OPENAI_BASE_URL".to_owned(), gateway_v1),
         ("OPENAI_API_KEY".to_owned(), token),
+        // Bind the child to the profile-resolved port so it lands where
+        // `sdk_app_base_url` dials it (release 3200, dev 4200, …). An explicit
+        // `RYU_SDK_APP_PORT` in Core's env is honoured by `resolved_sdk_app_port`.
+        (
+            ENV_SDK_APP_PORT.to_owned(),
+            resolved_sdk_app_port().to_string(),
+        ),
     ];
 
     #[cfg(target_os = "windows")]
@@ -436,7 +452,23 @@ mod tests {
         // Gateway policy is enforced by env-injection into the SDK subprocess, not
         // by routing the Core loopback call through the gateway (which would cause
         // Core to talk to the gateway, which talks back to Core — a loop).
+        //
+        // HERMETIC: `SdkAppEntry::new` defaults `base_url` to `sdk_app_base_url()`,
+        // which reads the process-global `RYU_SDK_APP_URL`. Rust runs tests in
+        // parallel threads of ONE process, so without this guard `env_url_override_
+        // takes_precedence` (which sets that var to 192.168.1.50:9090) races this
+        // test and the loopback assertion fails nondeterministically. Take the same
+        // lock those tests take, and clear the var so we assert the real DEFAULT.
+        let _lock = lock_sdk_env();
+        let prev = std::env::var(ENV_SDK_APP_URL).ok();
+        std::env::remove_var(ENV_SDK_APP_URL);
+
         let entry = SdkAppEntry::new("sdk:test", "Test", "test-sdk-app");
+
+        if let Some(v) = prev {
+            std::env::set_var(ENV_SDK_APP_URL, v);
+        }
+
         let gateway_url = crate::sidecar::gateway::gateway_url();
         assert_ne!(
             entry.base_url, gateway_url,
