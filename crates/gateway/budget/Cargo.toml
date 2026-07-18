@@ -1,0 +1,12 @@
+[package]
+name = "ryu-gw-budget"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+description = "Ryu Gateway token-budget stage: per-user / per-agent / per-session token budgets + the per-window exec budget, as a swappable BudgetBackend trait + registry with an in-memory built-in. The first extracted gateway stage crate."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+dashmap = "6"
+ryu-gw-contracts = { path = "../contracts" }

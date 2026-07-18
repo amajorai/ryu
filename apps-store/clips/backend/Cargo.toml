@@ -1,0 +1,38 @@
+[package]
+name = "ryu-clips"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Clips: agent-native Loom/Jam for Ryu — the Core→Shadow screen-capture proxy. An extracted Core capability crate owning the `/api/clips/*` HTTP surface (record start/stop/pause/resume, URL/file ingest, sources, frames, mp4 stream, diagnostics, recent-activity) that proxies each call to the Shadow sidecar over loopback. In-process default behind the `clips` cargo feature; the lean build drops the crate. The two kernel couplings the moved code needs — the yt-dlp downloader (over Core's DownloadCenter) for URL ingest, and filing a finished clip into the `Clips` system Space — are inverted through the `ClipsHost` trait, so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# The out-of-process sidecar binary. Core spawns it (`kind: local`, sibling on
+# PATH / `RYU_CLIPS_BIN`), health-checks it, and proxies `/api/clips/*` to it on
+# loopback — exactly like `ryu-mail` / `ryu-teams`. The same crate still compiles
+# INTO Core as a lib path-dependency (in-process default); this bin is just the
+# process shell around the crate's `routes()` + a concrete `ClipsHost`.
+[[bin]]
+name = "ryu-clips"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
+# axum router has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+# `full` (was `rt`) so the standalone `-p ryu-clips` build gets the macros + net +
+# multi-thread runtime the bin needs; the workspace already unifies tokio to `full`
+# via Core, so this adds no feature in the in-process build.
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json"] }
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+async-trait = "0.1"
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+# Sidecar-binary-only deps (data-dir resolution + logging + error type), mirroring
+# `ryu-mail` / `ryu-teams`. Core already pulls all of these, so there is no new
+# dependency in the in-process build.
+anyhow = "1"
+dirs = "5"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

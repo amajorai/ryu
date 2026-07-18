@@ -28,5 +28,11 @@
   "contributes": {
     "agents": []
   },
+  "provides": [
+    {
+      "capability": "engines",
+      "version": "1.0.0"
+    }
+  ],
   "permission_grants": []
 }

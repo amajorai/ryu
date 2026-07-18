@@ -82,7 +82,7 @@ export function decodeDocSync(bytes: Uint8Array): DocSyncMessage | null {
 		return null;
 	}
 	const tag = bytes[0];
-	if (!DOC_SYNC_TAGS.includes(tag)) {
+	if (tag === undefined || !DOC_SYNC_TAGS.includes(tag)) {
 		return null;
 	}
 	return { tag: tag as DocSyncTag, payload: bytes.slice(1) };

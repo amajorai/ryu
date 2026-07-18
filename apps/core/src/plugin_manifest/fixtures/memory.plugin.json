@@ -1,0 +1,11 @@
+{
+	"id": "com.ryu.memory",
+	"name": "Memory",
+	"version": "1.0.0",
+	"description": "Long-term memory CRUD: the multi-level (user/node/project) memory store surfaced in the Memory Library. Governance shell over the in-crate memory module — the in-process chat auto-recall path is kernel and never routes through this HTTP surface.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"permission_grants": []
+}

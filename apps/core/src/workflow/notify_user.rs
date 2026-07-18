@@ -6,10 +6,10 @@
 //! wait for an ack) → Core. *Who is a member* of the org/team is a control-plane
 //! fact, resolved over the gateway key ([`crate::sidecar::control_plane`]).
 //!
-//! Delivery reuses the monitor engine's fan-out surfaces
-//! ([`crate::monitors::MonitorEngine::deliver_user_notification`]) so a single
-//! user-scoped notification hits all three channels; the ack bookkeeping lives in
-//! the run's own `state` map so it survives a restart like every other checkpoint.
+//! Delivery reuses the kernel notification store
+//! ([`crate::notify::deliver_user_notification`]) so a single user-scoped
+//! notification hits all three channels; the ack bookkeeping lives in the run's
+//! own `state` map so it survives a restart like every other checkpoint.
 
 use serde::{Deserialize, Serialize};
 
@@ -93,25 +93,25 @@ pub async fn run(
     }
     let ack_required = !matches!(ack_mode, AckMode::None);
 
-    let engine = crate::monitors::global_engine()
-        .ok_or("NotifyUser: notification engine unavailable")?;
+    let store = crate::notify::global_store()
+        .ok_or("NotifyUser: notification store unavailable")?;
 
     // Deliver to every recipient across all three surfaces. Collect each inbox id
     // so an ack gate can map an acking user back to their row.
     let mut notifications = std::collections::HashMap::new();
     let mut delivered = Vec::new();
     for user_id in &recipients {
-        match engine
-            .deliver_user_notification(
-                user_id,
-                title,
-                body,
-                "info",
-                Some(&run.run_id),
-                Some(node_id),
-                ack_required,
-            )
-            .await
+        match crate::notify::deliver_user_notification(
+            &store,
+            user_id,
+            title,
+            body,
+            "info",
+            Some(&run.run_id),
+            Some(node_id),
+            ack_required,
+        )
+        .await
         {
             Ok(notif_id) => {
                 notifications.insert(user_id.clone(), notif_id);

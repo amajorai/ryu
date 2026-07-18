@@ -1,7 +1,7 @@
 //! Realtime Voice-Mode Protocol (RVP) — the wire contract for the ChatGPT-style
 //! desktop/island voice mode (`/api/voice/ws`).
 //!
-//! This is a LEAN sibling of the Ryu Hardware Protocol (`crate::hardware::protocol`):
+//! This is a LEAN sibling of the Ryu Hardware Protocol (`ryu_hardware::protocol`):
 //! same tagged-union style (`#[serde(tag = "type", rename_all = "snake_case")]`),
 //! but with none of the device baggage (no camera/telemetry/ambient/pairing) because
 //! the peer is a first-party renderer over loopback, not an ESP32.

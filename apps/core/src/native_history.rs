@@ -113,7 +113,7 @@ pub fn engine_supports_history(engine: &str) -> bool {
 }
 
 /// `<CLAUDE_CONFIG_DIR|~/.claude>/projects`, honouring the same override the
-/// Claude CLI itself reads (mirrors `usage::claude::credentials_path`).
+/// Claude CLI itself reads (mirrors `ryu_usage`'s `claude::credentials_path`).
 fn claude_projects_root() -> Option<PathBuf> {
     let home = std::env::var("CLAUDE_CONFIG_DIR")
         .ok()

@@ -851,7 +851,7 @@ mod tests {
             sample_rate: 0.5,
             stream_usage: true,
         };
-        Arc::new(AppState::new(config))
+        Arc::new(AppState::new(config).expect("builtin stage backends"))
     }
 
     #[test]

@@ -1,0 +1,35 @@
+[package]
+name = "ryu-teams"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Agent teams for Ryu (a named, ordered collection of agents + a coordination strategy, addressed as one unit via @team) — an extracted Core capability crate: SQLite store + `/api/teams/*` HTTP surface. In-process default; Core consumes it as a path dependency behind the `teams` feature. The store's only host coupling (the data-dir path) is injected at open time, so this crate has ZERO dependency on apps/core; the @team chat orchestration stays in Core's session loop as a consumer of this crate's types."
+repository = "https://github.com/amajorai/ryu"
+
+# The out-of-process sidecar binary. Core spawns it (`kind: local`, sibling on
+# PATH / `RYU_TEAMS_BIN`), health-checks it, and proxies `/api/teams/*` to it on
+# loopback — exactly like `ryu-mail`. The same crate still compiles INTO Core as a
+# lib path-dependency (in-process default); this bin is just the process shell
+# around the crate's `routes()` + `TeamStore`.
+[[bin]]
+name = "ryu-teams"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
+# axum router has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+# Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-mail`.
+# Core already pulls all of these, so there is no new dependency in the in-process
+# build.
+dirs = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

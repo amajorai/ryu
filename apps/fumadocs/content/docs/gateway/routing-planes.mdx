@@ -18,6 +18,39 @@ layer, and only one of them governs chat egress.
 
 ## The two planes
 
+```mermaid
+flowchart TB
+  subgraph PlaneA["Plane A · Model routing (Gateway)"]
+    direction TB
+    REQ["/v1/chat/completions\nbody.model = 'claude-sonnet-4-5'"]
+    SR{"Smart routing\n(optional)\npick model?"}
+    MR["ModelRouter::route\nmodel → provider"]
+    GOV["Governance\nfirewall → budget → audit"]
+
+    REQ --> SR
+    SR -->|"rewrite body.model"| MR
+    SR -->|"no rules / skip"| MR
+    MR --> GOV
+  end
+
+  subgraph PlaneB["Plane B · Agent routing (Core)"]
+    direction TB
+    TURN["Chat turn"]
+    RESOLVE["agent_route()\npick backend"]
+    OAI["OpenAiCompat\nvia_gateway: true"]
+    ACP_R["Acp\nown subprocess"]
+
+    TURN --> RESOLVE
+    RESOLVE -->|"catalog / registry"| OAI
+    RESOLVE -->|"ACP agent"| ACP_R
+  end
+
+  OAI -->|"feeds Plane A"| PlaneA
+  ACP_R -->|"chat: self-routes\n(bypass)"| Engine["Upstream Provider"]
+  ACP_R -->|"tool: governed\n(MCP bridge)"| GOV
+  GOV --> Engine
+```
+
 | Plane | Owns | Surface | Model lifetime | Governed how |
 |---|---|---|---|---|
 | Plane A - Model routing | Gateway | Picks the LLM for one OpenAI-compat `/v1/chat/completions` request | Model is fixed for the whole turn (and its tool loop) once routed | Full Gateway plane: allowlist + inbound firewall + budget + audit |
@@ -101,13 +134,40 @@ agent id so the allowlist cannot fail open.
 
 ## The ownership rule
 
-One rule decides which plane governs a turn - **only one plane governs chat egress:**
+One rule decides which plane governs a turn — **only one plane governs chat egress:**
 
 - **OpenAI-compat requests get Plane A model routing.** The Gateway picks and fixes the LLM, and the
   full policy plane (allowlist, firewall, budget, audit) applies to that chat.
 - **ACP agents self-route (Plane B).** The agent owns its model. Only its *tool egress* is governed
   (via the MCP bridge); its chat egress reaches the Gateway *only* if it honours `OPENAI_BASE_URL`
   and the per-agent toggle is ON.
+
+```mermaid
+flowchart LR
+  subgraph Turn["One chat turn"]
+    direction TB
+    A["OpenAI-compat agent"]
+    B["ACP agent"]
+  end
+
+  subgraph PlaneA["Plane A (Gateway governs chat)"]
+    direction TB
+    GA["firewall + budget + audit"]
+    LA["ModelRouter picks LLM"]
+    GA --> LA
+  end
+
+  subgraph PlaneB["Plane B (agent self-routes)"]
+    direction TB
+    CHAT["chat egress\nbypass (unless\nOPENAI_BASE_URL)"]
+    TOOL["tool egress\nalways governed\n(MCP bridge)"]
+  end
+
+  A --> PlaneA
+  B --> CHAT
+  B --> TOOL
+  TOOL --> Gateway["Gateway\n(governance layer)"]
+```
 
 Both planes feed **one** governance layer: the Ryu Gateway, the single place that decides what is
 allowed, shared, measured, and paid for. In the pipeline, `pre_process` runs rate-limit then inbound

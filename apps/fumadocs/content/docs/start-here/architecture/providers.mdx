@@ -1,0 +1,162 @@
+---
+title: "Providers & Models"
+description: "The full provider catalog, how routing resolves a provider, model formats and engine compatibility, and how to configure any provider."
+---
+
+Ryu is provider-agnostic. Every model, embedding, reranker, TTS/STT, and image-gen backend is a
+swappable default resolved through one registry and config, never a lock. This page lists every
+supported provider, every supported model format, and how the Gateway resolves a provider for
+each request.
+
+## Provider catalog
+
+The Gateway supports nine provider kinds, each wired through the `ModelRouter`
+(`apps/gateway/src/router/mod.rs`):
+
+| Provider kind | Wire value | Description | Auth |
+|---|---|---|---|
+| OpenAI | `openai` | GPT models, DALL-E, Whisper, TTS | `OPENAI_API_KEY` |
+| Anthropic | `anthropic` | Claude models | `ANTHROPIC_API_KEY` |
+| Google GenAI | `genai` | Native Gemini format (Gemini 2.5 Pro/Flash) | Per-adapter keys in `providers.genai.keys` |
+| OpenRouter | `openrouter` | Meta-routing upstream (routes to any provider) | `OPENROUTER_API_KEY` |
+| Local | `local` | llama.cpp, Ollama, MLX, vLLM, SGLang | None (local process) |
+| Modal | `modal` | Serverless GPU compute | `MODAL_API_KEY` + `MODAL_BASE_URL` |
+| Core | `core` | Internal agents (zeroclaw, openclaw) | None (loopback) |
+| Replicate | `replicate` | Replicate API | `REPLICATE_API_TOKEN` |
+| Fal | `fal` | Fal AI (media generation) | `FAL_KEY` |
+
+### Managed providers
+
+Ryu also supports managed providers that route through Ryu's own infrastructure:
+
+| Provider | Description |
+|---|---|
+| `managed-openrouter` | Ryu-managed OpenRouter with Ryu's API key |
+| `gateway` | Routes through the local Gateway (the default for most agents) |
+
+### Provider credentials
+
+Set provider credentials through environment variables, `gateway.toml`, or at runtime through
+Core's `PUT /api/gateway/providers`.
+
+| Provider | Env vars | Notes |
+|---|---|---|
+| OpenAI | `OPENAI_API_KEY` | `base_url` defaults to `https://api.openai.com/v1` |
+| Anthropic | `ANTHROPIC_API_KEY` | `base_url` defaults to `https://api.anthropic.com` |
+| OpenRouter | `OPENROUTER_API_KEY` | |
+| Local | `LOCAL_LLM_URL` | Core sets this to the active local engine on startup |
+| Modal | `MODAL_API_KEY` + `MODAL_BASE_URL` | Both required — each Modal deployment has its own `*.modal.run` endpoint |
+| GenAi | Per-provider keys in `providers.genai.keys` map | Keyed by adapter name, e.g. `"gemini"` |
+
+## How routing resolves a provider
+
+When the Gateway receives a request, it resolves the provider in this order:
+
+1. **Exact match** — `routing.model_map` exact key wins.
+2. **Longest prefix match** — `routing.model_map` prefix keys, longest match first.
+3. **Built-in prefix rules** — the hardcoded prefix table (e.g. `claude-` → Anthropic).
+4. **Default provider** — `routing.default_provider` (fallback).
+
+### Built-in prefix rules
+
+| Model prefix | Provider |
+|---|---|
+| `gpt-`, `o1`, `o3`, `o4`, `text-davinci` | OpenAI |
+| `claude-` | Anthropic |
+| `gemini-` | GenAi (native Gemini protocol) |
+| `openrouter/` | OpenRouter |
+| `modal/` | Modal (serverless GPU) |
+| `llama`, `mistral`, `mixtral`, `gemma`, `phi`, `qwen`, `deepseek` | Local engine |
+| `zeroclaw`, `openclaw` | Core agents |
+
+### Routing strategies
+
+| Strategy | Description |
+|---|---|
+| **Static model map** | Remaps an exact model name to a different provider |
+| **Fallback chain** | Tries alternative providers when the primary circuit is open |
+| **Eval-driven routing** | Splits traffic across candidates using rolling eval scores |
+| **Modality routing** | Sends chat, image, TTS, and STT to different providers |
+| **Smart routing** | Classifier-driven model selection from plain-language rules |
+
+See [Routing](/docs/gateway/routing) for the full configuration.
+
+## Model formats
+
+Ryu's model catalog is format-aware. A model carries a weight format, and the engine that serves
+it is derived from that format (`apps/core/src/model_format/mod.rs`):
+
+| Format | Wire value | Install shape | Serving engines |
+|---|---|---|---|
+| GGUF | `gguf` | Single file (`~/.ryu/models/<stem>.gguf`) | llama.cpp, Ollama |
+| Safetensors | `safetensors` | Repo snapshot directory | vLLM, SGLang |
+| MLX | `mlx` | Repo snapshot directory | MLX, MLX-VLM |
+
+### Engine compatibility
+
+| Engine | Formats | Platform |
+|---|---|---|
+| llama.cpp (default) | GGUF | All |
+| Ollama | GGUF | All |
+| vLLM | Safetensors | Linux (CUDA) |
+| SGLang | Safetensors | Linux (CUDA) |
+| MLX | MLX | macOS (Apple Silicon) |
+| MLX-VLM | MLX | macOS (Apple Silicon) |
+| Cactus | GGUF | Mobile (blocked) |
+
+Compatibility is computed per node. A catalog card is marked compatible when at least one engine
+that can serve its format is runnable on this node. Incompatible models surface with a
+`needs_engine` label rather than being hidden.
+
+Query which formats and engines a node can run:
+
+```
+GET /api/models/engines
+```
+
+## Local inference engines
+
+Core manages ~16 sidecar processes for local inference. Each downloads, checksum-verifies,
+installs, starts, and health-checks automatically:
+
+| Sidecar | Purpose | Default port |
+|---|---|---|
+| `llamacpp` | llama.cpp inference server | 8080 |
+| `llamacpp-embed` | Embedding server (nomic-embed-text-v1.5) | 8081 |
+| `ollama` | Ollama model serving | 11434 |
+| `mlx` | Apple MLX inference | — |
+| `mlx_vlm` | Apple MLX vision-language model | — |
+| `apfel` | Apple Foundation Models | — |
+| `sglang` | SGLang inference | — |
+| `vllm` | vLLM inference | — |
+| `sdcpp` | Stable Diffusion image generation | 8083 |
+| `outetts` | OuteTTS text-to-speech | — |
+| `ryutts` | Ryu's own TTS | — |
+| `parakeet` | Parakeet STT | — |
+| `whispercpp` | Whisper.cpp speech-to-text | — |
+| `docker_model_runner` | Docker Model Runner | — |
+| `unsloth` | LoRA/QLoRA fine-tuning | — |
+
+## The model list
+
+`GET /v1/models` returns the routable models. The built-in list includes:
+
+| Model ID | Provider |
+|---|---|
+| `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `o1`, `o3-mini` | OpenAI |
+| `claude-opus-4-5`, `claude-sonnet-4-5`, `claude-haiku-4-5` | Anthropic |
+| `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022` | Anthropic |
+| `zeroclaw`, `openclaw` | Core agents |
+| `openrouter/auto` | OpenRouter (auto-select) |
+| `llama3.2:latest`, `mistral:latest`, `phi4:latest`, `deepseek-r1:latest` | Local (Ollama) |
+
+Add custom mappings via `[routing.model_map]` in `gateway.toml`.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/gateway/routing" />
+  <DocCard href="/docs/desktop/engines" />
+  <DocCard href="/docs/desktop/models" />
+  <DocCard href="/docs/desktop/engines/agent-runtimes" />
+</Cards>

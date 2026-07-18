@@ -25,6 +25,9 @@ export default function Layout({ children }: LayoutProps<"/">) {
       className={`${geist.variable} ${inter.className}`}
       suppressHydrationWarning
     >
+      <head>
+        <link href="/llms.txt" rel="alternate" title="LLM-friendly docs index" type="text/plain" />
+      </head>
       <body className="flex flex-col min-h-screen">
         <RootProvider>{children}</RootProvider>
       </body>

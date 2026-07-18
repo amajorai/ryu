@@ -100,6 +100,20 @@ The inspector config is part of the cascade (`InspectorConfig` with `enabled`, `
 The inspector is **opt-in** (`enabled` defaults off) and **inbound-only** in v1 - it inspects the prompt, not the response. Outbound streaming LLM inspection is a deliberate follow-on. Because it fails open, a misconfiguration or a flaky model degrades to the regex scanner alone, never to a blocked request.
 </Callout>
 
+## Outbound DLP
+
+Beyond the inbound firewall, the Gateway applies outbound data-loss-prevention on every response:
+
+| Feature | What it redacts | When |
+|---|---|---|
+| **Outbound secret redaction** | GitHub PATs, OpenAI keys, AWS keys, bearer tokens, `token`/`secret` params | All outbound responses (firewall must be enabled) |
+| **Companion egress redaction** | Unconditional PII + secrets | Requests with `x-ryu-companion-source` header (screen-captured content) |
+| **Streaming response DLP** | Per-delta PII/secrets in SSE text deltas | Passthrough proxy responses (Claude Code, Codex) |
+
+The outbound scanner reuses the same compiled regex patterns as the inbound scanner, so a single
+config governs both directions. The `redact_pii` and `redact_secrets` flags control each direction
+independently.
+
 ## Companion egress redaction
 
 Requests that originate from the context companion (a screen-capture source) are forwarded by Core

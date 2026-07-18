@@ -1,0 +1,26 @@
+{
+	"id": "com.ryu.activity",
+	"name": "Activity",
+	"version": "1.0.0",
+	"description": "The unified activity feed: everything happening on this node — monitor alerts, finished tasks, runs, approvals, meetings, and notes — newest first, grouped by day.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "activity-companion",
+			"name": "Activity",
+			"kind": "companion",
+			"config": {
+				"label": "Activity",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"permission_grants": ["activity:read"],
+	"companion": {
+		"label": "Activity",
+		"icon": "activity"
+	}
+}

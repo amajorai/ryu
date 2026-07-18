@@ -6,11 +6,9 @@
 
 use tokio::sync::broadcast::error::RecvError;
 
-use super::{ActivityItem, ActivityLevel, ActivityStore};
+use ryu_activity::{ActivityItem, ActivityLevel, ActivityStore};
+
 use crate::approvals::{ApprovalEvent, ApprovalStatus};
-use crate::meetings::MeetingEvent;
-use crate::monitors::Alert;
-use crate::quests::QuestEvent;
 
 /// Parse an RFC3339 timestamp into epoch seconds, falling back to "now" so a
 /// malformed source timestamp never drops an item.
@@ -22,63 +20,23 @@ fn epoch_secs(rfc3339: &str) -> i64 {
 
 // ---- mappers ------------------------------------------------------------------
 
-/// A monitor alert (a watched site changed / went down / matched a keyword).
-pub fn from_monitor_alert(alert: &Alert) -> ActivityItem {
-    // Uptime-down reads as a warning; everything else is informational.
-    let level = if alert.kind == "uptime_down" {
-        ActivityLevel::Warning
-    } else {
-        ActivityLevel::Info
-    };
-    ActivityItem::new("monitor_alert", "monitors", alert.title.clone())
-        .with_body(Some(alert.message.clone()))
-        .with_level(level)
-        .with_metadata(serde_json::json!({
-            "monitor_id": alert.monitor_id,
-            "monitor_name": alert.monitor_name,
-            "alert_kind": alert.kind,
-        }))
-        .with_created_at(epoch_secs(&alert.created_at))
-}
+// Monitors are now out-of-process (`ryu-monitors` sidecar); their alerts no longer
+// arrive on an in-process broadcast. Core records them into the activity store in
+// `monitors_client::host_monitor_alert` (the sidecar posts each fired alert back),
+// where the JSON→`ActivityItem` mapping (the dep-free successor to the old
+// `from_monitor_alert`) now lives.
 
-/// A quest event. Deletions carry no feed value and are dropped (`None`).
-pub fn from_quest_event(event: &QuestEvent) -> Option<ActivityItem> {
-    let item = match event {
-        QuestEvent::Completed { quest, auto } => ActivityItem::new(
-            "quest",
-            "quests",
-            format!("Quest completed: {}", quest.title),
-        )
-        .with_body(quest.detail.clone())
-        .with_level(ActivityLevel::Success)
-        .with_metadata(serde_json::json!({
-            "quest_id": quest.id,
-            "auto": auto,
-        })),
-        QuestEvent::Suggested {
-            quest,
-            confidence,
-            reason,
-        } => ActivityItem::new(
-            "quest",
-            "quests",
-            format!("Quest may be done: {}", quest.title),
-        )
-        .with_body(Some(reason.clone()))
-        .with_level(ActivityLevel::Info)
-        .with_metadata(serde_json::json!({
-            "quest_id": quest.id,
-            "confidence": confidence,
-        })),
-        QuestEvent::Updated { quest } => {
-            ActivityItem::new("quest", "quests", format!("Quest updated: {}", quest.title))
-                .with_body(quest.detail.clone())
-                .with_metadata(serde_json::json!({ "quest_id": quest.id }))
-        }
-        QuestEvent::Deleted { .. } => return None,
-    };
-    Some(item)
-}
+// Quests are now out-of-process (`ryu-quests` sidecar); their activity events no
+// longer arrive on an in-process broadcast. Core folds the sidecar's
+// `/api/quests/events` SSE into the activity store in `quests_client`, where the
+// JSON→`ActivityItem` mapping (the dep-free successor to the old `from_quest_event`)
+// now lives.
+
+// Meetings are now out-of-process (`ryu-meetings` sidecar); their lifecycle events no
+// longer arrive on an in-process `MeetingEvent` broadcast. Core folds the sidecar's
+// `/api/meetings/stream` SSE into the activity store in `meetings_client`, where the
+// JSON→`ActivityItem` mapping (the dep-free successor to the old `from_meeting_event`)
+// now lives.
 
 /// An approval-inbox event (a request was raised or decided).
 pub fn from_approval_event(event: &ApprovalEvent) -> ActivityItem {
@@ -126,92 +84,13 @@ pub fn from_approval_event(event: &ApprovalEvent) -> ActivityItem {
     }
 }
 
-/// A meeting event. Only lifecycle boundaries make the feed; per-segment/status
-/// churn is dropped (`None`).
-pub fn from_meeting_event(event: &MeetingEvent) -> Option<ActivityItem> {
-    let item = match event {
-        MeetingEvent::Detected {
-            app,
-            title,
-            detected_at,
-        } => ActivityItem::new("meeting", "meetings", format!("Meeting detected: {title}"))
-            .with_metadata(serde_json::json!({ "app": app }))
-            .with_created_at(epoch_secs(detected_at)),
-        MeetingEvent::Started { meeting } => ActivityItem::new(
-            "meeting",
-            "meetings",
-            format!("Meeting started: {}", meeting.title),
-        )
-        .with_metadata(serde_json::json!({ "meeting_id": meeting.id }))
-        .with_created_at(epoch_secs(&meeting.started_at)),
-        MeetingEvent::Finalized { meeting } => ActivityItem::new(
-            "meeting",
-            "meetings",
-            format!("Meeting notes ready: {}", meeting.title),
-        )
-        .with_level(ActivityLevel::Success)
-        .with_metadata(serde_json::json!({
-            "meeting_id": meeting.id,
-            "space_id": meeting.space_id,
-        }))
-        .with_created_at(epoch_secs(&meeting.updated_at)),
-        MeetingEvent::Segment { .. } | MeetingEvent::Status { .. } => return None,
-    };
-    Some(item)
-}
-
 // ---- wiring -------------------------------------------------------------------
 
-/// Spawn the long-lived subscribe-loops that fold every producing engine's events
+/// Spawn the long-lived subscribe-loops that fold in-process producing engines' events
 /// into the activity feed. Each loop skips lagged frames and ends on channel close,
-/// exactly like the SSE handlers.
-pub fn spawn(
-    activity: ActivityStore,
-    monitors: &crate::monitors::MonitorEngine,
-    quests: &crate::quests::QuestEngine,
-    approvals: &crate::approvals::ApprovalEngine,
-    meetings: &crate::meetings::MeetingEngine,
-) {
-    // Monitors → activity.
-    {
-        let mut rx = monitors.store.subscribe();
-        let act = activity.clone();
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(alert) => {
-                        if let Err(e) = act.record(from_monitor_alert(&alert)).await {
-                            tracing::warn!("activity: failed to record monitor alert: {e:#}");
-                        }
-                    }
-                    Err(RecvError::Lagged(_)) => continue,
-                    Err(RecvError::Closed) => break,
-                }
-            }
-        });
-    }
-
-    // Quests → activity.
-    {
-        let mut rx = quests.store.subscribe();
-        let act = activity.clone();
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if let Some(item) = from_quest_event(&event) {
-                            if let Err(e) = act.record(item).await {
-                                tracing::warn!("activity: failed to record quest event: {e:#}");
-                            }
-                        }
-                    }
-                    Err(RecvError::Lagged(_)) => continue,
-                    Err(RecvError::Closed) => break,
-                }
-            }
-        });
-    }
-
+/// exactly like the SSE handlers. Out-of-process producers (monitors/quests/meetings)
+/// are folded in their respective `*_client` modules over loopback, not here.
+pub fn spawn(activity: ActivityStore, approvals: &crate::approvals::ApprovalEngine) {
     // Approvals → activity.
     {
         let mut rx = approvals.store.subscribe();
@@ -230,25 +109,5 @@ pub fn spawn(
             }
         });
     }
-
-    // Meetings → activity (best-effort lifecycle boundaries).
-    {
-        let mut rx = meetings.store.subscribe();
-        let act = activity.clone();
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if let Some(item) = from_meeting_event(&event) {
-                            if let Err(e) = act.record(item).await {
-                                tracing::warn!("activity: failed to record meeting event: {e:#}");
-                            }
-                        }
-                    }
-                    Err(RecvError::Lagged(_)) => continue,
-                    Err(RecvError::Closed) => break,
-                }
-            }
-        });
-    }
 }
+

@@ -1,7 +1,7 @@
 //! Room-keyed realtime WebSocket gateway (`GET /api/realtime/ws`).
 //!
 //! This is stage 2 of Phase 1 of the multi-user collaboration epic: the WS
-//! transport that drives the transport-agnostic [`crate::realtime`] registry. A
+//! transport that drives the transport-agnostic [`ryu_realtime`] registry. A
 //! client upgrades, sends a `join` control frame naming a room (`conversation` or
 //! `document`), and — if access is granted — is bridged onto that room's
 //! broadcast: room frames are forwarded to the socket, and the client's presence
@@ -67,9 +67,9 @@ use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc};
 
 use super::ServerState;
-use crate::collab::{classify_doc_sync, DocSyncAction, DocSyncMessage};
+use ryu_collab::{classify_doc_sync, DocSyncAction, DocSyncMessage};
 use crate::identity_verify::{can_access, Access, ResourceTenancy, VerifiedCaller};
-use crate::realtime::Frame;
+use ryu_realtime::Frame;
 
 /// Bounded buffer for the per-socket send task. Frames over this lag a slow
 /// client; the broadcast layer already drops + signals `Lagged`, so a full mpsc
@@ -339,7 +339,7 @@ async fn handle_socket(
     // ── Access decision ──────────────────────────────────────────────────────
     let meta = match join.kind {
         RoomKind::Conversation => state.conversations.get_access_meta(&room_id).await,
-        RoomKind::Document => state.spaces.get_access_meta(&room_id).await,
+        RoomKind::Document => super::spaces::doc_access_meta(&state.spaces, &room_id).await,
     };
     let access = match decide_access(meta, caller.as_ref(), peer_is_loopback) {
         AccessOutcome::Grant(access) => access,
@@ -604,14 +604,14 @@ async fn handle_socket(
 /// Write a document's materialized CRDT projection back through the spaces embed
 /// path so RAG re-embeds ONCE per quiescence (not per keystroke).
 ///
-/// WIRED but DORMANT: [`crate::collab::DocRegistry::materialize`] persists the
+/// WIRED but DORMANT: [`ryu_collab::DocRegistry::materialize`] persists the
 /// opaque snapshot + state vector but returns `source: None` until the
 /// client-provider batch pins the canonical `Y.Doc -> source` decode (faking it
 /// would feed wrong data into RAG). When `source` becomes `Some`, this fetches the
 /// current title and routes the projection through the existing
 /// [`super::spaces::SpaceStore::update_document`] embed-on-save path.
 async fn materialize_to_spaces(
-    collab: &crate::collab::DocRegistry,
+    collab: &ryu_collab::DocRegistry,
     spaces: &super::spaces::SpaceStore,
     doc_id: &str,
 ) {
@@ -644,7 +644,19 @@ async fn materialize_to_spaces(
 /// Render a room [`Frame`] as a wire message. `Event`/`Presence` are JSON text
 /// tagged with their channel so the client can route them; `DocSync` is opaque
 /// binary passed through untouched.
+///
+/// This is the first real consumer of the typed named-event contract. A caller that
+/// used [`ryu_realtime::RoomHandle::broadcast_event`] (e.g. the `conversation.message`
+/// fan-out) publishes a self-describing `{__ryu_event, data}` envelope on the Events
+/// channel; [`ryu_realtime::Event::decode`] recognises it and we forward only the
+/// inner `data`, so the wire stays byte-identical to the legacy raw `publish_event`
+/// shape (`{"channel":"events","data":<payload>}`). A non-envelope `Frame::Event`
+/// (any surviving raw `publish_event`) decodes to `None` and passes through
+/// unchanged. Presence/DocSync are never typed events and are untouched.
 fn frame_to_message(frame: Frame) -> Message {
+    if let Some(event) = ryu_realtime::Event::decode(&frame) {
+        return Message::Text(json!({"channel": "events", "data": event.payload}).to_string());
+    }
     match frame {
         Frame::Event(value) => {
             Message::Text(json!({"channel": "events", "data": value}).to_string())
@@ -783,5 +795,54 @@ mod tests {
     fn lookup_error_is_denied() {
         let outcome = decide_access(Err(anyhow::anyhow!("db down")), None, true);
         assert_eq!(deny_reason(&outcome), Some("resource-lookup-failed"));
+    }
+
+    /// The typed named-event contract is transparent on the wire: a
+    /// `broadcast_event` envelope (`{__ryu_event, data}` on the Events channel) must
+    /// forward the exact same bytes as the legacy raw `publish_event` of the inner
+    /// value — otherwise converting the `conversation.message` fan-out to the typed
+    /// contract would silently break every existing realtime client. This is the
+    /// empirical proof of the finish-the-slice back-compat claim.
+    #[test]
+    fn typed_event_frame_is_wire_identical_to_legacy_publish() {
+        // The exact payload the conversations fan-out publishes.
+        let payload = json!({
+            "type": "message",
+            "conversation_id": "c1",
+            "message": { "id": "m1", "role": "assistant", "content": "hi" },
+        });
+
+        // Legacy: raw `publish_event(payload)` -> `Frame::Event(payload)`.
+        let legacy = frame_to_message(Frame::Event(payload.clone()));
+
+        // Typed: `broadcast_event("conversation.message", payload)` rides
+        // `Frame::Event` as a `{__ryu_event, data}` envelope. Reproduce that envelope
+        // exactly (the `__ryu_event`/`data` keys are the documented wire contract).
+        let enveloped = Frame::Event(json!({
+            "__ryu_event": "conversation.message",
+            "data": payload,
+        }));
+        let typed = frame_to_message(enveloped);
+
+        match (legacy, typed) {
+            (Message::Text(a), Message::Text(b)) => assert_eq!(
+                a, b,
+                "typed broadcast_event must forward byte-identically to legacy publish_event"
+            ),
+            _ => panic!("expected text frames on the Events channel"),
+        }
+    }
+
+    /// A non-envelope `Frame::Event` (a surviving raw `publish_event`) still passes
+    /// through unchanged — the typed decode falls through to `None`.
+    #[test]
+    fn raw_event_frame_passes_through_unchanged() {
+        let value = json!({"legacy": true, "id": 7});
+        match frame_to_message(Frame::Event(value.clone())) {
+            Message::Text(text) => {
+                assert_eq!(text, json!({"channel": "events", "data": value}).to_string());
+            }
+            _ => panic!("expected a text frame"),
+        }
     }
 }

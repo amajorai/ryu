@@ -1,0 +1,35 @@
+{
+	"id": "com.ryu.research",
+	"name": "Research",
+	"version": "1.0.0",
+	"description": "Deep research: multi-step web research runs backed by the autoresearch sidecar, with sources, findings, and RAG-searchable reports. Declares the out-of-process ryu-research sidecar (a thin Rust proxy that forwards /api/research/* to the Python autoresearch engine on :8087); Core reaches it via the generic ext-proxy loader.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"sidecars": [
+		{
+			"name": "ryu-research",
+			"process": {
+				"kind": "local",
+				"command": "ryu-research",
+				"command_env": "RYU_RESEARCH_BIN",
+				"port_env": "RYU_RESEARCH_PORT"
+			},
+			"port": 7995,
+			"health_path": "/api/research/status",
+			"lazy": true,
+			"idle_stop_secs": 300,
+			"http": {
+				"mount": "/api/research",
+				"public_mount": "/api/research",
+				"routes": [
+					{ "path": "/status" },
+					{ "path": "/workspace" },
+					{ "path": "/workspace/:id/ledger" }
+				]
+			}
+		}
+	],
+	"permission_grants": []
+}

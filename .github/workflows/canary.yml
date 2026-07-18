@@ -1,16 +1,16 @@
 name: canary
 
-# Bleeding-edge build of the open-core headless trio (core / gateway / cli) on EVERY push to
-# main that touches the built sources, published as a rolling `canary` PRERELEASE. This is the
-# fresh-on-merge companion to nightly.yml (which is the once-a-day snapshot); use canary to test
-# the very latest main, nightly for a steadier daily build.
+# Bleeding-edge build of the open-core headless set (core / gateway / cli + the 11
+# feature-app backend sidecars) on EVERY push to main that touches the built sources,
+# published as a rolling `canary` PRERELEASE. This is the fresh-on-merge companion to
+# nightly.yml (the once-a-day snapshot); use canary to test the very latest main.
 #
 # Free-minutes note: like nightly.yml this reaches amajorai/ryu via the monorepo overlay
 # (mirror/overlay/) and only ever runs on the public repo, never in ryu-closed.
 #
-# Prerelease safety (same as nightly): Core's updater resolves `releases/latest`, which GitHub
-# excludes prereleases from, so installed nodes never auto-update onto a canary even though the
-# assets reuse the real updater's names. Only signed `v*` releases are ever "latest".
+# Prerelease safety (same as nightly): Core's updater resolves `releases/latest`, which
+# GitHub excludes prereleases from, so installed nodes never auto-update onto a canary even
+# though the assets reuse the real updater's names. Only signed `v*` releases are ever "latest".
 #
 # Concurrency: `cancel-in-progress: false` — a burst of merges QUEUES builds instead of killing
 # an in-flight one. Cancelling mid-run would leave the `canary` release with a mix of new and
@@ -23,6 +23,7 @@ on:
       - "apps/core/**"
       - "apps/gateway/**"
       - "apps/cli/**"
+      - "apps-store/*/backend/**"
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -53,39 +54,49 @@ jobs:
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Canary (${GITHUB_SHA:0:7})" \
-            --notes "Bleeding-edge build of the Ryu open-core binaries (core / gateway / cli) from \`main\` @ ${GITHUB_SHA:0:7}, $STAMP. Unsigned prereleases rebuilt on every merge — installed Ryu nodes never auto-update onto them (the updater only tracks the latest tagged \`v*\` release). For a steadier build use the \`nightly\` release; for anything real use the tagged releases."
+            --notes "Bleeding-edge build of the Ryu open-core binaries (core / gateway / cli + the 11 app-backend sidecars) from \`main\` @ ${GITHUB_SHA:0:7}, $STAMP. Unsigned prereleases rebuilt on every merge — installed Ryu nodes never auto-update onto them (the updater only tracks the latest tagged \`v*\` release). For a steadier build use the \`nightly\` release; for anything real use the tagged releases."
 
   build:
     needs: prepare
-    name: ${{ matrix.bin }} (${{ matrix.os }})
+    name: ${{ matrix.target.asset }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # audiopus_sys (transitive: opus codec) vendors a CMakeLists that requires
+    # cmake_minimum_required(<3.5); CMake >= 4.0 (current runner images) removed that
+    # compatibility. CMake honours this env var to configure the legacy project anyway.
+    env:
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # headless trio — all three desktop OSes (mirrors release.yml / nightly.yml)
-          - { os: ubuntu-latest,  dir: core,    bin: ryu-core,    ext: "" }
-          - { os: macos-latest,   dir: core,    bin: ryu-core,    ext: "" }
-          - { os: windows-latest, dir: core,    bin: ryu-core,    ext: ".exe" }
-          - { os: ubuntu-latest,  dir: gateway, bin: ryu-gateway, ext: "" }
-          - { os: macos-latest,   dir: gateway, bin: ryu-gateway, ext: "" }
-          - { os: windows-latest, dir: gateway, bin: ryu-gateway, ext: ".exe" }
-          - { os: ubuntu-latest,  dir: cli,     bin: ryu,         ext: "" }
-          - { os: macos-latest,   dir: cli,     bin: ryu,         ext: "" }
-          - { os: windows-latest, dir: cli,     bin: ryu,         ext: ".exe" }
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        target:
+          # headless trio + the 11 feature-app backend sidecars (mirrors release.yml / nightly.yml)
+          - { asset: ryu-core,       bin: ryu-core,       dir: apps/core }
+          - { asset: ryu-gateway,    bin: ryu-gateway,    dir: apps/gateway }
+          - { asset: ryu-cli,        bin: ryu,            dir: apps/cli }
+          - { asset: ryu-mail,       bin: ryu-mail,       dir: apps-store/mail/backend }
+          - { asset: ryu-teams,      bin: ryu-teams,      dir: apps-store/teams/backend }
+          - { asset: ryu-research,   bin: ryu-research,   dir: apps-store/research/backend }
+          - { asset: ryu-clips,      bin: ryu-clips,      dir: apps-store/clips/backend }
+          - { asset: ryu-finetune,   bin: ryu-finetune,   dir: apps-store/finetune/backend }
+          - { asset: ryu-quests,     bin: ryu-quests,     dir: apps-store/quests/backend }
+          - { asset: ryu-healing,    bin: ryu-healing,    dir: apps-store/healing/backend }
+          - { asset: ryu-monitors,   bin: ryu-monitors,   dir: apps-store/monitors/backend }
+          - { asset: ryu-dashboards, bin: ryu-dashboards, dir: apps-store/dashboards/backend }
+          - { asset: ryu-meetings,   bin: ryu-meetings,   dir: apps-store/meetings/backend }
+          - { asset: ryu-recipes,    bin: ryu-recipes,    dir: apps-store/recipes/backend }
     steps:
       - uses: actions/checkout@v4
 
       - name: Linux build deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libopus-dev
 
-      - name: macOS build deps (Core)
-        if: runner.os == 'macOS' && matrix.dir == 'core'
-        run: brew install dbus pkg-config
+      - name: macOS build deps
+        if: runner.os == 'macOS'
+        run: brew install dbus pkg-config opus
 
-      - name: Install protoc (Core needs prost-build)
-        if: matrix.dir == 'core'
+      - name: Install protoc (prost-build)
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -93,25 +104,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/${{ matrix.dir }}
+          workspaces: ${{ matrix.target.dir }}
 
       - name: Build
-        run: cargo build --release --manifest-path apps/${{ matrix.dir }}/Cargo.toml
+        run: cargo build --release --manifest-path ${{ matrix.target.dir }}/Cargo.toml
 
       - name: Package
         shell: bash
         run: |
           set -e
-          src="apps/${{ matrix.dir }}/target/release/${{ matrix.bin }}${{ matrix.ext }}"
-          name="${{ matrix.bin }}"; [ "$name" = "ryu" ] && name="ryu-cli"
+          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
           case "${{ runner.os }}" in
             Linux)   plat="linux-x86_64" ;;
             macOS)   plat="macos-aarch64" ;;
             Windows) plat="windows-x86_64" ;;
           esac
-          asset="${name}-${plat}${{ matrix.ext }}"
+          src="${{ matrix.target.dir }}/target/release/${{ matrix.target.bin }}${ext}"
+          asset="${{ matrix.target.asset }}-${plat}${ext}"
           mkdir -p dist
           cp "$src" "dist/$asset"
+          ( cd dist
+            if command -v sha256sum >/dev/null 2>&1; then sha256sum "$asset" > "$asset.sha256"
+            elif command -v shasum   >/dev/null 2>&1; then shasum -a 256 "$asset" > "$asset.sha256"
+            else echo "! no sha256 tool — skipping checksum for $asset" >&2; fi )
 
       - name: Upload to the canary prerelease
         shell: bash

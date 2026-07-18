@@ -32,12 +32,13 @@ pub enum JobTarget {
     },
     /// Run an agent: a single chat turn against the given agent id.
     Agent { agent_id: String, prompt: String },
-    /// Run one website-monitor check (fetch → compare → alert). Backed by the
-    /// monitor engine ([`crate::monitors`]); created automatically for every
+    /// Run one website-monitor check (fetch → compare → alert). The monitor engine
+    /// runs OUT-OF-PROCESS (`ryu-monitors` sidecar); the tick dispatches over loopback
+    /// via `crate::monitors_client`. Created automatically (reconciled) for every
     /// monitor so they ride the same tick loop as workflows and agents.
     Monitor { monitor_id: String },
     /// Run one quest detection pass (gather Shadow context → judge → suggest or
-    /// auto-complete). Backed by the quest engine ([`crate::quests`]); created
+    /// auto-complete). Backed by the quest engine (`ryu_quests`); created
     /// automatically for every open quest so it rides the same tick loop.
     Quest { quest_id: String },
     /// Re-validate every `AUTHENTICATED` Identity Vault connection and flip the

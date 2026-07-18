@@ -25,7 +25,9 @@ use serde_json::{json, Value};
 
 use crate::agents::{AgentStore, CreateAgent, PersonaSlot, UpdateAgent};
 use crate::sidecar::mcp::RegistryTool;
-use crate::teams::{Coordination, CreateTeam, TeamStore};
+use ryu_teams::{Coordination, CreateTeam};
+
+use crate::teams_client::{TeamSink, TeamsClient};
 
 /// Reserved server name for the agent-builder tool provider. Must not contain
 /// `__` (the tool-id separator).
@@ -198,20 +200,20 @@ pub async fn dispatch(
     tool: &str,
     arguments: Value,
     store: AgentStore,
-    team_store: Option<TeamStore>,
+    teams_client: Option<TeamsClient>,
 ) -> Result<Value> {
     match tool {
         "get_agent" => get_agent(arguments, store).await,
         "configure_agent" => configure_agent(arguments, store).await,
         "create_agent" => create_agent(arguments, store).await,
         "create_agent_team" => {
-            let teams = team_store.ok_or_else(|| {
+            let teams = teams_client.ok_or_else(|| {
                 anyhow!(
-                    "create_agent_team called but the team store is not wired; \
-                     call McpRegistry::with_team_store at startup"
+                    "create_agent_team called but the teams sidecar client is not \
+                     wired; call McpRegistry::with_teams_client at startup"
                 )
             })?;
-            create_agent_team(arguments, store, teams).await
+            create_agent_team(arguments, store, &teams).await
         }
         other => Err(anyhow!("unknown agent_builder tool: '{other}'")),
     }
@@ -372,7 +374,7 @@ async fn create_agent(args: Value, store: AgentStore) -> Result<Value> {
 async fn create_agent_team(
     args: Value,
     store: AgentStore,
-    team_store: TeamStore,
+    team_sink: &dyn TeamSink,
 ) -> Result<Value> {
     let team_name = require_str(&args, "team_name")?.to_owned();
     let members = args["members"]
@@ -411,8 +413,8 @@ async fn create_agent_team(
         member_ids.push(created.id);
     }
 
-    let team = team_store
-        .create(CreateTeam {
+    let team = team_sink
+        .create_team(CreateTeam {
             name: team_name,
             description: args["description"].as_str().map(str::to_owned),
             members: member_ids,
@@ -560,10 +562,10 @@ mod tests {
 
     #[tokio::test]
     async fn create_agent_team_mints_members_and_team() {
-        use crate::teams::Coordination;
+        use ryu_teams::Coordination;
 
         let store = store();
-        let teams = crate::teams::TeamStore::open_in_memory().unwrap();
+        let teams = ryu_teams::TeamStore::open_in_memory().unwrap();
         let res = create_agent_team(
             json!({
                 "team_name": "Marketing",
@@ -576,7 +578,7 @@ mod tests {
                 ]
             }),
             store.clone(),
-            teams.clone(),
+            &teams,
         )
         .await
         .unwrap();
@@ -602,11 +604,11 @@ mod tests {
     #[tokio::test]
     async fn create_agent_team_rejects_empty_members() {
         let store = store();
-        let teams = crate::teams::TeamStore::open_in_memory().unwrap();
+        let teams = ryu_teams::TeamStore::open_in_memory().unwrap();
         let err = create_agent_team(
             json!({ "team_name": "Empty", "members": [] }),
             store,
-            teams,
+            &teams,
         )
         .await
         .expect_err("empty members must fail");

@@ -34,6 +34,25 @@ interface RequiresWire {
 	grants?: string[];
 }
 
+/** One `surfaces.cli.commands[]` entry. Mirrors Core's `CliCommandSpec`
+ *  (`crates/ryu-kernel-contracts/src/manifest.rs`). `method`/`summary` are
+ *  `Option` in Rust (`skip_serializing_if`) so they may be absent/null. */
+interface CliCommandWire {
+	method?: string | null;
+	name: string;
+	path: string;
+	summary?: string | null;
+}
+
+/** One `surfaces` map entry. Mirrors Core's `SurfaceEntry`. Only `commands` is
+ *  consumed client-side today (the TUI `ryu <app> <cmd>` dispatcher); `support`
+ *  and `ui` are carried opaquely for forward-compat. */
+interface SurfaceEntryWire {
+	commands?: CliCommandWire[];
+	support?: string;
+	ui?: unknown;
+}
+
 interface AppManifestWire {
 	// System app fields injected by list_apps for Ghost/Shadow
 	built_in: boolean;
@@ -54,6 +73,9 @@ interface AppManifestWire {
 	requires?: RequiresWire | null;
 	runnables: RunnableEntryWire[];
 	sidecar_name: string | null;
+	/** Per-surface support + UI + contributed commands. Absent = legacy `targets`
+	 *  semantics; the `cli` entry's `commands` feed the TUI dispatcher. */
+	surfaces?: Record<string, SurfaceEntryWire> | null;
 	/** Host surfaces the plugin runs on. Absent/empty = EVERY surface. */
 	targets?: Surface[];
 	version: string;
@@ -106,8 +128,22 @@ export interface AppRequires {
 	grants: string[];
 }
 
+/** One terminal subcommand an app contributes to the `cli` surface (the TUI's
+ *  `ryu <app> <cmd>` dispatcher), client-side view. `method` is normalized to an
+ *  uppercase verb (default `"POST"`); `summary` is `null` when the app omitted it.
+ *  The dispatcher routes the call to `<method> /api/ext/<appId><path>`. */
+export interface AppCommand {
+	method: string;
+	name: string;
+	path: string;
+	summary: string | null;
+}
+
 export interface AppInfo {
 	builtIn: boolean;
+	/** Terminal subcommands this app contributes to the `cli` surface (TUI).
+	 *  Empty = none. Sourced from the manifest's `surfaces.cli.commands`. */
+	commands: AppCommand[];
 	companion: {
 		label: string;
 		icon: string | null;
@@ -241,9 +277,66 @@ function toDependencyError(value: unknown): DependencyError | null {
 
 // ── Mappers ───────────────────────────────────────────────────────────────────
 
+/** Whether a contributed CLI command `path` is a safe `ext_proxy` sub-path.
+ *
+ *  A command path is concatenated onto `/api/ext/<appId>` and fetched, and a WHATWG
+ *  URL parser resolves `..` segments — including their percent-encoded (`%2e`) and
+ *  backslash-separated forms (`\` is a path separator for http URLs) — BEFORE the
+ *  request is sent. A traversal path therefore escapes the plugin's proxy scope and
+ *  hits an arbitrary internal Core/Gateway route with the full node bearer. Core's
+ *  manifest loader rejects such paths at load ({@link validateCliCommandPath} in
+ *  `crates/ryu-kernel-contracts`); this mirrors that check client-side so a rogue
+ *  manifest that slipped past (or a compromised transport) is still never routed.
+ *
+ *  Accepts only an absolute, single-origin sub-path: leading `/`, no backslash, no
+ *  literal or percent-encoded `..`, and no percent-encoded path separators. */
+export function isSafeCommandPath(path: string): boolean {
+	if (!path.startsWith("/")) {
+		return false;
+	}
+	if (path.includes("\\")) {
+		return false;
+	}
+	const lower = path.toLowerCase();
+	if (path.includes("..") || lower.includes("%2e")) {
+		return false;
+	}
+	if (lower.includes("%2f") || lower.includes("%5c")) {
+		return false;
+	}
+	return true;
+}
+
+/** Parse the manifest's `surfaces.cli.commands` into the client-side
+ *  {@link AppCommand}[]. Defensive: an entry missing `name`/`path` is skipped
+ *  (never a partial command the dispatcher can't route); an entry whose `path`
+ *  fails {@link isSafeCommandPath} (a path-traversal / SSRF attempt) is dropped so
+ *  it can never be dispatched; `method` is uppercased with a `POST` default;
+ *  `summary` normalizes to `null`. */
+function toAppCommands(surfaces: AppManifestWire["surfaces"]): AppCommand[] {
+	const raw = surfaces?.cli?.commands ?? [];
+	const commands: AppCommand[] = [];
+	for (const c of raw) {
+		if (typeof c?.name !== "string" || typeof c?.path !== "string") {
+			continue;
+		}
+		if (!isSafeCommandPath(c.path)) {
+			continue;
+		}
+		commands.push({
+			name: c.name,
+			path: c.path,
+			method: (c.method ?? "POST").toUpperCase(),
+			summary: c.summary ?? null,
+		});
+	}
+	return commands;
+}
+
 function toAppInfo(w: AppManifestWire): AppInfo {
 	return {
 		builtIn: w.built_in ?? false,
+		commands: toAppCommands(w.surfaces),
 		companion: w.companion
 			? {
 					label: w.companion.label,

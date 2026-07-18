@@ -5,7 +5,7 @@ description: Install Ryu, understand how the pieces fit together, and send your 
 
 This section takes you from zero to a working agent. You will install the desktop app, learn the
 two-service split that every request flows through, and understand how Ryu stays engine-agnostic
-by design. Nothing here is aspirational - every step maps to a surface you can open today.
+by design. Nothing here is aspirational — every step maps to a surface you can open today.
 
 <Callout type="info">
   New to Ryu? Start with [Getting Started](/docs/start-here/getting-started) and come back to
@@ -23,18 +23,25 @@ by design. Nothing here is aspirational - every step maps to a surface you can o
 ## Understand the architecture
 
 <Cards>
-  <DocCard href="/docs/start-here/architecture" />
-  <DocCard href="/docs/start-here/architecture/why-ryu" />
-  <DocCard href="/docs/start-here/architecture/core-vs-gateway" />
-  <DocCard href="/docs/start-here/architecture/runnable-model" />
-  <DocCard href="/docs/start-here/architecture/batteries-included" />
+  <DocCard href="/docs/start-here/architecture" title="Architecture overview" description="The full system at a glance: clients, Core, Gateway, engines, and capability layers." />
+  <DocCard href="/docs/start-here/architecture/why-ryu" title="Why Ryu" description="Nothing hardcoded, everything swappable. The moat and the five principles." />
+  <DocCard href="/docs/start-here/architecture/three-products" title="Three products" description="Ryu App, Gateway, and Cloud — one codebase, three offers." />
+  <DocCard href="/docs/start-here/architecture/core-vs-gateway" title="Core vs Gateway" description="The single design rule that decides where every piece of code lives." />
+  <DocCard href="/docs/start-here/architecture/runnable-model" title="Runnable model" description="Runnable, Session, Plugin — the vocabulary every part of Ryu shares." />
+  <DocCard href="/docs/start-here/architecture/capability-layers" title="Capability layers" description="L0-L3 + Gateway: ~40 capability packages in a dependency DAG." />
+  <DocCard href="/docs/start-here/architecture/batteries-included" title="Batteries included" description="What ships on first install with zero API keys." />
+  <DocCard href="/docs/start-here/architecture/acp-agents" title="ACP Agents" description="Every agent Ryu can run, their gateway routing, and the agent catalog." />
+  <DocCard href="/docs/start-here/architecture/providers" title="Providers & Models" description="The provider catalog, model formats, and engine compatibility." />
+  <DocCard href="/docs/start-here/architecture/platform-decomposition" title="Platform decomposition" description="The apps-store model, capability broker, and six proven patterns." />
+  <DocCard href="/docs/start-here/architecture/decomposition-program" title="Decomposition program" description="The multi-wave extraction plan: waves, acceptance criteria, and the permanent kernel." />
+  <DocCard href="/docs/start-here/architecture/open-core" title="Open core" description="Which parts are open-source and which are proprietary." />
 </Cards>
 
 ## Essentials guides
 
 <Cards>
-  <DocCard href="/docs/start-here/essentials/what-is-ryu" />
-  <DocCard href="/docs/start-here/essentials/install-and-setup" />
-  <DocCard href="/docs/start-here/essentials/your-first-chat" />
-  <DocCard href="/docs/start-here/essentials/your-first-agent" />
+  <DocCard href="/docs/academy/essentials/what-is-ryu" title="What is Ryu" description="A plain-English overview of what Ryu does and why it exists." />
+  <DocCard href="/docs/academy/essentials/install-and-setup" title="Install & setup" description="Step-by-step installation and first-run configuration." />
+  <DocCard href="/docs/academy/essentials/your-first-chat" title="Your first chat" description="Send your first message to a local or hosted agent." />
+  <DocCard href="/docs/academy/essentials/your-first-agent" title="Your first agent" description="Create, configure, and chat with a custom agent." />
 </Cards>

@@ -26,6 +26,7 @@
     "skills-catalog",
     "---Runtime & Isolation---",
     "sandbox",
+    "finetuning",
     "app-manifest-lifecycle",
     "---Data & Identity---",
     "identity-vault",

@@ -1,29 +1,100 @@
 ---
 title: Extensions Overview
-description: Three ways to extend Ryu - MCP servers, plugin.json manifests, and the TypeScript SDK.
+description: Three ways to extend Ryu — MCP servers, plugin.json manifests, and the TypeScript SDK.
 ---
 
 Ryu is built so that **nothing is hardcoded and everything is swappable**. Extending it means
-adding new capabilities - tools, agents, workflows, skills - that plug into the same Core and
-Gateway every built-in uses. There are three paths, in increasing order of structure.
+adding new capabilities — tools, agents, workflows, skills — that plug into the same Core and
+Gateway every built-in uses.
 
-## Three ways to extend Ryu
+## Three extension paths
 
-1. **MCP server** - expose any tool over the Model Context Protocol. No manifest, no SDK, no
-   restart required. Register it with Core and its tools become callable from chat immediately.
-   This is the fastest path and the one the [MCP server guide](/docs/develop/extensions/mcp-server)
-   worked example uses.
+```mermaid
+flowchart TD
+  subgraph "Path 1: MCP Server"
+    A[Write tool logic] --> B[Start stdio server]
+    B --> C[Register with Core]
+    C --> D[Tools callable from chat]
+  end
 
-2. **`plugin.json` manifest** - bundle one or more Runnables (tools, agents, workflows, skills)
-   plus the permission grants they need into a single installable plugin. Core validates the
-   manifest, writes it to disk, and hot-reloads it with no restart.
+  subgraph "Path 2: plugin.json"
+    E[Declare Runnables] --> F[Add permission grants]
+    F --> G[Install via API]
+    G --> H[Gateway validates grants]
+    H --> I[Runnables + hooks active]
+  end
 
-3. **TypeScript SDK (`@ryuhq/sdk`)** - define agents, workflows, tools, and skills as typed
-   Runnables in code, with the Gateway mandatory on every model call. Scaffold a project with
-   `create-ryu-app`, author Runnables with `defineAgent` / `defineTool` / `defineSkill`, and
-   pack them into a `plugin.json` with `bunx ryu pack`.
+  subgraph "Path 3: TypeScript SDK"
+    J[Scaffold project] --> K[defineAgent / defineTool]
+    K --> L[bunx ryu pack]
+    L --> M[Install plugin]
+    M --> I
+  end
+```
 
-## When to use each
+### 1. MCP Server (fastest)
+
+Expose any tool over the Model Context Protocol. No manifest, no SDK, no restart required. Register
+it with Core and its tools become callable from chat immediately.
+
+```bash
+pipx install headroom-ai[mcp]
+curl -X POST http://localhost:7980/api/mcp/servers \
+  -H 'content-type: application/json' \
+  -d '{"name": "headroom", "command": ["headroom-mcp"]}'
+```
+
+Best for: wrapping an existing process in any language (Python, Go, stdio), quick tool exposure.
+
+See [Register an MCP Server](/docs/develop/extensions/mcp-server).
+
+### 2. `plugin.json` manifest (installable)
+
+Bundle one or more Runnables (tools, agents, workflows, skills) plus the permission grants they need
+into a single installable plugin. Core validates the manifest, writes it to disk, and hot-reloads it
+with no restart.
+
+```json
+{
+  "id": "com.example.my-plugin",
+  "name": "My Plugin",
+  "version": "1.0.0",
+  "runnables": [
+    { "id": "agent-main", "name": "Main", "kind": "agent", "config": { "model": "gemma4" } }
+  ],
+  "permission_grants": ["hook:side-model"]
+}
+```
+
+Best for: shipping a named, versioned bundle; declaring permission grants the Gateway enforces;
+contributing hooks, composer controls, or desktop UI.
+
+See [Bundle Runnables with plugin.json](/docs/develop/extensions/plugin-json-manifest).
+
+### 3. TypeScript SDK (typed)
+
+Define agents, workflows, tools, and skills as typed Runnables in code, with the Gateway mandatory
+on every model call. Pack into a `plugin.json` with `bunx ryu pack`.
+
+```typescript
+import { defineAgent } from "@ryuhq/sdk";
+
+export const researcher = defineAgent({
+  id: "agent-researcher",
+  name: "Researcher",
+  async run({ query }, ctx) {
+    const result = await ctx.gateway.chat([{ role: "user", content: query }]);
+    return { answer: result.content };
+  },
+});
+```
+
+Best for: authoring agents/workflows in typed TypeScript, gateway-routed model calls, validated
+packaging for distribution.
+
+See [TypeScript SDK](/docs/develop/extensions/typescript-sdk).
+
+## Decision guide
 
 | You want to... | Use |
 |---|---|
@@ -31,12 +102,13 @@ Gateway every built-in uses. There are three paths, in increasing order of struc
 | Wrap an existing process in any language (Python, Go, stdio) | MCP server |
 | Ship a named, versioned, installable bundle of Runnables | `plugin.json` manifest |
 | Declare permission grants the Gateway should enforce | `plugin.json` manifest |
+| React to chat events (turn hooks, tool gates) | `plugin.json` + turn hooks |
+| Contribute desktop UI | `plugin.json` + companion |
 | Author agents/workflows in typed TypeScript with Gateway-routed model calls | TypeScript SDK |
 | Validate and package a plugin for distribution | TypeScript SDK (`bunx ryu pack`) |
 
 An MCP server and a `plugin.json` manifest are not mutually exclusive. The MCP server is the
-executable that exposes the tools; the manifest is the install and lifecycle wrapper for the
-same surface.
+executable that exposes the tools; the manifest is the install and lifecycle wrapper.
 
 ## Quick start
 
@@ -50,30 +122,17 @@ bunx ryu pack   # produces plugin.json
 The scaffolded project includes a starter Runnable, a gateway-pointed model config, and a
 `plugin.json` manifest ready to load into Core.
 
-## Desktop UI contributions
-
-Plugins can also contribute **desktop UI** - a route, command, or settings section rendered
-inside the desktop app. The desktop extension host (`apps/desktop/src/contributions/host/`)
-renders a plugin's document in a sandboxed null-origin `<iframe>` with a capability-gated
-postMessage RPC bridge. The contract a plugin codes against ships in the SDK at
-`packages/sdk/src/plugin/ryu-plugin.ts`.
-
-<Callout type="warn">
-  The desktop UI host is an early MVP. The bridge and RPC gate are built and unit-tested, but
-  the in-webview handshake is not yet exercised end-to-end, and the granted-capability set is
-  host config rather than read from `plugin.json` grants. See
-  [Desktop companion](/docs/develop/extensions/desktop-companion) for the current state.
-</Callout>
-
 ## Explore further
 
 <Cards>
-  <Card title="MCP server" href="/docs/develop/extensions/mcp-server" />
-  <Card title="TypeScript SDK" href="/docs/develop/extensions/typescript-sdk" />
-  <Card title="plugin.json manifest" href="/docs/develop/extensions/plugin-json-manifest" />
-  <Card title="Agent skills" href="/docs/develop/extensions/agent-skills" />
-  <Card title="Desktop companion" href="/docs/develop/extensions/desktop-companion" />
-  <Card title="Channel bot" href="/docs/develop/extensions/channel-bot" />
-  <Card title="Author workflows" href="/docs/develop/extensions/author-workflows" />
+  <Card title="Plugins & Hooks" href="/docs/develop/extensions/plugin-json-manifest" />
+  <Card title="Hooks & Lifecycle" href="/docs/develop/extensions/hooks-lifecycle" />
+  <Card title="Plugin Runtime" href="/docs/develop/extensions/plugin-runtime" />
+  <Card title="MCP Server" href="/docs/develop/extensions/mcp-server" />
+  <Card title="Agent Skills" href="/docs/develop/extensions/agent-skills" />
+  <Card title="Ryu Apps" href="/docs/develop/extensions/ryu-apps" />
+  <Card title="Desktop Companion" href="/docs/develop/extensions/desktop-companion" />
+  <Card title="Channel Bot" href="/docs/develop/extensions/channel-bot" />
+  <Card title="Author Workflows" href="/docs/develop/extensions/author-workflows" />
   <Card title="Marketplace" href="/docs/develop/extensions/marketplace" />
 </Cards>

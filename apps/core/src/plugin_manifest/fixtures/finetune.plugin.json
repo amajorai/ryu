@@ -14,12 +14,39 @@
       }
     }
   ],
-  "permission_grants": ["finetune:runs", "sidecar:process"],
+  "permission_grants": ["finetune:runs"],
   "companion": {
     "label": "Fine-tuning",
     "icon": "sparkles"
   },
   "sidecars": [
+    {
+      "name": "ryu-finetune",
+      "process": {
+        "kind": "local",
+        "command": "ryu-finetune",
+        "command_env": "RYU_FINETUNE_BIN",
+        "port_env": "RYU_FINETUNE_PORT",
+        "env": {
+          "RYU_UNSLOTH_URL": "http://127.0.0.1:8086"
+        }
+      },
+      "port": 7990,
+      "health_path": "/health",
+      "http": {
+        "mount": "/api/finetune",
+        "public_mount": "/api/finetune",
+        "routes": [
+          { "path": "/capability" },
+          { "path": "/start" },
+          { "path": "/list" },
+          { "path": "/adapters" },
+          { "path": "/merge" },
+          { "path": "/:id" },
+          { "path": "/:id/stream" }
+        ]
+      }
+    },
     {
       "name": "unsloth",
       "port": 8086,
@@ -27,6 +54,7 @@
       "process": {
         "kind": "python",
         "entry": "ryu_unsloth",
+        "port_env": "RYU_UNSLOTH_PORT",
         "python_version": "3.11",
         "pyproject_extra": "train",
         "source": {
@@ -35,7 +63,6 @@
         },
         "env": {
           "RYU_UNSLOTH_HOST": "127.0.0.1",
-          "RYU_UNSLOTH_PORT": "8086",
           "HF_HOME": "${RYU_DIR}/models/hf",
           "RYU_UNSLOTH_OUTPUT_DIR": "${RYU_DIR}/models"
         }

@@ -187,6 +187,22 @@ export async function fetchWorkflows(target: ApiTarget): Promise<Workflow[]> {
 	return (json.workflows ?? []).map(toWorkflow);
 }
 
+/** Fetch a single workflow definition by id (e.g. to re-hydrate the canvas after
+ * the natural-language builder mutates it). */
+export async function fetchWorkflow(
+	target: ApiTarget,
+	id: string
+): Promise<Workflow> {
+	const resp = await fetch(apiUrl(target, `/workflows/${id}`), {
+		headers: makeHeaders(target.token),
+	});
+	if (!resp.ok) {
+		throw await errorFromResponse(resp, `/workflows/${id}`);
+	}
+	const json = (await resp.json()) as { workflow: WorkflowWire };
+	return toWorkflow(json.workflow);
+}
+
 /** Create (or overwrite, when `id` is set) a workflow. Core validates the DAG
  * first and returns a 400 with the validation error when it is invalid. */
 export async function createWorkflow(
@@ -258,4 +274,227 @@ export async function resumeWorkflow(
 		{ payload }
 	);
 	return toRun(json.run);
+}
+
+// ── Template catalog (mirrors apps/desktop/src/lib/api/workflows.ts) ─────────
+
+/** The four agent-design-pattern buckets templates are grouped under. */
+export type WorkflowTemplateCategory =
+	| "research"
+	| "orchestration"
+	| "quality"
+	| "automation";
+
+const TEMPLATE_CATEGORIES: readonly string[] = [
+	"research",
+	"orchestration",
+	"quality",
+	"automation",
+];
+
+/** Summary card for a workflow template (list view). */
+export interface WorkflowTemplateMeta {
+	category: WorkflowTemplateCategory;
+	description: string;
+	/** Optional icon hint (emoji or icon id) from the catalog; may be null. */
+	icon: string | null;
+	id: string;
+	name: string;
+	/** Number of nodes in the primary workflow (a "size" hint for the card). */
+	nodeCount: number;
+	/** The agent-design pattern the template demonstrates (e.g. "routing"). */
+	pattern: string;
+	/** Provenance link (e.g. the Anthropic/Karpathy write-up), when set. */
+	sourceUrl: string | null;
+	tags: string[];
+}
+
+/** Full template detail: the meta plus the primary workflow's preview graph. */
+export interface WorkflowTemplateDetail extends WorkflowTemplateMeta {
+	edges: WorkflowEdge[];
+	nodes: WorkflowNode[];
+}
+
+interface WorkflowTemplateMetaWire {
+	category?: string | null;
+	description?: string | null;
+	icon?: string | null;
+	id: string;
+	name: string;
+	node_count?: number | null;
+	pattern: string;
+	source_url?: string | null;
+	tags?: string[] | null;
+}
+
+interface WorkflowTemplateDetailWire extends WorkflowTemplateMetaWire {
+	edges?: WorkflowEdge[];
+	nodes?: WorkflowNode[];
+}
+
+function toTemplateCategory(
+	value: string | null | undefined
+): WorkflowTemplateCategory {
+	return value && TEMPLATE_CATEGORIES.includes(value)
+		? (value as WorkflowTemplateCategory)
+		: "orchestration";
+}
+
+function toTemplateMeta(w: WorkflowTemplateMetaWire): WorkflowTemplateMeta {
+	return {
+		id: w.id,
+		name: w.name,
+		description: w.description ?? "",
+		category: toTemplateCategory(w.category),
+		pattern: w.pattern,
+		icon: w.icon ?? null,
+		nodeCount: w.node_count ?? 0,
+		tags: w.tags ?? [],
+		sourceUrl: w.source_url ?? null,
+	};
+}
+
+/** Browse the workflow-template catalog (`GET /api/workflows/catalog`). */
+export async function fetchWorkflowTemplates(
+	target: ApiTarget
+): Promise<WorkflowTemplateMeta[]> {
+	const resp = await fetch(apiUrl(target, "/api/workflows/catalog"), {
+		headers: makeHeaders(target.token),
+	});
+	if (!resp.ok) {
+		throw await errorFromResponse(resp, "/api/workflows/catalog");
+	}
+	const json = (await resp.json()) as {
+		templates?: WorkflowTemplateMetaWire[];
+	};
+	return (json.templates ?? []).map(toTemplateMeta);
+}
+
+/** Fetch one template's detail incl. the primary workflow's preview graph. */
+export async function fetchWorkflowTemplate(
+	target: ApiTarget,
+	id: string
+): Promise<WorkflowTemplateDetail> {
+	const path = `/api/workflows/catalog/${id}`;
+	const resp = await fetch(apiUrl(target, path), {
+		headers: makeHeaders(target.token),
+	});
+	if (!resp.ok) {
+		throw await errorFromResponse(resp, path);
+	}
+	const json = (await resp.json()) as { template: WorkflowTemplateDetailWire };
+	const t = json.template;
+	return {
+		...toTemplateMeta(t),
+		nodes: t.nodes ?? [],
+		edges: t.edges ?? [],
+	};
+}
+
+/** Install a template: Core mints fresh workflow ids (primary + any `while`
+ * bodies, patching the references), persists all, and returns the primary id. */
+export async function installWorkflowTemplate(
+	target: ApiTarget,
+	templateId: string
+): Promise<string> {
+	const json = await postJson<{ workflow_id: string }>(
+		target,
+		"/api/workflows/catalog/install",
+		{ template_id: templateId }
+	);
+	return json.workflow_id;
+}
+
+// ── Version history (server-backed) ─────────────────────────────────────────
+
+/** Metadata for one saved workflow version. */
+export interface WorkflowVersionMeta {
+	/** Unix milliseconds. */
+	createdAt: number;
+	id: string;
+	label: string | null;
+	name: string;
+	workflowId: string;
+}
+
+interface WorkflowVersionMetaWire {
+	created_at: number;
+	id: string;
+	label?: string | null;
+	name: string;
+	workflow_id: string;
+}
+
+function toWorkflowVersionMeta(
+	w: WorkflowVersionMetaWire
+): WorkflowVersionMeta {
+	return {
+		createdAt: w.created_at,
+		id: w.id,
+		label: w.label ?? null,
+		name: w.name,
+		workflowId: w.workflow_id,
+	};
+}
+
+/** List a workflow's saved versions, newest first (metadata only). */
+export async function listWorkflowVersions(
+	target: ApiTarget,
+	id: string
+): Promise<WorkflowVersionMeta[]> {
+	const resp = await fetch(apiUrl(target, `/workflows/${id}/versions`), {
+		headers: makeHeaders(target.token),
+	});
+	if (!resp.ok) {
+		throw await errorFromResponse(resp, `/workflows/${id}/versions`);
+	}
+	const json = (await resp.json()) as { versions?: WorkflowVersionMetaWire[] };
+	return (json.versions ?? []).map(toWorkflowVersionMeta);
+}
+
+/** Fetch one version's captured definition as the raw wire object (snake_case),
+ * suitable for JSON-stringifying to diff against a canvas definition. */
+export async function getWorkflowVersionDefinition(
+	target: ApiTarget,
+	id: string,
+	versionId: string
+): Promise<Record<string, unknown>> {
+	const resp = await fetch(
+		apiUrl(target, `/workflows/${id}/versions/${versionId}`),
+		{ headers: makeHeaders(target.token) }
+	);
+	if (!resp.ok) {
+		throw await errorFromResponse(
+			resp,
+			`/workflows/${id}/versions/${versionId}`
+		);
+	}
+	const json = (await resp.json()) as {
+		version?: { workflow?: Record<string, unknown> };
+	};
+	return json.version?.workflow ?? {};
+}
+
+/** Snapshot the workflow's current definition as a new version. */
+export async function createWorkflowVersion(
+	target: ApiTarget,
+	id: string,
+	label?: string
+): Promise<void> {
+	await postJson(target, `/workflows/${id}/versions`, label ? { label } : {});
+}
+
+/** Restore a version as the workflow's current definition (undoable server-side).
+ * Returns the restored definition so the caller can re-hydrate the canvas. */
+export async function restoreWorkflowVersion(
+	target: ApiTarget,
+	id: string,
+	versionId: string
+): Promise<Workflow> {
+	const json = await postJson<{ workflow: WorkflowWire }>(
+		target,
+		`/workflows/${id}/versions/${versionId}/restore`,
+		{}
+	);
+	return toWorkflow(json.workflow);
 }

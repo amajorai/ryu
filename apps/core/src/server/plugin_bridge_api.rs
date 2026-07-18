@@ -79,26 +79,18 @@ fn bridge_path_for(method: &str) -> Option<&'static str> {
 
 /// The grant a method requires. Checked at the endpoint (a clean 403 before dispatch)
 /// AND again inside the bridge (defense in depth) — the two never trust each other.
+///
+/// Single-sourced: reads the `method → grant` table from `ryu-kernel-contracts`
+/// ([`ryu_kernel_contracts::grant_for`]), the SAME table the TS app host derives its
+/// `METHOD_CAPABILITY` / `GRANT_CAPABILITY` from, so the two vocabularies can never
+/// drift. The table also carries grants for methods this bridge does NOT dispatch
+/// (monitors/workflows/… are TS-host-direct), but `plugin_bridge_dispatch` still
+/// double-gates on [`bridge_path_for`], so a grant here without a bridge path is
+/// rejected as `unknown host method` exactly as before — see the dispatch match.
+/// `view.action` (grant `views:actions`) is the one bridge-gated method with no unary
+/// bridge path; it is handled by its own dispatch branch.
 fn required_grant_for(method: &str) -> Option<&'static str> {
-    match method {
-        "model.complete" => Some("hook:side-model"),
-        "agent.run" => Some("hook:run-agent"),
-        "storage.get" | "storage.set" | "storage.delete" | "storage.keys" => Some("storage:kv"),
-        "spaces.createDoc"
-        | "spaces.getDoc"
-        | "spaces.updateDoc"
-        | "spaces.listDocs"
-        | "spaces.deleteDoc" => Some("spaces:docs"),
-        "finetune.capability"
-        | "finetune.start"
-        | "finetune.list"
-        | "finetune.get"
-        | "finetune.cancel"
-        | "finetune.adapters"
-        | "finetune.merge"
-        | "finetune.stream" => Some("finetune:runs"),
-        _ => None,
-    }
+    ryu_kernel_contracts::host_api::grant_for(method)
 }
 
 /// One in-flight `agent.run` limiter per plugin id.
@@ -138,15 +130,26 @@ pub async fn plugin_bridge_dispatch(
     Json(body): Json<HostDispatchBody>,
 ) -> axum::response::Response {
     // Allowlist the method → closed `host.*` path (no verbatim path injection).
-    let (Some(bridge_path), Some(required_grant)) = (
-        bridge_path_for(&body.method),
-        required_grant_for(&body.method),
-    ) else {
-        return err_response(
-            StatusCode::BAD_REQUEST,
-            "invalid_args",
-            format!("unknown host method '{}'", body.method),
-        );
+    // `view.action` is the one grant-gated method with NO unary bridge path: the
+    // shell relays a declarative-view intent to the owning app. It is dispatched
+    // by its own branch below (after the enabled + grant gates), never the bridge.
+    let is_view_action = body.method == "view.action";
+    let (bridge_path, required_grant) = if is_view_action {
+        (None, "views:actions")
+    } else {
+        match (
+            bridge_path_for(&body.method),
+            required_grant_for(&body.method),
+        ) {
+            (Some(path), Some(grant)) => (Some(path), grant),
+            _ => {
+                return err_response(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_args",
+                    format!("unknown host method '{}'", body.method),
+                )
+            }
+        }
     };
 
     // Live enabled gate + approved-grant load (never the unvalidated manifest claim).
@@ -173,6 +176,32 @@ pub async fn plugin_bridge_dispatch(
             format!("capability '{required_grant}' not granted to this app"),
         );
     }
+
+    // `view.action` v1: the method EXISTS, is grant-gated (above), and is audited
+    // (the tracing line below feeds the standard log/audit pipeline), but no app
+    // turn-hook runtime consumes view intents yet — the declarative `http` tier is
+    // the primary CRUD path. Apps relaying intents get an honest 501 rather than a
+    // silent drop; wiring a hook phase upgrades this branch without a wire change.
+    if is_view_action {
+        tracing::info!(
+            plugin = %plugin_id,
+            args = %body.args,
+            "plugin view.action intent received (no app hook runtime wired; declarative http actions are the primary path)"
+        );
+        return err_response(
+            StatusCode::NOT_IMPLEMENTED,
+            "server_error",
+            "view.action intents are not consumed by an app hook runtime yet; declare a declarative `http` handler on the action instead".to_owned(),
+        );
+    }
+    // Every non-view.action method resolved a concrete bridge path above.
+    let Some(bridge_path) = bridge_path else {
+        return err_response(
+            StatusCode::BAD_REQUEST,
+            "invalid_args",
+            format!("unknown host method '{}'", body.method),
+        );
+    };
 
     // Bound the heavy sub-agent path per plugin. Held for the whole call.
     let _permit = if body.method == "agent.run" {
@@ -298,9 +327,11 @@ pub async fn plugin_bridge_stream(
     let grants: HashSet<String> = record.approved_grants.into_iter().collect();
 
     // Fine-tune progress stream: the `com.ryu.finetune` app subscribes to a run's
-    // live SSE. Core owns the orchestration + the sidecar SSE; we proxy that stream
-    // verbatim (its frames are the app's OWN run data — step/loss/state — not another
-    // agent's internals, so no governance filter is applied). Gated on `finetune:runs`.
+    // live SSE. The `ryu-finetune` sidecar owns the orchestration + the source SSE
+    // (local worker or remote node); we proxy that stream verbatim through the
+    // loopback finetune client (its frames are the app's OWN run data — step/loss/
+    // state — not another agent's internals, so no governance filter is applied).
+    // Gated on `finetune:runs`.
     if body.method == "finetune.stream" {
         if !grants.contains("finetune:runs") {
             return err_response(
@@ -323,7 +354,7 @@ pub async fn plugin_bridge_stream(
                 "finetune.stream requires a non-empty 'id'".to_owned(),
             );
         }
-        return crate::server::finetune::stream_response(&state, &id).await;
+        return state.finetune.stream(&id).await;
     }
 
     if !grants.contains("hook:run-agent") {
@@ -517,6 +548,10 @@ mod tests {
         assert_eq!(required_grant_for("finetune.capability"), Some("finetune:runs"));
         assert_eq!(required_grant_for("finetune.start"), Some("finetune:runs"));
         assert_eq!(required_grant_for("finetune.get"), Some("finetune:runs"));
+        // `view.action` is grant-gated but has NO unary bridge path — it is
+        // dispatched by its own branch (501 until an app hook runtime consumes it).
+        assert_eq!(required_grant_for("view.action"), Some("views:actions"));
+        assert_eq!(bridge_path_for("view.action"), None);
         assert_eq!(required_grant_for("nope"), None);
     }
 

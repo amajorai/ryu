@@ -17,13 +17,13 @@ use crate::server::memory::{
     DEFAULT_SHORT_TERM_LIMIT, LOCAL_USER,
 };
 use crate::server::retrieval::{ChunkSource, RetrievalOptions, RetrievalStore, ScoredChunk};
-use crate::server::trace::{hash_args, TraceStore};
-use crate::server::worktree::{create_worktree_in, find_git_root, is_git_repo, WorktreeGuard};
+use ryu_tracing::{hash_args, TraceStore};
+use ryu_workspace::worktree::{create_worktree_in, find_git_root, is_git_repo, WorktreeGuard};
 use crate::sidecar::active_engine::{is_local_engine, local_engine_base_url};
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::BoxFuture;
 use crate::sidecar::SidecarManager;
-use crate::skills::SkillRegistry;
+use ryu_skills::SkillRegistry;
 use axum::{
     body::Body,
     http::{HeaderValue, StatusCode},
@@ -1072,6 +1072,65 @@ enum AgentRoute {
 /// which underlying agent is running.
 fn is_default_agent(agent_id: Option<&str>) -> bool {
     matches!(agent_id, None | Some("") | Some("default") | Some("ryu"))
+}
+
+/// Fresh-node servability guard for the flagship `ryu` default agent.
+///
+/// The `ryu` agent runs the managed Pi with its model egress forced through the
+/// gateway's `local` provider (llama.cpp). On a fresh node with no model weights
+/// and no remote provider, that provider returns 503 — but the managed Pi
+/// *swallows* that error and returns a clean `EndTurn`, streaming its own
+/// context/skills banner as if it were the assistant reply (input-independent
+/// garbage, with no error surfaced). This predicate lets the caller short-circuit
+/// BEFORE spawning Pi with an actionable error instead.
+///
+/// Returns `true` only when the node is *unambiguously* unable to serve a chat
+/// completion for this agent. It is conservative by construction — every servable
+/// configuration trips one check open, so it can never block a working node:
+///   1. Only the flagship default (`ryu`) agent — every other agent brings its
+///      own engine and is out of scope here.
+///   2. No remote egress configured (default base_url, no default API key, no
+///      file-configured providers) — any remote provider would serve.
+///   3. The resident local engine is the default llama.cpp, or none — a keyless
+///      engine such as `apfel` (Apple Foundation Models) serves without weights.
+///   4. The local chat model weight file is absent — present ⇒ llama.cpp serves.
+///
+/// It deliberately does NOT fire on some exotic no-LLM configs (e.g. a remote key
+/// set but the local model still selected with no weights): that is an accepted
+/// false-negative in exchange for zero false-positives, and matches this defect's
+/// scope (fresh node, no provider key, local engine without a model).
+async fn ryu_default_unservable(
+    manager: &SidecarManager,
+    provider_reg: &ProviderRegistry,
+    effective_agent_id: Option<&str>,
+) -> bool {
+    // 1. Flagship default agent only.
+    if !is_default_agent(effective_agent_id) {
+        return false;
+    }
+    // 2. A remote provider would serve — fail open if any is configured. Mirrors
+    //    `default_agent_route`'s key resolution, plus the file-configured
+    //    `providers` list (a key in `registry.json` with no env var set).
+    let remote_configured = provider_reg.default_llm_base_url
+        != crate::registry::DEFAULT_LLM_BASE_URL
+        || std::env::var("RYU_DEFAULT_LLM_API_KEY")
+            .ok()
+            .is_some_and(|s| !s.is_empty())
+        || std::env::var("OPENAI_API_KEY")
+            .ok()
+            .is_some_and(|s| !s.is_empty())
+        || !provider_reg.providers.is_empty();
+    if remote_configured {
+        return false;
+    }
+    // 3. A non-llama.cpp resident local engine (e.g. `apfel`) serves without a
+    //    GGUF weight file, so its presence means the node is servable.
+    match manager.active_local_engine().await.as_deref() {
+        None | Some("llamacpp") => {}
+        Some(_) => return false,
+    }
+    // 4. The local chat model weight file is absent ⇒ nothing can serve.
+    !crate::sidecar::providers::llamacpp::active_chat_model_present(provider_reg).await
 }
 
 /// Build the default plain-LLM route from the unified [`ProviderRegistry`].
@@ -2209,7 +2268,7 @@ pub async fn run_reply_text(
 #[allow(clippy::too_many_arguments)]
 pub async fn run_team_reply_text(
     conversation_id: String,
-    team: crate::teams::TeamRecord,
+    team: ryu_teams::TeamRecord,
     text: String,
     author_name: Option<String>,
     registry: Arc<AcpAgentRegistry>,
@@ -2222,7 +2281,7 @@ pub async fn run_team_reply_text(
     skills: SkillRegistry,
     traces: TraceStore,
 ) -> anyhow::Result<String> {
-    use crate::teams::Coordination;
+    use ryu_teams::Coordination;
 
     if team.members.is_empty() {
         anyhow::bail!(
@@ -2859,7 +2918,7 @@ fn push_member_block(
 #[allow(clippy::too_many_arguments)]
 pub async fn route_team_chat_stream(
     req: ChatStreamRequest,
-    team: crate::teams::TeamRecord,
+    team: ryu_teams::TeamRecord,
     registry: Arc<AcpAgentRegistry>,
     conversations: ConversationStore,
     agent_store: AgentStore,
@@ -2870,7 +2929,7 @@ pub async fn route_team_chat_stream(
     skills: SkillRegistry,
     traces: TraceStore,
 ) -> Response {
-    use crate::teams::Coordination;
+    use ryu_teams::Coordination;
 
     if team.members.is_empty() {
         return error_stream(format!(
@@ -3720,6 +3779,24 @@ pub async fn route_chat_stream(
             .await
         }
         AgentRoute::Acp { spawn_cmd } => {
+            // Fresh-node degradation guard (zero-setup first run). The flagship
+            // `ryu` agent routes its model calls through the gateway's `local`
+            // provider; on a node with no model weights and no remote provider that
+            // 503s, but the managed Pi swallows the error and streams its
+            // context/skills banner as a fake reply. Short-circuit BEFORE spawning
+            // Pi with an actionable error so the user is told what to do rather than
+            // shown input-independent garbage. Conservative — fails open on any
+            // servable configuration (see `ryu_default_unservable`).
+            if ryu_default_unservable(&manager, &provider_reg, effective_agent_id.as_deref())
+                .await
+            {
+                return error_stream(
+                    "No model is configured yet, so the default Ryu agent can't reply. \
+                     Open Settings > Engines to download a local model or add a provider \
+                     API key, then try again."
+                        .to_owned(),
+                );
+            }
             let conversation_id = req.conversation_id.clone();
             // Resolve the per-agent allowlist so the MCP bridge only offers the
             // tools the agent is permitted to call (AC3 governance). Use the
@@ -3746,7 +3823,7 @@ pub async fn route_chat_stream(
             // are no progressive skills) we fall back to the full-body block. The
             // no-tool openai-compat path always uses the full block (see
             // `route_openai_stream`), so a weak model is never starved.
-            let skill_block = if crate::skills::is_progressive_disclosure() {
+            let skill_block = if ryu_skills::is_progressive_disclosure() {
                 skills.progressive_block(&skills_allowlist)
             } else {
                 skills.skill_block(&skills_allowlist)
@@ -5533,7 +5610,7 @@ async fn route_acp_stream(
             } else {
                 live_guard.base_hash.clone()
             };
-            let diff = crate::server::worktree::worktree_diff(&live_guard.path, &base);
+            let diff = ryu_workspace::worktree::worktree_diff(&live_guard.path, &base);
             worktree_diffs.lock().await.insert(
                 conv_id.clone(),
                 crate::server::WorktreeRun {
@@ -5821,7 +5898,7 @@ mod tests {
     #[tokio::test]
     async fn backfill_indexes_new_facts_then_is_idempotent() {
         let memory = MemoryStore::open_in_memory().unwrap();
-        let retrieval = RetrievalStore::open_in_memory().unwrap();
+        let retrieval = RetrievalStore::open_in_memory(crate::registry::DEFAULT_EMBED_DIMS, crate::registry::DEFAULT_RERANKER_MODEL.to_owned()).unwrap();
         let scope = "default";
 
         let fact_id = memory
@@ -5878,8 +5955,8 @@ mod tests {
     #[tokio::test]
     async fn run_auto_recall_fts_source_gated_by_flag() {
         let memory = MemoryStore::open_in_memory().unwrap();
-        let retrieval = RetrievalStore::open_in_memory().unwrap();
-        let fts = crate::server::message_fts::MessageFtsIndex::open_in_memory().unwrap();
+        let retrieval = RetrievalStore::open_in_memory(crate::registry::DEFAULT_EMBED_DIMS, crate::registry::DEFAULT_RERANKER_MODEL.to_owned()).unwrap();
+        let fts = ryu_search::MessageFtsIndex::open_in_memory().unwrap();
         // Conversation store WITHOUT a semantic message index (so the only past-chat
         // contribution can come from the FTS source), WITH the FTS index wired.
         let conversations = ConversationStore::open_in_memory()
@@ -6756,8 +6833,8 @@ mod tests {
             crate::agents::AgentStore::open_in_memory(&AcpAgentRegistry::new()).unwrap();
         let manager = crate::sidecar::SidecarManager::new_noop();
         let mcp = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let skills = crate::skills::SkillRegistry::empty();
-        let traces = crate::server::trace::TraceStore::open_in_memory().unwrap();
+        let skills = ryu_skills::SkillRegistry::empty();
+        let traces = ryu_tracing::TraceStore::open_in_memory().unwrap();
 
         let conv_id = "telegram-chat-99".to_string();
 
@@ -6831,8 +6908,8 @@ mod tests {
             crate::agents::AgentStore::open_in_memory(&AcpAgentRegistry::new()).unwrap();
         let manager = crate::sidecar::SidecarManager::new_noop();
         let mcp = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let skills = crate::skills::SkillRegistry::empty();
-        let traces = crate::server::trace::TraceStore::open_in_memory().unwrap();
+        let skills = ryu_skills::SkillRegistry::empty();
+        let traces = ryu_tracing::TraceStore::open_in_memory().unwrap();
 
         // No agent_id — falls back to the default route (which will error because
         // no LLM is configured). The important thing is it doesn't panic.

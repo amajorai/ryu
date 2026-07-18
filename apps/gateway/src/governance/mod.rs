@@ -22,12 +22,29 @@
 //! keys) before hashing, so re-serialization across the stack (Mongo, JSON
 //! round-trips) never changes the signed bytes. Doing both here keeps one
 //! canonicalization code path.
+//!
+//! **Decomposition (W6): the pure crypto moved out.** The grant-allowlist
+//! *matching*, the ed25519 sign / verify over the canonicalized encoding, the
+//! canonicalization itself, and the seed / public-key parsers were extracted to
+//! the [`ryu_gw_governance`] crate — everything that operates over caller data
+//! and *explicit* keys / allowlists. What stays here is the **key custody + the
+//! allowlist policy** (the marketplace trust root, kept where the secret lives):
+//! the `RYU_MARKETPLACE_SIGNING_KEY` env source-of-truth, the dev-persisted
+//! on-disk key, the process `OnceLock`, and the built-in default grant
+//! allowlist. The `sign_manifest` / `verify_manifest` / `validate_grants` /
+//! `public_key_b64` functions below are thin wrappers that resolve the
+//! key/allowlist and delegate to the crate, so `crate::governance::…` call
+//! sites are byte-unchanged. `GrantDecision` and `SIGNING_ALGORITHM` are
+//! re-exported from the crate.
 
 use std::sync::OnceLock;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, SECRET_KEY_LENGTH};
-use serde_json::{Map, Value};
+use ed25519_dalek::SigningKey;
+use serde_json::Value;
+
+pub use ryu_gw_governance::{GrantDecision, SIGNING_ALGORITHM};
+use ryu_gw_governance::{signing_key_from_seed, verifying_key_from_b64};
 
 /// Env var holding the ed25519 signing seed (32-byte secret), base64-encoded.
 /// The production source of truth: set it and every gateway replica signs with
@@ -42,10 +59,6 @@ const ENV_SIGNING_KEY: &str = "RYU_MARKETPLACE_SIGNING_KEY";
 /// audit db location in `config.rs`). Only consulted when `ENV_SIGNING_KEY` is
 /// unset. No secret is ever in code.
 const ENV_SIGNING_KEY_PATH: &str = "RYU_MARKETPLACE_SIGNING_KEY_PATH";
-
-/// The signing algorithm advertised in responses and stored alongside a
-/// signature. Stable identifier so clients/verifiers can branch on it.
-pub const SIGNING_ALGORITHM: &str = "ed25519";
 
 /// Env var holding a comma/whitespace-separated allowlist of permission grants
 /// the marketplace will approve. When unset a sensible built-in default
@@ -62,12 +75,42 @@ fn default_grant_allowlist() -> Vec<String> {
         "mcp.tools",
         "tools.read",
         "tools.invoke",
+        // Per-server MCP tool grants that the seeded system MCP-tool plugins
+        // declare in their `permission_grants` (`spider`, `agentbrowser`, `exa`,
+        // `ghost`, `shadow`). `validate_grants` matches exact scope strings, so
+        // each built-in MCP tool needs its own `mcp:<name>` on the allowlist:
+        // without them a runtime disable→re-enable (which re-runs
+        // `/v1/grants/validate` with the app's full declared grant set) is denied
+        // with GrantsDenied. Swappable via the `RYU_MARKETPLACE_GRANT_ALLOWLIST`
+        // env override. (Test-only `sample.plugin.json` is not seeded, so its
+        // `mcp:web_search`/`mcp:file_read` are intentionally NOT here.)
+        "mcp:spider",
+        "mcp:agentbrowser",
+        "mcp:exa",
+        "mcp:ghost",
+        "mcp:shadow",
         // data scopes
         "memory.read",
         "memory.write",
         "spaces.read",
         "spaces.write",
         "files.read",
+        // The Monitors app (`com.ryu.monitors`) drives Core's `/api/monitors/*`
+        // orchestration from its sandboxed companion frame via one bridge
+        // capability. On the allowlist so the lifecycle enable path
+        // (`/v1/grants/validate`) approves a runtime disable→re-enable instead of
+        // denying it with GrantsDenied (fresh install seeds the grant directly, so
+        // this only bites on the re-enable path). Swappable via the env override.
+        "monitors:crud",
+        // The Mail companion (`com.ryu.mail`) drives Core's `/api/mail/*` (inboxes/
+        // messages/send, proxied to the ryu-mail sidecar) from its sandboxed frame
+        // via the `mail.crud` bridge family. Same re-enable rationale as
+        // `monitors:crud` above.
+        "mail:crud",
+        // The Skill-editor companion (`com.ryu.skill-editor`) drives Core's
+        // `/api/skills` CRUD from its sandboxed frame via the `skills.crud` bridge
+        // family. Same re-enable rationale as `monitors:crud`/`mail:crud` above.
+        "skills:crud",
         // model / network scopes
         "model.chat",
         "model.embed",
@@ -84,6 +127,113 @@ fn default_grant_allowlist() -> Vec<String> {
         // the lifecycle enable path (`/v1/grants/validate`) approves it instead of
         // denying a widget-bearing plugin at enable.
         "widget:render",
+        // Companion-app capability scopes that first-party built-ins declare in their
+        // `permission_grants` (whiteboard/canvas/meetings own Space documents; canvas
+        // also bridges to media + agent-listing + side-model hooks; fine-tuning drives
+        // Core's run orchestration). Like `monitors:crud`/`widget:render` above, a fresh
+        // install seeds these directly, but the runtime disable→re-enable path re-runs
+        // `/v1/grants/validate`; without them a re-enable of whiteboard/canvas/finetune
+        // would be denied with GrantsDenied. Swappable via the env override.
+        "spaces:docs",
+        "core:list_agents",
+        "media:generate",
+        "media:transcribe",
+        "hook:run-agent",
+        "hook:side-model",
+        "finetune:runs",
+        // The Workflows app (`com.ryu.workflows`) drives Core's DAG workflow engine
+        // (CRUD + versions + run/run-state/resume), the workflow-template catalog,
+        // node-config catalog reads, and ghost record→replay from its sandboxed
+        // companion frame via these four bridge capabilities. Same rationale as
+        // `monitors:crud` above: a fresh install seeds them directly, but a runtime
+        // disable→re-enable re-runs `/v1/grants/validate`; without them the re-enable
+        // would be denied with GrantsDenied. Swappable via the env override.
+        "workflows:crud",
+        "workflows:runstate",
+        "workflows:catalogs",
+        "ghost:record",
+        // The Webhooks app (`com.ryu.webhooks`) renders Core's read-only webhook
+        // endpoint registry from its sandboxed companion frame via one bridge
+        // capability. Same rationale as `monitors:crud` above: a fresh install seeds the
+        // grant directly, but a runtime disable→re-enable re-runs `/v1/grants/validate`;
+        // without it the re-enable would be denied with GrantsDenied. Swappable via the
+        // `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
+        "webhooks:crud",
+        // The Quests app (`com.ryu.quests`) drives Core's `/api/quests/*` auto-detecting-
+        // todo orchestration from its sandboxed companion frame via one bridge capability.
+        // Same rationale as `monitors:crud`/`webhooks:crud` above: a fresh install seeds the
+        // grant directly, but a runtime disable→re-enable re-runs `/v1/grants/validate`;
+        // without it the re-enable would be denied with GrantsDenied. Swappable via the
+        // `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
+        "quests:crud",
+        // The Activity app (`com.ryu.activity`) renders Core's read-only unified activity
+        // feed from its sandboxed companion frame via one bridge capability. Same
+        // rationale as `monitors:crud`/`webhooks:crud`/`quests:crud` above: a fresh install
+        // seeds the grant directly, but a runtime disable→re-enable re-runs
+        // `/v1/grants/validate`; without it the re-enable would be denied with GrantsDenied.
+        // Swappable via the `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
+        "activity:read",
+        // The Timeline app (`com.ryu.timeline`) renders the activity replay scrubber
+        // (Shadow's captured lanes + keyframe preview + Dayflow work journal) from its
+        // sandboxed companion frame via one bridge capability. Same rationale as
+        // `monitors:crud`/`activity:read` above: a fresh install seeds the grant directly,
+        // but a runtime disable→re-enable re-runs `/v1/grants/validate`; without it the
+        // re-enable would be denied with GrantsDenied. Swappable via the
+        // `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
+        "timeline:read",
+        // The Calendar app (`com.ryu.calendar`) renders the scheduled-runs calendar and
+        // schedules an agent from its sandboxed companion frame via one bridge capability.
+        // Same rationale as `monitors:crud`/`webhooks:crud`/`quests:crud`/`activity:read`
+        // above: a fresh install seeds the grant directly, but a runtime disable→re-enable
+        // re-runs `/v1/grants/validate`; without it the re-enable would be denied with
+        // GrantsDenied. Swappable via the `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
+        "calendar:crud",
+        // The Learning app (`com.ryu.learning`) renders the read-only continual-learning
+        // surface (opt-in levels + models, the experience buffer, the self-healing attempt
+        // history) from its sandboxed companion frame via one bridge capability. Same
+        // rationale as `monitors:crud`/`webhooks:crud`/`quests:crud`/`activity:read`/
+        // `calendar:crud` above: a fresh install seeds the grant directly, but a runtime
+        // disable→re-enable re-runs `/v1/grants/validate`; without it the re-enable would
+        // be denied with GrantsDenied. Swappable via the `RYU_MARKETPLACE_GRANT_ALLOWLIST`
+        // env override.
+        "learning:crud",
+        // The Inbox / Approvals app (`com.ryu.approvals`) renders the unified inbox
+        // (pending HITL approvals + the per-user notification feed + quest task
+        // check-offs + Shadow's proactive suggestions) from its sandboxed companion
+        // frame via one bridge capability (its quest section reuses `quests:crud`, seeded
+        // separately above). Same rationale as `monitors:crud`/`quests:crud`/`learning:crud`
+        // above: a fresh install seeds the grant directly, but a runtime disable→re-enable
+        // re-runs `/v1/grants/validate`; without it the re-enable would be denied with
+        // GrantsDenied. Swappable via the `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
+        "approvals:crud",
+        // The Meetings app (`com.ryu.meetings`) drives Core's `/api/meetings/*`
+        // orchestration (record → live transcript → AI notes + audio import) from its
+        // sandboxed companion frame via one bridge capability. Same rationale as
+        // `monitors:crud`/`learning:crud` above: a fresh install seeds the grant directly,
+        // but a runtime disable→re-enable re-runs `/v1/grants/validate`; without it the
+        // re-enable would be denied with GrantsDenied. Swappable via the
+        // `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
+        "meetings:crud",
+        // A durable key/value store scope declared by the seeded chat-hook
+        // plugins (`goal`, `proof`) so they can persist run state. Same re-enable
+        // rationale as the companion scopes above. Swappable via the env override.
+        "storage:kv",
+        // The follow-up-message scope declared by the seeded widget companion
+        // plugins (`checklist`, `chart-studio`, `data-grid-explorer`,
+        // `decision-wizard`, `worktree-diff-review`), which post a follow-up chat
+        // turn from their sandboxed frame. On the allowlist so a runtime
+        // disable→re-enable of a widget companion is approved, not denied with
+        // GrantsDenied. Swappable via the env override.
+        "chat.sendFollowUp",
+        // The Browser app (`com.ryu.browser`) exposes a real-Chromium Electron
+        // sidecar as the grant-gated `browser.control` capability (list/open/
+        // navigate tabs, screenshot, read titles, evaluate JS), which the desktop
+        // Browser panel drives through the ext-proxy. Same rationale as
+        // `monitors:crud`/`meetings:crud` above: a fresh install seeds the grant
+        // directly, but a runtime disable→re-enable re-runs `/v1/grants/validate`;
+        // without it the re-enable would be denied with GrantsDenied. Swappable via
+        // the `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
+        "browser:control",
     ]
     .iter()
     .map(|s| (*s).to_string())
@@ -105,39 +255,11 @@ fn grant_allowlist() -> &'static Vec<String> {
     })
 }
 
-/// Outcome of validating a manifest's requested grants against gateway policy.
-pub struct GrantDecision {
-    pub approved: Vec<String>,
-    pub denied: Vec<String>,
-}
-
-impl GrantDecision {
-    pub fn all_approved(&self) -> bool {
-        self.denied.is_empty()
-    }
-}
-
-/// Validate the requested grants against the gateway's allowlist. A grant not
-/// on the allowlist is denied. Matching is case-insensitive on the trimmed
-/// scope string. An empty request approves trivially.
+/// Validate the requested grants against the gateway's active allowlist (env
+/// override or built-in default). Delegates the matching to
+/// [`ryu_gw_governance::validate_grants`].
 pub fn validate_grants(grants: &[String]) -> GrantDecision {
-    let allow = grant_allowlist();
-    let allowed = |g: &str| allow.iter().any(|a| a.eq_ignore_ascii_case(g.trim()));
-
-    let mut approved = Vec::new();
-    let mut denied = Vec::new();
-    for g in grants {
-        let scope = g.trim();
-        if scope.is_empty() {
-            continue;
-        }
-        if allowed(scope) {
-            approved.push(scope.to_string());
-        } else {
-            denied.push(scope.to_string());
-        }
-    }
-    GrantDecision { approved, denied }
+    ryu_gw_governance::validate_grants(grants, grant_allowlist())
 }
 
 // ── Signing ─────────────────────────────────────────────────────────────────
@@ -276,91 +398,40 @@ fn persist_signing_key(path: &std::path::Path, key: &SigningKey) -> bool {
     true
 }
 
-/// Parse a base64-encoded 32-byte ed25519 seed into a signing key.
-fn signing_key_from_seed(b64: &str) -> Option<SigningKey> {
-    let bytes = B64.decode(b64).ok()?;
-    let seed: [u8; SECRET_KEY_LENGTH] = bytes.try_into().ok()?;
-    Some(SigningKey::from_bytes(&seed))
-}
-
 /// The base64-encoded public verifying key, exposed so clients can pin it.
 pub fn public_key_b64() -> String {
-    B64.encode(signing_key().verifying_key().to_bytes())
+    ryu_gw_governance::public_key_b64(&signing_key().verifying_key())
 }
 
-/// Sign a manifest, returning the base64-encoded ed25519 signature over the
-/// canonicalized manifest bytes.
+/// Sign a manifest with the gateway's process signing key, returning the
+/// base64-encoded ed25519 signature over the canonicalized manifest bytes.
 pub fn sign_manifest(manifest: &Value) -> String {
-    let bytes = canonical_bytes(manifest);
-    let sig = signing_key().sign(&bytes);
-    B64.encode(sig.to_bytes())
+    ryu_gw_governance::sign_manifest(signing_key(), manifest)
 }
 
 /// Verify a base64 signature against a manifest. When `public_key_b64` is
 /// `None` the process key is used (the common case: same Gateway signed and
-/// verifies). A tampered manifest or a wrong key returns `false`.
+/// verifies). A malformed pinned public key, a tampered manifest, or a wrong
+/// key returns `false`.
 pub fn verify_manifest(
     manifest: &Value,
     signature_b64: &str,
     public_key_b64: Option<&str>,
 ) -> bool {
-    let Ok(sig_bytes) = B64.decode(signature_b64) else {
-        return false;
-    };
-    let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else {
-        return false;
-    };
-    let signature = Signature::from_bytes(&sig_arr);
-
     let verifying_key = match public_key_b64 {
-        Some(pk) => {
-            let Ok(pk_bytes) = B64.decode(pk) else {
-                return false;
-            };
-            let Ok(pk_arr) = <[u8; 32]>::try_from(pk_bytes.as_slice()) else {
-                return false;
-            };
-            match VerifyingKey::from_bytes(&pk_arr) {
-                Ok(k) => k,
-                Err(_) => return false,
-            }
-        }
+        Some(pk) => match verifying_key_from_b64(pk) {
+            Some(k) => k,
+            None => return false,
+        },
         None => signing_key().verifying_key(),
     };
-
-    let bytes = canonical_bytes(manifest);
-    verifying_key.verify(&bytes, &signature).is_ok()
-}
-
-/// Canonicalize a JSON value into deterministic bytes: object keys recursively
-/// sorted, no insignificant whitespace. This makes the signed representation
-/// independent of key ordering introduced by Mongo storage or JSON
-/// re-serialization across stacks, so a faithfully-preserved manifest verifies
-/// even after a round-trip.
-fn canonical_bytes(value: &Value) -> Vec<u8> {
-    let canonical = canonicalize(value);
-    serde_json::to_vec(&canonical).unwrap_or_default()
-}
-
-fn canonicalize(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => {
-            let mut sorted: Vec<(&String, &Value)> = map.iter().collect();
-            sorted.sort_by(|a, b| a.0.cmp(b.0));
-            let mut out = Map::new();
-            for (k, v) in sorted {
-                out.insert(k.clone(), canonicalize(v));
-            }
-            Value::Object(out)
-        }
-        Value::Array(items) => Value::Array(items.iter().map(canonicalize).collect()),
-        other => other.clone(),
-    }
+    ryu_gw_governance::verify_manifest(manifest, signature_b64, &verifying_key)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::Signer;
     use serde_json::json;
 
     #[test]
@@ -396,27 +467,109 @@ mod tests {
     }
 
     #[test]
+    fn workflows_companion_grants_are_approved() {
+        // Crux #2: the Workflows companion's four bridge grants must be on the
+        // built-in allowlist so a runtime disable→re-enable (which re-runs
+        // `/v1/grants/validate`) approves them instead of dropping them with
+        // GrantsDenied — which would leave the canvas unable to call anything.
+        let d = validate_grants(&[
+            "workflows:crud".to_string(),
+            "workflows:runstate".to_string(),
+            "workflows:catalogs".to_string(),
+            "ghost:record".to_string(),
+        ]);
+        assert!(d.all_approved());
+        assert_eq!(d.approved.len(), 4);
+        assert!(d.denied.is_empty());
+    }
+
+    /// Drift tripwire: every grant a **seeded built-in** fixture declares must be
+    /// on the allowlist. Core's enable path (`plugins/lifecycle.rs`) sends an
+    /// app's full `permission_grants` set through `/v1/grants/validate` on every
+    /// enable — including a runtime disable→re-enable — so a declared grant that
+    /// is not allowlisted is denied with GrantsDenied and the app cannot re-enable.
+    ///
+    /// Rather than restate the grant set (which would silently pass when a NEW
+    /// fixture adds an unlisted grant — the exact drift this guards), the test
+    /// READS the fixtures Core compiles in (`apps/core/src/plugin_manifest/
+    /// fixtures/*.plugin.json`) and asserts `validate_grants` approves each
+    /// declared grant. This also enforces handoff §8 automatically: a fixture that
+    /// declared `sidecar:process` (or any other unlisted scope) would fail here.
+    ///
+    /// `sample.plugin.json` is excluded: it is a test-only demo, not in
+    /// `SEED_MANIFESTS`, so it is never enabled at runtime and its file-read/
+    /// web-search scopes must NOT loosen the marketplace-publish allowlist.
+    ///
+    /// Read at runtime (not `include_str!`, which can't cross crates cleanly) and
+    /// skipped when the fixtures dir is absent, so a separately-vendored gateway
+    /// (no sibling `apps/core`) still tests green — mirrors the core companion-pair
+    /// test's skip-if-absent posture.
+    #[test]
+    fn every_builtin_fixture_grant_is_allowlisted() {
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("core")
+            .join("src")
+            .join("plugin_manifest")
+            .join("fixtures");
+        let Ok(entries) = std::fs::read_dir(&fixtures) else {
+            // Vendored gateway without sibling `apps/core` — nothing to check.
+            return;
+        };
+
+        let mut checked_files = 0;
+        let mut checked_grants = 0;
+        let mut failures: Vec<String> = Vec::new();
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.ends_with(".plugin.json") {
+                continue; // skip .ui.html and anything else
+            }
+            if name == "sample.plugin.json" {
+                continue; // test-only demo, not seeded (see doc comment)
+            }
+            let raw = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("fixture {} unreadable: {e}", path.display()));
+            let manifest: Value = serde_json::from_str(&raw)
+                .unwrap_or_else(|e| panic!("fixture {name} is not valid JSON: {e}"));
+            let Some(grants) = manifest.get("permission_grants").and_then(Value::as_array) else {
+                continue; // no declared grants
+            };
+            checked_files += 1;
+            let declared: Vec<String> = grants
+                .iter()
+                .filter_map(|g| g.as_str().map(str::to_string))
+                .collect();
+            let decision = validate_grants(&declared);
+            for denied in decision.denied {
+                failures.push(format!("{name}: '{denied}'"));
+            }
+            checked_grants += declared.len();
+        }
+
+        assert!(
+            failures.is_empty(),
+            "seeded built-in fixtures declare grants missing from default_grant_allowlist() \
+             (a runtime disable→re-enable would fail with GrantsDenied). Add each to the \
+             allowlist (or, for `sidecar:process`, remove it from the fixture per handoff §8): {}",
+            failures.join(", ")
+        );
+        // Guard against a vacuous pass: the dir existed, so we must have parsed at
+        // least a few grant-bearing fixtures.
+        assert!(
+            checked_files > 0 && checked_grants > 0,
+            "fixtures dir resolved but no grant-bearing fixtures were read \
+             (checked_files={checked_files}, checked_grants={checked_grants})"
+        );
+    }
+
+    #[test]
     fn sign_then_verify_roundtrips() {
         let manifest = json!({"id": "acme/widget", "version": "1.0.0", "grants": ["mcp.tools"]});
         let sig = sign_manifest(&manifest);
         assert!(verify_manifest(&manifest, &sig, None));
-    }
-
-    #[test]
-    fn verify_is_order_independent() {
-        // Same content, different key order — must still verify (canonicalized).
-        let a = json!({"id": "x", "version": "1.0.0", "nested": {"b": 2, "a": 1}});
-        let b = json!({"version": "1.0.0", "nested": {"a": 1, "b": 2}, "id": "x"});
-        let sig = sign_manifest(&a);
-        assert!(verify_manifest(&b, &sig, None));
-    }
-
-    #[test]
-    fn tampered_manifest_fails_verify() {
-        let manifest = json!({"id": "acme/widget", "version": "1.0.0"});
-        let sig = sign_manifest(&manifest);
-        let tampered = json!({"id": "acme/widget", "version": "9.9.9"});
-        assert!(!verify_manifest(&tampered, &sig, None));
     }
 
     #[test]
@@ -428,11 +581,12 @@ mod tests {
     }
 
     #[test]
-    fn seed_roundtrip_parses() {
-        let seed = [7u8; 32];
-        let b64 = B64.encode(seed);
-        assert!(signing_key_from_seed(&b64).is_some());
-        assert!(signing_key_from_seed("not-base64!!!").is_none());
+    fn malformed_pinned_public_key_fails_verify() {
+        // The gateway wrapper resolves a caller-pinned public key; a malformed one
+        // must return false (unverifiable), not fall through to the process key.
+        let manifest = json!({"id": "x"});
+        let sig = sign_manifest(&manifest);
+        assert!(!verify_manifest(&manifest, &sig, Some("not-base64!!!")));
     }
 
     #[test]
@@ -456,7 +610,10 @@ mod tests {
         );
         // A signature made with the original verifies against the reloaded key.
         let manifest = json!({"id": "acme/widget", "version": "1.0.0"});
-        let sig = B64.encode(key.sign(&canonical_bytes(&manifest)).to_bytes());
+        let sig = B64.encode(
+            key.sign(&ryu_gw_governance::canonical_bytes(&manifest))
+                .to_bytes(),
+        );
         assert!(verify_manifest(
             &manifest,
             &sig,

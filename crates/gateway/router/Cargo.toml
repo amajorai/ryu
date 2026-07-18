@@ -1,0 +1,11 @@
+[package]
+name = "ryu-gw-router"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+description = "Ryu Gateway model-routing core (Plane A): the pure model->provider resolution logic. The full route() resolution order (exact map -> longest user prefix -> builtin prefix table -> default), the built-in zero-config prefix table, the modality-slot resolution, the cost-tier fallback-chain sort, the eval-driven A/B explore/exploit picker, and the classifier ('smart routing') text helpers (prompt build, reply parse, last-user-message extraction, keyword match) — all over plain `&str`/`String`/`serde_json::Value`, keyed on provider *strings* (the ProviderKind->string opening). The `RouterRegistry`/`SmartRouterBackend` traits + registration, the `RouteDecision` + config value-types, the `AtomicU64` A/B counter, and SmartRouter's async provider/embedding orchestration stay in apps/gateway ('engine moves, wiring stays'; behavior-identical)."
+
+[dependencies]
+serde_json = "1"
+tracing = "0.1"

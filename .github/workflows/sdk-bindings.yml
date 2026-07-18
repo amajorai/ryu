@@ -1,6 +1,6 @@
 # Multi-language SDK bindings — pipeline proof.
 #
-# Builds the crates/ryu-sdk-uniffi cdylib, generates the Python binding from it,
+# Builds the crates/sdk/uniffi cdylib, generates the Python binding from it,
 # and runs a smoke test that exercises the shared Rust rules through the
 # generated module. Proves the end-to-end UniFFI pipeline with ONE language
 # (Python: built into UniFFI, zero third-party bindgen). Go (cgo) and C#
@@ -12,14 +12,14 @@ name: SDK bindings
 on:
   push:
     paths:
-      - "crates/ryu-sdk/**"
-      - "crates/ryu-sdk-uniffi/**"
+      - "crates/sdk/core/**"
+      - "crates/sdk/uniffi/**"
       - "bindings/python/**"
       - ".github/workflows/sdk-bindings.yml"
   pull_request:
     paths:
-      - "crates/ryu-sdk/**"
-      - "crates/ryu-sdk-uniffi/**"
+      - "crates/sdk/core/**"
+      - "crates/sdk/uniffi/**"
       - "bindings/python/**"
       - ".github/workflows/sdk-bindings.yml"
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
       run:
         # ryu-sdk-uniffi is a standalone crate (its own Cargo.lock, not in a
         # workspace), so all cargo commands run from inside it.
-        working-directory: crates/ryu-sdk-uniffi
+        working-directory: crates/sdk/uniffi
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +41,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/ryu-sdk-uniffi
+          workspaces: crates/sdk/uniffi
 
       - name: Set up Python
         uses: actions/setup-python@v5

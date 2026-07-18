@@ -1,0 +1,26 @@
+{
+	"id": "com.ryu.approvals",
+	"name": "Approvals",
+	"version": "1.0.0",
+	"description": "Approval inbox: a human-in-the-loop queue where agent-proposed actions, edits, and fixes wait for your accept or reject before they take effect.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "approvals-companion",
+			"name": "Inbox",
+			"kind": "companion",
+			"config": {
+				"label": "Inbox",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"permission_grants": ["approvals:crud", "quests:crud"],
+	"companion": {
+		"label": "Inbox",
+		"icon": "shield-01"
+	}
+}

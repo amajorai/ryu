@@ -792,7 +792,7 @@ const OAUTH_REFRESH_SKEW_SECS: u64 = 60;
 /// nothing secret is hardcoded here). Two things bound the blast radius of a stale
 /// value: (1) both token endpoints live on the vendor's own first-party domain
 /// (`console.anthropic.com` / `auth.openai.com`) — the same origins Ryu already
-/// talks to for subscription usage (`crate::usage::{claude,codex}`) — so a wrong
+/// talks to for subscription usage (the `ryu_usage` crate) — so a wrong
 /// value fails the refresh loudly instead of leaking the refresh token to a third
 /// party; and (2) a *failed* refresh does not consume the (single-use) refresh
 /// token, so a wrong id degrades to a no-op, never a logout. Every field is
@@ -928,7 +928,7 @@ fn persist_oauth_refresh(
 ///
 /// This targets the managed Pi's OWN isolated `auth.json` (`~/.ryu/pi-agent`),
 /// NEVER the user's `~/.claude` / `~/.codex`. That distinction is what makes
-/// refreshing safe here: unlike the read-only usage feature (`crate::usage`, which
+/// refreshing safe here: unlike the read-only usage feature (the `ryu_usage` crate, which
 /// must not refresh a shared, single-use CLI token or it would log the real CLI
 /// out with `refresh_token_reused`), rotating a token in Ryu's private copy only
 /// affects this copy. pi-acp also spawns a fresh Pi process per `session/new` (one

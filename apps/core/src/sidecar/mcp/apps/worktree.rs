@@ -20,7 +20,7 @@ use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
 use super::{app_result, AppDispatchCtx};
-use crate::server::worktree::{apply_worktree, ApplyMode, FileChangeKind, WorktreeDiff};
+use ryu_workspace::worktree::{apply_worktree, ApplyMode, FileChangeKind, WorktreeDiff};
 
 pub async fn dispatch(tool: &str, args: Value, ctx: &AppDispatchCtx<'_>) -> Result<Value> {
     match tool {
@@ -320,20 +320,25 @@ mod tests {
 
     #[test]
     fn parses_multi_file_unified_diff_into_hunks() {
-        let diff = "diff --git a/src/foo.rs b/src/foo.rs\n\
---- a/src/foo.rs\n\
-+++ b/src/foo.rs\n\
-@@ -1,3 +1,4 @@ impl Foo\n\
- ctx line\n\
--old line\n\
-+new line a\n\
-+new line b\n\
-diff --git a/new.txt b/new.txt\n\
---- /dev/null\n\
-+++ b/new.txt\n\
-@@ -0,0 +1,1 @@\n\
-+hello\n";
-        let map = parse_hunks_by_file(diff);
+        // Built line-by-line and joined so the leading space that marks a
+        // context line survives — a `\`-continued string literal would strip it.
+        let diff = [
+            "diff --git a/src/foo.rs b/src/foo.rs",
+            "--- a/src/foo.rs",
+            "+++ b/src/foo.rs",
+            "@@ -1,3 +1,4 @@ impl Foo",
+            " ctx line",
+            "-old line",
+            "+new line a",
+            "+new line b",
+            "diff --git a/new.txt b/new.txt",
+            "--- /dev/null",
+            "+++ b/new.txt",
+            "@@ -0,0 +1,1 @@",
+            "+hello",
+        ]
+        .join("\n");
+        let map = parse_hunks_by_file(&diff);
         let foo = map.get("src/foo.rs").expect("foo hunks");
         assert_eq!(foo.len(), 1);
         assert_eq!(foo[0]["id"], "src/foo.rs#0");
@@ -350,17 +355,24 @@ diff --git a/new.txt b/new.txt\n\
     fn body_line_starting_with_dashes_is_not_a_file_header() {
         // A deleted line whose content begins with "-- " must stay a del line,
         // not be misread as a `--- ` file header (guarded by header.is_some()).
-        let diff = "diff --git a/x b/x\n\
---- a/x\n\
-+++ b/x\n\
-@@ -1,2 +1,1 @@\n\
- keep\n\
---- a comment\n";
-        let map = parse_hunks_by_file(diff);
+        // Joined line-by-line so the context line's leading space survives (a
+        // `\`-continued literal would strip it). The del line's on-disk content
+        // is "-- a comment"; with the leading `-` del marker it reads "--- a
+        // comment" in the diff, which is exactly the "--- " header shape guarded.
+        let diff = [
+            "diff --git a/x b/x",
+            "--- a/x",
+            "+++ b/x",
+            "@@ -1,2 +1,1 @@",
+            " keep",
+            "--- a comment",
+        ]
+        .join("\n");
+        let map = parse_hunks_by_file(&diff);
         let hunks = map.get("x").expect("x hunks");
         let lines = hunks[0]["lines"].as_array().unwrap();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[1]["kind"], "del");
-        assert_eq!(lines[1]["content"], "- a comment");
+        assert_eq!(lines[1]["content"], "-- a comment");
     }
 }

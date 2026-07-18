@@ -9,9 +9,12 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
 
-use crate::win_process::NoWindow;
+// The git engine (everything that shells `git`) lives in the `ryu-workspace`
+// crate; these handlers are the thin axum surface over it.
+use ryu_workspace::git::{
+    checkout_branch, create_branch, list_branches, query_git_state, run_git_action,
+};
 
 #[derive(Deserialize)]
 pub struct GitStatusQuery {
@@ -86,110 +89,6 @@ pub async fn git_status(Query(params): Query<HashMap<String, String>>) -> axum::
     }
 }
 
-#[derive(serde::Serialize)]
-struct GitState {
-    is_repo: bool,
-    branch: Option<String>,
-    ahead: u32,
-    behind: u32,
-    dirty: bool,
-    changed_files_count: usize,
-    insertions: u32,
-    deletions: u32,
-}
-
-/// Total added/removed lines for the working tree vs HEAD (staged + unstaged),
-/// summed from `git diff HEAD --numstat`. Binary files (numstat "-") are skipped.
-fn query_diff_totals(cwd: &str) -> (u32, u32) {
-    let numstat = run_git(cwd, &["diff", "HEAD", "--numstat"]).unwrap_or_default();
-    let mut insertions = 0u32;
-    let mut deletions = 0u32;
-    for line in numstat.lines() {
-        let mut cols = line.split('\t');
-        let adds = cols.next().and_then(|c| c.parse::<u32>().ok());
-        let dels = cols.next().and_then(|c| c.parse::<u32>().ok());
-        if let (Some(a), Some(d)) = (adds, dels) {
-            insertions += a;
-            deletions += d;
-        }
-    }
-    (insertions, deletions)
-}
-
-fn run_git(cwd: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .no_window()
-        .output()
-        .ok()?;
-    if out.status.success() {
-        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-    } else {
-        None
-    }
-}
-
-fn query_git_state(cwd: &str) -> GitState {
-    // Confirm this is actually a git repo.
-    let branch = run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]);
-    let is_repo = branch.is_some();
-
-    if !is_repo {
-        return GitState {
-            is_repo: false,
-            branch: None,
-            ahead: 0,
-            behind: 0,
-            dirty: false,
-            changed_files_count: 0,
-            insertions: 0,
-            deletions: 0,
-        };
-    }
-
-    // Dirty state from porcelain output — one line per changed file.
-    let porcelain = run_git(cwd, &["status", "--porcelain"]).unwrap_or_default();
-    let changed: Vec<&str> = porcelain.lines().filter(|l| !l.is_empty()).collect();
-    let dirty = !changed.is_empty();
-
-    // Ahead / behind relative to the upstream branch. Fails gracefully when no
-    // tracking branch is configured — defaults to 0/0.
-    let ahead_behind = run_git(cwd, &["rev-list", "--count", "--left-right", "@{u}...HEAD"]);
-    let (behind, ahead) = parse_ahead_behind(ahead_behind.as_deref());
-
-    let (insertions, deletions) = query_diff_totals(cwd);
-
-    GitState {
-        is_repo: true,
-        branch,
-        ahead,
-        behind,
-        dirty,
-        changed_files_count: changed.len(),
-        insertions,
-        deletions,
-    }
-}
-
-/// Parse `git rev-list --count --left-right @{u}...HEAD` output: "<behind>\t<ahead>".
-fn parse_ahead_behind(raw: Option<&str>) -> (u32, u32) {
-    let Some(s) = raw else {
-        return (0, 0);
-    };
-    let mut parts = s.split_whitespace();
-    let behind = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-    let ahead = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-    (behind, ahead)
-}
-
-#[derive(serde::Serialize)]
-struct GitBranches {
-    is_repo: bool,
-    current: Option<String>,
-    branches: Vec<String>,
-}
-
 /// `GET /api/git/branches?cwd=<path>`
 ///
 /// Lists local branches plus the currently checked-out one so the desktop's
@@ -230,30 +129,6 @@ pub async fn git_branches(
             tracing::error!("git_branches: join error: {e}");
             Json(json!({ "is_repo": false, "current": null, "branches": [] })).into_response()
         }
-    }
-}
-
-fn list_branches(cwd: &str) -> GitBranches {
-    let current = run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]);
-    if current.is_none() {
-        return GitBranches {
-            is_repo: false,
-            current: None,
-            branches: Vec::new(),
-        };
-    }
-
-    let raw = run_git(cwd, &["branch", "--format=%(refname:short)"]).unwrap_or_default();
-    let branches: Vec<String> = raw
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect();
-
-    GitBranches {
-        is_repo: true,
-        current,
-        branches,
     }
 }
 
@@ -311,31 +186,6 @@ pub async fn git_checkout(Json(body): Json<GitCheckoutBody>) -> axum::response::
     }
 }
 
-fn checkout_branch(cwd: &str, branch: &str) -> Result<String, String> {
-    // Only switch to a branch git itself reports — guards against typos and any
-    // argument-injection (e.g. a name beginning with '-').
-    let known = list_branches(cwd);
-    if !known.is_repo {
-        return Err("not a git repository".to_string());
-    }
-    if !known.branches.iter().any(|b| b == branch) {
-        return Err(format!("branch '{branch}' not found"));
-    }
-
-    let out = Command::new("git")
-        .args(["switch", branch])
-        .current_dir(cwd)
-        .no_window()
-        .output()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-
-    if out.status.success() {
-        Ok(branch.to_string())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
-}
-
 /// `POST /api/git/create-branch` `{ cwd, branch }`
 ///
 /// Create a new branch off the current HEAD and switch to it (`git switch -c`).
@@ -387,35 +237,6 @@ pub async fn git_create_branch(Json(body): Json<GitCheckoutBody>) -> axum::respo
             )
                 .into_response()
         }
-    }
-}
-
-fn create_branch(cwd: &str, branch: &str) -> Result<String, String> {
-    if !list_branches(cwd).is_repo {
-        return Err("not a git repository".to_string());
-    }
-    // Guard against argument injection (a name beginning with '-') and obvious bad
-    // input; git validates the full ref-name grammar itself and errors cleanly.
-    let name = branch.trim();
-    if name.is_empty()
-        || name.starts_with('-')
-        || name.contains("..")
-        || name.chars().any(|c| c.is_whitespace() || c.is_control())
-    {
-        return Err(format!("'{branch}' is not a valid branch name"));
-    }
-
-    let out = Command::new("git")
-        .args(["switch", "-c", name])
-        .current_dir(cwd)
-        .no_window()
-        .output()
-        .map_err(|e| format!("failed to run git: {e}"))?;
-
-    if out.status.success() {
-        Ok(name.to_string())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
 }
 
@@ -491,93 +312,6 @@ pub async fn git_commit_push(Json(body): Json<GitCommitPushBody>) -> axum::respo
                 .into_response()
         }
     }
-}
-
-#[derive(serde::Serialize)]
-struct CommitPushOutcome {
-    success: bool,
-    committed: bool,
-    pushed: bool,
-    commit: Option<String>,
-}
-
-fn run_git_action(
-    cwd: &str,
-    message: &str,
-    action: &str,
-    include_unstaged: bool,
-) -> Result<CommitPushOutcome, String> {
-    // Confirm this is a git repo before touching the working tree.
-    if run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).is_none() {
-        return Err("not a git repository".to_string());
-    }
-
-    if action != "push" && include_unstaged {
-        // Stage everything. A failure here is fatal (e.g. corrupt index).
-        let add = Command::new("git")
-            .args(["add", "-A"])
-            .current_dir(cwd)
-            .no_window()
-            .output()
-            .map_err(|e| format!("failed to run git: {e}"))?;
-        if !add.status.success() {
-            return Err(String::from_utf8_lossy(&add.stderr).trim().to_string());
-        }
-    }
-
-    let mut committed = false;
-    if action != "push" {
-        let staged_args = ["diff", "--cached", "--name-only"];
-        let has_staged = run_git(cwd, &staged_args)
-            .map(|s| s.lines().any(|l| !l.trim().is_empty()))
-            .unwrap_or(false);
-
-        if !has_staged && include_unstaged {
-            let has_changes = run_git(cwd, &["status", "--porcelain"])
-                .map(|s| s.lines().any(|l| !l.trim().is_empty()))
-                .unwrap_or(false);
-            if has_changes {
-                return Err("no staged changes to commit".to_string());
-            }
-        }
-
-        let commit = Command::new("git")
-            .args(["commit", "-m", message])
-            .current_dir(cwd)
-            .no_window()
-            .output()
-            .map_err(|e| format!("failed to run git: {e}"))?;
-        if has_staged && commit.status.success() {
-            committed = true;
-        } else if has_staged {
-            return Err(String::from_utf8_lossy(&commit.stderr).trim().to_string());
-        }
-    }
-
-    let mut pushed = false;
-    if action != "commit" {
-        // Push to the configured upstream. When there is no tracking branch git
-        // exits non-zero with a helpful message — surface it verbatim.
-        let push = Command::new("git")
-            .args(["push"])
-            .current_dir(cwd)
-            .no_window()
-            .output()
-            .map_err(|e| format!("failed to run git: {e}"))?;
-        if !push.status.success() {
-            return Err(String::from_utf8_lossy(&push.stderr).trim().to_string());
-        }
-        pushed = true;
-    }
-
-    let commit = run_git(cwd, &["rev-parse", "--short", "HEAD"]);
-
-    Ok(CommitPushOutcome {
-        success: true,
-        committed,
-        pushed,
-        commit,
-    })
 }
 
 // ── Create a new project folder ("Start from scratch") ────────────────────────
@@ -743,21 +477,6 @@ fn validate_folder_name(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_ahead_behind_normal() {
-        assert_eq!(parse_ahead_behind(Some("3\t1")), (3, 1));
-    }
-
-    #[test]
-    fn parse_ahead_behind_none() {
-        assert_eq!(parse_ahead_behind(None), (0, 0));
-    }
-
-    #[test]
-    fn parse_ahead_behind_no_upstream() {
-        assert_eq!(parse_ahead_behind(Some("")), (0, 0));
-    }
 
     #[test]
     fn folder_name_accepts_plain_names() {

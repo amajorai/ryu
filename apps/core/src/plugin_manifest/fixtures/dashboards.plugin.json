@@ -1,0 +1,38 @@
+{
+	"id": "com.ryu.dashboards",
+	"name": "Dashboards",
+	"version": "1.0.0",
+	"description": "Dashboards: composable widget boards that assemble live views over monitors, meetings, quests, and other Core surfaces via soft HTTP loopback. Declares the out-of-process ryu-dashboards sidecar (kind:local) that owns the store + refresh loop + /api/dashboards/* surface, served to the desktop through the generic ext-proxy public_mount. Started eagerly (not lazy) so the kernel hardware device-dashboard renderer + nudge loop can reach it at boot / on a device poll before any desktop has opened Home. The dashboard_builder MCP runnable + the hardware render seam reach it over loopback via dashboards_client.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"sidecars": [
+		{
+			"name": "ryu-dashboards",
+			"process": {
+				"kind": "local",
+				"command": "ryu-dashboards",
+				"command_env": "RYU_DASHBOARDS_BIN",
+				"port_env": "RYU_DASHBOARDS_PORT"
+			},
+			"port": 7997,
+			"health_path": "/api/dashboards/catalog",
+			"http": {
+				"mount": "/api/dashboards",
+				"public_mount": "/api/dashboards",
+				"routes": [
+					{ "path": "/" },
+					{ "path": "/catalog" },
+					{ "path": "/events" },
+					{ "path": "/:id" },
+					{ "path": "/:id/widgets" },
+					{ "path": "/:id/widgets/:wid" },
+					{ "path": "/:id/widgets/:wid/layout" },
+					{ "path": "/:id/widgets/:wid/refresh" }
+				]
+			}
+		}
+	],
+	"permission_grants": []
+}

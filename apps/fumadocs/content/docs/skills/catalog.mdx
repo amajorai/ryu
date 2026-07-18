@@ -1,6 +1,6 @@
 ---
 title: "Catalog"
-description: "The skills Ryu ships in apps/skills: the setup-ryu flagship plus instruction packs for operating a node, routing, memory, workflows, and the MCP bridge."
+description: "The skills Ryu ships in apps/skills: the setup-ryu flagship plus instruction packs for local models, MCP, authoring skills, and building agents."
 ---
 
 The `apps/skills` directory is Ryu's maintained collection of agent skills. Each one is a `SKILL.md` instruction pack you can install to the universal skills directory and activate per agent. The collection is led by the [setup-ryu](/docs/skills/setup-ryu) flagship and rounds out with packs for the parts of Ryu an agent most often needs to reason about.
@@ -11,13 +11,13 @@ The `apps/skills` directory is Ryu's maintained collection of agent skills. Each
 
 ## Shipped skills
 
-- `setup-ryu` - the flagship. Teaches an agent how Ryu is structured so it can install, configure, and operate a node accurately. See [setup-ryu](/docs/skills/setup-ryu).
-- `ryu-operator` - day-two operation. Reading node status and system info, switching the active model, and pointing surfaces at a different node.
-- `ryu-gateway` - the control plane. How routing, firewall, budgets, evals, and audit work, and how to read why a call was allowed, shaped, or blocked.
-- `ryu-memory` - memory and RAG. When to store a note, how recall works over the node's vector store, and how to keep context tight.
-- `ryu-workflows` - the DAG engine. Composing agents, tools, and sub-workflows into durable, resumable runs with retries and human-in-the-loop gates.
-- `ryu-mcp-client` - the bridge. How an external MCP host drives a node through the [MCP server](/docs/mcp) tools, and which tools read versus write.
-- `web-researcher` - a general example pack. Enables web-search tools and tells the model when to use and cite them.
+| Skill | What it teaches |
+|---|---|
+| **setup-ryu** | The flagship. Teaches an agent how Ryu is structured so it can install, configure, and operate a node accurately. See [setup-ryu](/docs/skills/setup-ryu). |
+| **ryu-local-model** | How to browse, download, and run local GGUF/MLX models through the model catalog and llama.cpp sidecar. |
+| **ryu-mcp** | How to register, configure, and use MCP servers through Core's MCP registry, and which tools read versus write. |
+| **ryu-author-skill** | How to author a new Ryu agent skill: the SKILL.md format, progressive disclosure, and how to test and publish. |
+| **ryu-build-agent** | How to build a custom agent in code using the Ryu TypeScript SDK, from `defineAgent` to install. |
 
 ## How they relate
 

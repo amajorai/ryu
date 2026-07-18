@@ -1,0 +1,40 @@
+{
+	"id": "com.ryu.healing",
+	"name": "Self-Healing",
+	"version": "1.0.0",
+	"description": "Self-healing: failed runs are diagnosed by a Gateway side-model and proposed fixes are delivered to the approvals inbox for human review before they apply.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"requires": {
+		"apps": [
+			{
+				"id": "com.ryu.approvals",
+				"min_version": "1.0.0"
+			}
+		]
+	},
+	"sidecars": [
+		{
+			"name": "ryu-healing",
+			"process": {
+				"kind": "local",
+				"command": "ryu-healing",
+				"command_env": "RYU_HEALING_BIN",
+				"port_env": "RYU_HEALING_PORT"
+			},
+			"port": 8001,
+			"health_path": "/health",
+			"http": {
+				"mount": "/api/healing",
+				"public_mount": "/api/healing",
+				"routes": [
+					{ "path": "/config" },
+					{ "path": "/status" }
+				]
+			}
+		}
+	],
+	"permission_grants": []
+}

@@ -302,9 +302,9 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
     // regardless of how Core was launched (the gateway child does inherit Core's
     // env, but we do not rely on that — this guarantees the signal is set and
     // canonical) so `tools::mesh_enabled()` neutralizes loopback trust on every
-    // admin/exec path. Mirror Core's `mesh::is_enabled()` truthy semantics so both
-    // sides agree on the same signal.
-    if crate::mesh::is_enabled() {
+    // admin/exec path. Mirror Core's `ryu_mesh::is_enabled()` truthy semantics so
+    // both sides agree on the same signal.
+    if ryu_mesh::is_enabled() {
         tracing::info!("gateway: mesh enabled, neutralizing gateway loopback-admin trust");
         env.push(("RYU_MESH_ENABLED".to_owned(), "1".to_owned()));
     }

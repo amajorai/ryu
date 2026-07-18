@@ -1,0 +1,26 @@
+{
+	"id": "com.ryu.skill-editor",
+	"name": "Skill Editor",
+	"version": "1.0.0",
+	"description": "Author a user-owned Agent Skill (SKILL.md): front-matter fields (name / description / allowed tools / always-on), a markdown body editor, debounced autosave, and server-backed undoable version history.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "skill-editor-companion",
+			"name": "Skill Editor",
+			"kind": "companion",
+			"config": {
+				"label": "Skill Editor",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"permission_grants": ["skills:crud"],
+	"companion": {
+		"label": "Skill Editor",
+		"icon": "sparkles"
+	}
+}

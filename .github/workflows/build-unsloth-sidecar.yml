@@ -1,12 +1,12 @@
 name: build-unsloth-sidecar
 
-# Packages apps/unsloth-sidecar into a source tarball and publishes it as a STABLE
+# Packages apps-store/finetune/sidecar into a source tarball and publishes it as a STABLE
 # release asset on THIS public repo (amajorai/ryu). The Ryu Fine-tuning app
 # (com.ryu.finetune) points its manifest sidecar `source.url` at that asset, so Core
 # downloads + extracts the Unsloth training runtime on first use, then
 # `pip install -e ".[train]"`.
 #
-# This repo is the public mirror of the monorepo — apps/unsloth-sidecar lands here via
+# This repo is the public mirror of the monorepo — apps-store/finetune/sidecar lands here via
 # tools/mirror-public.sh. Building on the public repo is deliberate: the download URL
 # in plugin.json must resolve for every installed node, and it points at this repo's
 # releases. Triggers on any change to the sidecar source (auto-refresh), on a change to
@@ -16,7 +16,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "apps/unsloth-sidecar/**"
+      - "apps-store/finetune/sidecar/**"
       - ".github/workflows/build-unsloth-sidecar.yml"
   workflow_dispatch:
 
@@ -40,14 +40,14 @@ jobs:
       - name: Package the sidecar source
         run: |
           set -euo pipefail
-          if [ ! -f apps/unsloth-sidecar/pyproject.toml ]; then
-            echo "::error::apps/unsloth-sidecar/pyproject.toml missing — nothing to package."
+          if [ ! -f apps-store/finetune/sidecar/pyproject.toml ]; then
+            echo "::error::apps-store/finetune/sidecar/pyproject.toml missing — nothing to package."
             exit 1
           fi
           # Whole-tree tarball with pyproject.toml + ryu_unsloth/ at the ARCHIVE ROOT.
           # Core extracts it whole-tree into the sidecar runtime dir, keys idempotency
           # off the root pyproject.toml, then runs `pip install -e ".[train]"`.
-          tar czf "$ASSET" -C apps/unsloth-sidecar .
+          tar czf "$ASSET" -C apps-store/finetune/sidecar .
           sha256sum "$ASSET" | tee "$ASSET.sha256"
           echo "SHA256=$(cut -d' ' -f1 < "$ASSET.sha256")" >> "$GITHUB_ENV"
 
@@ -59,9 +59,14 @@ jobs:
           # Stable tag: create once, then clobber the asset on every source change so the
           # plugin.json URL is permanent.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
+            # MUST be a prerelease: this is an auxiliary (non-`v*`) tag, and GitHub's
+            # `releases/latest` excludes prereleases. Without this the stray
+            # unsloth-sidecar release captured `latest` and every install/auto-update
+            # asset fetch (/releases/latest/download/<asset>) 302→404'd.
             gh release create "$TAG" \
+              --prerelease \
               --title "Unsloth training sidecar" \
-              --notes "Source tarball for the Ryu Fine-tuning app's Unsloth LoRA/QLoRA training sidecar. Auto-published from apps/unsloth-sidecar; consumed by com.ryu.finetune's manifest sidecar \`source.url\`."
+              --notes "Source tarball for the Ryu Fine-tuning app's Unsloth LoRA/QLoRA training sidecar. Auto-published from apps-store/finetune/sidecar; consumed by com.ryu.finetune's manifest sidecar \`source.url\`."
           fi
           gh release upload "$TAG" "$ASSET" "$ASSET.sha256" --clobber
 

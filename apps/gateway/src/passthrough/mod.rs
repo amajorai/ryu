@@ -62,17 +62,42 @@ use axum::{
 use serde_json::Value;
 use tracing::warn;
 
-use crate::{audit::AuditRecord, state::SharedState};
+use crate::{audit::AuditRecord, firewall::FirewallBackend, state::SharedState};
 
-/// Which native wire format a passthrough route speaks. Drives request-side
-/// redaction (different body shapes) and response-side SSE text extraction
-/// (different streaming event shapes).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WireFormat {
-    /// Anthropic Messages (`/v1/messages`) — Claude Code.
-    Anthropic,
-    /// OpenAI Responses (`/responses`) — Codex ChatGPT-login mode.
-    OpenAiResponses,
+// The pure passthrough wire-format redaction engine — the request-body DLP
+// redactors, the streaming-SSE response redactor (event reassembly + per-delta
+// sanitize), the upstream URL / path helpers, and the `WireFormat` marker — was
+// extracted to the `ryu-gw-passthrough` crate ("engine moves, wiring stays",
+// mirroring `ryu-gw-firewall`). The reverse-proxy `forward` orchestration below,
+// audit emission, the loopback boundary, and the `PassthroughBackend` /
+// `PassthroughRegistry` pipeline wiring stay here and consume the crate. The
+// engine reaches the firewall only through the crate's narrow
+// [`ryu_gw_passthrough::PassthroughFirewall`] trait, implemented just below for
+// the gateway's `dyn FirewallBackend` (the `with_firewall` closure type) and its
+// concrete `FirewallScanner` (the redaction unit tests). `WireFormat` is
+// re-exported so `crate::passthrough::WireFormat` paths resolve unchanged.
+pub(crate) use ryu_gw_passthrough::WireFormat;
+use ryu_gw_passthrough::{
+    build_upstream_url, drain_complete_events, is_messages_path, is_responses_path,
+    redact_request_body, redact_sse_event, PassthroughFirewall,
+};
+
+impl PassthroughFirewall for dyn FirewallBackend + '_ {
+    fn sanitize(&self, text: &str) -> String {
+        FirewallBackend::sanitize(self, text)
+    }
+    fn redact_outbound(&self, text: &str) -> (String, Vec<&'static str>) {
+        FirewallBackend::redact_outbound(self, text)
+    }
+}
+
+impl PassthroughFirewall for crate::firewall::FirewallScanner {
+    fn sanitize(&self, text: &str) -> String {
+        FirewallBackend::sanitize(self, text)
+    }
+    fn redact_outbound(&self, text: &str) -> (String, Vec<&'static str>) {
+        FirewallBackend::redact_outbound(self, text)
+    }
 }
 
 /// Default upstream the Anthropic passthrough forwards to. Overridable via
@@ -125,19 +150,21 @@ pub async fn anthropic(
     raw_query: axum::extract::RawQuery,
     body: Bytes,
 ) -> Response {
-    forward(
-        WireFormat::Anthropic,
-        &anthropic_upstream(),
-        is_messages_path(&path),
-        state,
-        peer,
-        path,
-        method,
-        headers,
-        raw_query,
-        body,
-    )
-    .await
+    let backend = state.passthrough.active();
+    backend
+        .forward(
+            WireFormat::Anthropic,
+            anthropic_upstream(),
+            is_messages_path(&path),
+            state,
+            peer,
+            path,
+            method,
+            headers,
+            raw_query,
+            body,
+        )
+        .await
 }
 
 /// `ANY /passthrough/openai-responses/{*path}` — transparent reverse proxy to the
@@ -157,19 +184,21 @@ pub async fn codex(
     raw_query: axum::extract::RawQuery,
     body: Bytes,
 ) -> Response {
-    forward(
-        WireFormat::OpenAiResponses,
-        &codex_upstream(),
-        is_responses_path(&path),
-        state,
-        peer,
-        path,
-        method,
-        headers,
-        raw_query,
-        body,
-    )
-    .await
+    let backend = state.passthrough.active();
+    backend
+        .forward(
+            WireFormat::OpenAiResponses,
+            codex_upstream(),
+            is_responses_path(&path),
+            state,
+            peer,
+            path,
+            method,
+            headers,
+            raw_query,
+            body,
+        )
+        .await
 }
 
 /// Shared transparent reverse-proxy core for every passthrough route. Applies the
@@ -324,102 +353,6 @@ async fn forward(
     };
     out.body(response_body)
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-}
-
-/// True for the Messages endpoint (`.../v1/messages`), the only Anthropic path
-/// with a JSON prompt body. `count_tokens` and other sub-paths are proxied
-/// untouched.
-fn is_messages_path(path: &str) -> bool {
-    let p = path.trim_end_matches('/');
-    p == "v1/messages" || p.ends_with("/v1/messages")
-}
-
-/// True for the Codex Responses endpoint (`.../responses`), the path carrying the
-/// prompt body. Other sub-paths are proxied untouched.
-fn is_responses_path(path: &str) -> bool {
-    let p = path.trim_end_matches('/');
-    p == "responses" || p.ends_with("/responses")
-}
-
-fn build_upstream_url(base: &str, path: &str, query: Option<&str>) -> String {
-    let base = base.trim_end_matches('/');
-    let path = path.trim_start_matches('/');
-    match query {
-        Some(q) if !q.is_empty() => format!("{base}/{path}?{q}"),
-        _ => format!("{base}/{path}"),
-    }
-}
-
-/// Redact a request body in place per its wire format. Both reuse the firewall's
-/// config-gated `sanitize` over the prompt-bearing fields.
-fn redact_request_body(
-    format: WireFormat,
-    fw: &crate::firewall::FirewallScanner,
-    body: &mut Value,
-) {
-    match format {
-        WireFormat::Anthropic => redact_anthropic_body(fw, body),
-        WireFormat::OpenAiResponses => redact_responses_body(fw, body),
-    }
-}
-
-/// Redact PII/secrets from an OpenAI Responses request body in place: the
-/// top-level `instructions` field and each `input` item's `content`. The Responses
-/// API accepts `input` as either a plain string or an array of items, each with a
-/// `content` that is a string or an array of `{ "type": "input_text", "text": … }`
-/// parts. Reuses the firewall's config-gated `sanitize`.
-fn redact_responses_body(fw: &crate::firewall::FirewallScanner, body: &mut Value) {
-    if let Some(instructions) = body.get_mut("instructions") {
-        redact_content(fw, instructions);
-    }
-    match body.get_mut("input") {
-        Some(Value::String(s)) => {
-            *s = fw.sanitize(s);
-        }
-        Some(Value::Array(items)) => {
-            for item in items.iter_mut() {
-                if let Some(content) = item.get_mut("content") {
-                    redact_content(fw, content);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Redact PII/secrets from an Anthropic Messages request body in place: the
-/// top-level `system` field and each message's `content` (string or content-block
-/// array). Reuses the firewall's config-gated `sanitize`.
-fn redact_anthropic_body(fw: &crate::firewall::FirewallScanner, body: &mut Value) {
-    if let Some(sys) = body.get_mut("system") {
-        redact_content(fw, sys);
-    }
-    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        for msg in messages.iter_mut() {
-            if let Some(content) = msg.get_mut("content") {
-                redact_content(fw, content);
-            }
-        }
-    }
-}
-
-/// Redact a content node that may be a plain string or an array of content blocks
-/// (`[{ "type": "text", "text": "…" }, …]`).
-fn redact_content(fw: &crate::firewall::FirewallScanner, content: &mut Value) {
-    match content {
-        Value::String(s) => {
-            *s = fw.sanitize(s);
-        }
-        Value::Array(parts) => {
-            for part in parts.iter_mut() {
-                if let Some(text) = part.get("text").and_then(Value::as_str) {
-                    let redacted = fw.sanitize(text);
-                    part["text"] = Value::String(redacted);
-                }
-            }
-        }
-        _ => {}
-    }
 }
 
 /// Read an optional non-empty header value as an owned string. Mirrors the
@@ -645,123 +578,15 @@ fn audit_outbound(
     }
 }
 
-/// Split off every complete `\n\n`-terminated SSE event from `pending`, redact
-/// each, and return the rewritten bytes plus the concatenated redacted assistant
-/// text (for the end-of-stream audit). The trailing incomplete remainder is left
-/// in `pending` for the next chunk.
-fn drain_complete_events(
-    format: WireFormat,
-    fw: &crate::firewall::FirewallScanner,
-    pending: &mut Vec<u8>,
-) -> (Vec<u8>, String) {
-    let mut out = Vec::new();
-    let mut text = String::new();
-    // Find each `\n\n` boundary and process the event up to and including it.
-    while let Some(idx) = find_event_boundary(pending) {
-        let event: Vec<u8> = pending.drain(..idx).collect();
-        let raw = String::from_utf8_lossy(&event).to_string();
-        let (redacted, t) = redact_sse_event(format, fw, &raw);
-        out.extend_from_slice(redacted.as_bytes());
-        text.push_str(&t);
-    }
-    (out, text)
-}
-
-/// Index just past the first `\n\n` event terminator in `buf`, if any. Returns
-/// the length to drain (boundary inclusive) so SSE framing is preserved exactly.
-fn find_event_boundary(buf: &[u8]) -> Option<usize> {
-    buf.windows(2).position(|w| w == b"\n\n").map(|p| p + 2)
-}
-
-/// Redact the assistant-text delta inside a single complete SSE event, returning
-/// the rewritten event text and the redacted assistant text it carried (empty for
-/// non-text events). The `event:` line and framing are preserved; only the JSON
-/// on a text-delta `data:` line is rewritten. Unparseable JSON / non-text events
-/// pass through verbatim (fail open).
-fn redact_sse_event(
-    format: WireFormat,
-    fw: &crate::firewall::FirewallScanner,
-    raw: &str,
-) -> (String, String) {
-    let mut out = String::with_capacity(raw.len());
-    let mut redacted_text = String::new();
-    for line in raw.split_inclusive('\n') {
-        // Preserve the line's own terminator (split_inclusive keeps it).
-        let (content, newline) = match line.strip_suffix('\n') {
-            Some(c) => (c, "\n"),
-            None => (line, ""),
-        };
-        let Some(data) = content.strip_prefix("data:") else {
-            out.push_str(line);
-            continue;
-        };
-        let trimmed = data.trim();
-        if trimmed.is_empty() || trimmed == "[DONE]" {
-            out.push_str(line);
-            continue;
-        }
-        match redact_sse_data_json(format, fw, trimmed) {
-            Some((rewritten, text)) => {
-                redacted_text.push_str(&text);
-                // Rebuild the `data:` line, preserving the original separator
-                // (`data:` vs `data: `) by re-using the leading whitespace.
-                let lead_ws = &data[..data.len() - data.trim_start().len()];
-                out.push_str("data:");
-                out.push_str(lead_ws);
-                out.push_str(&rewritten);
-                out.push_str(newline);
-            }
-            None => out.push_str(line),
-        }
-    }
-    (out, redacted_text)
-}
-
-/// Redact the assistant-text field of a single SSE `data:` JSON payload per
-/// format. Returns the re-serialized JSON + the redacted text, or `None` if the
-/// event is not a text delta or fails to parse (caller passes it through).
-fn redact_sse_data_json(
-    format: WireFormat,
-    fw: &crate::firewall::FirewallScanner,
-    data: &str,
-) -> Option<(String, String)> {
-    let mut json: Value = serde_json::from_str(data).ok()?;
-    match format {
-        WireFormat::Anthropic => {
-            // content_block_delta → { "delta": { "type": "text_delta", "text": … } }
-            let text = json
-                .get("delta")
-                .and_then(|d| d.get("text"))
-                .and_then(Value::as_str)?;
-            let redacted = fw.sanitize(text);
-            let (redacted, _) = fw.redact_outbound(&redacted);
-            json["delta"]["text"] = Value::String(redacted.clone());
-            Some((serde_json::to_string(&json).ok()?, redacted))
-        }
-        WireFormat::OpenAiResponses => {
-            // response.output_text.delta → top-level `delta` string.
-            let is_text_delta = json
-                .get("type")
-                .and_then(Value::as_str)
-                .map(|t| t.ends_with("output_text.delta"))
-                .unwrap_or(false);
-            if !is_text_delta {
-                return None;
-            }
-            let delta = json.get("delta").and_then(Value::as_str)?;
-            let redacted = fw.sanitize(delta);
-            let (redacted, _) = fw.redact_outbound(&redacted);
-            json["delta"] = Value::String(redacted.clone());
-            Some((serde_json::to_string(&json).ok()?, redacted))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{FirewallConfig, FirewallPolicy};
     use crate::firewall::FirewallScanner;
+    // Request-body redactors are consumed only by these tests (the non-test path
+    // calls `redact_request_body`); import them test-locally to avoid an unused
+    // import in the non-test build.
+    use ryu_gw_passthrough::{redact_anthropic_body, redact_responses_body};
 
     fn enabled_scanner() -> FirewallScanner {
         FirewallScanner::new(FirewallConfig {
@@ -772,30 +597,6 @@ mod tests {
             redact_secrets: true,
             ..FirewallConfig::default()
         })
-    }
-
-    #[test]
-    fn messages_path_detection() {
-        assert!(is_messages_path("v1/messages"));
-        assert!(is_messages_path("v1/messages/"));
-        assert!(!is_messages_path("v1/messages/count_tokens"));
-        assert!(!is_messages_path("v1/models"));
-    }
-
-    #[test]
-    fn upstream_url_joins_path_and_query() {
-        assert_eq!(
-            build_upstream_url("https://api.anthropic.com/", "v1/messages", None),
-            "https://api.anthropic.com/v1/messages"
-        );
-        assert_eq!(
-            build_upstream_url(
-                "https://api.anthropic.com",
-                "/v1/messages",
-                Some("beta=true")
-            ),
-            "https://api.anthropic.com/v1/messages?beta=true"
-        );
     }
 
     #[test]
@@ -835,15 +636,6 @@ mod tests {
     }
 
     // ── Codex (OpenAI Responses) passthrough (#455) ──────────────────────────
-
-    #[test]
-    fn responses_path_detection() {
-        assert!(is_responses_path("responses"));
-        assert!(is_responses_path("responses/"));
-        assert!(is_responses_path("v1/responses"));
-        assert!(!is_responses_path("v1/models"));
-        assert!(!is_responses_path("responses/123/cancel"));
-    }
 
     #[test]
     fn redacts_responses_instructions_and_input_string() {
@@ -1009,5 +801,231 @@ mod tests {
         );
         assert_eq!(codex_upstream(), "http://test-upstream.local");
         std::env::remove_var("RYU_PASSTHROUGH_CODEX_UPSTREAM");
+    }
+}
+
+// ─── Swappable passthrough proxy backend (W6c decomposition) ─────────────────
+
+/// The native-format passthrough reverse proxy as a swappable capability. The
+/// built-in [`BuiltinPassthrough`] (the transparent loopback [`forward`] core) is
+/// the default; an alternative (e.g. a mesh-relayed or policy-augmented proxy)
+/// can register without touching the route handlers, mirroring the
+/// [`crate::budget::BudgetRegistry`] inversion. Async because the proxy streams
+/// the upstream response, so it follows the [`crate::providers`] async-trait shape
+/// rather than the sync budget closure.
+#[async_trait::async_trait]
+pub(crate) trait PassthroughBackend: Send + Sync {
+    /// Proxy one native-format request upstream and stream the response back.
+    #[allow(clippy::too_many_arguments)]
+    async fn forward(
+        &self,
+        format: WireFormat,
+        upstream_base: String,
+        redact_body: bool,
+        state: SharedState,
+        peer: SocketAddr,
+        path: String,
+        method: Method,
+        headers: HeaderMap,
+        raw_query: axum::extract::RawQuery,
+        body: Bytes,
+    ) -> Response;
+}
+
+/// The built-in passthrough proxy: delegates to the module's transparent
+/// loopback [`forward`] core. Byte-identical to the pre-inversion behavior.
+pub(crate) struct BuiltinPassthrough;
+
+#[async_trait::async_trait]
+impl PassthroughBackend for BuiltinPassthrough {
+    async fn forward(
+        &self,
+        format: WireFormat,
+        upstream_base: String,
+        redact_body: bool,
+        state: SharedState,
+        peer: SocketAddr,
+        path: String,
+        method: Method,
+        headers: HeaderMap,
+        raw_query: axum::extract::RawQuery,
+        body: Bytes,
+    ) -> Response {
+        forward(
+            format,
+            &upstream_base,
+            redact_body,
+            state,
+            peer,
+            path,
+            method,
+            headers,
+            raw_query,
+            body,
+        )
+        .await
+    }
+}
+
+/// Id-keyed registry over [`PassthroughBackend`] implementations with a live-swap
+/// discipline, matching [`crate::budget::BudgetRegistry`] in shape but yielding an
+/// `Arc<dyn PassthroughBackend>` (not a borrowing closure) so the active backend
+/// survives the streamed `.await` — the same discipline the async smart router
+/// uses. The built-in [`BuiltinPassthrough`] is registered under
+/// [`PassthroughRegistry::BUILTIN`] and active by default.
+pub(crate) struct PassthroughRegistry {
+    inner: std::sync::RwLock<PassthroughRegistryInner>,
+}
+
+struct PassthroughRegistryInner {
+    backends: std::collections::HashMap<String, std::sync::Arc<dyn PassthroughBackend>>,
+    order: Vec<String>,
+    active_id: String,
+    active: std::sync::Arc<dyn PassthroughBackend>,
+}
+
+impl PassthroughRegistry {
+    /// Stable id of the built-in in-process passthrough proxy.
+    pub const BUILTIN: &'static str = "builtin";
+
+    /// Build the registry with the built-in passthrough proxy as the default
+    /// active backend.
+    pub fn new() -> Self {
+        let builtin: std::sync::Arc<dyn PassthroughBackend> =
+            std::sync::Arc::new(BuiltinPassthrough);
+        let mut backends = std::collections::HashMap::new();
+        backends.insert(Self::BUILTIN.to_string(), std::sync::Arc::clone(&builtin));
+        Self {
+            inner: std::sync::RwLock::new(PassthroughRegistryInner {
+                backends,
+                order: vec![Self::BUILTIN.to_string()],
+                active_id: Self::BUILTIN.to_string(),
+                active: builtin,
+            }),
+        }
+    }
+
+    /// Clone the active backend out under a brief read lock (recovering from a
+    /// poisoned lock). The returned `Arc` holds no lock, so the handler can keep
+    /// it across the streamed `.await`.
+    pub fn active(&self) -> std::sync::Arc<dyn PassthroughBackend> {
+        match self.inner.read() {
+            Ok(guard) => std::sync::Arc::clone(&guard.active),
+            Err(poisoned) => std::sync::Arc::clone(&poisoned.into_inner().active),
+        }
+    }
+
+    /// Register a backend under a stable id (open extension point). Re-registering
+    /// replaces in place; refreshes the live handle if it is the active id.
+    #[allow(dead_code)]
+    pub fn register(&self, id: impl Into<String>, backend: std::sync::Arc<dyn PassthroughBackend>) {
+        let id = id.into();
+        let mut guard = match self.inner.write() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if !guard.backends.contains_key(&id) {
+            guard.order.push(id.clone());
+        }
+        let is_active = id == guard.active_id;
+        guard.backends.insert(id, std::sync::Arc::clone(&backend));
+        if is_active {
+            guard.active = backend;
+        }
+    }
+
+    /// Select the active backend by id. `false` (unchanged) if `id` is unknown.
+    pub fn set_active(&self, id: &str) -> bool {
+        let mut guard = match self.inner.write() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        match guard.backends.get(id).map(std::sync::Arc::clone) {
+            Some(backend) => {
+                guard.active = backend;
+                guard.active_id = id.to_string();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The id of the currently active backend.
+    #[allow(dead_code)]
+    pub fn active_id(&self) -> String {
+        match self.inner.read() {
+            Ok(g) => g.active_id.clone(),
+            Err(p) => p.into_inner().active_id.clone(),
+        }
+    }
+
+    /// The registered backend ids in registration order.
+    pub fn available(&self) -> Vec<String> {
+        match self.inner.read() {
+            Ok(g) => g.order.clone(),
+            Err(p) => p.into_inner().order.clone(),
+        }
+    }
+}
+
+impl Default for PassthroughRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod passthrough_registry_tests {
+    use super::*;
+
+    /// A stub backend answering with a fixed sentinel response — proof the registry
+    /// dispatches to a swapped-in impl.
+    struct StubPassthrough;
+    #[async_trait::async_trait]
+    impl PassthroughBackend for StubPassthrough {
+        async fn forward(
+            &self,
+            _format: WireFormat,
+            _upstream_base: String,
+            _redact_body: bool,
+            _state: SharedState,
+            _peer: SocketAddr,
+            _path: String,
+            _method: Method,
+            _headers: HeaderMap,
+            _raw_query: axum::extract::RawQuery,
+            _body: Bytes,
+        ) -> Response {
+            (StatusCode::IM_A_TEAPOT, "stub").into_response()
+        }
+    }
+
+    #[test]
+    fn builtin_is_the_default_active_backend() {
+        let reg = PassthroughRegistry::new();
+        assert_eq!(reg.active_id(), PassthroughRegistry::BUILTIN);
+        assert_eq!(
+            reg.available(),
+            vec![PassthroughRegistry::BUILTIN.to_string()]
+        );
+    }
+
+    #[test]
+    fn register_then_set_active_swaps_the_live_backend() {
+        let reg = PassthroughRegistry::new();
+        reg.register(
+            "stub",
+            std::sync::Arc::new(StubPassthrough) as std::sync::Arc<dyn PassthroughBackend>,
+        );
+        // Registered but not active: built-in is still the active id.
+        assert_eq!(reg.active_id(), PassthroughRegistry::BUILTIN);
+        assert_eq!(reg.available().len(), 2);
+
+        assert!(reg.set_active("stub"));
+        assert_eq!(reg.active_id(), "stub");
+
+        // Unknown id is a no-op keeping the current active backend.
+        assert!(!reg.set_active("nope"));
+        assert_eq!(reg.active_id(), "stub");
     }
 }

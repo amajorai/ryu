@@ -7,6 +7,16 @@
  */
 
 import type { ChatDelta, ChatMessage, ChatResult } from "../model/client.ts";
+import type {
+	DurableClient,
+	EnginesClient,
+	ImageClient,
+	MemoryClient,
+	RagClient,
+	RealtimeClient,
+	SttClient,
+	TtsClient,
+} from "./primitives.ts";
 
 export type { ChatDelta, ChatMessage, ChatResult };
 
@@ -39,15 +49,42 @@ export interface GatewayClient {
  * at construction time via `defineModel`, never at run time.
  */
 export interface RunnableContext {
+	/** Durable primitive: checkpoint · resume (`crates/ryu-durable`). */
+	durable?: DurableClient;
+	/** Engines primitive: complete · embed (`crates/ryu-engines`). */
+	engines?: EnginesClient;
 	/**
 	 * Gateway client — the single allowed path for model calls.
 	 * Never null; a Runnable that needs a model must use this.
 	 */
 	gateway: GatewayClient;
+	/** Image primitive: generate (`crates/ryu-image`). */
+	image?: ImageClient;
+	/** Memory primitive: recall · store (`crates/ryu-memory`). */
+	memory?: MemoryClient;
+
+	// ── Composable primitive clients (program §6b) ────────────────────────────
+	//
+	// Each is a typed, gateway-mandatory client over a decomposed capability
+	// crate, mounted here so a Runnable composes primitives the same way a
+	// developer does: `ctx.rag.retrieve()`, `ctx.memory.recall()`, … They are
+	// OPTIONAL — present only when the runner injects a `PrimitiveTransport`
+	// (e.g. a Core node it holds a token for). Back-compat: a `{ gateway }` ctx
+	// still satisfies this interface. Wire a full bundle with
+	// `createPrimitives(transport)` from `./primitives.ts`.
+
+	/** RAG primitive: retrieve · embed · rerank (`crates/ryu-rag`). */
+	rag?: RagClient;
+	/** Realtime primitive: broadcast · subscribe (`crates/ryu-realtime`). */
+	realtime?: RealtimeClient;
 	/** Optional session id for stateful runs (Core session). */
 	sessionId?: string;
 	/** Signal to abort a long-running run. */
 	signal?: AbortSignal;
+	/** STT primitive: transcribe (`crates/ryu-stt`). */
+	stt?: SttClient;
+	/** TTS primitive: speak (`crates/ryu-tts`). */
+	tts?: TtsClient;
 }
 
 // ── Runnable ──────────────────────────────────────────────────────────────────

@@ -1,10 +1,55 @@
 ---
 title: The Runnable model
-description: Runnable, Session, and App - the vocabulary every part of Ryu shares.
+description: Runnable, Session, and App — the vocabulary every part of Ryu shares, with a hierarchy diagram.
 ---
 
 Ryu describes everything it can run with one small vocabulary. Learn these three words and the rest
 of the system reads cleanly.
+
+## The object model
+
+```mermaid
+flowchart TB
+  subgraph Plugin["Plugin (plugin.json)"]
+    direction TB
+    P_META["Manifest\nid · version · permissions"]
+    P_RUN["Runnables\nwhat the plugin contributes"]
+    P_COMP["Companion\noptional UI surface"]
+    P_META --> P_RUN
+    P_META --> P_COMP
+  end
+
+  subgraph Runnables["Runnables (8 kinds, peers not hierarchy)"]
+    direction LR
+    AG["agent\nmulti-turn model loop"]
+    WF["workflow\nDAG of typed nodes"]
+    TL["tool\ncallable function"]
+    SK["skill\nreusable capability block"]
+    CP["companion\nin-desktop overlay"]
+    CH["channel\nmessaging bot adapter"]
+    EN["engine\ninference backend"]
+    PL["policy\nGateway-enforced rule"]
+  end
+
+  subgraph Session["Session"]
+    S_HIST["conversation history"]
+    S_STATE["run status\nidle · running · completed · failed"]
+    S_RID["runnable_id + kind"]
+    S_HIST --> S_STATE
+    S_RID --> S_HIST
+  end
+
+  subgraph Gateway["Gateway"]
+    GW_GOV["governance\nfirewall · budget · audit"]
+  end
+
+  Plugin --> Runnables
+  AG -->|"invokes as tool"| TL
+  WF -->|"calls as step"| AG
+  Runnables -->|"runs in"| Session
+  Session -->|"model calls"| Gateway
+  Gateway --> Engine["Engine\nllama.cpp · OpenAI · etc."]
+```
 
 ## Runnable
 
@@ -28,11 +73,39 @@ tool; a workflow can orchestrate agents by calling them as steps. The `RunnableR
 Runnables from plugin manifests, with partial-install semantics so one failing Runnable does not abort
 the others.
 
+### How Runnables compose
+
+```mermaid
+flowchart LR
+  subgraph Agent["Agent"]
+    A1["model call"]
+    A2["tool call"]
+    A3["memory recall"]
+  end
+
+  subgraph Workflow["Workflow"]
+    W1["prompt node"]
+    W2["tool node"]
+    W3["condition"]
+    W4["agent node"]
+  end
+
+  subgraph MCP["MCP Server"]
+    M1["tool: crawl"]
+    M2["tool: search"]
+  end
+
+  A2 -->|"wraps"| MCP
+  W2 -->|"invokes"| MCP
+  W4 -->|"calls as step"| Agent
+  A1 -->|"can invoke as tool"| Workflow
+```
+
 <Callout type="warn">
   Core **validates** all eight kinds, but today it only **activates** three of them from a plugin
   manifest: `agent` (created in the agent store), `workflow` (saved to the workflow engine), and
-  `tool` (registered into the MCP registry). The other five - `companion`, `channel`, `engine`,
-  `policy`, and `skill` - parse and validate but have **no Core activation handler** yet, so enabling
+  `tool` (registered into the MCP registry). The other five — `companion`, `channel`, `engine`,
+  `policy`, and `skill` — parse and validate but have **no Core activation handler** yet, so enabling
   a plugin that ships them returns a per-Runnable "no handler" result for those entries
   (`apps/core/src/server/mod.rs`, `build_runnable_registry`). `engine` and `policy` are the Gateway's
   domain; `companion`/`channel`/`skill` activation is not built. See
@@ -49,6 +122,17 @@ the others.
 A **Session** owns a run's conversation history and status. It lives in Core
 (`apps/core/src/server/conversations.rs`) and binds a conversation to a Runnable.
 
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Running: start run
+  Running --> Completed: run finished
+  Running --> Failed: error
+  Running --> Idle: user cancels
+  Completed --> Idle: new run
+  Failed --> Idle: retry
+```
+
 A session has a `runnable_id`, a `runnable_kind`, and a `status` that is one of `idle`, `running`,
 `completed`, or `failed`. Sessions are how Ryu tracks background runs and shows a conversation's run
 list. See [Conversations and sessions](/docs/core/conversations-sessions).
@@ -59,9 +143,24 @@ A **Plugin** is a `plugin.json` manifest that bundles one or more Runnables plus
 they need, packaged so Core can install, enable, disable, and update it as a unit. It is modeled on
 the plugin-manifest pattern: one declarative file describing everything the plugin contributes.
 
-An agent inside a plugin is a "Pokemon card" with independently swappable slots for chat model, STT,
-TTS, image model, tools, memory, persona, and Gateway policy. No two cards are alike, and you can
-change any slot without rebuilding the agent.
+An agent inside a plugin is a "Pokemon card" with independently swappable slots:
+
+```mermaid
+flowchart TB
+  Agent["Agent Card"]
+  Chat["Chat Model\n(gpt-4o, claude, local)"]
+  STT["STT Engine\n(whisper, parakeet)"]
+  TTS["TTS Engine\n(OuteTTS, KittenTTS)"]
+  IMG["Image Model\n(DALL-E, stable-diffusion)"]
+  Tools["Tools / MCP\n(spiders, browser, custom)"]
+  Mem["Memory / Spaces\n(RAG, GraphRAG)"]
+  Persona["Persona\n(system prompt, style)"]
+  Policy["Gateway Policy\n(firewall, budget)"]
+
+  Agent --> Chat & STT & TTS & IMG & Tools & Mem & Persona & Policy
+```
+
+No two cards are alike, and you can change any slot without rebuilding the agent.
 
 See [Plugin manifests](/docs/develop/extensions/plugin-json-manifest) for the full schema and
 [The Store](/docs/desktop/user-guide/store) for installing plugins.
@@ -79,3 +178,12 @@ A Plugin is what you install. Its Runnables are what execute. A Session is the l
 Runnable. And every model call a Runnable makes is routed through the Gateway. This is the same
 vocabulary the [SDK](/docs/develop/sdk) uses, so code you author with `defineAgent` and friends maps
 one-to-one onto what Core runs.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/start-here/architecture/capability-layers" />
+  <DocCard href="/docs/start-here/architecture/core-vs-gateway" />
+  <DocCard href="/docs/develop/extensions/plugin-json-manifest" />
+  <DocCard href="/docs/core/workflows" />
+</Cards>

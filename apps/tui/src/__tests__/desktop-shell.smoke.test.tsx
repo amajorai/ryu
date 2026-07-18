@@ -37,6 +37,7 @@ const CANONICAL_PATH: Record<string, string> = {
 	home: "/home",
 	chat: "/chat",
 	agents: "/agents",
+	teams: "/teams",
 	store: "/store",
 	"store-models": "/models",
 	"store-skills": "/skills",
@@ -51,6 +52,9 @@ const CANONICAL_PATH: Record<string, string> = {
 	monitors: "/monitors",
 	tasks: "/tasks",
 	meetings: "/meetings",
+	inbox: "/inbox",
+	downloads: "/downloads",
+	setup: "/setup",
 };
 
 let ws: ReturnType<typeof useWorkspace> | null = null;

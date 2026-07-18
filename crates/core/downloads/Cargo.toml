@@ -1,0 +1,26 @@
+[package]
+name = "ryu-downloads"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "The DownloadCenter artifact-fetch primitive for Ryu: one process-wide registry that owns the lifecycle of every artifact Ryu pulls over the network (chat/embedding GGUFs, engine + agent binaries, tools, skills). Stream-to-`.part` with HTTP Range + `If-Range` resume, bounded retry, checksum-verify + atomic rename, pause/resume/cancel, live SSE progress over a broadcast channel, and a durable history log. An extracted Core capability crate, in-process by default and consumed as a NON-optional path dependency (the sidecar loader, model catalog, engines, and marketplace install all fetch through it — a primitive by reuse, not swap). The three kernel couplings — the `~/.ryu` data dir, the version-store checksum-skip, and Hugging Face bearer auth — invert through the narrow `DownloadsHost` trait so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+futures-util = "0.3"
+hex = "0.4"
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+
+[dev-dependencies]
+# The `resumes_from_part_via_range` test stands up a loopback HTTP server to
+# exercise the Range/If-Range resume path deterministically.
+axum = { version = "0.7", features = ["ws", "multipart"] }

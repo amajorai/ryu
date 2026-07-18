@@ -589,6 +589,11 @@ struct ResolvedAppTool {
     grants: std::collections::HashSet<String>,
     /// The owning plugin id (sandbox storage owner + audit attribution).
     plugin_id: String,
+    /// The owning plugin manifest's unified **runtime permission set**, lowered to
+    /// Deno `--allow-*` flags when an `inline_deno` tool runs. `None` = the manifest
+    /// declared no `permissions` block → the sandbox stays **deny-all** (its
+    /// historical zero-permission posture).
+    permissions: Option<crate::plugin_manifest::PermissionSet>,
 }
 
 /// The config-driven MCP server registry. Cheap to clone-share via `Arc`.
@@ -637,22 +642,18 @@ pub struct McpRegistry {
     /// `skills__load`) can discover + load Agent Skills on demand (progressive
     /// disclosure). Cheap to clone (`Arc` inside). `None` in test/CLI contexts
     /// that don't wire it (the tools then report skills unavailable).
-    pub skills: Option<crate::skills::SkillRegistry>,
+    pub skills: Option<ryu_skills::SkillRegistry>,
     /// Preferences store, wired so the built-in `advisor` tool can resolve the
     /// configured `advisor-model` (the stronger reviewer model). Cheap to clone
     /// (`Arc` inside). `None` in test/CLI contexts; the tool then falls back to
     /// env / the bundled default.
     pub preferences: Option<crate::server::preferences::PreferencesStore>,
-    /// Agent team store, wired so the `agent_builder__create_agent_team` tool can
-    /// persist a team after minting its members. Cheap to clone (`Arc` inside).
-    /// `None` in test/CLI contexts; the tool then reports the team store
-    /// unavailable rather than partially creating agents with no team.
-    pub team_store: Option<crate::teams::TeamStore>,
-    /// Quests store, wired so the in-process `ryu.quests` app (quest-board widget)
-    /// reads/writes live quests through the dispatch context. Cheap to clone
-    /// (`Arc` inside). `None` in test/CLI contexts; the app then falls back to the
-    /// process-global quest engine's store when one is published.
-    pub quests: Option<crate::quests::store::QuestStore>,
+    /// Loopback client for the out-of-process `ryu-teams` sidecar, wired so the
+    /// `agent_builder__create_agent_team` tool can persist a team (over HTTP) after
+    /// minting its members. Cheap to clone. `None` in test/CLI contexts; the tool
+    /// then reports the team sink unavailable rather than partially creating agents
+    /// with no team.
+    pub teams_client: Option<crate::teams_client::TeamsClient>,
     /// Per-run worktree diff store, wired so the in-process `ryu.worktree` app
     /// (worktree-diff-review widget) resolves a run's diff and applies/discards it.
     /// Cheap to clone (`Arc` inside). `None` in test/CLI contexts; the app then
@@ -681,8 +682,7 @@ impl McpRegistry {
             conversations: None,
             skills: None,
             preferences: None,
-            team_store: None,
-            quests: None,
+            teams_client: None,
             worktree_diffs: None,
             spaces: None,
         }
@@ -702,8 +702,7 @@ impl McpRegistry {
             conversations: None,
             skills: None,
             preferences: None,
-            team_store: None,
-            quests: None,
+            teams_client: None,
             worktree_diffs: None,
             spaces: None,
         }
@@ -728,19 +727,11 @@ impl McpRegistry {
         self
     }
 
-    /// Wire the agent team store into the registry. Must be called after
+    /// Wire the teams sidecar client into the registry. Must be called after
     /// construction to enable `agent_builder__create_agent_team` (mint a roster of
-    /// agents + persist them as a team).
-    pub fn with_team_store(mut self, store: crate::teams::TeamStore) -> Self {
-        self.team_store = Some(store);
-        self
-    }
-
-    /// Wire the quests store into the registry. Must be called after construction
-    /// to let the in-process `ryu.quests` app read/write live quests through the
-    /// dispatch context (the quest-board widget).
-    pub fn with_quests(mut self, store: crate::quests::store::QuestStore) -> Self {
-        self.quests = Some(store);
+    /// agents + persist them as a team over loopback HTTP).
+    pub fn with_teams_client(mut self, client: crate::teams_client::TeamsClient) -> Self {
+        self.teams_client = Some(client);
         self
     }
 
@@ -774,7 +765,7 @@ impl McpRegistry {
     /// Wire the skill registry into the registry. Must be called after
     /// construction to enable the `skills` built-in tools (`skills__search` /
     /// `skills__load`, progressive disclosure of Agent Skills).
-    pub fn with_skills(mut self, skills: crate::skills::SkillRegistry) -> Self {
+    pub fn with_skills(mut self, skills: ryu_skills::SkillRegistry) -> Self {
         self.skills = Some(skills);
         self
     }
@@ -812,12 +803,22 @@ impl McpRegistry {
     /// degrades gracefully — `tools/list` simply fails to spawn and the server
     /// is logged-and-skipped, so one unavailable built-in never hides the rest.
     fn builtin_servers() -> BTreeMap<String, McpServerConfig> {
+        // Point Ghost at the island's loopback control server so its pointer/keyboard
+        // actions drive the visible ghost-cursor overlay (POST /ghost-cursor). Always
+        // injected — Core cannot know whether an island is running, but the sidecar's
+        // POSTs are fire-and-forget, so a dead port is a harmless no-op. Profile-shifted
+        // to match the island's own port math (control.ts: base 7989, +1000 for dev).
+        let mut ghost_env = BTreeMap::new();
+        ghost_env.insert(
+            "RYU_GHOST_OVERLAY_URL".to_owned(),
+            format!("http://127.0.0.1:{}/ghost-cursor", crate::profile::port(7989)),
+        );
         let ghost = McpServerConfig {
             command: crate::sidecar::tools::ghost::ghost_bin_path()
                 .to_string_lossy()
                 .into_owned(),
             args: vec!["mcp".to_owned()],
-            env: BTreeMap::new(),
+            env: ghost_env,
             description: Some(
                 "Ghost — desktop automation (29 tools: screen perception + input control). \
                  Windows-first; install the `ghost` sidecar to enable. Unavailable until installed."
@@ -871,8 +872,7 @@ impl McpRegistry {
             conversations: None,
             skills: None,
             preferences: None,
-            team_store: None,
-            quests: None,
+            teams_client: None,
             worktree_diffs: None,
             spaces: None,
         }
@@ -1841,6 +1841,36 @@ impl McpRegistry {
         let (server, tool) = Self::split_tool_id(tool_id)
             .ok_or_else(|| anyhow!("malformed tool id '{tool_id}' (expected server__tool)"))?;
 
+        // Core self-API provider (agents driving Ryu itself): OpenAPI-derived tools
+        // dispatched by looping back over HTTP to THIS Core with its own token.
+        //
+        // TENANCY FAIL-CLOSED: the loopback request carries the node's own
+        // `RYU_TOKEN` = full node power, NOT this agent's scoped principal. On an
+        // org-bound node that is a tenancy bypass, so CoreApi tools refuse unless the
+        // resolved principal is `Unrestricted` (⟺ the node is unbound/personal —
+        // there is exactly one principal and the node token IS its boundary). We
+        // resolve the principal from the host conversation when a store is wired,
+        // else fall back to the node's org binding directly.
+        if server == crate::self_api::SERVER_NAME {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            let unrestricted = match self.conversations.as_ref() {
+                Some(store) => matches!(
+                    ToolPrincipal::resolve(store, host_conversation_id).await,
+                    ToolPrincipal::Unrestricted
+                ),
+                None => crate::sidecar::control_plane::registered_org().is_none(),
+            };
+            if let Some(reason) = crate::self_api::refuse_reason_if_tenant_bound(unrestricted) {
+                return Err(anyhow!("{reason}"));
+            }
+            return crate::self_api::dispatch(&self.http, tool_id, arguments).await;
+        }
+
         // App-registered tool (tool-as-Runnable, M3): an enabled plugin re-exposes
         // an existing registry tool under its own `app__` namespace. The plugin's
         // Tool Runnable `slug` IS the target tool id (e.g. `app__exa__search` →
@@ -1907,13 +1937,44 @@ impl McpRegistry {
                             std::sync::Arc::new(crate::tool_exec::SandboxToolInvoker::bridge(bridge));
                         let program =
                             crate::tool_exec::build_inline_tool_program(&arguments, &code);
-                        // Box the sandbox future: `run_sandboxed` → the `Bridge`
+                        // Lower the owning manifest's unified permission set to the
+                        // Deno sandbox. `None` (no `permissions` block) keeps the
+                        // historical deny-all posture; a declared set opens exactly
+                        // the FS/net/subprocess it names.
+                        //
+                        // A `child_process`-capable inline tool reaches Ryu's
+                        // capability broker through PATH shims. Materialize this
+                        // plugin's cap-shims and hand the sandbox a SCOPED
+                        // `--allow-run` allow-list (the shim NAMES — Deno's allow-run
+                        // matches the spawned program name, never a directory) plus
+                        // the env the shims authenticate the broker with: the
+                        // shim-prepended `PATH` + `RYU_CORE_PORT` (via
+                        // `inject_shim_env`) and the per-plugin
+                        // `RYU_EXT_TOKEN`/`RYU_EXT_PLUGIN_ID`. The token is layered
+                        // POST-scrub inside the backend so it is delivered (not
+                        // stripped by the secret-key env scrubber). Best-effort: any
+                        // failure logs and falls back to today's bare `--allow-run`
+                        // + no shim env, never blocking the tool call.
+                        let augment = if resolved
+                            .permissions
+                            .as_ref()
+                            .is_some_and(|p| p.child_process)
+                        {
+                            build_cap_shim_augment(&resolved.plugin_id).await
+                        } else {
+                            ryu_tool_exec::SandboxAugment::default()
+                        };
+                        // Box the sandbox future: `run_sandboxed*` → the `Bridge`
                         // invoker can transitively re-enter tool dispatch, so this
                         // edge must be boxed to keep the async future finite-sized.
-                        let outcome = Box::pin(crate::tool_exec::run_sandboxed(
+                        // Called on the crate directly (not via the `crate::tool_exec`
+                        // facade) so the wiring stays inside this change's file set.
+                        let outcome = Box::pin(ryu_tool_exec::run_sandboxed_with_augment(
                             program,
                             invoker,
                             &resolved.plugin_id,
+                            resolved.permissions.as_ref(),
+                            &augment,
                         ))
                         .await;
                         return match outcome {
@@ -1995,7 +2056,6 @@ impl McpRegistry {
             }
             let ctx = apps::AppDispatchCtx {
                 http: &self.http,
-                quests: self.quests.as_ref(),
                 worktree_diffs: self.worktree_diffs.as_ref(),
                 conversation_id: session_id.clone(),
                 agent_id: None,
@@ -2320,7 +2380,7 @@ impl McpRegistry {
                 tool,
                 arguments,
                 store,
-                self.team_store.clone(),
+                self.teams_client.clone(),
             )
             .await;
         }
@@ -2465,6 +2525,7 @@ impl McpRegistry {
                     backend,
                     grants,
                     plugin_id: manifest.id.clone(),
+                    permissions: manifest.permissions.clone(),
                 });
             }
         }
@@ -2484,6 +2545,71 @@ impl McpRegistry {
             .read()
             .expect("mcp servers RwLock poisoned")
             .is_empty()
+    }
+}
+
+/// Build the [`ryu_tool_exec::SandboxAugment`] for a `child_process`-capable
+/// inline plugin tool: materialize the plugin's capability CLI shims and return a
+/// scoped `--allow-run` allow-list (the shim program NAMES) plus the env the shims
+/// authenticate the broker with.
+///
+/// The env layers, in order: the shim-prepended `PATH` + `RYU_CORE_PORT`
+/// (`cli_shims::inject_shim_env`) and the per-plugin `RYU_EXT_TOKEN` +
+/// `RYU_EXT_PLUGIN_ID` (`ext_proxy::ext_token`) — the same three vars a native
+/// sidecar receives at spawn. These are handed to the backend as `extra_env` and
+/// applied AFTER the secret-key scrub, so the freshly-minted token is delivered
+/// rather than stripped (the scrubber blocks LEAKING Core's inherited secrets, not
+/// the host handing the child a token minted for exactly this run).
+///
+/// Best-effort: on a materialize failure it logs and returns
+/// [`ryu_tool_exec::SandboxAugment::default`] (today's bare `--allow-run`, no shim
+/// env), never blocking the tool call.
+async fn build_cap_shim_augment(plugin_id: &str) -> ryu_tool_exec::SandboxAugment {
+    let plugin_dir = crate::plugin_manifest::PluginManifestLoader::plugins_dir().join(plugin_id);
+    // The plugin's DECLARED capability edges → convenience-alias shims + the
+    // scoped run allow-list. Empty is fine (the `ryu-cap` multiplexer still covers
+    // every capability); only the convenience aliases are gated on this set.
+    let declared: Vec<String> = crate::plugin_manifest::PluginManifestLoader::load()
+        .into_iter()
+        .find(|m| m.id == plugin_id)
+        .map(|m| {
+            m.required_capabilities()
+                .iter()
+                .map(|c| c.capability.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    match crate::sidecar::cli_shims::materialize(&plugin_dir, &declared).await {
+        Ok(shim_dir) => {
+            let mut env = std::collections::BTreeMap::new();
+            crate::sidecar::cli_shims::inject_shim_env(&mut env, &shim_dir);
+            let token = crate::sidecar::ext_proxy::ext_token(
+                crate::sidecar::ext_proxy::node_token().as_deref(),
+                plugin_id,
+            );
+            env.insert(
+                crate::sidecar::ext_proxy::ENV_EXT_TOKEN.to_owned(),
+                token,
+            );
+            env.insert(
+                crate::sidecar::ext_proxy::ENV_EXT_PLUGIN_ID.to_owned(),
+                plugin_id.to_owned(),
+            );
+            ryu_tool_exec::SandboxAugment {
+                run_allow: crate::sidecar::cli_shims::shim_names(&declared),
+                extra_env: env.into_iter().collect(),
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                plugin_id = %plugin_id,
+                error = %e,
+                "could not materialize capability CLI shims for inline tool; \
+                 running with bare --allow-run and no shim env"
+            );
+            ryu_tool_exec::SandboxAugment::default()
+        }
     }
 }
 
@@ -2691,12 +2817,14 @@ mod tests {
         assert!(!file.mcp_servers["git"].enabled);
         let reg = McpRegistry::from_servers(file.mcp_servers);
         assert_eq!(reg.len(), 2);
-        // Two config servers plus the 15 always-present built-in providers
-        // (shadow, spider, rtk, exa, web_fetch, sandbox, notify, channel,
-        // search_conversations, threads, delegate, orchestrator, skills, advisor,
-        // ui) — all unconditionally listed by `server_summaries`.
+        // Two config servers plus the 16 always-present built-in providers
+        // (shadow, spider, research, rtk, exa, web_fetch, sandbox, notify,
+        // channel, search_conversations, threads, delegate, orchestrator,
+        // skills, advisor, ui) — all unconditionally listed by
+        // `server_summaries`. `research` (the autoresearch experiment runner)
+        // was added in 94060a75 alongside the research sidecar.
         let summaries = reg.server_summaries();
-        assert_eq!(summaries.len(), 17);
+        assert_eq!(summaries.len(), 18);
         assert!(summaries.iter().any(|s| s.name == shadow::SERVER_NAME));
         assert!(summaries.iter().any(|s| s.name == spider::SERVER_NAME));
         assert!(summaries.iter().any(|s| s.name == exa::SERVER_NAME));

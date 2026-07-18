@@ -1,0 +1,53 @@
+{
+	"id": "com.ryu.monitors",
+	"name": "Monitors",
+	"version": "1.0.0",
+	"description": "Website monitors: price, stock, keyword, content, and uptime watches with cross-device notification fan-out.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "monitors-companion",
+			"name": "Monitors",
+			"kind": "companion",
+			"config": {
+				"label": "Monitors",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"sidecars": [
+		{
+			"name": "ryu-monitors",
+			"process": {
+				"kind": "local",
+				"command": "ryu-monitors",
+				"command_env": "RYU_MONITORS_BIN",
+				"port_env": "RYU_MONITORS_PORT"
+			},
+			"port": 8003,
+			"health_path": "/health",
+			"http": {
+				"mount": "/api/monitors",
+				"public_mount": "/api/monitors",
+				"routes": [
+					{ "path": "/alerts/stream" },
+					{ "path": "/alerts" },
+					{ "path": "/alerts/:id/ack" },
+					{ "path": "/" },
+					{ "path": "/:id" },
+					{ "path": "/:id/run" },
+					{ "path": "/:id/snapshots" },
+					{ "path": "/:id/alerts" }
+				]
+			}
+		}
+	],
+	"permission_grants": ["monitors:crud"],
+	"companion": {
+		"label": "Monitors",
+		"icon": "radar"
+	}
+}

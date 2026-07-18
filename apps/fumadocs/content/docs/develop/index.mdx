@@ -1,13 +1,48 @@
 ---
 title: Develop
-description: Build on Ryu - TypeScript SDK, Rust SDK, plugin manifests, extensions, the client library, agent inboxes, and the full API reference.
+description: Build on Ryu — plugins, hooks, skills, apps, MCP servers, the TypeScript and Rust SDKs, and the full API reference.
 ---
 
 The Develop section covers everything needed to build on top of Ryu. Core runs locally on port 7980
 and exposes a JSON + SSE HTTP API. The Gateway on port 7981 is the LLM control plane you route
-model calls through. The TypeScript SDK (`@ryuhq/sdk`) lets you author agents, workflows, tools,
-and skills as typed Runnables and pack them into installable plugins. The client library
-(`@ryu/client`) lets any Node, Bun, or browser app call a running Core node directly.
+model calls through.
+
+There are **three extension paths**, in increasing order of structure:
+
+1. **MCP servers** — expose tools over the Model Context Protocol. No manifest, no restart.
+2. **`plugin.json` manifests** — bundle Runnables + permission grants into an installable plugin.
+3. **TypeScript SDK** — define agents, workflows, tools, and skills as typed Runnables with Gateway-mandatory model calls.
+
+```mermaid
+flowchart LR
+  subgraph "Extension Paths"
+    A[MCP Server] -->|fastest| B[Expose tools]
+    C[plugin.json] -->|installable| D[Bundle Runnables]
+    E[TypeScript SDK] -->|typed| F[Author agents + tools]
+  end
+
+  subgraph "Runtime"
+    D --> G[Core validates + loads]
+    F --> G
+    B --> H[Core registers MCP server]
+    G --> I[Gateway governs model calls]
+    H --> I
+  end
+```
+
+## What you can build
+
+| Category | What | Guide |
+|---|---|---|
+| **Plugins** | Installable bundles of agents, tools, workflows, skills | [plugin.json](/docs/develop/extensions/plugin-json-manifest) |
+| **Turn hooks** | React to chat events (pre/post turn, tool use, sessions) | [Hooks & Lifecycle](/docs/develop/extensions/hooks-lifecycle) |
+| **MCP servers** | Expose any tool over the Model Context Protocol | [MCP Server](/docs/develop/extensions/mcp-server) |
+| **Agent skills** | Reusable prompt patterns as SKILL.md files | [Agent Skills](/docs/develop/extensions/agent-skills) |
+| **Ryu apps** | Interactive in-chat widgets | [Ryu Apps](/docs/develop/extensions/ryu-apps) |
+| **Desktop companions** | Contribute UI into the desktop app | [Desktop Companion](/docs/develop/extensions/desktop-companion) |
+| **Channel bots** | Messaging-platform bot adapters | [Channel Bot](/docs/develop/extensions/channel-bot) |
+| **Workflows** | Orchestrate agents as a DAG in TypeScript | [Author Workflows](/docs/develop/extensions/author-workflows) |
+| **UI** | Consistent components, themes, and hooks | [Design System](/docs/develop/ui-package) |
 
 <Callout type="info">
   Both `@ryuhq/sdk` and `@ryu/client` are in the Ryu monorepo at `workspace:*` today. Public npm
@@ -16,9 +51,10 @@ and skills as typed Runnables and pack them into installable plugins. The client
 
 <Cards>
   <DocCard href="/docs/develop/quickstart" title="Quickstart" description="Scaffold a plugin with create-ryu-app, define a tool, and install it into Core in under five minutes." />
-  <DocCard href="/docs/develop/extensions" title="Extensions" description="MCP servers, plugin.json manifests, agent skills, channel bots, desktop companions, and the marketplace submission flow." />
-  <DocCard href="/docs/develop/sdk" title="SDK" description="TypeScript SDK (defineAgent / Workflow / Tool / Skill), the client library for calling Core, and the Rust SDK crate." />
-  <DocCard href="/docs/develop/agent-inboxes" title="Agent Inboxes" description="Hosted email inboxes for agents - receive and send mail over an API via Ryu Cloud's AWS SES integration." />
+  <DocCard href="/docs/develop/extensions" title="Extensions" description="Plugins, hooks, skills, apps, MCP servers, desktop companions, channel bots, and the marketplace." />
+  <DocCard href="/docs/develop/sdk" title="SDK Reference" description="TypeScript SDK (defineAgent / defineWorkflow / defineTool / defineSkill), the client library, and the Rust SDK." />
+  <DocCard href="/docs/develop/ui-package" title="Design System" description="66+ components, 16 hooks, 30+ theme presets, and a full OKLCH token system for consistent UI across surfaces." />
+  <DocCard href="/docs/develop/contributing" title="Contributing" description="How to contribute code, docs, and plugins to the Ryu project." />
+  <DocCard href="/docs/develop/debugging" title="Debugging" description="Logs, tracing, sandbox inspection, and common failure modes across Core, Gateway, and plugins." />
   <DocCard href="/docs/develop/api-reference" title="API Reference" description="Interactive OpenAPI reference for both the Core API (port 7980) and the Gateway API (port 7981)." />
-  <DocCard href="/docs/develop/guides/sdk-quickstart" title="Guides" description="Hands-on walkthroughs: SDK quickstart, Runnables deep-dive, plugins and apps, and publishing to the marketplace." />
 </Cards>

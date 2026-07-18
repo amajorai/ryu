@@ -1,0 +1,38 @@
+[package]
+name = "ryu-healing"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Self-healing loop for failed runs: an extracted Core capability crate (the diagnose→propose engine + decision logic + `/api/healing/config|status` HTTP surface). In-process default; Core consumes it as a path dependency. The run-status bus, the conversation-store context read, the Gateway diagnosis call, the agent/workflow re-run, and the approvals inbox are inverted through the `HealingHost` trait so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# The out-of-process sidecar binary. Core spawns it (`kind: local`, sibling on
+# PATH / `RYU_HEALING_BIN`), health-checks it, and drives it on loopback: Core POSTs
+# a failed run's context to `/api/healing/report-failure` and applies the returned
+# verdict (Core owns the welded approvals write + agent/workflow re-run), while the
+# public `/api/healing/config|status` surface is served through the manifest
+# `public_mount`. The SAME crate still compiles INTO Core as a lib path-dependency
+# (for `HealVerdict`/`apply_verdict`/`CoreHealingHost`), so no code is duplicated.
+[[bin]]
+name = "ryu-healing"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
+# axum router has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+async-trait = "0.1"
+tracing = "0.1"
+# Sidecar-binary-only deps (data-dir resolution + Gateway HTTP + logging), mirroring
+# `ryu-quests` / `ryu-mail`. Core already pulls all of these, so the in-process build
+# gains no new dependency.
+reqwest = { version = "0.12", features = ["json"] }
+dirs = "5"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

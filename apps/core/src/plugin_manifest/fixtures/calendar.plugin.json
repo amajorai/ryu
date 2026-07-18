@@ -1,0 +1,26 @@
+{
+	"id": "com.ryu.calendar",
+	"name": "Calendar",
+	"version": "1.0.0",
+	"description": "The scheduled-runs calendar: every agent and workflow scheduled job projected onto Month, Week, Day, and Agenda views — past runs from history, upcoming runs from cron/interval — with a New automation dialog that schedules an agent.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "calendar-companion",
+			"name": "Calendar",
+			"kind": "companion",
+			"config": {
+				"label": "Calendar",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"permission_grants": ["calendar:crud"],
+	"companion": {
+		"label": "Calendar",
+		"icon": "calendar-04"
+	}
+}

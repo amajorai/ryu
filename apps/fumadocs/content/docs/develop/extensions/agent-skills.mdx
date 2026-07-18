@@ -12,6 +12,23 @@ install shows up in Ryu.
 This page is the authoring how-to. For how Ryu discovers, ranks, activates, and injects Skills (the
 catalog and the per-agent allowlist), see [Skills catalog](/docs/core/skills-catalog).
 
+## How skills flow through Ryu
+
+```mermaid
+flowchart TD
+  A[Author SKILL.md] --> B[Install to ~/.claude/skills/]
+  B --> C{Active?}
+  C -->|Yes| D[Injected into system prompt]
+  C -->|No| E[Visible but inert]
+  D --> F[Agent carries instruction every turn]
+  E -->|POST /api/skills/activate| D
+
+  subgraph "Both planes"
+    D --> G[OpenAI-compat injection]
+    D --> H[ACP injection]
+  end
+```
+
 ## Where a Skill lives
 
 A Skill is one directory under the shared Agent Skills home, holding a `SKILL.md` plus any bundled
@@ -126,6 +143,7 @@ extension surfaces, see the cards below.
 
 <Cards>
   <DocCard href="/docs/core/skills-catalog" />
+  <DocCard href="/docs/develop/extensions/hooks-lifecycle" />
   <DocCard href="/docs/develop/extensions/mcp-server" />
   <DocCard href="/docs/develop/extensions/plugin-json-manifest" />
 </Cards>

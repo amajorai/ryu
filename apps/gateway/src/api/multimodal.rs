@@ -8,7 +8,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::{
-    config::{Modality, ProviderKind},
+    config::{Modality, ProviderId},
     error::GatewayError,
     pipeline::{self, authenticate, AuthInputs},
     state::SharedState,
@@ -36,7 +36,7 @@ pub async fn image_generations(
     // image_model slot so the gateway can route this call to the slot's provider
     // instead of the static modality_map entry.
     let slot_provider = header_string(&headers, "x-ryu-slot-image-provider")
-        .and_then(|s| s.parse::<ProviderKind>().ok());
+        .map(ProviderId::from);
     let slot_model = header_string(&headers, "x-ryu-slot-image-model");
 
     let ctx = authenticate(
@@ -80,7 +80,7 @@ pub async fn audio_speech(
     let agent_id = header_string(&headers, "x-ryu-agent-id");
     // Per-agent TTS slot override (M3 / #164).
     let slot_provider = header_string(&headers, "x-ryu-slot-tts-provider")
-        .and_then(|s| s.parse::<ProviderKind>().ok());
+        .map(ProviderId::from);
     let slot_model = header_string(&headers, "x-ryu-slot-tts-model");
 
     let ctx = authenticate(
@@ -124,7 +124,7 @@ pub async fn audio_transcriptions(
     let agent_id = header_string(&headers, "x-ryu-agent-id");
     // Per-agent STT slot override (M3 / #164).
     let slot_provider = header_string(&headers, "x-ryu-slot-stt-provider")
-        .and_then(|s| s.parse::<ProviderKind>().ok());
+        .map(ProviderId::from);
     let slot_model = header_string(&headers, "x-ryu-slot-stt-model");
 
     let ctx = authenticate(
@@ -170,7 +170,7 @@ pub async fn video_generations(
     let agent_id = header_string(&headers, "x-ryu-agent-id");
     // Per-agent video slot override (mirrors image/tts/stt).
     let slot_provider = header_string(&headers, "x-ryu-slot-video-provider")
-        .and_then(|s| s.parse::<ProviderKind>().ok());
+        .map(ProviderId::from);
     let slot_model = header_string(&headers, "x-ryu-slot-video-model");
 
     let ctx = authenticate(

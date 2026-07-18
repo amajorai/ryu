@@ -1,6 +1,37 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// The budget config value-types moved to the extracted `ryu-gw-budget` stage
+// crate; `AlertTier` (a cross-stage type used by firewall too) moved to
+// `ryu-gw-contracts`. Re-exported here so every `crate::config::{AlertTier,
+// Budget*, ExecBudget*}` path — and `GatewayConfig`'s `budgets` / `exec_budget`
+// fields below — stay byte-unchanged.
+pub use ryu_gw_budget::{BudgetAction, BudgetConfig, ExecBudgetAction, ExecBudgetConfig};
+// `BudgetRule` / `SessionBudgetConfig` have no production caller today (config
+// deserializes the whole `BudgetConfig`); they are re-exported to keep the
+// stable `crate::config::{BudgetRule,SessionBudgetConfig}` path and are
+// referenced by the config tests via `super::`. Kept for API-path stability.
+#[allow(unused_imports)]
+pub use ryu_gw_budget::{BudgetRule, SessionBudgetConfig};
+pub use ryu_gw_contracts::AlertTier;
+
+// The evals config value-type moved to the extracted `ryu-gw-evals` stage crate.
+// Re-exported here so every `crate::config::EvalsConfig` path — and
+// `GatewayConfig`'s `evals` field below — stays byte-unchanged.
+pub use ryu_gw_evals::EvalsConfig;
+
+// The audit config value-type moved to the extracted `ryu-gw-audit` stage crate.
+// Re-exported here so every `crate::config::AuditConfig` path — and
+// `GatewayConfig`'s `audit` field below — stays byte-unchanged.
+pub use ryu_gw_audit::AuditConfig;
+
+// The cache config value-types moved to the extracted `ryu-gw-cache` stage crate
+// (co-located with the `Cache` / `SemanticCache` backends they configure).
+// Re-exported here so every `crate::config::{CacheConfig, SemanticCacheConfig}`
+// path — and `GatewayConfig`'s `cache` / `semantic_cache` fields below — stays
+// byte-unchanged.
+pub use ryu_gw_cache::{CacheConfig, SemanticCacheConfig};
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GatewayConfig {
     #[serde(default = "default_bind")]
@@ -88,6 +119,27 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub compression: CompressionConfig,
 
+    /// Per-stage active-backend selection (W6a). Each inverted pipeline stage
+    /// (budget, cache, semantic_cache, audit, evals, circuit_breaker, rate_limit)
+    /// keeps an id-keyed [`crate::budget::BudgetRegistry`]-style registry whose
+    /// built-in is registered under `"builtin"` and active by default. This map
+    /// names which registered backend is active for each stage. Applied at
+    /// `AppState` build (fail-closed: an unknown id refuses startup, listing the
+    /// registered ids) so the registries are load-bearing rather than dead code.
+    /// `#[serde(default)]` + all-`"builtin"` default keeps an existing
+    /// `gateway.toml` byte-identical — omitting the field == today's behavior.
+    #[serde(default)]
+    pub backends: StageBackendsConfig,
+
+    /// Declarative pre-processing pipeline stage order (W6d). Empty ⇒ the
+    /// immutable [`crate::pipeline::stages::DEFAULT_ORDER`] (today's exact
+    /// sequence). Config may reorder/disable only the reorderable governance
+    /// stages; a config that violates a safety invariant (disable firewall, move
+    /// audit, …) refuses startup. `#[serde(default)]` + skip-when-empty keeps an
+    /// existing `gateway.toml` byte-identical when no `[pipeline]` table is set.
+    #[serde(default, skip_serializing_if = "pipeline_order_is_default")]
+    pub pipeline: crate::pipeline::stages::PipelineOrderConfig,
+
     #[serde(default)]
     pub tools: ToolsConfig,
 
@@ -108,6 +160,70 @@ pub struct GatewayConfig {
     /// hardcoded.
     #[serde(default)]
     pub fleet: bool,
+}
+
+/// The default active-backend id for every inverted pipeline stage: the built-in
+/// in-process implementation, registered under `"builtin"` and active out of the
+/// box. Nothing hardcoded — a plugin registers an alternative under a new id and
+/// names it here (or via `PUT /v1/config { backends }`).
+pub fn default_stage_backend() -> String {
+    "builtin".to_string()
+}
+
+/// Skip serializing an unset `[pipeline]` table so an existing `gateway.toml`
+/// stays byte-identical when no stage reorder/disable is configured.
+fn pipeline_order_is_default(cfg: &crate::pipeline::stages::PipelineOrderConfig) -> bool {
+    cfg == &crate::pipeline::stages::PipelineOrderConfig::default()
+}
+
+/// Per-stage active-backend selection (W6a). One id per inverted stage naming
+/// which registered backend is active; the registries themselves live in
+/// `crate::{budget,cache,semantic_cache,audit,evals,circuit_breaker,rate_limit}`.
+/// Every field defaults to `"builtin"`, so an absent `[backends]` table is
+/// byte-identical to today. Selection is applied at `AppState` build and refused
+/// fail-closed when an id is not registered (see `AppState::new`).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct StageBackendsConfig {
+    #[serde(default = "default_stage_backend")]
+    pub budget: String,
+    #[serde(default = "default_stage_backend")]
+    pub cache: String,
+    #[serde(default = "default_stage_backend")]
+    pub semantic_cache: String,
+    #[serde(default = "default_stage_backend")]
+    pub audit: String,
+    #[serde(default = "default_stage_backend")]
+    pub evals: String,
+    #[serde(default = "default_stage_backend")]
+    pub circuit_breaker: String,
+    #[serde(default = "default_stage_backend")]
+    pub rate_limit: String,
+    #[serde(default = "default_stage_backend")]
+    pub firewall: String,
+    #[serde(default = "default_stage_backend")]
+    pub router: String,
+    #[serde(default = "default_stage_backend")]
+    pub smart_router: String,
+    #[serde(default = "default_stage_backend")]
+    pub passthrough: String,
+}
+
+impl Default for StageBackendsConfig {
+    fn default() -> Self {
+        Self {
+            budget: default_stage_backend(),
+            cache: default_stage_backend(),
+            semantic_cache: default_stage_backend(),
+            audit: default_stage_backend(),
+            evals: default_stage_backend(),
+            circuit_breaker: default_stage_backend(),
+            rate_limit: default_stage_backend(),
+            firewall: default_stage_backend(),
+            router: default_stage_backend(),
+            smart_router: default_stage_backend(),
+            passthrough: default_stage_backend(),
+        }
+    }
 }
 
 /// Platform-credits wallet debit hook (marketplace monetization #486, spec §4).
@@ -957,7 +1073,7 @@ impl Modality {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct RoutingConfig {
     #[serde(default)]
-    pub default_provider: ProviderKind,
+    pub default_provider: ProviderId,
 
     /// Static model → provider mappings (e.g. "claude-3-5-sonnet" → anthropic)
     #[serde(default)]
@@ -965,7 +1081,7 @@ pub struct RoutingConfig {
 
     /// Fallback chain when the primary provider is unavailable
     #[serde(default)]
-    pub fallback_chain: Vec<ProviderKind>,
+    pub fallback_chain: Vec<ProviderId>,
 
     /// Cost-tier ordering for the fallback chain (#2). Lower = preferred:
     /// subscription (0) → cheap (1) → free (2). After the primary provider, the
@@ -974,7 +1090,7 @@ pub struct RoutingConfig {
     /// default to tier 0. Empty map (the default) preserves the flat
     /// `fallback_chain` order exactly — nothing hardcoded.
     #[serde(default)]
-    pub provider_tiers: HashMap<ProviderKind, u8>,
+    pub provider_tiers: HashMap<ProviderId, u8>,
 
     /// Eval-driven (A/B) routing. When enabled, requests are split across a set
     /// of candidate providers and the winner is biased toward whichever candidate
@@ -1150,7 +1266,7 @@ pub struct SmartRule {
 /// the provider config.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModalityMapping {
-    pub provider: ProviderKind,
+    pub provider: ProviderId,
     /// Model id to send to the provider. When absent the caller's `model`
     /// field is forwarded unchanged.
     #[serde(default)]
@@ -1167,7 +1283,7 @@ pub struct EvalRoutingConfig {
     /// rolling eval scores and sends most traffic to the leader, reserving
     /// `explore_ratio` for the others so scores stay fresh.
     #[serde(default)]
-    pub candidates: Vec<ProviderKind>,
+    pub candidates: Vec<ProviderId>,
 
     /// Fraction of eligible traffic reserved for exploration (non-leader
     /// candidates), in `[0.0, 1.0]`. Default: 0.2.
@@ -1191,7 +1307,7 @@ impl Default for EvalRoutingConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModelMapping {
-    pub provider: ProviderKind,
+    pub provider: ProviderId,
     /// If set, rewrite the model name before forwarding (e.g. "gpt-4" → "gpt-4o")
     pub provider_model: Option<String>,
 }
@@ -1243,6 +1359,79 @@ impl std::str::FromStr for ProviderKind {
             "fal" => Ok(ProviderKind::Fal),
             other => Err(format!("unknown provider kind: {other}")),
         }
+    }
+}
+
+/// A provider registry id — an arbitrary, open string naming which backend a
+/// route resolves to (e.g. `"openai"`, `"anthropic"`, or a novel plugin id like
+/// `"acme"`). This is the routing-layer analogue of the string-keyed
+/// [`crate::providers::ProviderRegistry`]: routing is no longer pinned to the
+/// closed [`ProviderKind`] enum, so a provider registered under a brand-new id
+/// is routable purely via config (`default_provider`, `fallback_chain`,
+/// `model_map`, `provider_tiers`, modality/eval maps) with no code change. An id
+/// with no registered provider simply misses the registry at dispatch and falls
+/// through the existing provider-unavailable path (fail-safe).
+///
+/// `#[serde(transparent)]` makes it (de)serialize as a bare string, so it works
+/// as a JSON/TOML map key (`provider_tiers`) and every existing config naming one
+/// of the nine legacy providers deserializes byte-identically. `ProviderKind` is
+/// retained only as an ergonomic legacy alias that lowers to a `ProviderId` via
+/// `From` / cross-type `PartialEq`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+pub struct ProviderId(pub String);
+
+impl ProviderId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for ProviderId {
+    /// Mirrors the former `ProviderKind::default() == OpenAi` so zero-config
+    /// routing keeps `default_provider = "openai"` (the only Default consumer).
+    fn default() -> Self {
+        ProviderId("openai".to_string())
+    }
+}
+
+impl std::fmt::Display for ProviderId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<String> for ProviderId {
+    fn from(s: String) -> Self {
+        ProviderId(s)
+    }
+}
+
+impl From<&str> for ProviderId {
+    fn from(s: &str) -> Self {
+        ProviderId(s.to_string())
+    }
+}
+
+impl From<ProviderKind> for ProviderId {
+    fn from(k: ProviderKind) -> Self {
+        ProviderId(k.as_str().to_string())
+    }
+}
+
+// Cross-type equality keeps `ProviderKind` an ergonomic legacy alias: call sites
+// and tests can still write `decision.provider == ProviderKind::Anthropic`, and
+// via std's blanket `Vec<A>: PartialEq<Vec<B>>` whole-chain assertions compile
+// unchanged.
+impl PartialEq<ProviderKind> for ProviderId {
+    fn eq(&self, other: &ProviderKind) -> bool {
+        self.0 == other.as_str()
+    }
+}
+
+impl PartialEq<ProviderId> for ProviderKind {
+    fn eq(&self, other: &ProviderId) -> bool {
+        self.as_str() == other.0
     }
 }
 
@@ -1404,7 +1593,8 @@ pub struct InspectorConfig {
     #[serde(default = "default_inspector_timeout_ms")]
     pub timeout_ms: u64,
     /// The action taken when the inspector flags a turn, reusing the firewall's
-    /// [`FirewallPolicy`] (Block / Sanitize / WarnAndContinue). Default: warn.
+    /// [`FirewallPolicy`] (Block / Sanitize / WarnAndContinue). Default: sanitize
+    /// (the shared [`FirewallPolicy`] default).
     #[serde(default)]
     pub action: FirewallPolicy,
 }
@@ -1507,9 +1697,14 @@ pub enum FirewallPolicy {
     /// Reject the request with a 403
     Block,
     /// Log the detection but allow the request through
-    #[default]
     WarnAndContinue,
-    /// Replace detected patterns with placeholder text
+    /// Replace detected patterns with placeholder text. This is the **default**:
+    /// a detected secret/PII is redacted before egress (the leak is closed) while
+    /// the request still succeeds (local-first UX preserved). Prompt-injection
+    /// matches are not meaningfully redactable, so under Sanitize they proceed
+    /// with any co-located PII/secrets scrubbed and the injection text left intact
+    /// (blocking injection is high-FP; that stays opt-in via `Block`).
+    #[default]
     Sanitize,
 }
 
@@ -1638,195 +1833,6 @@ pub struct ApiKeyConfig {
     /// identity headers to evade its quota.
     #[serde(default)]
     pub trusted_forwarder: bool,
-}
-
-/// What the gateway does when a per-user or per-agent budget is exhausted.
-///
-/// These are the four data-plane actions a budget can trigger (U21). They are
-/// enforced inline, on the request path, using local counters — no cross-user
-/// or team coordination (that is control-plane, U29).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum BudgetAction {
-    /// Allow the request through but flag it (observable via response headers
-    /// and metrics) so the client can surface a warning. Never blocks.
-    #[default]
-    Notify,
-    /// Swap the requested model for the rule's `downgrade_to` (a cheaper model)
-    /// and continue. Falls back to `Restrict` if no downgrade model is set.
-    Downgrade,
-    /// Allow the request but clamp it: strip tool definitions and cap
-    /// `max_tokens` so an over-budget caller can still get a minimal answer.
-    Restrict,
-    /// Reject the request with `402 budget_exceeded`. The hard stop.
-    Stop,
-}
-
-/// Alert tier: the notification fan-out a policy match triggers, ORTHOGONAL to
-/// [`BudgetAction`]/[`FirewallPolicy`] (the enforcement). Enforcement decides
-/// what happens to the request; the tier decides who gets told. Core takes the
-/// `max` tier across all matched rules, so the derive order (Silent < Warn <
-/// Fanout < Email) is load-bearing — keep the variants in ascending severity.
-///
-/// Named `Fanout` (never `Notify`) so it never collides with
-/// [`BudgetAction::Notify`], which is an enforcement action, not a tier.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, PartialOrd, Ord,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum AlertTier {
-    /// No alert. The default, so every pre-existing config parses to Silent.
-    #[default]
-    Silent,
-    /// Log/SSE only: surface a live warning to the desktop, no fan-out sinks.
-    Warn,
-    /// Fan out to Webhook/Telegram/ExpoPush (Core `notify_all`).
-    Fanout,
-    /// Fan out AND send email (Core SMTP sink / managed control-plane email).
-    Email,
-}
-
-/// A single budget rule: a token cap plus the action taken once it is reached.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct BudgetRule {
-    /// Lifetime token cap (input + output combined) for this scope. 0 = unlimited.
-    pub limit: u64,
-    /// Action to take once `limit` is reached. Defaults to `notify`.
-    #[serde(default)]
-    pub action: BudgetAction,
-    /// Model to route to when `action = downgrade`. Required for downgrade to
-    /// take effect; otherwise the rule degrades to `restrict`.
-    #[serde(default)]
-    pub downgrade_to: Option<String>,
-    /// Cap applied to `max_tokens` when `action = restrict`. Defaults to 256.
-    #[serde(default = "default_restrict_max_tokens")]
-    pub restrict_max_tokens: u64,
-    /// Notification fan-out tier when this rule matches (orthogonal to `action`).
-    /// Missing in old configs → `Silent`.
-    #[serde(default)]
-    pub alert: AlertTier,
-}
-
-fn default_restrict_max_tokens() -> u64 {
-    256
-}
-
-/// Per-user and per-agent token budgets (data plane, local counters).
-///
-/// Keyed by the identity Core forwards on the request: `x-ryu-user-id` and
-/// `x-ryu-agent-id`. A request can match both a user budget and an agent
-/// budget; both are evaluated and the most restrictive triggered action wins
-/// (`stop` > `downgrade`/`restrict` > `notify`).
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct BudgetConfig {
-    /// Per-user budgets, keyed by user id.
-    #[serde(default)]
-    pub users: HashMap<String, BudgetRule>,
-    /// Per-agent budgets, keyed by agent id.
-    #[serde(default)]
-    pub agents: HashMap<String, BudgetRule>,
-    /// A single global per-session token cap (#510). Unlike `users`/`agents`,
-    /// this is NOT a map: session ids are ephemeral (Core mints a fresh
-    /// conversation id per chat), so a per-session-id rule map would be dead
-    /// config nobody could populate. Instead one rule applies to every session,
-    /// with the running counter keyed by the `x-ryu-session-id` header.
-    #[serde(default)]
-    pub session: SessionBudgetConfig,
-}
-
-/// Global per-session token budget (#510). One rule that applies to every
-/// session; the running counter is keyed by session id at request time.
-///
-/// Mirrors [`BudgetRule`]'s shape (a token cap plus an action) so the existing
-/// `decide`/`enforce_budget` machinery enforces it identically — `stop` rejects,
-/// `downgrade` swaps the model, `restrict` clamps, `notify` only flags.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SessionBudgetConfig {
-    /// Lifetime token cap (input + output combined) for any single session.
-    /// 0 = unlimited (the feature is off).
-    #[serde(default)]
-    pub limit: u64,
-    /// Action to take once a session reaches `limit`. Defaults to `notify`.
-    #[serde(default)]
-    pub action: BudgetAction,
-    /// Model to route to when `action = downgrade`. Required for downgrade to
-    /// take effect; otherwise the rule degrades to `restrict`.
-    #[serde(default)]
-    pub downgrade_to: Option<String>,
-    /// Cap applied to `max_tokens` when `action = restrict`. Defaults to 256.
-    #[serde(default = "default_restrict_max_tokens")]
-    pub restrict_max_tokens: u64,
-    /// Notification fan-out tier when the session cap matches. Old configs →
-    /// `Silent`.
-    #[serde(default)]
-    pub alert: AlertTier,
-}
-
-impl Default for SessionBudgetConfig {
-    fn default() -> Self {
-        Self {
-            limit: 0,
-            action: BudgetAction::default(),
-            downgrade_to: None,
-            restrict_max_tokens: default_restrict_max_tokens(),
-            alert: AlertTier::default(),
-        }
-    }
-}
-
-/// Exec (sandbox) budget config: count and/or wall-clock per rolling window.
-///
-/// Unlike the token budget (lifetime, model-call shaped), exec budgets apply
-/// to non-model executions: sandbox runs, MCP tool invocations, and any
-/// event posted to `POST /v1/exec/audit`. Limits reset at each window boundary.
-///
-/// Both `max_count` and `max_wall_clock_secs` can be configured independently;
-/// when both are set, whichever is exhausted first triggers the deny. 0 = no
-/// limit for that dimension.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ExecBudgetConfig {
-    /// Maximum number of sandbox/tool executions per `window_secs`. 0 = unlimited.
-    #[serde(default = "default_exec_max_count")]
-    pub max_count: u64,
-    /// Maximum total wall-clock seconds of sandbox execution per `window_secs`. 0 = unlimited.
-    #[serde(default)]
-    pub max_wall_clock_secs: u64,
-    /// Rolling window size in seconds. Default: 3600 (one hour).
-    #[serde(default = "default_exec_window_secs")]
-    pub window_secs: u64,
-    /// Action when the exec budget is exhausted. Only `stop` (deny) is meaningful
-    /// here — exec events do not support model downgrade or token restriction.
-    #[serde(default)]
-    pub action: ExecBudgetAction,
-}
-
-fn default_exec_max_count() -> u64 {
-    0 // unlimited by default
-}
-fn default_exec_window_secs() -> u64 {
-    3600
-}
-
-/// What the gateway does when the exec budget is exhausted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ExecBudgetAction {
-    /// Allow the execution (log but do not block). Default.
-    #[default]
-    Notify,
-    /// Deny the execution with 429 budget_exceeded.
-    Stop,
-}
-
-impl Default for ExecBudgetConfig {
-    fn default() -> Self {
-        Self {
-            max_count: default_exec_max_count(),
-            max_wall_clock_secs: 0,
-            window_secs: default_exec_window_secs(),
-            action: ExecBudgetAction::default(),
-        }
-    }
 }
 
 /// Widget (Ryu Apps) governance config (§4.3). Governs the interactive widget
@@ -2543,19 +2549,10 @@ pub struct ChannelsConfig {
     pub whatsapp: Option<WhatsAppChannelConfig>,
 }
 
-/// When a bot replies inside a GROUP/multi-user chat. Direct messages are always
-/// answered regardless; this only gates the noisy group case. Mirrors the
-/// control-plane `GROUP_REPLY_MODES` (`packages/db/src/models/channel.model.ts`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum GroupReplyMode {
-    /// Reply only when the bot is @mentioned, replied to, or addressed by a
-    /// command. The safe default — a group bot otherwise answers every message.
-    #[default]
-    Mentions,
-    /// Reply to every message in the group.
-    All,
-}
+// `GroupReplyMode` is the shared channel-domain type, owned by the
+// `ryu-gw-channels` crate. Re-exported here so `config::GroupReplyMode` stays a
+// valid path and the channel config structs below keep using it as a field type.
+pub use ryu_gw_channels::GroupReplyMode;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TelegramChannelConfig {
@@ -2758,74 +2755,6 @@ fn default_whatsapp_graph_version() -> String {
 // ─── Phase-2 config structs ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AuditConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Path to the SQLite database file. Defaults to
-    /// `$XDG_DATA_HOME/ryu/audit.db` (or `~/.local/share/ryu/audit.db`).
-    #[serde(default = "default_audit_db_path")]
-    pub db_path: String,
-}
-
-fn default_audit_db_path() -> String {
-    dirs::data_local_dir()
-        .map(|d| d.join("ryu").join("audit.db"))
-        .and_then(|p| p.to_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| "audit.db".to_string())
-}
-
-impl Default for AuditConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            db_path: default_audit_db_path(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct EvalsConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Latency (ms) at which the latency score drops to 0. Default: 10 000 ms.
-    #[serde(default = "default_max_latency_ms")]
-    pub max_latency_ms: u64,
-    /// Fraction of completed requests to score, in `[0.0, 1.0]`.
-    /// `1.0` scores every request; `0.0` disables scoring entirely.
-    /// Sampling keeps eval overhead bounded under load. Default: 1.0.
-    #[serde(default = "default_sample_rate")]
-    pub sample_rate: f32,
-    /// Inject `stream_options.include_usage=true` into streamed requests so
-    /// the provider emits a terminal usage frame that the gateway can parse
-    /// to record non-zero token counts and run eval scoring at stream end.
-    ///
-    /// Only conforming providers (OpenAI and OpenAI-compatible) honour this
-    /// flag. Non-conforming providers fall back to `estimate_prompt_tokens`.
-    /// Default: true (on by default for all OpenAI-compatible providers).
-    #[serde(default = "default_true")]
-    pub stream_usage: bool,
-}
-
-fn default_max_latency_ms() -> u64 {
-    10_000
-}
-
-fn default_sample_rate() -> f32 {
-    1.0
-}
-
-impl Default for EvalsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_latency_ms: default_max_latency_ms(),
-            sample_rate: default_sample_rate(),
-            stream_usage: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ComposioConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -2872,65 +2801,11 @@ impl Default for ComposioConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SemanticCacheConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    /// Cosine-similarity threshold to count as a cache hit. Default: 0.92.
-    #[serde(default = "default_similarity_threshold")]
-    pub similarity_threshold: f32,
-    /// Embedding model to call via the OpenAI provider.
-    #[serde(default = "default_embedding_model")]
-    pub embedding_model: String,
-}
-
-fn default_similarity_threshold() -> f32 {
-    0.92
-}
-fn default_embedding_model() -> String {
-    "text-embedding-3-small".to_string()
-}
-
-impl Default for SemanticCacheConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            similarity_threshold: default_similarity_threshold(),
-            embedding_model: default_embedding_model(),
-        }
-    }
-}
+// `SemanticCacheConfig` + `CacheConfig` moved to the extracted `ryu-gw-cache`
+// stage crate (co-located with the backends they configure) and are re-exported
+// from the top of this module.
 
 // ─── Original Phase-1 config structs ─────────────────────────────────────────
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct CacheConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// How long a cached entry is valid (seconds). Default: 300 (5 min).
-    #[serde(default = "default_cache_ttl")]
-    pub ttl_secs: u64,
-    /// Maximum number of entries before the oldest are evicted. Default: 1000.
-    #[serde(default = "default_cache_max_entries")]
-    pub max_entries: usize,
-}
-
-impl Default for CacheConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            ttl_secs: default_cache_ttl(),
-            max_entries: default_cache_max_entries(),
-        }
-    }
-}
-
-fn default_cache_ttl() -> u64 {
-    300
-}
-fn default_cache_max_entries() -> usize {
-    1_000
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CircuitBreakerConfig {
@@ -3035,11 +2910,64 @@ impl Default for GatewayConfig {
             control_plane: ControlPlaneConfig::default(),
             exec_budget: ExecBudgetConfig::default(),
             compression: CompressionConfig::default(),
+            backends: StageBackendsConfig::default(),
+            pipeline: crate::pipeline::stages::PipelineOrderConfig::default(),
             tools: ToolsConfig::default(),
             widget: WidgetConfig::default(),
             credits: CreditsConfig::default(),
             fleet: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod provider_id_tests {
+    use super::{ProviderId, ProviderKind, RoutingConfig};
+
+    /// Provider routing is keyed by open registry-id strings: an existing config
+    /// naming one of the nine legacy providers deserializes byte-identically, AND
+    /// a brand-new id (`"acme"`) that no enum variant covers survives round-trip
+    /// through every routing field — including the `provider_tiers` map KEY, the
+    /// one spot where a non-transparent newtype Deserialize would silently drop it.
+    #[test]
+    fn legacy_and_novel_provider_ids_roundtrip_via_serde() {
+        let json = serde_json::json!({
+            "default_provider": "acme",
+            "fallback_chain": ["openai", "acme"],
+            "provider_tiers": { "openai": 0, "acme": 2 },
+            "model_map": { "my-model": { "provider": "acme" } }
+        });
+
+        let routing: RoutingConfig =
+            serde_json::from_value(json).expect("routing config with a novel provider id must parse");
+
+        // Legacy name lowers to the same string it always was (back-compat).
+        assert_eq!(routing.default_provider, ProviderId::from("acme"));
+        assert_eq!(routing.fallback_chain[0], ProviderKind::OpenAi); // "openai" legacy id
+        assert_eq!(routing.fallback_chain[1], ProviderId::from("acme"));
+
+        // The map KEY is the serde trap — both legacy and novel keys must survive.
+        assert_eq!(routing.provider_tiers.get(&ProviderId::from("openai")), Some(&0));
+        assert_eq!(routing.provider_tiers.get(&ProviderId::from("acme")), Some(&2));
+
+        assert_eq!(
+            routing.model_map.get("my-model").unwrap().provider,
+            ProviderId::from("acme")
+        );
+
+        // And it serializes back out as a bare string (no enum-shaped wrapper),
+        // so the wire stays identical to the pre-open-id format.
+        let back = serde_json::to_value(&routing).expect("serialize");
+        assert_eq!(back["default_provider"], "acme");
+        assert_eq!(back["fallback_chain"][0], "openai");
+    }
+
+    /// The empty/zero-config case keeps `default_provider = "openai"`, exactly as
+    /// the former `ProviderKind::default() == OpenAi` produced.
+    #[test]
+    fn default_provider_id_is_openai() {
+        assert_eq!(ProviderId::default(), ProviderKind::OpenAi);
+        assert_eq!(RoutingConfig::default().default_provider, ProviderKind::OpenAi);
     }
 }
 

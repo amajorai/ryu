@@ -1,0 +1,57 @@
+{
+	"id": "com.ryu.mail",
+	"name": "Mail",
+	"version": "1.0.0",
+	"description": "Agent Inboxes — email as a service for agents. Runs the out-of-process ryu-mail sidecar; Core proxies /api/mail/* to it. Its sandboxed companion is a per-node mail client (list inboxes, read messages, compose/send, create an inbox) driving /api/mail/* via the mail:crud bridge capability.",
+	"tagline": "Email inboxes for your agents",
+	"category": "Communication",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "mail-companion",
+			"name": "Mail",
+			"kind": "companion",
+			"config": {
+				"label": "Agent Inboxes",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"sidecars": [
+		{
+			"name": "ryu-mail",
+			"process": {
+				"kind": "local",
+				"command": "ryu-mail",
+				"command_env": "RYU_MAIL_BIN",
+				"port_env": "RYU_MAIL_PORT"
+			},
+			"port": 7996,
+			"health_path": "/api/mail/status",
+			"http": {
+				"mount": "/api/mail",
+				"public_mount": "/api/mail",
+				"max_body_bytes": 27262976,
+				"routes": [
+					{ "path": "/status" },
+					{ "path": "/inboxes" },
+					{ "path": "/inboxes/:id" },
+					{ "path": "/inboxes/:id/rotate-secret" },
+					{ "path": "/inboxes/:id/messages" },
+					{ "path": "/inboxes/:id/send" },
+					{ "path": "/messages/:id" },
+					{ "path": "/attachments/:id" },
+					{ "path": "/inbound/:id", "auth": "public" }
+				]
+			}
+		}
+	],
+	"permission_grants": ["mail:crud"],
+	"companion": {
+		"label": "Agent Inboxes",
+		"icon": "mail-01"
+	}
+}

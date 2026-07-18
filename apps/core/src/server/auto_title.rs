@@ -95,7 +95,8 @@ async fn auto_title_conversation(state: &ServerState, conversation_id: &str) {
     }
     let user_input: String = first.chars().take(MAX_INPUT_CHARS).collect();
 
-    let Some(raw) = generate(state, CHAT_SYSTEM_PROMPT, &user_input).await else {
+    let Some(raw) = generate(&state.preferences, &state.client, CHAT_SYSTEM_PROMPT, &user_input).await
+    else {
         return; // no local model + no override → keep the derived title
     };
     let title = sanitize_title(&raw);
@@ -113,12 +114,15 @@ async fn auto_title_conversation(state: &ServerState, conversation_id: &str) {
     }
 }
 
-/// Generate a concise meeting title from its summary, applying it unless the
-/// meeting title is user-chosen. Best-effort; returns the new title when it
-/// wrote one. Called from the meeting finalize path once notes exist.
-pub async fn auto_title_meeting(
-    state: &ServerState,
-    meeting_id: &str,
+/// Generate a concise meeting title from its summary (generate + sanitize only;
+/// no store write — the extracted `ryu_meetings` crate owns the write, leaving a
+/// user-chosen title alone). Best-effort; returns the candidate title or `None`.
+/// This is the Core-side implementation the meetings host shim calls: the
+/// shared title-model call reaches only preferences + the HTTP client, so it
+/// takes those directly instead of the whole `ServerState`.
+pub async fn generate_meeting_title(
+    preferences: &super::preferences::PreferencesStore,
+    client: &reqwest::Client,
     summary: &str,
 ) -> Option<String> {
     let summary = summary.trim();
@@ -126,53 +130,46 @@ pub async fn auto_title_meeting(
         return None;
     }
     let input: String = summary.chars().take(MAX_INPUT_CHARS).collect();
-    let raw = generate(state, MEETING_SYSTEM_PROMPT, &input).await?;
+    let raw = generate(preferences, client, MEETING_SYSTEM_PROMPT, &input).await?;
     let title = sanitize_title(&raw);
     if title.is_empty() {
-        return None;
-    }
-    match state
-        .meetings
-        .store
-        .auto_set_title(meeting_id, &title)
-        .await
-    {
-        Ok(Some(_)) => {
-            tracing::info!("auto-titled meeting {meeting_id}: {title}");
-            Some(title)
-        }
-        Ok(None) => None, // user-chosen title — left alone
-        Err(e) => {
-            tracing::warn!("auto-title write failed for meeting {meeting_id}: {e:#}");
-            None
-        }
+        None
+    } else {
+        Some(title)
     }
 }
 
 /// Produce a raw title string for `user_input`. Default: the resident local
 /// engine, called directly. Override (pref `auto-title-model`): the Gateway with
-/// that model id, tagged background. `None` when neither is available.
-async fn generate(state: &ServerState, system: &str, user_input: &str) -> Option<String> {
-    if let Ok(Some(pref)) = state.preferences.get(AUTO_TITLE_MODEL_PREF).await {
+/// that model id, tagged background. `None` when neither is available. Reaches
+/// only preferences + the HTTP client, so both are passed directly (this keeps
+/// the meeting-title path callable from the extracted meetings host without a
+/// `ServerState`).
+async fn generate(
+    preferences: &super::preferences::PreferencesStore,
+    client: &reqwest::Client,
+    system: &str,
+    user_input: &str,
+) -> Option<String> {
+    if let Ok(Some(pref)) = preferences.get(AUTO_TITLE_MODEL_PREF).await {
         let model = pref.trim().to_string();
         if !model.is_empty() {
-            let effort = state
-                .preferences
+            let effort = preferences
                 .get(AUTO_TITLE_EFFORT_PREF)
                 .await
                 .ok()
                 .flatten()
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
-            return gateway_title(state, &model, effort.as_deref(), system, user_input).await;
+            return gateway_title(client, &model, effort.as_deref(), system, user_input).await;
         }
     }
-    local_title(state, system, user_input).await
+    local_title(client, system, user_input).await
 }
 
 /// Call the resident local engine directly (no Gateway hop), so the user's text
 /// never leaves the machine and routing can't fall back to a cloud default.
-async fn local_title(state: &ServerState, system: &str, user_input: &str) -> Option<String> {
+async fn local_title(client: &reqwest::Client, system: &str, user_input: &str) -> Option<String> {
     let engine = ActiveEngineStore::load().active?;
     if !is_local_engine(&engine) {
         return None;
@@ -180,11 +177,11 @@ async fn local_title(state: &ServerState, system: &str, user_input: &str) -> Opt
     let base = local_engine_url(&engine)?; // e.g. http://127.0.0.1:8080/v1
                                            // The served model id. llama.cpp ignores it; ollama/vllm/DMR need the real
                                            // pulled name, so query `/models` and fall back to the engine name.
-    let model = served_model_id(state, &base)
+    let model = served_model_id(client, &base)
         .await
         .unwrap_or_else(|| engine.clone());
     let body = post_completion(
-        state,
+        client,
         &format!("{base}/chat/completions"),
         &model,
         None,
@@ -199,7 +196,7 @@ async fn local_title(state: &ServerState, system: &str, user_input: &str) -> Opt
 /// Route through the Gateway with an explicit model id (power-user override).
 /// `effort` is forwarded as `reasoning_effort` (empty = provider default).
 async fn gateway_title(
-    state: &ServerState,
+    client: &reqwest::Client,
     model: &str,
     effort: Option<&str>,
     system: &str,
@@ -210,7 +207,7 @@ async fn gateway_title(
     let base = base.trim_end_matches('/');
     let token = gateway_token();
     let body = post_completion(
-        state,
+        client,
         &format!("{base}/v1/chat/completions"),
         model,
         effort,
@@ -226,7 +223,7 @@ async fn gateway_title(
 /// the Gateway path needs auth); the `x-ryu-priority: background` header is
 /// harmless to a local engine and lets the Gateway de-prioritize the call.
 async fn post_completion(
-    state: &ServerState,
+    client: &reqwest::Client,
     url: &str,
     model: &str,
     effort: Option<&str>,
@@ -246,8 +243,7 @@ async fn post_completion(
     if let Some(effort) = effort {
         payload["reasoning_effort"] = json!(effort);
     }
-    let mut req = state
-        .client
+    let mut req = client
         .post(url)
         .timeout(std::time::Duration::from_secs(30))
         .header("x-ryu-priority", "background")
@@ -264,9 +260,8 @@ async fn post_completion(
 }
 
 /// First served model id from an OpenAI-compatible `/models` listing.
-async fn served_model_id(state: &ServerState, base: &str) -> Option<String> {
-    let resp = state
-        .client
+async fn served_model_id(client: &reqwest::Client, base: &str) -> Option<String> {
+    let resp = client
         .get(format!("{base}/models"))
         .timeout(std::time::Duration::from_secs(5))
         .send()

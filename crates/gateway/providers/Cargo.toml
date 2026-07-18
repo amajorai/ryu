@@ -1,0 +1,25 @@
+[package]
+name = "ryu-gw-providers"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+description = "Ryu Gateway concrete backend providers: the OpenAI/Anthropic/local/core/OpenRouter/Modal/GenAI/Replicate/Fal HTTP implementations behind the `Provider` trait, the shared provider HTTP helpers (retry, rate-limit header parsing, media-output normalization, model discovery), the per-provider quota sink, and the video-job value types. The `ProviderRegistry` + config-driven registration + key custody stay in apps/gateway ('engine moves, wiring stays'); the trait returns a crate-local `ProviderError` that the gateway maps to its `GatewayError` at the pipeline boundary, so a new provider is a drop-in."
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7" }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+futures-util = "0.3"
+bytes = "1"
+genai = "0.6.5"
+dashmap = "6"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+futures-util = "0.3"

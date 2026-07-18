@@ -16,10 +16,15 @@
 //! rather than silently passing. `moderation` has no pattern set in the firewall
 //! today, so it is accepted but not enforced (a documented no-op).
 
-use axum::{extract::State, Json};
+use axum::{
+    extract::State,
+    http::HeaderMap,
+    Json,
+};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::{error::GatewayError, state::SharedState};
+use crate::{audit::AuditRecord, error::GatewayError, state::SharedState};
 
 /// Body accepted by `POST /v1/firewall/check`.
 #[derive(Debug, Deserialize)]
@@ -72,8 +77,15 @@ fn map_checks(checks: &[String]) -> Vec<String> {
 }
 
 /// POST /v1/firewall/check — scan `text` for the requested guardrails.
+///
+/// This endpoint stays ungated (read-only over caller text), but a trip is now
+/// written to the audit log so a Core workflow Guardrails block is as observable
+/// as the pipeline's inline firewall/inspector blocks (P2 #3). The `authorization`
+/// bearer, when present, only *attributes* the audit row — it is never required,
+/// so the endpoint's auth posture is unchanged.
 pub async fn firewall_check(
     State(state): State<SharedState>,
+    headers: HeaderMap,
     Json(req): Json<FirewallCheckRequest>,
 ) -> Result<Json<FirewallCheckResponse>, GatewayError> {
     let mapped = map_checks(&req.checks);
@@ -96,9 +108,11 @@ pub async fn firewall_check(
                 pattern = %m.pattern_name,
                 "firewall check: guardrail tripped"
             );
+            let reason = format!("{kind} guardrail tripped ({})", m.pattern_name);
+            audit_firewall_check_block(&state, &headers, kind, &m.pattern_name);
             Ok(Json(FirewallCheckResponse {
                 allowed: false,
-                reason: Some(format!("{kind} guardrail tripped ({})", m.pattern_name)),
+                reason: Some(reason),
             }))
         }
         None => Ok(Json(FirewallCheckResponse {
@@ -106,6 +120,51 @@ pub async fn firewall_check(
             reason: None,
         })),
     }
+}
+
+/// Write an audit record when a `POST /v1/firewall/check` guardrail trips,
+/// mirroring the pipeline's `audit_inspector_block` shape (provider/backend tag,
+/// `error` carrying the tripped category + pattern). Like every other audit
+/// writer this is a no-op when audit logging is disabled. The bearer is read
+/// only to attribute the row (stripped of the `Bearer ` prefix, as
+/// `authenticate` does); an absent bearer is labelled `firewall-check`.
+fn audit_firewall_check_block(state: &SharedState, headers: &HeaderMap, kind: &str, pattern: &str) {
+    if !state.audit.is_enabled() {
+        return;
+    }
+    let api_key = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .map(|k| k.strip_prefix("Bearer ").unwrap_or(k).to_string())
+        .unwrap_or_else(|| "firewall-check".to_string());
+
+    state.audit.log(AuditRecord {
+        request_id: Uuid::new_v4().to_string(),
+        api_key,
+        user_name: None,
+        org_id: None,
+        team_id: None,
+        project_id: None,
+        provider: "firewall".to_string(),
+        model: "firewall-check".to_string(),
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_hit: false,
+        latency_ms: 0,
+        eval_score: None,
+        error: Some(format!("firewall check blocked: {kind} ({pattern})")),
+        skill_ids: None,
+        session_id: None,
+        user_id: None,
+        agent_id: None,
+        feature: None,
+        event_type: crate::audit::EventType::ModelCall,
+        backend: Some("firewall".to_string()),
+        command: None,
+        duration_ms: None,
+        exit_code: None,
+        widget_instance_id: None,
+    });
 }
 
 #[cfg(test)]

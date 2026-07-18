@@ -517,7 +517,7 @@ fn front_matter_name(dir: &Path) -> Option<String> {
         })?
     };
     let content = std::fs::read_to_string(path).ok()?;
-    let record = crate::skills::parse_skill_md("_probe", &content).ok()?;
+    let record = ryu_skills::parse_skill_md("_probe", &content).ok()?;
     Some(record.name)
 }
 
@@ -755,7 +755,7 @@ fn install_from_dir(dir: &Path, root_name_hint: Option<String>) -> Result<Instal
         skill.name
     };
 
-    let dest = crate::skills::SkillRegistry::skills_dir().join(&name);
+    let dest = ryu_skills::SkillRegistry::skills_dir().join(&name);
     // Replace any existing install of the same name so updates are clean.
     if dest.exists() {
         std::fs::remove_dir_all(&dest)
@@ -765,7 +765,7 @@ fn install_from_dir(dir: &Path, root_name_hint: Option<String>) -> Result<Instal
 
     // A skill installed through Ryu is active by default (consistent with the
     // skills.sh catalog install path).
-    crate::skills::set_active(&name, true);
+    ryu_skills::set_active(&name, true);
 
     Ok(InstallResult {
         slug: name.clone(),
@@ -889,7 +889,7 @@ mod tests {
     fn install_from_local_dir_with_nested_skills_layout() {
         // Serialize with other tests that mutate the shared RYU_SKILLS_* env vars,
         // so a parallel run never lets one test's remove_var clobber this set_var.
-        let _env = crate::skills::SKILLS_ENV_LOCK
+        let _env = ryu_skills::SKILLS_ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Build a fake repo: skills/<category>/<name>/SKILL.md + a resource file.
@@ -914,7 +914,7 @@ mod tests {
         let installed_dir = skills_home.join("my-cool-skill");
         let skill_md = installed_dir.join("SKILL.md");
         let resource = installed_dir.join("reference.md");
-        let active = crate::skills::load_active_set();
+        let active = ryu_skills::load_active_set();
 
         std::env::remove_var("RYU_SKILLS_DIR");
         std::env::remove_var("RYU_SKILLS_ACTIVE_FILE");

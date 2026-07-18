@@ -1,0 +1,13 @@
+[package]
+name = "ryu-gw-governance"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+description = "Ryu Gateway marketplace-governance core: the pure grant-allowlist matching + ed25519 manifest sign/verify crypto over a canonicalized (recursively key-sorted) JSON encoding, taking explicit keys and allowlists. No env / disk / process-key custody — the RYU_MARKETPLACE_SIGNING_KEY resolution, dev-persisted-key disk custody, and the default grant allowlist stay in apps/gateway ('engine moves, key custody stays'; the marketplace trust root, behavior-identical)."
+
+[dependencies]
+base64 = "0.22"
+ed25519-dalek = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

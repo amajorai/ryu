@@ -1,0 +1,18 @@
+[package]
+name = "ryu-workspace"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Git-native workspace primitive for Ryu: the git/worktree engine that shells `git`/`gh` for a caller-supplied cwd. Owns per-run worktrees (create → isolated `ryu/run-<id>` branch → `Drop`-on-completion cleanup), the aggregate run diff (committed + staged/untracked, numstat + name-status), whole-tree apply (commit → merge-into-base OR commit → push → `gh pr create`), and the read-only git status/branches/checkout/create-branch/commit-push helpers. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the ACP chat loop opens a worktree per isolated run). ZERO dependency on apps/core: the only kernel coupling is the Windows console-suppression `NoWindow` util, vendored verbatim (a `Command`-builder extension trait with no shared crate home — the same UTIL-duplication call `ryu-webhook-ingress` made). The chat-cwd threading (ChatStreamRequest → conversations.rs) stays kernel; only the git engine moves here."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

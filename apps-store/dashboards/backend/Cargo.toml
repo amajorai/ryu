@@ -1,0 +1,47 @@
+[package]
+name = "ryu-dashboards"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Home dashboards: a customizable, constantly-updating grid of widgets — an extracted Core capability crate (engine + SQLite store + widget-source resolution + refresh loop + device-image renderer + `/api/dashboards/*` HTTP surface). In-process default; Core consumes it as a NON-optional path dependency (the hardware device-dashboard renderer, the `dashboard_builder` MCP runnable, and the background refresh loop reach its types in every build). The three cross-cutting couplings the widget-source resolver needs — the Gateway URL/token (Composio), the agent runner (agent widgets), and the SSRF-guarded external fetch (HTTP widgets) — are inverted through the `DashboardsHost` trait so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# The out-of-process sidecar binary (mirrors ryu-mail). Core spawns it via the
+# generic manifest loader and proxies `/api/dashboards/*` to it on loopback; the
+# crate itself stays an in-process path-dep of Core too, so this package builds
+# BOTH a lib (`ryu_dashboards`, what Core consumes) and this bin. The bin depends
+# on its own lib — it constructs the store/engine/router from the public API and
+# provides a concrete `DashboardsHost`, exactly as Core's `CoreDashboardsHost` does.
+[[bin]]
+name = "ryu-dashboards"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
+# axum router has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+# `full` for the bin's runtime (`#[tokio::main]` + `net` for the loopback listener);
+# additive over the `sync` the lib alone needs — reqwest/axum already pull the rest.
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+reqwest = { version = "0.12", features = ["json"] }
+futures-util = "0.3"
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+humantime = "2"
+async-trait = "0.1"
+tracing = "0.1"
+# Bin-only: structured logs + data-dir resolution for the standalone sidecar. Unused
+# by the lib (Core drives logging + paths), harmless additions to its dep tree.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "5"
+url = "2"
+# Device-dashboard rasterization (hardware e-ink/LCD panels): `resvg` renders the
+# widget SVG onto a pure-Rust `tiny-skia` pixmap (no headless browser, no system
+# deps), and `render.rs` down-converts it to 1-bit / rgb565 for the firmware.
+resvg = "0.44"
+png = "0.17"

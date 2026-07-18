@@ -386,48 +386,19 @@ fn prune_workflow_versions(workflow_id: &str) -> std::io::Result<()> {
 /// after a durable `Delay` stamps its `wake_at`) so the run is resumable from
 /// disk.
 ///
-/// The write is **atomic and durable**: the JSON is written to a per-run temp
-/// file, flushed + `fsync`'d, then renamed over the destination (an atomic
-/// replace on both Windows and Unix). This guarantees a crash mid-write can
-/// never leave a torn/half-written run file — a reader always sees either the
-/// previous complete state or the new complete state — which is what makes the
-/// durable-timer / resume guarantees real rather than best-effort.
+/// The atomically-durable write (temp file + `fsync` + atomic rename) lives in
+/// the `ryu-durable` [`FileCheckpointStore`](ryu_durable::FileCheckpointStore) —
+/// the extracted durable-execution primitive — so a crash mid-write can never
+/// leave a torn/half-written run file. This thin wrapper only supplies the run
+/// directory and run-id key; the executor consumes the durable primitive through
+/// it after every node.
 pub fn save_run(run: &WorkflowRun) -> std::io::Result<()> {
-    validate_id(&run.run_id)?;
-    let dir = runs_dir();
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{}.json", run.run_id));
-    let json = serde_json::to_string_pretty(run)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-    // Unique temp name so two concurrent saves of different runs never collide;
-    // the run_id is already path-safe (validated above).
-    let tmp = dir.join(format!("{}.json.tmp", run.run_id));
-    {
-        use std::io::Write as _;
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(json.as_bytes())?;
-        // Flush to the OS and force the bytes to disk before the rename so a
-        // hard crash right after this returns still has the data on platter.
-        f.sync_all()?;
-    }
-    // Atomic replace. If the rename fails, clean up the temp so it doesn't leak.
-    match std::fs::rename(&tmp, &path) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            Err(e)
-        }
-    }
+    ryu_durable::FileCheckpointStore::new(runs_dir()).save(&run.run_id, run)
 }
 
 /// Load a run's state by run id.
 pub fn load_run(run_id: &str) -> std::io::Result<WorkflowRun> {
-    validate_id(run_id)?;
-    let path = runs_dir().join(format!("{run_id}.json"));
-    let bytes = std::fs::read(path)?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    ryu_durable::FileCheckpointStore::new(runs_dir()).load(run_id)
 }
 
 #[cfg(test)]

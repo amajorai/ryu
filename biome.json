@@ -213,7 +213,7 @@
       }
     },
     {
-      "includes": ["crates/ryu-sdk-napi/index.js"],
+      "includes": ["crates/sdk/napi/index.js"],
       "linter": {
         "enabled": false
       }

@@ -12,11 +12,14 @@ use inline_eval::{
     llm_judge_backstop_kind, InlineOutcome,
 };
 
+pub mod stages;
+use stages::PipelineStage;
+
 use crate::{
     audit::AuditRecord,
     budget::BudgetDecision,
     cache::Cache,
-    config::{AlertTier, ApiKeyConfig, BudgetAction, FirewallPolicy, Modality, ProviderKind},
+    config::{AlertTier, ApiKeyConfig, BudgetAction, FirewallPolicy, Modality, ProviderId},
     error::GatewayError,
     evaluators::{Evaluator, EvaluatorImpl, EvaluatorRegistry, EvaluatorTarget},
     firewall::{inspector::InspectorClient, FirewallScanner},
@@ -82,7 +85,7 @@ pub struct RequestContext {
     /// Per-agent slot provider override (M3 / #164), from `x-ryu-slot-provider`.
     /// When set, this provider is used in place of the static modality_map entry
     /// for multimodal requests from carded agents. `None` falls back to the map.
-    pub slot_provider: Option<ProviderKind>,
+    pub slot_provider: Option<ProviderId>,
     /// Per-agent slot model override (M3 / #164), from `x-ryu-slot-model`.
     /// When set alongside `slot_provider`, this model is forwarded to the provider
     /// instead of the config-pinned or caller-requested model.
@@ -221,7 +224,7 @@ pub struct AuthInputs<'a> {
     /// which folds in the legacy `x-ryu-composio-actions` fallback.
     pub tools_header_present: bool,
     /// Per-agent modality slot provider override (M3 / #164).
-    pub slot_provider: Option<ProviderKind>,
+    pub slot_provider: Option<ProviderId>,
     /// Per-agent modality slot model override (M3 / #164).
     pub slot_model: Option<String>,
     /// Core conversation id (M4 / #176), from `x-ryu-session-id`.
@@ -340,6 +343,32 @@ pub async fn authenticate(
     // take effect immediately without a gateway restart.
     let outcome = state.with_auth(|auth| {
         if !auth.require_auth {
+            // Even in no-auth mode a PROVISIONED master key stays authoritative:
+            // a caller presenting it is recognized as master (so the shared
+            // control-plane admin gate — config/audit/budget-spend — honors it),
+            // while everyone else remains anonymous exactly as before. Without a
+            // configured master key this is a no-op and the zero-config dev path
+            // is unchanged (P2 #2 — pairs with the `master_key_present` term in
+            // `admin_loopback_allowed`).
+            if let (Some(master), Some(raw)) = (&auth.master_key, raw_api_key) {
+                let key = raw.strip_prefix("Bearer ").unwrap_or(raw);
+                if key == master.as_str() {
+                    return StaticOutcome::Matched(build_ctx(
+                        true,
+                        key.to_string(),
+                        None,
+                        None,
+                        None,
+                        Some("master".to_string()),
+                        user_id.clone(),
+                        agent_id.clone(),
+                        None,
+                        false,
+                        None,
+                        None,
+                    ));
+                }
+            }
             return StaticOutcome::Matched(build_ctx(
                 false,
                 raw_api_key.unwrap_or("anonymous").to_string(),
@@ -491,18 +520,24 @@ async fn apply_smart_routing(state: &AppState, ctx: &RequestContext, body: &mut 
     // classifier `.await` below (PUT /v1/config can swap it concurrently); a per-agent
     // override still wins over the global default.
     let global = state.smart_router();
-    let router = per_agent.as_deref().unwrap_or(global.as_ref());
+    let router: &dyn crate::router::smart::SmartRouterBackend = match per_agent.as_deref() {
+        Some(r) => r,
+        None => global.as_ref(),
+    };
 
     if !router.is_active() {
         return false;
     }
 
+    // Clone the active model-routing backend out of its swap lock so it survives
+    // the classifier `.await` too (W6c: `state.router` is now a registry).
+    let model_router = state.router.active();
     let chosen = router
         .resolve(
             &body["messages"],
             ctx.session_id.as_deref(),
             &state.providers,
-            &state.router,
+            model_router.as_ref(),
             &state.http,
             state.config.providers.openai.as_ref(),
         )
@@ -574,260 +609,306 @@ async fn pre_process(
     // firewall warn-and-continue match). Merged with any budget alert by the
     // caller and stamped onto the response header via the router's map_response.
     let mut pending_alert: Option<PolicyAlert> = None;
-    // 1. Request rate limit — honours per-key RBAC overrides
-    if !state
-        .rate_limiter
-        .check_request_for_key(&ctx.api_key, ctx.key_config.as_ref())
-    {
-        warn!(key = %ctx.api_key, request_id = %ctx.request_id, "rate limit exceeded");
-        state.metrics.inc_rate_limited();
-        return Err(GatewayError::RateLimited);
-    }
 
-    // 2. Burst / bot detection
-    if !state.rate_limiter.check_burst(&ctx.api_key) {
-        warn!(key = %ctx.api_key, request_id = %ctx.request_id, "burst rate exceeded (bot detection)");
-        state.metrics.inc_rate_limited();
-        return Err(GatewayError::RateLimited);
-    }
-
-    // 3. Inbound firewall — per-request RESOLVED scanner (node → org → agent).
-    //
-    // `resolved_scanner` returns a cached `Arc<FirewallScanner>` (no lock held),
-    // so it is safe to reuse across the regex scan, the LLM inspector's `.await`,
-    // the locked-guardrail scan, and the companion redaction below — one
-    // resolution per request, shared by all four.
+    // Per-request inputs shared by the firewall / inspector / policy / companion
+    // stages. Resolved ONCE here (not per stage): `resolved_scanner` hands back a
+    // cached `Arc<FirewallScanner>` (node→org→agent, no lock held), reused across
+    // the regex scan, the inspector's `.await`, the locked-guardrail scan, and the
+    // companion redaction. `prompt_text` is the single text extraction the pre-W6d
+    // code also did once. Hoisting them above the stage loop (rather than computing
+    // inside the firewall step) is what lets the governance stages be reordered
+    // freely; the only cost is one extra text extraction on the rate-limited reject
+    // path, which is immaterial and not a behavior change.
     let prompt_text = extract_text_for_scanning(body);
     let scanner = state.resolved_scanner(ctx);
-    if let Some(violation) = scanner.scan_inbound(&prompt_text) {
-        match scanner.policy() {
-            FirewallPolicy::Block => {
-                state.metrics.inc_firewall_blocked();
-                return Err(GatewayError::FirewallBlocked(
-                    format!(
-                        "Inbound content blocked: {} ({:?})",
-                        violation.pattern_name, violation.kind
-                    ),
-                    firewall_policy_alert(scanner.config(), ctx, "block"),
-                ));
-            }
-            FirewallPolicy::Sanitize => {
-                warn!(
-                    request_id = %ctx.request_id,
-                    pattern = %violation.pattern_name,
-                    "firewall: sanitized inbound content"
-                );
-                sanitize_messages(body, scanner.as_ref());
-            }
-            FirewallPolicy::WarnAndContinue => {
-                warn!(
-                    request_id = %ctx.request_id,
-                    pattern = %violation.pattern_name,
-                    "firewall: inbound violation (warn-and-continue)"
-                );
-                // Ok-path stamp: a warn-tier firewall match propagates its alert
-                // to the response via `pre_process`'s pending-alert return.
-                pending_alert = merge_alert(
-                    pending_alert,
-                    firewall_policy_alert(scanner.config(), ctx, "notify"),
-                );
-            }
-        }
-    }
-
-    // 3a. LLM traffic inspector (opt-in, inbound-only). Runs AFTER the regex scan
-    // and BEFORE provider dispatch. It calls a cheap model directly (never the
-    // tool loop) and fails OPEN — a timeout / provider error / bad JSON is
-    // treated as not-flagged (allow + warn). Gated by `enabled` + `min_chars`
-    // inside `inspect`, so this branch is a cheap no-op when disabled.
-    let inspector_cfg = scanner.config().inspector.clone();
-    if inspector_cfg.enabled {
-        let verdict = crate::firewall::inspector::InspectorClient::inspect(
-            &prompt_text,
-            &inspector_cfg,
-            &state.providers,
-            &state.router,
-        )
-        .await;
-        if verdict.flagged {
-            match inspector_cfg.action {
-                FirewallPolicy::Block => {
-                    warn!(
-                        request_id = %ctx.request_id,
-                        categories = ?verdict.categories,
-                        reason = %verdict.reason,
-                        "inspector: blocked inbound content"
-                    );
-                    state.metrics.inc_firewall_blocked();
-                    audit_inspector_block(state, ctx, body, &verdict);
-                    return Err(GatewayError::FirewallBlocked(
-                        format!(
-                            "Inbound content blocked by inspector: {} [{}]",
-                            verdict.reason,
-                            verdict.categories.join(",")
-                        ),
-                        firewall_policy_alert(scanner.config(), ctx, "block"),
-                    ));
-                }
-                FirewallPolicy::Sanitize => {
-                    warn!(
-                        request_id = %ctx.request_id,
-                        categories = ?verdict.categories,
-                        "inspector: sanitizing flagged inbound content"
-                    );
-                    sanitize_messages(body, scanner.as_ref());
-                }
-                FirewallPolicy::WarnAndContinue => {
-                    warn!(
-                        request_id = %ctx.request_id,
-                        categories = ?verdict.categories,
-                        reason = %verdict.reason,
-                        "inspector: inbound flagged (warn-and-continue)"
-                    );
-                }
-            }
-        }
-    }
-
-    // 3a-ii. Unified-evaluator inline guardrails — INPUT target (P3). Driven by
-    // the resolved per-agent policy's enabled evaluator bindings (node→org→agent),
-    // it reuses the SAME block/sanitize/warn machinery as the regex firewall and
-    // the inspector. A no-op (allocation-free) when no binding is enabled.
-    if let Some(alert) =
-        apply_inline_input_evaluators(state, ctx, body, scanner.as_ref(), &prompt_text).await?
-    {
-        pending_alert = merge_alert(pending_alert, Some(alert));
-    }
-
-    // 3b. Control-plane policy (U28).
-    //
-    // The control plane already cascaded org/team/project/user layers and froze
-    // admin-locked fields; the data plane enforces the resolved policy here. The
-    // master key bypasses (operator escape hatch), matching rate-limit semantics
-    // elsewhere in the pipeline.
     let requested_model = body["model"].as_str().unwrap_or("gpt-4o").to_string();
-    if !ctx.is_master_key {
-        // A dynamically-resolved `rgw_` tenant enforces its OWN control-plane
-        // policy; single-org / static-key paths use the global startup policy.
-        let policy = ctx
-            .resolved_policy
-            .clone()
-            .unwrap_or_else(|| state.policy_snapshot());
 
-        // Model allowlist.
-        if !policy.allows_model(&requested_model) {
-            warn!(
-                request_id = %ctx.request_id,
-                model = %requested_model,
-                "policy: model not on the control-plane allowlist"
-            );
-            state.metrics.inc_firewall_blocked();
-            return Err(GatewayError::PolicyViolation(format!(
-                "Model '{requested_model}' is not approved by control-plane policy"
-            )));
-        }
+    // The routing decision, produced by the pinned `Route` stage. `StageOrder`
+    // guarantees `Route` is present in every resolved order, so this is `Some`
+    // after the loop.
+    let mut decision: Option<RouteDecision> = None;
 
-        // Locked guardrails: scan even if the local firewall config disabled
-        // them, so a lower level cannot bypass an admin-locked guardrail. Uses the
-        // same per-request resolved scanner (its custom patterns participate).
-        if policy.requires_firewall() {
-            if let Some(violation) =
-                scanner.scan_locked_guardrails(&prompt_text, &policy.locked_guardrails)
-            {
-                warn!(
-                    request_id = %ctx.request_id,
-                    pattern = %violation.pattern_name,
-                    "policy: locked guardrail violation in inbound request"
-                );
-                state.metrics.inc_firewall_blocked();
-                return Err(GatewayError::PolicyViolation(format!(
-                    "Inbound content violates a locked guardrail: {} ({:?})",
-                    violation.pattern_name, violation.kind
-                )));
+    // Run the pre-processing stages in the resolved, validated order. The order is
+    // DATA (`state.stage_order`, resolved once at config-apply time — zero
+    // per-request allocation to know it), so the default reproduces the exact
+    // pre-W6d numbered sequence while config can reorder / disable the governance
+    // block within the pinned safety skeleton (rate-limit → firewall → … → route
+    // → audit). See `pipeline::stages`.
+    for &stage in state.stage_order.stages() {
+        match stage {
+            // Steps 1 + 2: per-key request rate limit + burst / bot detection.
+            PipelineStage::RateLimit => {
+                if !state
+                    .rate_limiter
+                    .check_request_for_key(&ctx.api_key, ctx.key_config.as_ref())
+                {
+                    warn!(key = %ctx.api_key, request_id = %ctx.request_id, "rate limit exceeded");
+                    state.metrics.inc_rate_limited();
+                    return Err(GatewayError::RateLimited);
+                }
+                if !state.rate_limiter.check_burst(&ctx.api_key) {
+                    warn!(key = %ctx.api_key, request_id = %ctx.request_id, "burst rate exceeded (bot detection)");
+                    state.metrics.inc_rate_limited();
+                    return Err(GatewayError::RateLimited);
+                }
             }
+
+            // Step 3: inbound regex firewall on the per-request RESOLVED scanner
+            // (node → org → agent).
+            PipelineStage::Firewall => {
+                if let Some(violation) = scanner.scan_inbound(&prompt_text) {
+                    match scanner.policy() {
+                        FirewallPolicy::Block => {
+                            state.metrics.inc_firewall_blocked();
+                            return Err(GatewayError::FirewallBlocked(
+                                format!(
+                                    "Inbound content blocked: {} ({:?})",
+                                    violation.pattern_name, violation.kind
+                                ),
+                                firewall_policy_alert(scanner.config(), ctx, "block"),
+                            ));
+                        }
+                        FirewallPolicy::Sanitize => {
+                            warn!(
+                                request_id = %ctx.request_id,
+                                pattern = %violation.pattern_name,
+                                "firewall: sanitized inbound content"
+                            );
+                            sanitize_messages(body, scanner.as_ref());
+                        }
+                        FirewallPolicy::WarnAndContinue => {
+                            warn!(
+                                request_id = %ctx.request_id,
+                                pattern = %violation.pattern_name,
+                                "firewall: inbound violation (warn-and-continue)"
+                            );
+                            // Ok-path stamp: a warn-tier firewall match propagates
+                            // its alert to the response via the pending-alert return.
+                            pending_alert = merge_alert(
+                                pending_alert,
+                                firewall_policy_alert(scanner.config(), ctx, "notify"),
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Step 3a: LLM traffic inspector (opt-in, inbound-only). Calls a cheap
+            // model directly (never the tool loop) and fails OPEN — a timeout /
+            // provider error / bad JSON is treated as not-flagged (allow + warn).
+            // Gated by `enabled` + `min_chars` inside `inspect`, so it is a cheap
+            // no-op when disabled.
+            PipelineStage::Inspector => {
+                let inspector_cfg = scanner.config().inspector.clone();
+                if inspector_cfg.enabled {
+                    let model_router = state.router.active();
+                    let verdict = crate::firewall::inspector::InspectorClient::inspect(
+                        &prompt_text,
+                        &inspector_cfg,
+                        &state.providers,
+                        model_router.as_ref(),
+                    )
+                    .await;
+                    if verdict.flagged {
+                        match inspector_cfg.action {
+                            FirewallPolicy::Block => {
+                                warn!(
+                                    request_id = %ctx.request_id,
+                                    categories = ?verdict.categories,
+                                    reason = %verdict.reason,
+                                    "inspector: blocked inbound content"
+                                );
+                                state.metrics.inc_firewall_blocked();
+                                audit_inspector_block(state, ctx, body, &verdict);
+                                return Err(GatewayError::FirewallBlocked(
+                                    format!(
+                                        "Inbound content blocked by inspector: {} [{}]",
+                                        verdict.reason,
+                                        verdict.categories.join(",")
+                                    ),
+                                    firewall_policy_alert(scanner.config(), ctx, "block"),
+                                ));
+                            }
+                            FirewallPolicy::Sanitize => {
+                                warn!(
+                                    request_id = %ctx.request_id,
+                                    categories = ?verdict.categories,
+                                    "inspector: sanitizing flagged inbound content"
+                                );
+                                sanitize_messages(body, scanner.as_ref());
+                            }
+                            FirewallPolicy::WarnAndContinue => {
+                                warn!(
+                                    request_id = %ctx.request_id,
+                                    categories = ?verdict.categories,
+                                    reason = %verdict.reason,
+                                    "inspector: inbound flagged (warn-and-continue)"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Step 3a-ii: unified-evaluator inline guardrails — INPUT target (P3).
+            // Reuses the SAME block/sanitize/warn machinery as the regex firewall
+            // and the inspector. A no-op (allocation-free) when no binding is enabled.
+            PipelineStage::InlineInput => {
+                if let Some(alert) =
+                    apply_inline_input_evaluators(state, ctx, body, scanner.as_ref(), &prompt_text)
+                        .await?
+                {
+                    pending_alert = merge_alert(pending_alert, Some(alert));
+                }
+            }
+
+            // Step 3b: control-plane policy (U28). The master key bypasses
+            // (operator escape hatch), matching rate-limit semantics elsewhere.
+            PipelineStage::Policy => {
+                if !ctx.is_master_key {
+                    // A dynamically-resolved `rgw_` tenant enforces its OWN
+                    // control-plane policy; single-org / static-key paths use the
+                    // global startup policy.
+                    let policy = ctx
+                        .resolved_policy
+                        .clone()
+                        .unwrap_or_else(|| state.policy_snapshot());
+
+                    // Model allowlist.
+                    if !policy.allows_model(&requested_model) {
+                        warn!(
+                            request_id = %ctx.request_id,
+                            model = %requested_model,
+                            "policy: model not on the control-plane allowlist"
+                        );
+                        state.metrics.inc_firewall_blocked();
+                        return Err(GatewayError::PolicyViolation(format!(
+                            "Model '{requested_model}' is not approved by control-plane policy"
+                        )));
+                    }
+
+                    // Locked guardrails: scan even if the local firewall config
+                    // disabled them, so a lower level cannot bypass an admin-locked
+                    // guardrail. Uses the same per-request resolved scanner (its
+                    // custom patterns participate).
+                    if policy.requires_firewall() {
+                        if let Some(violation) =
+                            scanner.scan_locked_guardrails(&prompt_text, &policy.locked_guardrails)
+                        {
+                            warn!(
+                                request_id = %ctx.request_id,
+                                pattern = %violation.pattern_name,
+                                "policy: locked guardrail violation in inbound request"
+                            );
+                            state.metrics.inc_firewall_blocked();
+                            return Err(GatewayError::PolicyViolation(format!(
+                                "Inbound content violates a locked guardrail: {} ({:?})",
+                                violation.pattern_name, violation.kind
+                            )));
+                        }
+                    }
+                }
+            }
+
+            // Step 3c: companion DLP egress guard (M7 / #199). When Core tags a
+            // request as companion-sourced (screen-capture text), unconditionally
+            // redact PII and secrets from the inbound prompt before the provider
+            // call — regardless of whether the local firewall is enabled (AC3).
+            // `redact_companion_egress()` ignores `config.enabled`/`redact_pii`/
+            // `redact_secrets`; detections are recorded via the audit path (AC2).
+            PipelineStage::CompanionDlp => {
+                if ctx.companion_source {
+                    let (_, redacted_categories) = scanner.redact_companion_egress(&prompt_text);
+                    // Redact message bodies unconditionally (categories may be empty
+                    // for clean text).
+                    scanner.companion_sanitize_messages(&mut body["messages"]);
+                    if !redacted_categories.is_empty() {
+                        warn!(
+                            request_id = %ctx.request_id,
+                            categories = ?redacted_categories,
+                            "companion DLP: redacted PII/secrets from companion-sourced prompt before egress"
+                        );
+                        // Emit an audit record so redaction events are observable (AC2).
+                        let category_names: Vec<&str> = redacted_categories
+                            .iter()
+                            .map(|c| c.as_str())
+                            .collect();
+                        state.metrics.inc_firewall_blocked();
+                        state.audit.log(crate::audit::AuditRecord {
+                            request_id: ctx.request_id.clone(),
+                            api_key: ctx.api_key.clone(),
+                            user_name: ctx.user_name.clone(),
+                            org_id: ctx.org_id.clone(),
+                            team_id: ctx.team_id.clone(),
+                            project_id: ctx.project_id.clone(),
+                            provider: "companion-dlp".to_string(),
+                            model: body["model"].as_str().unwrap_or("unknown").to_string(),
+                            input_tokens: 0,
+                            output_tokens: 0,
+                            cache_hit: false,
+                            latency_ms: 0,
+                            eval_score: None,
+                            error: Some(format!(
+                                "companion DLP redacted: {}",
+                                category_names.join(",")
+                            )),
+                            skill_ids: ctx.skill_ids.clone(),
+                            session_id: ctx.session_id.clone(),
+                            user_id: ctx.user_id.clone(),
+                            agent_id: ctx.agent_id.clone(),
+                            feature: ctx.feature.clone(),
+                            event_type: crate::audit::EventType::ModelCall,
+                            backend: Some("companion".to_string()),
+                            command: None,
+                            duration_ms: None,
+                            exit_code: None,
+                            widget_instance_id: None,
+                        });
+                    }
+                }
+            }
+
+            // Step 4: model routing (Plane A). Per-agent chat slot override wins
+            // over eval/model routing (M3 / #164); eval-driven A/B routing only
+            // applies when no slot is set and the classifier did not already choose.
+            PipelineStage::Route => {
+                decision = Some(
+                    if ctx.slot_provider.is_some() || ctx.slot_model.is_some() {
+                        state.router.route_modality_with_slot(
+                            &crate::config::Modality::Chat,
+                            &requested_model,
+                            ctx.slot_provider.as_ref(),
+                            ctx.slot_model.as_deref(),
+                        )
+                    } else if smart_routed {
+                        // The classifier already chose this model — route it straight
+                        // to its provider and skip eval/A-B routing, which would
+                        // otherwise reassign the provider and break the smart-routed
+                        // model (#473 smart routing).
+                        state.router.route(&requested_model)
+                    } else {
+                        state
+                            .router
+                            .eval_route(&requested_model, |p| {
+                                state.evals.provider_score(p.as_str())
+                            })
+                            .unwrap_or_else(|| state.router.route(&requested_model))
+                    },
+                );
+            }
+
+            // Ordering anchor only. Auditing needs the provider response, so the
+            // real `audit.log` runs post-provider in `run` / `run_stream` — which
+            // is genuinely last. Modelled as a pinned terminal stage purely so
+            // "audit is always last" is an enforceable, testable invariant; here it
+            // is a deliberate no-op, NOT a missing implementation.
+            PipelineStage::Audit => {}
         }
     }
 
-    // 3c. Companion DLP egress guard (M7 / #199).
-    //
-    // When Core tags a request as companion-sourced (screen-capture text), we
-    // unconditionally redact PII and secrets from the inbound prompt before the
-    // provider call — regardless of whether the local firewall is enabled.
-    // This satisfies AC3: a locked/org guardrail for companion egress that cannot
-    // be bypassed by a locally firewall-disabled config. The redaction uses
-    // `redact_companion_egress()` which ignores `config.enabled`/`redact_pii`/
-    // `redact_secrets`. Detections are recorded via the existing audit path (AC2).
-    if ctx.companion_source {
-        let (_, redacted_categories) = scanner.redact_companion_egress(&prompt_text);
-        // Redact message bodies unconditionally (categories may be empty for clean text).
-        scanner.companion_sanitize_messages(&mut body["messages"]);
-        if !redacted_categories.is_empty() {
-            warn!(
-                request_id = %ctx.request_id,
-                categories = ?redacted_categories,
-                "companion DLP: redacted PII/secrets from companion-sourced prompt before egress"
-            );
-            // Emit an audit record so redaction events are observable (AC2).
-            let category_names: Vec<&str> = redacted_categories
-                .iter()
-                .map(|c| c.as_str())
-                .collect();
-            state.metrics.inc_firewall_blocked();
-            state.audit.log(crate::audit::AuditRecord {
-                request_id: ctx.request_id.clone(),
-                api_key: ctx.api_key.clone(),
-                user_name: ctx.user_name.clone(),
-                org_id: ctx.org_id.clone(),
-                team_id: ctx.team_id.clone(),
-                project_id: ctx.project_id.clone(),
-                provider: "companion-dlp".to_string(),
-                model: body["model"].as_str().unwrap_or("unknown").to_string(),
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_hit: false,
-                latency_ms: 0,
-                eval_score: None,
-                error: Some(format!(
-                    "companion DLP redacted: {}",
-                    category_names.join(",")
-                )),
-                skill_ids: ctx.skill_ids.clone(),
-                session_id: ctx.session_id.clone(),
-                user_id: ctx.user_id.clone(),
-                agent_id: ctx.agent_id.clone(),
-                feature: ctx.feature.clone(),
-                event_type: crate::audit::EventType::ModelCall,
-                backend: Some("companion".to_string()),
-                command: None,
-                duration_ms: None,
-                exit_code: None,
-                widget_instance_id: None,
-            });
-        }
-    }
-
-    // 4. Route — per-agent chat slot override wins over eval/model routing (M3 / #164).
-    // When Core forwards a carded agent's chat slot via `x-ryu-slot-chat-provider`,
-    // the slot takes priority so the agent's chosen provider is always honored.
-    // Eval-driven A/B routing only applies when no slot is set.
-    let decision = if ctx.slot_provider.is_some() || ctx.slot_model.is_some() {
-        state.router.route_modality_with_slot(
-            &crate::config::Modality::Chat,
-            &requested_model,
-            ctx.slot_provider.as_ref(),
-            ctx.slot_model.as_deref(),
-        )
-    } else if smart_routed {
-        // The classifier already chose this model — route it straight to its
-        // provider and skip eval/A-B routing, which would otherwise reassign the
-        // provider and break the smart-routed model (#473 smart routing).
-        state.router.route(&requested_model)
-    } else {
-        state
-            .router
-            .eval_route(&requested_model, |p| state.evals.provider_score(p.as_str()))
-            .unwrap_or_else(|| state.router.route(&requested_model))
-    };
+    // `Route` is pinned present in every resolved `StageOrder`, so the loop always
+    // produced a decision.
+    let decision = decision.expect("Route stage is pinned present in every resolved StageOrder");
 
     // Build exact-match cache key from the (possibly sanitized) body.
     let cache_key = Cache::make_key(ctx.org_id.as_deref(), &decision.model, &body["messages"]);
@@ -923,13 +1004,14 @@ async fn flag_inline_binding(
             }
             let ins = &scanner.config().inspector;
             let timeout = if ins.timeout_ms == 0 { 1500 } else { ins.timeout_ms };
+            let model_router = state.router.active();
             let verdict = InspectorClient::inspect_rubric(
                 text,
                 rubric,
                 &ins.model,
                 timeout,
                 &state.providers,
-                &state.router,
+                model_router.as_ref(),
             )
             .await;
             // Deterministic floor: when the judge did NOT answer (no provider /
@@ -1385,11 +1467,14 @@ pub async fn run(
     // 5b. Semantic cache lookup (optional)
     let mut semantic_embedding: Option<Vec<f32>> = None;
     if let (Some(sc), Some(openai_cfg)) = (
-        &state.semantic_cache,
+        state.semantic_cache.active(),
         state.config.providers.openai.as_ref(),
     ) {
         let text = SemanticCache::messages_to_text(&body["messages"]);
-        if let Ok(emb) = sc.get_embedding(&text, &state.http, openai_cfg).await {
+        if let Ok(emb) = sc
+            .get_embedding(&text, &state.http, &openai_cfg.base_url, &openai_cfg.api_key)
+            .await
+        {
             if let Some(cached) = sc.lookup(ctx.org_id.as_deref(), &emb) {
                 debug!(request_id = %ctx.request_id, "semantic cache hit");
                 state.metrics.inc_semantic_cache_hit();
@@ -1500,14 +1585,14 @@ pub async fn run(
                 provider = provider_kind.as_str(),
                 "circuit open, skipping provider"
             );
-            last_err = Some(GatewayError::CircuitOpen(provider_kind.as_str()));
+            last_err = Some(GatewayError::CircuitOpen(provider_kind.as_str().to_string()));
             if Some(provider_kind) == primary_provider.as_ref() {
                 primary_skipped = true;
             }
             continue;
         }
 
-        let Some(provider) = state.providers.get(provider_kind) else {
+        let Some(provider) = state.providers.get(provider_kind.as_str()) else {
             if Some(provider_kind) == primary_provider.as_ref() {
                 primary_skipped = true;
             }
@@ -1633,6 +1718,7 @@ pub async fn run(
                 provider
                     .complete(&decision.model, &body)
                     .await
+                    .map_err(GatewayError::from)
                     .map(|v| (v, 0u64))
             }
         };
@@ -1734,7 +1820,7 @@ pub async fn run(
                 state.cache.insert(cache_key, response.clone());
 
                 // 12b. Semantic cache store (if we fetched an embedding earlier)
-                if let (Some(sc), Some(emb)) = (&state.semantic_cache, semantic_embedding) {
+                if let (Some(sc), Some(emb)) = (state.semantic_cache.active(), semantic_embedding) {
                     sc.insert(ctx.org_id.clone(), emb, response.clone());
                 }
 
@@ -2116,14 +2202,14 @@ pub async fn run_stream(
 
     for provider_kind in &fallback_chain {
         if state.circuit_breaker.is_open(provider_kind.as_str()) {
-            last_err = Some(GatewayError::CircuitOpen(provider_kind.as_str()));
+            last_err = Some(GatewayError::CircuitOpen(provider_kind.as_str().to_string()));
             if Some(provider_kind) == primary_provider_stream.as_ref() {
                 primary_skipped_stream = true;
             }
             continue;
         }
 
-        let Some(provider) = state.providers.get(provider_kind) else {
+        let Some(provider) = state.providers.get(provider_kind.as_str()) else {
             if Some(provider_kind) == primary_provider_stream.as_ref() {
                 primary_skipped_stream = true;
             }
@@ -2195,7 +2281,10 @@ pub async fn run_stream(
                 Err(e) => Err(e),
             }
         } else {
-            provider.complete_stream(&decision.model, &body).await
+            provider
+                .complete_stream(&decision.model, &body)
+                .await
+                .map_err(GatewayError::from)
         };
 
         match stream_result {
@@ -2235,10 +2324,10 @@ pub async fn run_stream(
                 // arrives; streaming responses arrive incrementally, so we wrap
                 // the SSE body. Behaviour is chosen per-policy because bytes
                 // already streamed to the client cannot be un-sent:
-                //   - WarnAndContinue (default): pass the stream through
-                //     unchanged, scanning the accumulated text only to log
-                //     detections. Keeps the U18 "stream through unchanged"
-                //     contract for the default config.
+                //   - WarnAndContinue: pass the stream through unchanged,
+                //     scanning the accumulated text only to log detections.
+                //     Keeps the U18 "stream through unchanged" contract for the
+                //     warn config.
                 //   - Block / Sanitize: buffer the upstream stream fully, scan
                 //     the assembled text, then emit either a single blocked SSE
                 //     error frame or the sanitized completion. This defeats
@@ -2467,14 +2556,14 @@ pub async fn run_multimodal(
 
     for provider_kind in &fallback_chain {
         if state.circuit_breaker.is_open(provider_kind.as_str()) {
-            last_err = Some(GatewayError::CircuitOpen(provider_kind.as_str()));
+            last_err = Some(GatewayError::CircuitOpen(provider_kind.as_str().to_string()));
             if Some(provider_kind) == primary_provider_mm.as_ref() {
                 primary_skipped_mm = true;
             }
             continue;
         }
 
-        let Some(provider) = state.providers.get(provider_kind) else {
+        let Some(provider) = state.providers.get(provider_kind.as_str()) else {
             if Some(provider_kind) == primary_provider_mm.as_ref() {
                 primary_skipped_mm = true;
             }
@@ -2484,10 +2573,22 @@ pub async fn run_multimodal(
         state.metrics.inc_provider_request(provider.name());
 
         let result = match modality {
-            Modality::Image => provider.generate_image(&decision.model, &body).await,
-            Modality::Tts => provider.synthesize_speech(&decision.model, &body).await,
-            Modality::Stt => provider.transcribe_audio(&decision.model, &body).await,
-            Modality::Chat => provider.complete(&decision.model, &body).await,
+            Modality::Image => provider
+                .generate_image(&decision.model, &body)
+                .await
+                .map_err(GatewayError::from),
+            Modality::Tts => provider
+                .synthesize_speech(&decision.model, &body)
+                .await
+                .map_err(GatewayError::from),
+            Modality::Stt => provider
+                .transcribe_audio(&decision.model, &body)
+                .await
+                .map_err(GatewayError::from),
+            Modality::Chat => provider
+                .complete(&decision.model, &body)
+                .await
+                .map_err(GatewayError::from),
             // Video is job-based (submit + poll); it never flows through the
             // block-and-return path. `submit_video_job` handles it instead.
             Modality::Video => Err(GatewayError::ProviderError(
@@ -2714,11 +2815,11 @@ pub async fn submit_video_job(
 
     let provider_kind = decision.provider.clone();
     if state.circuit_breaker.is_open(provider_kind.as_str()) {
-        let e = GatewayError::CircuitOpen(provider_kind.as_str());
+        let e = GatewayError::CircuitOpen(provider_kind.as_str().to_string());
         audit_failure(&state, &ctx, &decision.model, &e, start);
         return Err(e);
     }
-    let Some(provider) = state.providers.get(&provider_kind) else {
+    let Some(provider) = state.providers.get(provider_kind.as_str()) else {
         let e = GatewayError::AllProvidersUnavailable(format!(
             "video provider '{}' not configured",
             provider_kind.as_str()
@@ -2731,6 +2832,7 @@ pub async fn submit_video_job(
     let job = provider
         .submit_video(&decision.model, &body)
         .await
+        .map_err(GatewayError::from)
         .map_err(|e| {
             state.circuit_breaker.record_failure(provider.name());
             state.metrics.inc_provider_error(provider.name());
@@ -2818,7 +2920,7 @@ pub async fn poll_video_job(
         return Ok(job.to_response());
     }
 
-    let Some(provider) = state.providers.get(&job.provider) else {
+    let Some(provider) = state.providers.get(job.provider.as_str()) else {
         return Err(GatewayError::AllProvidersUnavailable(format!(
             "video provider '{}' not configured",
             job.provider.as_str()
@@ -3926,7 +4028,7 @@ fn response_to_text(response: &Value) -> String {
     out
 }
 
-fn sanitize_messages(body: &mut Value, scanner: &crate::firewall::FirewallScanner) {
+fn sanitize_messages(body: &mut Value, scanner: &dyn crate::firewall::FirewallBackend) {
     if let Some(messages) = body["messages"].as_array_mut() {
         for msg in messages.iter_mut() {
             if let Some(content) = msg["content"].as_str() {
@@ -3936,7 +4038,7 @@ fn sanitize_messages(body: &mut Value, scanner: &crate::firewall::FirewallScanne
     }
 }
 
-fn sanitize_response(response: &mut Value, scanner: &crate::firewall::FirewallScanner) {
+fn sanitize_response(response: &mut Value, scanner: &dyn crate::firewall::FirewallBackend) {
     if let Some(choices) = response["choices"].as_array_mut() {
         for choice in choices.iter_mut() {
             if let Some(content) = choice["message"]["content"].as_str() {
@@ -4562,6 +4664,41 @@ mod tests {
         assert!(!FirewallScanner::new(off).outbound_enabled());
     }
 
+    /// A bare secret in a chat body does NOT reach the provider under the DEFAULT
+    /// firewall config. This exercises the exact `PipelineStage::Firewall` decision
+    /// (scan_inbound → match policy → sanitize_messages) with no policy overrides,
+    /// proving the default `Sanitize` closes the inbound secret-egress leak.
+    #[test]
+    fn bare_secret_not_forwarded_to_provider_under_default() {
+        let scanner = FirewallScanner::new(FirewallConfig::default());
+        let mut body = serde_json::json!({
+            "model": "gpt-4o",
+            "messages": [
+                { "role": "user", "content": "deploy with AKIAIOSFODNN7EXAMPLE now" }
+            ]
+        });
+
+        let prompt = extract_text_for_scanning(&body);
+        let violation = scanner
+            .scan_inbound(&prompt)
+            .expect("a bare secret must trip the inbound scan");
+        assert_eq!(violation.kind, crate::firewall::DetectionKind::Secret);
+
+        // The default policy is Sanitize, so the Firewall stage redacts the body.
+        assert_eq!(scanner.policy(), &FirewallPolicy::Sanitize);
+        sanitize_messages(&mut body, &scanner);
+
+        let egress = body["messages"][0]["content"].as_str().unwrap();
+        assert!(
+            !egress.contains("AKIAIOSFODNN7EXAMPLE"),
+            "secret must not reach the provider body: {egress}"
+        );
+        assert!(
+            egress.contains("[REDACTED:"),
+            "expected a redaction marker in the egress body: {egress}"
+        );
+    }
+
     // ─── Multimodal pipeline integration tests ────────────────────────────────
 
     /// Verify that `multimodal_input_text` extracts the right field per modality.
@@ -4594,7 +4731,7 @@ mod tests {
         modality_map.insert(
             Modality::Image,
             ModalityMapping {
-                provider: crate::config::ProviderKind::OpenAi,
+                provider: crate::config::ProviderKind::OpenAi.into(),
                 model: Some("dall-e-3".to_string()),
             },
         );
@@ -4653,7 +4790,7 @@ mod tests {
         modality_map.insert(
             Modality::Stt,
             ModalityMapping {
-                provider: crate::config::ProviderKind::OpenAi,
+                provider: crate::config::ProviderKind::OpenAi.into(),
                 model: Some("whisper-1".to_string()),
             },
         );
@@ -4702,7 +4839,7 @@ mod tests {
             modality_map.insert(
                 Modality::Image,
                 ModalityMapping {
-                    provider: provider.clone(),
+                    provider: provider.clone().into(),
                     model: None,
                 },
             );
@@ -4735,7 +4872,7 @@ mod tests {
         modality_map.insert(
             Modality::Image,
             ModalityMapping {
-                provider: ProviderKind::OpenAi,
+                provider: ProviderKind::OpenAi.into(),
                 model: Some("dall-e-3".to_string()),
             },
         );
@@ -4746,7 +4883,7 @@ mod tests {
         });
 
         // The carded agent's image slot pins Local / "my-local-image-model".
-        let slot_provider = ProviderKind::Local;
+        let slot_provider: ProviderId = ProviderKind::Local.into();
         let slot_model = "my-local-image-model";
 
         let decision = router.route_modality_with_slot(
@@ -4772,9 +4909,10 @@ mod tests {
     /// entries that don't pin a model.
     #[test]
     fn per_agent_slot_without_model_forwards_caller_model() {
+        use crate::config::ProviderKind;
         let router = crate::router::ModelRouter::new(crate::config::RoutingConfig::default());
 
-        let slot_provider = ProviderKind::Anthropic;
+        let slot_provider: ProviderId = ProviderKind::Anthropic.into();
         let decision = router.route_modality_with_slot(
             &Modality::Tts,
             "tts-caller-model",
@@ -4800,7 +4938,7 @@ mod tests {
         modality_map.insert(
             Modality::Image,
             ModalityMapping {
-                provider: ProviderKind::OpenAi,
+                provider: ProviderKind::OpenAi.into(),
                 model: Some("dall-e-3".to_string()),
             },
         );
@@ -4843,7 +4981,7 @@ mod tests {
         // Chat call with a slot override — the agent card pins Anthropic for chat.
         // This exercises the `pre_process` branch added in #164: when
         // ctx.slot_provider is Some, route_modality_with_slot(Chat,...) is used.
-        let chat_slot_provider = ProviderKind::Anthropic;
+        let chat_slot_provider: ProviderId = ProviderKind::Anthropic.into();
         let chat_slot_model = "claude-3-5-sonnet";
         let chat_decision = router.route_modality_with_slot(
             &Modality::Chat,
@@ -4859,7 +4997,7 @@ mod tests {
         assert_eq!(chat_decision.model, "claude-3-5-sonnet");
 
         // Image call — agent card pins Local provider for image generation.
-        let image_slot_provider = ProviderKind::Local;
+        let image_slot_provider: ProviderId = ProviderKind::Local.into();
         let image_slot_model = "stable-diffusion-local";
         let image_decision = router.route_modality_with_slot(
             &Modality::Image,
@@ -4900,6 +5038,154 @@ mod tests {
             decision.provider,
             ProviderKind::OpenAi,
             "absent slot must fall through to standard model routing for chat"
+        );
+    }
+
+    /// End-to-end proof that provider routing is open to arbitrary registry ids:
+    /// a provider registered under a brand-new id (`"acme"`) that the closed
+    /// `ProviderKind` enum never covered is routable purely via
+    /// `default_provider = "acme"` in config, and a real request driven through
+    /// the full `run()` pipeline reaches that provider's `complete()`. This is the
+    /// acceptance test for W6b — the enum is no longer on the road, only the map.
+    #[tokio::test]
+    async fn novel_provider_id_routable_end_to_end_through_pipeline() {
+        use crate::audit::AuditLogger;
+        use crate::config::{
+            AuditConfig, EvalsConfig, FirewallConfig, GatewayConfig, ProviderId, RoutingConfig,
+        };
+        use crate::providers::Provider;
+        use crate::state::AppState;
+        use serde_json::{json, Value};
+        use std::pin::Pin;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        // A provider under an id no enum variant knows about.
+        struct AcmeProvider {
+            calls: AtomicUsize,
+        }
+        impl Provider for AcmeProvider {
+            fn name(&self) -> &'static str {
+                "acme"
+            }
+            fn complete<'a>(
+                &'a self,
+                _model: &'a str,
+                _body: &'a Value,
+            ) -> Pin<
+                Box<
+                    dyn std::future::Future<Output = Result<Value, ryu_gw_providers::ProviderError>>
+                        + Send
+                        + 'a,
+                >,
+            > {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async move {
+                    Ok(json!({
+                        "id": "chatcmpl-acme",
+                        "object": "chat.completion",
+                        "model": "acme-1",
+                        "choices": [{
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "pong"},
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+                    }))
+                })
+            }
+            fn complete_stream<'a>(
+                &'a self,
+                _model: &'a str,
+                _body: &'a Value,
+            ) -> Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<axum::body::Body, ryu_gw_providers::ProviderError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                Box::pin(async move {
+                    Err(ryu_gw_providers::ProviderError::Provider("no stream".into()))
+                })
+            }
+        }
+
+        // Route everything to "acme" by config alone — no code names the enum.
+        let config = GatewayConfig {
+            routing: RoutingConfig {
+                default_provider: ProviderId::from("acme"),
+                ..RoutingConfig::default()
+            },
+            firewall: FirewallConfig {
+                enabled: false,
+                ..FirewallConfig::default()
+            },
+            ..GatewayConfig::default()
+        };
+
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
+        let mut state = AppState::new_for_test(config, audit, evals);
+
+        let acme = Arc::new(AcmeProvider {
+            calls: AtomicUsize::new(0),
+        });
+        state
+            .providers
+            .register(Arc::clone(&acme) as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let ctx = RequestContext {
+            request_id: "acme-route-req".to_string(),
+            api_key: "sk-test".to_string(),
+            is_master_key: false,
+            org_id: None,
+            team_id: None,
+            project_id: None,
+            user_name: None,
+            user_id: None,
+            agent_id: None,
+            key_config: None,
+            skill_ids: None,
+            tool_actions: None,
+            tools_header_present: false,
+            slot_provider: None,
+            slot_model: None,
+            session_id: None,
+            feature: None,
+            companion_source: false,
+            tool_search_requested: false,
+            priority: crate::concurrency::Priority::Interactive,
+            tool_profile: None,
+            raw_tools: false,
+            managed_inference: false,
+            remaining_budget_micro_usd: None,
+            resolved_policy: None,
+        };
+
+        let body = json!({
+            "model": "anything",
+            "messages": [{"role": "user", "content": "ping"}]
+        });
+
+        let out = run(Arc::clone(&state), ctx, body)
+            .await
+            .expect("pipeline must route to the novel-id provider and succeed");
+
+        assert_eq!(
+            out.provider_used, "acme",
+            "the provider registered under the novel id must serve the turn end-to-end"
+        );
+        assert_eq!(
+            acme.calls.load(Ordering::SeqCst),
+            1,
+            "the novel-id provider's complete() must have been invoked exactly once"
         );
     }
 

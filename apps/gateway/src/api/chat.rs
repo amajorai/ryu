@@ -9,7 +9,7 @@ use tracing::debug;
 
 use crate::{
     budget::BudgetDecision,
-    config::{BudgetAction, ProviderKind},
+    config::{BudgetAction, ProviderId},
     error::GatewayError,
     pipeline::{self, authenticate, AuthInputs},
     state::SharedState,
@@ -96,8 +96,9 @@ pub async fn chat_completions(
     // slot provider is stored on the context but run/run_stream currently use
     // model-based routing; the model override is forwarded via body["model"] by
     // Core so the gateway's existing model routing picks it up.
-    let slot_provider = header_string(&headers, "x-ryu-slot-chat-provider")
-        .and_then(|s| s.parse::<ProviderKind>().ok());
+    // Any non-empty id is a valid provider id now (open routing); an unregistered
+    // id simply misses the registry at dispatch and fails safe.
+    let slot_provider = header_string(&headers, "x-ryu-slot-chat-provider").map(ProviderId::from);
     let slot_model = header_string(&headers, "x-ryu-slot-chat-model");
     // Core conversation/session id for per-run audit correlation (M4 / #176).
     let session_id = header_string(&headers, "x-ryu-session-id");

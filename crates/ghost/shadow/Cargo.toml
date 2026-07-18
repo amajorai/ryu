@@ -1,0 +1,27 @@
+[package]
+name = "ryu-shadow-core"
+version = "0.0.5"
+edition = "2021"
+description = "Screen/audio/input capture, OCR, and semantic search engine for Shadow."
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/shadow"
+
+[lib]
+name = "shadow_core"
+
+[dependencies]
+rmp-serde = "1.3"
+rmpv = { version = "1", features = ["with-serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+zstd = "0.13"
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+tantivy = "0.22"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,12 @@
+[package]
+name = "ryu-gw-firewall"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+description = "Ryu Gateway firewall scanning core: the pure regex detection engine (curated PII/secret/injection/code-injection/toxicity/bias pattern builders, Unicode-obfuscation normalization, Luhn / credit-card / public-IPv4 validators, the DetectionKind/FirewallMatch scan types) plus the command-injection scanner. No pipeline / AppState dependency — the FirewallBackend impl + FirewallRegistry that wire this into the gateway pipeline stay in apps/gateway."
+
+[dependencies]
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"

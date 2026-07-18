@@ -221,11 +221,11 @@ impl Scheduler {
                         let prompt = prompt.clone();
                         let err = error.clone();
                         tokio::spawn(async move {
-                            if let Some(engine) = crate::healing::global_engine() {
-                                engine
+                            if let Some(client) = crate::healing_client::global_client() {
+                                client
                                     .report_failure(
                                         &src,
-                                        crate::healing::HealSource::Agent {
+                                        ryu_healing::HealSource::Agent {
                                             agent_id: Some(agent_id),
                                         },
                                         prompt,
@@ -282,15 +282,25 @@ pub(crate) async fn run_target(target: &JobTarget) -> Result<Option<String>, Str
             }
         }
         JobTarget::Monitor { monitor_id } => {
-            let engine = crate::monitors::global_engine()
-                .ok_or_else(|| "monitor engine not initialized".to_string())?;
-            engine.run_monitor(monitor_id).await?;
+            // The `JobTarget::Monitor` variant stays in the scheduler kernel; the
+            // monitor engine is now OUT-OF-PROCESS (`ryu-monitors` sidecar). Dispatch
+            // over loopback via the process-global `monitors_client`. A missing client
+            // (sidecar not yet wired) treats the tick as a no-op rather than an error.
+            if let Some(client) = crate::monitors_client::global_client() {
+                client.run(monitor_id).await?;
+            }
             Ok(None)
         }
         JobTarget::Quest { quest_id } => {
-            let engine = crate::quests::global_engine()
-                .ok_or_else(|| "quest engine not initialized".to_string())?;
-            engine.judge_quest(quest_id).await?;
+            // The `JobTarget::Quest` variant stays in the scheduler kernel; the
+            // quest engine is now OUT-OF-PROCESS (`ryu-quests` sidecar). Dispatch
+            // over loopback via the process-global `quests_client`, which gathers
+            // Shadow evidence Core-side (the sidecar cannot reach `McpRegistry`) and
+            // posts it in the judge body. A missing client (sidecar not yet wired)
+            // treats the tick as a no-op rather than an error.
+            if let Some(client) = crate::quests_client::global_client() {
+                client.judge(quest_id).await?;
+            }
             Ok(None)
         }
         JobTarget::IdentityHealth => {
@@ -300,12 +310,21 @@ pub(crate) async fn run_target(target: &JobTarget) -> Result<Option<String>, Str
             Ok(None)
         }
         JobTarget::LearningCycle => {
+            // The learning ENGINE is the out-of-crate `ryu-learning` capability, but
+            // it is driven IN-PROCESS here through a `LearningCtx` over the published
+            // `ServerState` — NOT an out-of-process HTTP hop like `quests_client`.
+            // This is deliberate (Outcome B): the cycle is welded to six live Core
+            // subsystems and iterates the whole conversation corpus per sweep, so a
+            // sidecar would only move a data-hungry consumer away from its data. Full
+            // rationale: `crate::learning` module doc.
             let state = crate::learning::global_state()
                 .ok_or_else(|| "learning state not initialized".to_string())?;
+            let ctx = crate::learning::learning_ctx(&state);
+            let host = &*ctx.host;
             // Local skills pass first — on-device + inbox-gated, so it runs on the
             // default skills opt-in and does NOT wait on the training opt-in or the
             // sleep window. Bounded per tick; failures are logged, not fatal.
-            match crate::learning::run_skills_pass(&state, 5).await {
+            match ryu_learning::run_skills_pass(&ctx, 5).await {
                 Ok(n) if n > 0 => tracing::info!("learning: proposed {n} skill(s) to the inbox"),
                 Ok(_) => {}
                 Err(e) => tracing::warn!("learning: skills pass failed: {e:#}"),
@@ -315,18 +334,18 @@ pub(crate) async fn run_target(target: &JobTarget) -> Result<Option<String>, Str
             // pragmatic "idle window" gate, MetaClaw-style). The job is ticked
             // hourly so it reliably catches the window; a persisted min-gap keeps
             // it to at most one retrain per ~day and prevents fire-on-every-restart.
-            if !crate::learning::resolve_enabled(&state).await {
+            if !ryu_learning::resolve_enabled(host).await {
                 return Ok(None);
             }
-            if !crate::learning::resolve_in_sleep_window(&state).await {
+            if !ryu_learning::resolve_in_sleep_window(host).await {
                 return Ok(None);
             }
-            if !crate::learning::scheduled_cycle_due(&state).await {
+            if !ryu_learning::scheduled_cycle_due(host).await {
                 return Ok(None);
             }
             // Stamp before running so a crash/restart mid-cycle can't re-fire.
-            crate::learning::mark_cycle_ran(&state).await;
-            let plan = crate::learning::run_cycle(&state, true)
+            ryu_learning::mark_cycle_ran(host).await;
+            let plan = ryu_learning::run_cycle(&ctx, true)
                 .await
                 .map_err(|e| format!("{e:#}"))?;
             // A dispatch failure is folded into plan.error (run_cycle still returns

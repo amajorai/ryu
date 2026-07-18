@@ -54,3 +54,38 @@ pub fn publish(notification: DesktopNotification) {
 pub fn subscribe() -> broadcast::Receiver<DesktopNotification> {
     sender().subscribe()
 }
+
+/// A **navigation request** from a sandboxed app to the host shell — the
+/// `host.navigate` primitive. A sandboxed app UI cannot deep-link or navigate the
+/// shell itself; it emits this and the connected surface (desktop/web/…) consumes
+/// the SSE stream and performs the navigation. Fire-and-forget, like a notification.
+#[derive(Clone, Debug, Serialize)]
+pub struct NavigationRequest {
+    /// The plugin that requested the navigation (audit + so the shell can scope the
+    /// target to that app's routes).
+    pub plugin_id: String,
+    /// The navigation target — a shell route or `ryu://` deep link (e.g.
+    /// `"/library/monitors"`). Interpreted by the surface's router.
+    pub target: String,
+    /// Optional structured params for the target (query/state). Opaque here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<serde_json::Value>,
+}
+
+static NAV_EVENTS: OnceLock<broadcast::Sender<NavigationRequest>> = OnceLock::new();
+
+fn nav_sender() -> &'static broadcast::Sender<NavigationRequest> {
+    NAV_EVENTS.get_or_init(|| broadcast::channel(64).0)
+}
+
+/// Publish a navigation request to all live subscribers (the `host.navigate`
+/// primitive). No subscriber = no-op, never an error for the caller.
+pub fn publish_navigation(request: NavigationRequest) {
+    let _ = nav_sender().send(request);
+}
+
+/// Subscribe to the navigation-request stream (used by the SSE endpoint the shell
+/// consumes).
+pub fn subscribe_navigation() -> broadcast::Receiver<NavigationRequest> {
+    nav_sender().subscribe()
+}

@@ -94,6 +94,222 @@ pub const SPACES_PLUGIN_ID: &str = "com.ryu.spaces";
 /// `state.spaces.{list_spaces, create_space}`.
 pub const MEETINGS_PLUGIN_ID: &str = "com.ryu.meetings";
 
+/// The Research app's plugin id — the `/api/research/*` proxy over the autoresearch
+/// sidecar. A governance-shell leaf: default-on, no `requires` (it owns its own
+/// sidecar), compile-out-able behind the `research` cargo feature.
+pub const RESEARCH_PLUGIN_ID: &str = "com.ryu.research";
+
+/// The Dashboards app's plugin id — the `/api/dashboards/*` live widget-grid
+/// surface. Governance-shell leaf: default-on, no `requires` (soft HTTP loopback to
+/// monitors/etc). Gate-only (deep in-crate coupling to hardware displays +
+/// `dashboard_builder`), so it is NOT behind a cargo feature.
+pub const DASHBOARDS_PLUGIN_ID: &str = "com.ryu.dashboards";
+
+/// The Teams app's plugin id — the `/api/teams/*` CRUD surface over agent teams.
+/// Governance-shell leaf: default-on, no `requires` (stores agent-id strings only).
+/// Gate-only (the store also backs `@team` chat routing + `agent_builder`), so it
+/// is NOT behind a cargo feature.
+pub const TEAMS_PLUGIN_ID: &str = "com.ryu.teams";
+
+/// The Clips app's plugin id — the `/api/clips/*` Core→Shadow capture proxy. It
+/// `requires` the `shadow` app (its recordings live in Shadow), so the graph
+/// refuses to disable Shadow out from under an enabled Clips. Default-on;
+/// compile-out-able behind the `clips` cargo feature.
+pub const CLIPS_PLUGIN_ID: &str = "com.ryu.clips";
+
+/// The Recipes app's plugin id — the `/api/recipes/*` record→replay surface over
+/// Ghost's RecipeStore. It `requires` the `ghost` app, so the graph refuses to
+/// disable Ghost out from under an enabled Recipes. Default-on; the HTTP routes are
+/// compile-out-able behind the `recipes` cargo feature (the extracted `ryu_recipes`
+/// engine stays compiled — the workflow executor's GhostAction node uses it).
+pub const RECIPES_PLUGIN_ID: &str = "com.ryu.recipes";
+
+/// The Mail (Agent Inboxes) app's plugin id. Unlike the gate-only apps above, Mail is
+/// a **fully manifest-driven** app: its `ryu-mail` sidecar (a local sibling binary) is
+/// spawned by the generic loader and its `/api/mail/*` surface is proxied via the
+/// `public_mount` mechanism — there is no hand-coded Rust proxy. Default-on so the
+/// externally-committed inbound-webhook URL resolves out of the box.
+pub const MAIL_PLUGIN_ID: &str = "com.ryu.mail";
+
+/// The RAG capability app's plugin id — the default in-process embeddings+retrieval
+/// provider. Declares `provides:[rag]` + `requires:[engines]`, so the capability
+/// binding/graph resolves rag→engines for real (Track B). Default-on; a GraphRAG or
+/// third-party provider app can bind the `rag` capability to swap the implementation.
+pub const RAG_PLUGIN_ID: &str = "com.ryu.rag";
+
+/// The Quests app's plugin id — the `/api/quests/*` auto-detecting todo board.
+/// Governance-shell leaf: default-on, no `requires` (the scheduler is kernel infra).
+/// The engine + store + HTTP surface are physically extracted to `crates/ryu-quests`
+/// and mounted behind this gate; the whole capability is behind the `quests` cargo
+/// feature (in `default`), so a lean build drops it. This id stays in Core as the
+/// AppGate identity (a manifest/registry constant, not quest business logic).
+pub const QUESTS_PLUGIN_ID: &str = "com.ryu.quests";
+
+/// The Approvals app's plugin id — the `/api/approvals/*` human-in-the-loop inbox.
+/// Governance-shell leaf: default-on, no `requires` (the workflow dependency is
+/// soft). It is a **dependency target**: Healing declares `requires.apps =
+/// [com.ryu.approvals]` because it delivers proposed fixes into this inbox. Gate-only
+/// (its `ApprovalEngine` is a `ServerState` field used by the scheduler/workflow/
+/// healing), so it is NOT behind a cargo feature.
+///
+/// W7 frontend extraction: this manifest ALSO now carries the `approvals-companion`
+/// runnable — the desktop Inbox page (`pages/InboxPage.tsx`) became the sandboxed
+/// `apps-store/approvals/ui` companion, seeded with the `approvals:crud` + `quests:crud`
+/// grants + a prebuilt UI bundle (see `seed_overrides`). It stays a route gate (unlike
+/// the pure-companion webhooks/activity/calendar apps): the `/api/approvals/*` routes
+/// remain gated on it; the unified inbox's reads (approvals + notifications + quest
+/// check-offs + Shadow suggestions) reach Core/Shadow host-side (the monitors pattern).
+pub const APPROVALS_PLUGIN_ID: &str = "com.ryu.approvals";
+
+/// The Skills app's plugin id — the `/api/skills/*` + `/api/skills/catalog/*`
+/// SKILL.md discovery/authoring/catalog surface. Governance-shell leaf: default-on,
+/// no `requires`. It is a **dependency target**: Learning declares `requires.apps =
+/// [com.ryu.skills]` because it writes synthesized skills. Gate-only (its
+/// `SkillRegistry` is a `ServerState` field injected into every chat turn by
+/// `route_chat_stream`), so it is NOT behind a cargo feature.
+pub const SKILLS_PLUGIN_ID: &str = "com.ryu.skills";
+
+/// The Learning app's plugin id — the `/api/learn/*` + `/api/experience/list`
+/// continual-learning loop. `requires` the `skills` app (it writes synthesized
+/// skills), so the graph refuses to disable Skills out from under it. Default-on.
+/// Gate-only (its `ExperienceStore` is a `ServerState` field written from the chat
+/// feedback path + a `JobTarget::LearningCycle` scheduler job), so it is NOT behind
+/// a cargo feature.
+///
+/// W7 frontend extraction: this manifest ALSO now carries the `learning-companion`
+/// runnable — the desktop Learning page became the sandboxed `apps-store/learning/ui`
+/// companion, seeded with the `learning:crud` grant + a prebuilt UI bundle (see
+/// `seed_overrides`). It stays a route gate (unlike the pure-companion webhooks/
+/// activity/calendar apps): the `/api/learn/*` + `/api/experience/*` routes remain
+/// gated on it; the companion's reads reach them host-side (monitors pattern).
+pub const LEARNING_PLUGIN_ID: &str = "com.ryu.learning";
+
+/// The Self-Healing app's plugin id — the `/api/healing/*` diagnose→propose-fix
+/// surface, now served OUT-OF-PROCESS by the `ryu-healing` sidecar (`public_mount`).
+/// `requires` the `approvals` app (it delivers fixes into that inbox), so the graph
+/// refuses to disable Approvals out from under it. Default-on; Core keeps only the
+/// welded action side (`healing_client::CoreHealingHost`) and drives the sidecar over
+/// loopback, with the run-status bus loop spawned unconditionally in `main.rs`.
+pub const HEALING_PLUGIN_ID: &str = "com.ryu.healing";
+
+/// The Monitors app's plugin id — the `/api/monitors/*` website-watch surface
+/// (price/stock/keyword/content/uptime + alerts). Now served OUT-OF-PROCESS by the
+/// `ryu-monitors` sidecar (`public_mount`, App-gated via the ext proxy). Default-on,
+/// no `requires` (the scheduler is kernel infra). Core keeps only the loopback driver
+/// (`monitors_client`: `JobTarget::Monitor` run + backing-job reconcile) and the two
+/// ext-bearer host callbacks (Spider fetch + alert fan-out); the interleaved
+/// `/api/activity/*`, `/api/events/*`, and `/api/notifications/*` streams are separate
+/// kernel concerns and stay ungated.
+pub const MONITORS_PLUGIN_ID: &str = "com.ryu.monitors";
+
+/// The Hardware app's plugin id — the PROTECTED `/api/hardware/devices*` device-
+/// registry CRUD (list/patch/delete + per-device dashboard config). Governance-shell
+/// leaf: default-on, no `requires`. Gate-only (the device store + `hardware_ws` are
+/// `ServerState`-adjacent and the RHP link is coupled to voice/dashboards), so it is
+/// NOT behind a cargo feature. The gate covers ONLY the protected device-management
+/// routes; the PUBLIC device channel (`/api/hardware/{ws,pair,display}`) stays ungated
+/// so physical ESP32 devices can connect and pair regardless of the app's enabled bit.
+pub const HARDWARE_PLUGIN_ID: &str = "com.ryu.hardware";
+
+/// The Workflows app's plugin id — the protected workflow surface: the DAG CRUD
+/// (`/workflows/*`, no `/api` prefix) plus the template catalog
+/// (`/api/workflows/catalog/*`). Governance-shell leaf: default-on, no `requires`.
+/// Gate-only (its executor is a `ServerState` engine dispatched by the scheduler
+/// `JobTarget::Workflow`, durable execution, healing, and approvals), so it is NOT
+/// behind a cargo feature — the impl must always compile. The gate covers ONLY the
+/// protected routes; the PUBLIC per-workflow webhook (`/api/workflows/:id/webhook`)
+/// stays on the public router, ungated, so external systems can POST triggers
+/// regardless of the app's enabled bit.
+pub const WORKFLOWS_PLUGIN_ID: &str = "com.ryu.workflows";
+
+/// The Agents app's plugin id — the `/api/agents/*` catalog + CRUD + session-
+/// management surface (list/create/edit/delete/catalog/install, ACP config/auth/
+/// sessions, threads, usage, capabilities). Governance-shell leaf: default-on AND
+/// **load-bearing** (see [`LOAD_BEARING_PLUGINS`]) — the composer fetches the agent
+/// list on boot, so a disabled Agents app would break chat; a plain disable is
+/// refused. Gate-only (the `AgentStore` is a `ServerState` field the chat path reads
+/// in-process), so it is NOT behind a cargo feature. The gate covers ONLY these
+/// catalog/CRUD HTTP routes; the ACP routing/execution substrate that actually
+/// serves a chat turn (`agent_routing/`, `sidecar/adapters/acp.rs`, and the
+/// `/api/chat/stream` path) is kernel and stays untouched — it never HTTP-loops back
+/// through `/api/agents`.
+pub const AGENTS_PLUGIN_ID: &str = "com.ryu.agents";
+
+/// The Voice app's plugin id — the PROTECTED voice data path
+/// (`/api/voice/transcribe`, `/api/voice/speak`, `/api/voice/tts-engines`,
+/// `/api/voice/tts-models`, `/api/voice/tts-models/install`). Governance-shell leaf:
+/// default-on, no `requires`. Gate-only (the `voice` module is called in-process by
+/// the chat/island paths), so it is NOT behind a cargo feature. The gate covers ONLY
+/// these protected routes; the PUBLIC realtime voice WS (`/api/voice/ws`) stays on the
+/// public router, ungated (a browser WS upgrade authenticates in-handler), so live
+/// voice mode connects regardless of the app's enabled bit.
+pub const VOICE_PLUGIN_ID: &str = "com.ryu.voice";
+
+/// The Media-Generation app's plugin id — the generative-media PRODUCERS
+/// (`/api/images/generate`, `/api/video/generate`, `/api/video/jobs/:id`,
+/// `/api/gifs/search`). Governance-shell leaf: default-on, no `requires`. Gate-only,
+/// so it is NOT behind a cargo feature. The gate covers ONLY the producers; the shared
+/// no-cloud blob store (`/api/media/:file` serve + `/api/media/upload`) stays UNGATED
+/// kernel storage because it also serves TTS audio output and chat uploads — gating it
+/// here would couple Voice/chat to the Media app's enabled bit.
+pub const MEDIA_PLUGIN_ID: &str = "com.ryu.media";
+
+/// The Memory app's plugin id — the `/api/memory` + `/api/memory/:id` long-term memory
+/// CRUD surface (the Memory Library). Governance-shell leaf: default-on, no `requires`.
+/// Gate-only (the `MemoryStore` is a `ServerState` field), so it is NOT behind a cargo
+/// feature. The gate covers ONLY the HTTP CRUD surface; the in-process chat auto-recall
+/// path is kernel and never HTTP-loops back through `/api/memory`.
+pub const MEMORY_PLUGIN_ID: &str = "com.ryu.memory";
+
+/// The Webhooks app's plugin id — the inbound webhook endpoint registry surfaced by
+/// the sandboxed `apps-store/webhooks/ui` companion (W7 frontend extraction). Unlike
+/// the other leaf shells this is NOT a route gate: `/api/webhooks` +
+/// `/api/webhook-ingress/status` are read-only and stay ungated on the main router
+/// (the desktop host calls them directly, monitors pattern). The manifest exists only
+/// to seed the companion's UI bundle + `webhooks:crud` grant. Default-on so the
+/// companion is present on every fresh install (the page it replaced was always-on).
+pub const WEBHOOKS_PLUGIN_ID: &str = "com.ryu.webhooks";
+
+/// The Activity app's plugin id — the unified chronological feed surfaced by the
+/// sandboxed `apps-store/activity/ui` companion (W7 frontend extraction). Like
+/// `webhooks` this is NOT a route gate: `/api/activity` (+ its `/stream`) is
+/// read-only and stays ungated on the main router (the desktop host calls it
+/// directly, monitors pattern). The manifest exists only to seed the companion's UI
+/// bundle + `activity:read` grant. Default-on so the companion is present on every
+/// fresh install (the page it replaced was always-on).
+pub const ACTIVITY_PLUGIN_ID: &str = "com.ryu.activity";
+
+/// The Calendar app's plugin id — the scheduled-runs calendar (agent/workflow jobs
+/// projected onto Month/Week/Day/Agenda) surfaced by the sandboxed
+/// `apps-store/calendar/ui` companion (W7 frontend extraction). Like `webhooks`/
+/// `activity` this is NOT a route gate: the underlying `/heartbeat/jobs` +
+/// `/workflows` + `/api/agents` endpoints stay ungated on the main router (the
+/// desktop host calls them directly, monitors pattern). The manifest exists only to
+/// seed the companion's UI bundle + `calendar:crud` grant. Default-on so the
+/// companion is present on every fresh install (the page it replaced was always-on).
+pub const CALENDAR_PLUGIN_ID: &str = "com.ryu.calendar";
+
+/// The Timeline app's plugin id — the CapCut-style activity replay scrubber
+/// (Shadow's captured lanes + keyframe preview + Dayflow work journal) surfaced by
+/// the sandboxed `apps-store/timeline/ui` companion (W7 frontend extraction). Like
+/// `webhooks`/`activity`/`calendar` this is NOT a route gate: Shadow's device-local
+/// `/timeline` + `/journal` + `/frame` endpoints live on the Shadow sidecar (:3030),
+/// not the Core router, and the desktop host calls them directly (the monitors
+/// pattern, but WITHOUT a node token — Shadow is machine-pinned). The manifest exists
+/// only to seed the companion's UI bundle + `timeline:read` grant. Default-on so the
+/// companion is present on every fresh install (the page it replaced was always-on).
+pub const TIMELINE_PLUGIN_ID: &str = "com.ryu.timeline";
+
+/// The Skill Editor app's plugin id — the SKILL.md authoring editor (front-matter
+/// form fields + a markdown body + server-backed version history) surfaced by the
+/// sandboxed `apps-store/skill-editor/ui` companion (W7 frontend extraction). Like
+/// `webhooks`/`activity`/`timeline` this is NOT a route gate: Core's `/api/skills`
+/// authoring endpoints stay ungated on the router and the desktop host calls them
+/// directly (the monitors pattern), so this manifest exists only to seed the
+/// companion's UI bundle + `skills:crud` grant. Default-on so the editor's
+/// `/skills/new` + `/skills/:id/edit` routes resolve on every fresh install.
+pub const SKILL_EDITOR_PLUGIN_ID: &str = "com.ryu.skill-editor";
+
 /// The set of **Core-tier** built-in plugin ids (#444).
 ///
 /// Core-tier plugins are first-party and shipped with Ryu; they are seeded
@@ -132,6 +348,11 @@ pub const CORE_PLUGINS: &[&str] = &[
     "firewall",
     "routing",
     "sandbox",
+    // Mail (Agent Inboxes) — manifest-driven app; its `ryu-mail` sidecar is spawned
+    // by the generic loader (see MAIL_PLUGIN_ID).
+    MAIL_PLUGIN_ID,
+    // RAG capability provider (default in-process embeddings+retrieval).
+    RAG_PLUGIN_ID,
     // System-wide predictive typing. Core-tier but opt-in (NOT in CORE_DEFAULT_ON):
     // enabling it is the single on/off switch for the /api/predict/* brain, and it
     // sends text from arbitrary apps to a model, so it ships disabled.
@@ -166,8 +387,10 @@ pub const CORE_PLUGINS: &[&str] = &[
     "com.ryu.canvas",
     // The Fine-tuning app — a full-page Companion (`ui_format:"html"`) that drives
     // Core's fine-tune orchestration via `finetune:runs` and owns its Unsloth Python
-    // training sidecar (`sidecar:process`). Default-on; `plugins::seed` gives it its approved
-    // grants + `ui_code` HTML blob. Replaces the built-in fine-tuning page.
+    // training sidecar (spawned on the Core-tier auto-run path, so it declares no
+    // `sidecar:process` grant — the Gateway denies that grant at enable). Default-on;
+    // `plugins::seed` gives it its approved grants + `ui_code` HTML blob. Replaces the
+    // built-in fine-tuning page.
     "com.ryu.finetune",
     // Spaces + Meetings — the first REAL plugin→plugin dependency edge. Both are
     // governance shells: the implementation stays in-crate and the record gates it
@@ -177,6 +400,70 @@ pub const CORE_PLUGINS: &[&str] = &[
     // Spaces while Meetings is still on, which the graph now refuses.
     SPACES_PLUGIN_ID,
     MEETINGS_PLUGIN_ID,
+    // Five leaf-feature governance shells (research/dashboards/teams/clips/recipes).
+    // Core-tier AND default-on: their `/api/<feature>/*` routes were always-on
+    // before the gate, so a default-on seed is what keeps them reachable on every
+    // existing install (same reasoning as Meetings/Spaces). `clips`→`shadow` and
+    // `recipes`→`ghost` are real `requires` edges; both deps are default-on, so the
+    // fail-closed seeder never skips them.
+    RESEARCH_PLUGIN_ID,
+    DASHBOARDS_PLUGIN_ID,
+    TEAMS_PLUGIN_ID,
+    CLIPS_PLUGIN_ID,
+    RECIPES_PLUGIN_ID,
+    // Wave-2 leaf-feature governance shells (quests/approvals/skills/learning/
+    // healing). Core-tier AND default-on: their `/api/<feature>/*` routes were
+    // always-on before the gate, so a default-on seed keeps them reachable on every
+    // existing install (same reasoning as the wave-1 five). `learning`→`skills` and
+    // `healing`→`approvals` are real `requires` edges; both deps are default-on, so
+    // the fail-closed seeder never skips them.
+    QUESTS_PLUGIN_ID,
+    APPROVALS_PLUGIN_ID,
+    SKILLS_PLUGIN_ID,
+    LEARNING_PLUGIN_ID,
+    HEALING_PLUGIN_ID,
+    // Wave-3 leaf-feature governance shells (monitors/hardware). Core-tier AND
+    // default-on: their `/api/<feature>/*` routes were always-on before the gate, so
+    // a default-on seed keeps them reachable on every existing install. Neither
+    // declares `requires` (the scheduler + device store are kernel infra).
+    MONITORS_PLUGIN_ID,
+    HARDWARE_PLUGIN_ID,
+    // The wave-4 two, default-on so their always-on routes stay reachable after
+    // gating (see CORE_PLUGINS). Neither has a `requires` edge; `agents` is also
+    // load-bearing (it can only be disabled with an explicit force override).
+    WORKFLOWS_PLUGIN_ID,
+    AGENTS_PLUGIN_ID,
+    // W0 honest-gating baseline: three data-path governance shells whose
+    // `/api/{voice,images+video+gifs,memory}/*` routes were mounted RAW before this
+    // wave. Core-tier AND default-on so the gate is transparent on every existing
+    // install (the routes were always-on before). Neither declares `requires`; the
+    // `voice`/`media`/`memory` modules stay in-crate (gate-only, no cargo feature).
+    VOICE_PLUGIN_ID,
+    MEDIA_PLUGIN_ID,
+    MEMORY_PLUGIN_ID,
+    // W7 frontend extraction: the webhooks page became a sandboxed companion app.
+    // Not a route gate (the `/api/webhooks*` reads stay ungated) — Core-tier + default-on
+    // so the companion is present on every fresh install. No `requires` edge.
+    WEBHOOKS_PLUGIN_ID,
+    // W7 frontend extraction: the activity feed page became a sandboxed companion app.
+    // Not a route gate (the `/api/activity` read stays ungated) — Core-tier + default-on
+    // so the companion is present on every fresh install. No `requires` edge.
+    ACTIVITY_PLUGIN_ID,
+    // W7 frontend extraction: the calendar page became a sandboxed companion app.
+    // Not a route gate (the `/heartbeat/jobs` + `/workflows` + `/api/agents` reads stay
+    // ungated) — Core-tier + default-on so the companion is present on every fresh
+    // install. No `requires` edge.
+    CALENDAR_PLUGIN_ID,
+    // W7 frontend extraction: the timeline page became a sandboxed companion app.
+    // Not a route gate (Shadow's device-local `/timeline` + `/journal` + `/frame` live
+    // on the Shadow sidecar :3030, not the Core router) — Core-tier + default-on so the
+    // companion is present on every fresh install. No `requires` edge.
+    TIMELINE_PLUGIN_ID,
+    // W7 frontend extraction: the SKILL.md editor became a sandboxed companion app.
+    // Not a route gate (`/api/skills` authoring endpoints stay ungated) — Core-tier +
+    // default-on so the `/skills/new` + `/skills/:id/edit` routes resolve on every fresh
+    // install. No `requires` edge.
+    SKILL_EDITOR_PLUGIN_ID,
 ];
 
 /// The subset of [`CORE_PLUGINS`] that should be **enabled by default** on a
@@ -207,6 +494,15 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     "shadow",
     "spider",
     "agentbrowser",
+    // NOTE: com.ryu.mail is intentionally NOT default-on. It is sidecar-only now
+    // (the in-process path was deleted, Track C), and the `ryu-mail` binary is not
+    // yet shipped/resolvable by packaging — a default-on entry 502s `/api/mail/*` on
+    // every fresh install. Kept in CORE_PLUGINS (installable/enable-able) and made
+    // opt-in until the release ships `ryu-mail` to `~/.ryu/bin` (or a dev build puts
+    // it on PATH / sets RYU_MAIL_BIN). See docs/platform-decomposition-handoff.md.
+    // RAG — default-on so retrieval works out of the box; requires `engines`
+    // (the embed sidecar), which the capability graph pulls in + protects.
+    RAG_PLUGIN_ID,
     // Auto-expand ships default-on so its composer toggle + `/expand` command are
     // available with zero setup; the flag/command `match` gate makes it free when
     // the toggle is off and no `/expand` is used (no sandbox spawn on idle turns).
@@ -240,6 +536,66 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     // fixtures on every boot, instead of only in a synthetic unit test.
     MEETINGS_PLUGIN_ID,
     SPACES_PLUGIN_ID,
+    // The five leaf-feature governance shells, default-on so their always-on routes
+    // stay reachable after gating (see CORE_PLUGINS). `clips`/`recipes` are declared
+    // here alongside their deps (`shadow`/`ghost`, both already default-on); the
+    // hand-written order is irrelevant — `seed::seed_order` topologically reorders
+    // by `requires`, so a dependency is always seeded before its dependent.
+    RESEARCH_PLUGIN_ID,
+    DASHBOARDS_PLUGIN_ID,
+    TEAMS_PLUGIN_ID,
+    CLIPS_PLUGIN_ID,
+    RECIPES_PLUGIN_ID,
+    // The wave-2 five, default-on so their always-on routes stay reachable after
+    // gating (see CORE_PLUGINS). `learning`/`healing` are declared here alongside
+    // their deps (`skills`/`approvals`); the hand-written order is irrelevant —
+    // `seed::seed_order` topologically reorders by `requires`, so a dependency is
+    // always seeded before its dependent.
+    QUESTS_PLUGIN_ID,
+    APPROVALS_PLUGIN_ID,
+    SKILLS_PLUGIN_ID,
+    LEARNING_PLUGIN_ID,
+    HEALING_PLUGIN_ID,
+    // The wave-3 two, default-on so their always-on routes stay reachable after
+    // gating (see CORE_PLUGINS). Neither has a `requires` edge.
+    MONITORS_PLUGIN_ID,
+    HARDWARE_PLUGIN_ID,
+    // Wave-4 leaf features turned into governance-shell Apps (toggle via the plugin
+    // lifecycle + route gate; impl stays in-crate). Both default-on so the gate is
+    // transparent on a fresh install (the routes were always-on before). Neither
+    // declares `requires`. `agents` is additionally LOAD-BEARING (see
+    // `LOAD_BEARING_PLUGINS`) because chat depends on the agent list.
+    WORKFLOWS_PLUGIN_ID,
+    AGENTS_PLUGIN_ID,
+    // The W0 three data-path shells, default-on so their always-on routes stay
+    // reachable after gating (see CORE_PLUGINS). Neither has a `requires` edge.
+    //
+    // NOTE: `predict` is deliberately absent — it is in CORE_PLUGINS but stays OPT-IN
+    // (NOT default-on). Enabling the Predict plugin flips the system-wide predictive-
+    // typing brain ON (`main.rs` seeds `predict::set_enabled(rec.enabled)` at boot),
+    // which sends text from arbitrary apps to a model; the codebase ships it OFF by
+    // design (fixture note + `predict::ENABLED = AtomicBool::new(false)`). Gating its
+    // `/api/predict/*` routes on the opt-in app breaks no working install: the brain is
+    // already default-off, so any install where predict actually works already has the
+    // record enabled → the gate passes. Default-on would be a privacy regression.
+    VOICE_PLUGIN_ID,
+    MEDIA_PLUGIN_ID,
+    MEMORY_PLUGIN_ID,
+    // W7: the webhooks companion, default-on so it is present on every fresh install
+    // (the page it replaced was always-on). No `requires` edge; not a route gate.
+    WEBHOOKS_PLUGIN_ID,
+    // W7: the activity-feed companion, default-on so it is present on every fresh
+    // install (the page it replaced was always-on). No `requires` edge; not a route gate.
+    ACTIVITY_PLUGIN_ID,
+    // W7: the calendar companion, default-on so it is present on every fresh install
+    // (the page it replaced was always-on). No `requires` edge; not a route gate.
+    CALENDAR_PLUGIN_ID,
+    // W7: the timeline companion, default-on so it is present on every fresh install
+    // (the page it replaced was always-on). No `requires` edge; not a route gate.
+    TIMELINE_PLUGIN_ID,
+    // W7: the skill-editor companion, default-on so the `/skills/new` + `/skills/:id/edit`
+    // routes resolve on every fresh install. No `requires` edge; not a route gate.
+    SKILL_EDITOR_PLUGIN_ID,
 ];
 
 /// The [`crate::plugin_manifest::PluginTier`] of a plugin, derived from
@@ -285,11 +641,16 @@ pub fn find_system_plugin(manifest_id: &str) -> Option<&'static SystemPlugin> {
 ///   (`workflow::durable::FallbackEngine`). Disabling it strips durable execution
 ///   (checkpoints + bounded `While` resume) out from under every workflow run, so
 ///   in-flight/scheduled workflows lose their durability guarantee.
+/// - `com.ryu.agents` — the agent catalog/CRUD surface (`/api/agents/*`). The
+///   composer fetches the agent list on boot to populate the picker, so a disabled
+///   Agents app would leave chat with no selectable agent — a fresh install would
+///   read as broken. The chat-serving ACP substrate is separate kernel code and is
+///   never gated; this protects only the catalog surface the composer depends on.
 ///
 /// Everything else stays freely swappable/disableable — this list is deliberately
 /// minimal so the "nothing hardcoded, everything swappable" principle holds for
 /// all but the two subsystems whose absence reads as a broken install.
-pub const LOAD_BEARING_PLUGINS: &[&str] = &["engines", "durable"];
+pub const LOAD_BEARING_PLUGINS: &[&str] = &["engines", "durable", AGENTS_PLUGIN_ID];
 
 /// Whether disabling `manifest_id` needs an explicit force override because a core
 /// subsystem depends on it. See [`LOAD_BEARING_PLUGINS`].
@@ -800,6 +1161,10 @@ mod tests {
     fn engines_is_load_bearing_and_default_swappables_are_not() {
         assert!(is_load_bearing("engines"), "engines is load-bearing");
         assert!(is_load_bearing("durable"), "durable is load-bearing");
+        assert!(
+            is_load_bearing(AGENTS_PLUGIN_ID),
+            "agents is load-bearing (composer fetches the agent list on boot)"
+        );
         // A freely-disableable Core plugin is NOT load-bearing.
         assert!(!is_load_bearing("goal"));
         assert!(!is_load_bearing("firewall"));

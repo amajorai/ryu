@@ -1,0 +1,49 @@
+{
+	"id": "com.ryu.browser",
+	"name": "Browser",
+	"version": "1.0.0",
+	"description": "A real-Chromium browser (Electron) Ryu runs as a local sidecar and exposes as the grant-gated `browser.control` capability: list/open/navigate tabs, screenshot, read titles, and (privileged) evaluate JS in a tab. Core spawns the sidecar lazily and idle-stops it; the desktop Browser panel drives it through the ext-proxy.",
+	"tagline": "Real-Chromium browser control for agents",
+	"category": "Automation",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"sidecars": [
+		{
+			"name": "browser",
+			"process": {
+				"kind": "local",
+				"command": "ryu-browser",
+				"command_env": "RYU_BROWSER_BIN",
+				"port_env": "RYU_BROWSER_PORT"
+			},
+			"port": 7993,
+			"health_path": "/health",
+			"lazy": true,
+			"idle_stop_secs": 300,
+			"http": {
+				"routes": [
+					{ "path": "/" },
+					{ "path": "/health" },
+					{ "path": "/tabs" },
+					{ "path": "/tabs/:id" },
+					{ "path": "/tabs/:id/navigate" },
+					{ "path": "/tabs/:id/screenshot" },
+					{ "path": "/tabs/:id/eval" },
+					{ "path": "/tabs/:id/title" }
+				]
+			}
+		}
+	],
+	"provides": [
+		{
+			"capability": "browser.control",
+			"version": "1.0.0",
+			"sidecar": "browser",
+			"route": "/",
+			"grant": "browser:control"
+		}
+	],
+	"permission_grants": ["browser:control"]
+}

@@ -1,0 +1,11 @@
+{
+	"id": "com.ryu.agents",
+	"name": "Agents",
+	"version": "1.0.0",
+	"description": "Agent catalog and management: browse, install, create, edit, and delete agents that back Ryu chat sessions.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"permission_grants": []
+}

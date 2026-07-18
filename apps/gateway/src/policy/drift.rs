@@ -213,12 +213,18 @@ mod tests {
             actions: vec!["GITHUB_CREATE_ISSUE".to_string()],
             ..Default::default()
         };
-        // Firewall enabled + WarnAndContinue (both defaults).
+        // Firewall enabled (default) + WarnAndContinue set explicitly — the R3
+        // rule fires only for the advisory-only warn policy, which is no longer the
+        // firewall default (that is now Sanitize), so it must be opted into here.
+        let firewall = FirewallConfig {
+            policy: FirewallPolicy::WarnAndContinue,
+            ..Default::default()
+        };
         let warnings = detect_drift(
             &ToolsConfig::default(),
             &composio,
             &ExecBudgetConfig::default(),
-            &FirewallConfig::default(),
+            &firewall,
             &EffectivePolicy::default(),
         );
         assert!(codes(&warnings).contains(&"composio_guardrails_advisory"));

@@ -14,7 +14,7 @@ use serde_json::json;
 use std::collections::HashMap;
 
 use super::ServerState;
-use crate::activity::{default_metadata, default_source, ActivityItem, ActivityLevel};
+use ryu_activity::{default_metadata, default_source, ActivityItem, ActivityLevel};
 
 const DEFAULT_LIMIT: u32 = 100;
 const MAX_LIMIT: u32 = 500;

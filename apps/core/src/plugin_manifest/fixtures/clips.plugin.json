@@ -1,0 +1,50 @@
+{
+	"id": "com.ryu.clips",
+	"name": "Clips",
+	"version": "1.0.0",
+	"description": "Clips: capture and browse screen/timeline clips. A Core→Shadow proxy that depends on the Shadow capture app for its recordings. Runs the out-of-process ryu-clips sidecar; Core proxies /api/clips/* to it. The Shadow record/browse surface is fully served out-of-process (the sidecar reads RYU_SHADOW_URL itself); URL/yt-dlp ingest and auto-file into the Clips Space require Core's kernel machinery and degrade cleanly in the standalone sidecar.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"requires": {
+		"apps": [
+			{
+				"id": "shadow",
+				"min_version": "1.0.0"
+			}
+		]
+	},
+	"sidecars": [
+		{
+			"name": "ryu-clips",
+			"process": {
+				"kind": "local",
+				"command": "ryu-clips",
+				"command_env": "RYU_CLIPS_BIN",
+				"port_env": "RYU_CLIPS_PORT"
+			},
+			"port": 7992,
+			"health_path": "/health",
+			"http": {
+				"mount": "/api/clips",
+				"public_mount": "/api/clips",
+				"routes": [
+					{ "path": "/" },
+					{ "path": "/ingest" },
+					{ "path": "/sources" },
+					{ "path": "/recent-activity" },
+					{ "path": "/start" },
+					{ "path": "/:id/stop" },
+					{ "path": "/:id/pause" },
+					{ "path": "/:id/resume" },
+					{ "path": "/:id/context" },
+					{ "path": "/:id/frame" },
+					{ "path": "/:id/file" },
+					{ "path": "/:id/diagnostics" }
+				]
+			}
+		}
+	],
+	"permission_grants": []
+}

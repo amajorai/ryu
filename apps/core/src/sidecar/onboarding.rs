@@ -424,7 +424,9 @@ impl SetupManager {
             let model_id = registry.local_chat_model.id.clone();
             match downloads
                 .download_blocking(crate::model_catalog::gguf_download_spec(
-                    &registry.local_chat_model,
+                    &registry.local_chat_model.id,
+                    &registry.local_chat_model.weight_url,
+                    &registry.local_chat_model.sha256,
                     &format!("{model_id} (chat model)"),
                 ))
                 .await
@@ -509,7 +511,9 @@ impl SetupManager {
             let id = registry.local_embed_model.id.clone();
             match downloads
                 .download_blocking(crate::model_catalog::gguf_download_spec(
-                    &registry.local_embed_model,
+                    &registry.local_embed_model.id,
+                    &registry.local_embed_model.weight_url,
+                    &registry.local_embed_model.sha256,
                     &format!("{id} (embedding model)"),
                 ))
                 .await
@@ -561,7 +565,9 @@ impl SetupManager {
             let id = registry.local_reranker_model.id.clone();
             match downloads
                 .download_blocking(crate::model_catalog::gguf_download_spec(
-                    &registry.local_reranker_model,
+                    &registry.local_reranker_model.id,
+                    &registry.local_reranker_model.weight_url,
+                    &registry.local_reranker_model.sha256,
                     &format!("{id} (reranker model)"),
                 ))
                 .await

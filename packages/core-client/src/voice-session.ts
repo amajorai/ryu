@@ -112,7 +112,7 @@ function floatToPcm16(samples: Float32Array): ArrayBuffer {
 	const buffer = new ArrayBuffer(samples.length * 2);
 	const view = new DataView(buffer);
 	for (let i = 0; i < samples.length; i++) {
-		const s = Math.max(-1, Math.min(1, samples[i]));
+		const s = Math.max(-1, Math.min(1, samples[i] ?? 0));
 		view.setInt16(i * 2, s < 0 ? s * 0x80_00 : s * 0x7f_ff, true);
 	}
 	return buffer;

@@ -1,0 +1,244 @@
+---
+title: "Three Products, One Core"
+description: "Ryu App, Ryu Gateway, and Ryu Cloud — three offers built on the same Rust core, so adopting one never forks you onto a different stack."
+---
+
+Ryu is one codebase that ships as three products. The same Core and Gateway power all three,
+so adopting one never forks you onto a different stack. The products differ in who operates
+the infrastructure, not in what the code does.
+
+## The three products
+
+```mermaid
+flowchart TB
+  subgraph Core["Ryu Core + Gateway (shared)"]
+    direction LR
+    C["Core\norchestration\nsessions · memory · tools\nworkflows · sidecars"]
+    G["Gateway\nrouting · firewall\nbudgets · evals · audit"]
+    C -->|"every model call"| G
+  end
+
+  subgraph Products["Three products, one core"]
+    direction LR
+    A["🖥️ Ryu App\nIndividuals, small teams\nDownload, pick an agent, go"]
+    GW["⚡ Ryu Gateway\nDev / platform teams\nOne config = firewall for any agent"]
+    CL["☁️ Ryu Cloud\nBusinesses\nWe build, deploy, host"]
+  end
+
+  Core --> A
+  Core --> GW
+  Core --> CL
+```
+
+| Product | Audience | What you get | One-line pitch |
+|---|---|---|---|
+| 🖥️ **Ryu App** | Individuals, small teams | Desktop app + local Core + local Gateway + built-in agent | Download, pick an agent, go |
+| ⚡ **Ryu Gateway** | Dev / platform teams | Standalone Gateway + config file + API | One config change puts a firewall in front of any agent |
+| ☁️ **Ryu Cloud** | Businesses (SG/SEA SMEs) | Managed hosting + multi-node fleet + channel bots | We audit, build, deploy, and host for you |
+
+## Ryu App
+
+The flagship product. A desktop app (Tauri v2 + React) that spawns a local Core on `:7980`
+and a local Gateway on `:7981`. Everything runs on your machine.
+
+```mermaid
+flowchart LR
+  subgraph Desktop["Ryu Desktop App"]
+    UI["React UI"]
+    IS["Island overlay"]
+    EX["Browser extension"]
+  end
+
+  Core["Ryu Core\n:7980"]
+  GW["Ryu Gateway\n:7981"]
+  Engine["llama.cpp + Gemma 4\n(local default)"]
+
+  UI --> Core
+  IS --> Core
+  EX --> Core
+  Core --> GW
+  GW --> Engine
+  GW -->|"BYO provider"| Cloud["OpenAI · Anthropic · Gemini"]
+```
+
+**What ships on install:**
+- Built-in agent "Ryu" (Pi + Gateway, self-sufficient)
+- Local llama.cpp + Gemma 4 chat model
+- Local embedding model (nomic-embed-text-v1.5)
+- Local STT (whisper.cpp) and TTS (OuteTTS)
+- Default reranker (BAAI bge-reranker)
+- Default tools (agentbrowser, spider)
+- All data stored locally under `~/.ryu/`
+
+**Surfaces:**
+- Desktop app (Tauri v2)
+- Island companion overlay (Electron)
+- Browser extension (WXT)
+- TUI terminal client (Bun + OpenTUI)
+- CLI terminal client (Rust, deprecated)
+- Mobile app (Expo/RN, partial)
+- Raycast extension
+
+## Ryu Gateway
+
+A standalone Gateway that sits in front of any agent or framework. You run it yourself
+(or we host it), point your agents at its base URL, and every model call runs through
+Ryu's firewall, PII/DLP, budgets, evals, and audit.
+
+```mermaid
+flowchart LR
+  subgraph Agents["Your agents"]
+    M["Mastra"]
+    L["LangChain"]
+    S["OpenAI SDK"]
+    CC["Claude Code"]
+    CD["Codex"]
+  end
+
+  GW["Ryu Gateway\n:7981\nOpenAI-compat API"]
+
+  subgraph Providers["Upstream providers"]
+    OAI["OpenAI"]
+    ANT["Anthropic"]
+    OR["OpenRouter"]
+    LOC["Local engine"]
+  end
+
+  M -->|"baseURL swap"| GW
+  L -->|"baseURL swap"| GW
+  S -->|"baseURL swap"| GW
+  CC -->|"passthrough proxy"| GW
+  CD -->|"passthrough proxy"| GW
+
+  GW -->|"route + govern"| OAI
+  GW -->|"route + govern"| ANT
+  GW -->|"route + govern"| OR
+  GW -->|"route + govern"| LOC
+```
+
+**Quick start:**
+```bash
+# 1. Create gateway.toml
+cat > gateway.toml << 'EOF'
+[auth]
+require_auth = true
+
+[[auth.api_keys]]
+key = "ryu-sk-my-secret"
+name = "my-app"
+EOF
+
+# 2. Start the Gateway
+cargo run --manifest-path apps/gateway/Cargo.toml -- --config gateway.toml
+
+# 3. Point any agent at it
+# baseURL = http://127.0.0.1:7981/v1
+# apiKey = ryu-sk-my-secret
+```
+
+**What it governs:**
+- Model routing (smart routing, fallback, eval-driven)
+- Firewall (PII/DLP, prompt injection, moderation)
+- Budgets (per-user, per-agent, per-session token caps)
+- Rate limiting and circuit breaking
+- Exact and semantic caching
+- Evals and audit trail
+- Tool governance (search, allowlist, exec budget)
+
+## Ryu Cloud
+
+Managed hosting for businesses. We run the infrastructure, you use the agents.
+
+```mermaid
+flowchart TB
+  subgraph Cloud["Ryu Cloud (managed)"]
+    direction LR
+    API["Control Plane\nidentity · billing · content"]
+    NODE["Core Node\norchestration"]
+    GW["Gateway\npolicy"]
+    DB["MongoDB\nstate"]
+  end
+
+  subgraph Channels["Channel bots"]
+    TG["Telegram"]
+    SL["Slack"]
+    WA["WhatsApp"]
+    DC["Discord"]
+  end
+
+  subgraph Clients["Client apps"]
+    DESK["Desktop"]
+    WEB["Web dashboard"]
+    MOB["Mobile"]
+  end
+
+  Clients --> API
+  API --> NODE
+  NODE --> GW
+  NODE --> DB
+  GW --> Providers["Providers\nOpenAI · Anthropic · etc."]
+  NODE --> Channels
+```
+
+**What Ryu Cloud adds:**
+- Managed identity and billing (Better Auth + Polar)
+- Multi-node fleet with cross-device sync
+- Node selection (prefer reachable remote, else local)
+- Channel bots (Telegram, Slack, WhatsApp, Discord)
+- Notion-backed content and blog
+- Web dashboard for billing and settings
+
+## How they share code
+
+The key insight: **the code is the same**. The products differ in what runs where, not in what
+the code does.
+
+| Layer | Ryu App | Ryu Gateway | Ryu Cloud |
+|---|---|---|---|
+| Core | Local process | Not needed | Managed node |
+| Gateway | Local sidecar | Standalone process | Managed node |
+| Desktop | Local Tauri app | — | Remote web app |
+| Server | Local (optional) | — | Managed (Better Auth) |
+| Database | Local SQLite | — | Managed MongoDB |
+| Agents | Local subprocess | BYO | Managed + BYO |
+| Billing | — | — | Polar integration |
+
+The same `apps/core` and `apps/gateway` Rust binaries run in all three contexts. The desktop
+app spawns them as sidecars; Ryu Cloud runs them as services; Ryu Gateway runs the Gateway
+standalone.
+
+## The business shape
+
+The business model is **open core plus managed cloud** (the Vercel / Supabase shape):
+
+- **Core + Gateway** are open-source (Apache-2.0 / AGPL-3.0) and self-hostable
+- **Desktop + Web + Server** are proprietary (the UX and identity layer)
+- **Ryu Cloud** is the managed offering that funds development
+
+This means:
+- Anyone can self-host the orchestration and control plane
+- The product surface (desktop, web, mobile) is closed
+- The moat (Gateway) is AGPL, preventing proprietary forks from reselling it
+- The plugin runtime is in OSS Core, so the closed desktop stays extensible
+
+See [Open Core](/docs/start-here/architecture/open-core) for the full licensing boundary.
+
+## Which product should I use?
+
+| If you are... | Use... | Why |
+|---|---|---|
+| An individual who wants AI agents | Ryu App | Download and go, no setup |
+| A developer with existing agents | Ryu Gateway | Point your agents at it, get governance |
+| A team that wants managed agents | Ryu Cloud | We handle infrastructure |
+| A business in SG/SEA | Ryu Cloud | Full-service: build, deploy, host |
+| A plugin author | Ryu App or self-hosted Core | Plugins live in OSS Core |
+| An enterprise wanting control | Ryu Gateway + self-hosted | Full control, your infrastructure |
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/start-here/architecture/core-vs-gateway" />
+  <DocCard href="/docs/start-here/architecture/open-core" />
+  <DocCard href="/docs/start-here/architecture/batteries-included" />
+  <DocCard href="/docs/gateway/gateway-for-any-agent" />
+</Cards>

@@ -1805,6 +1805,14 @@ pub async fn run_acp_instance(
                     // byte-for-byte what `send_prompt` does internally.
                     let turn_usage: Arc<Mutex<Option<serde_json::Value>>> =
                         Arc::new(Mutex::new(None));
+                    // Captures a fatal `session/prompt` failure (the request itself
+                    // erroring — e.g. no model configured / provider unreachable, which
+                    // surfaces as a transport error or timeout). Without this the error
+                    // was dropped inside `on_receiving_result` and the turn closed with
+                    // a normal `finish`, passing off any pre-failure agent banner as a
+                    // successful reply. Read after the update loop to emit a real error
+                    // frame instead.
+                    let turn_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
                     let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
                     let mut blocks: Vec<ContentBlock> = vec![turn_text.into()];
                     // Only attach image blocks when the agent advertised
@@ -1828,6 +1836,7 @@ pub async fn run_acp_instance(
                         }
                     }
                     let usage_capture = Arc::clone(&turn_usage);
+                    let error_capture = Arc::clone(&turn_error);
                     session
                         .connection()
                         .send_request_to(
@@ -1835,13 +1844,32 @@ pub async fn run_acp_instance(
                             PromptRequest::new(session.session_id().clone(), blocks),
                         )
                         .on_receiving_result(move |result| async move {
-                            let resp: PromptResponse = result?;
-                            // Capture the turn's final token totals (ACP unstable
-                            // usage). `None` when the agent reports no usage.
-                            if let Some(usage) = resp.usage.as_ref() {
-                                if let Ok(v) = serde_json::to_value(usage) {
-                                    if let Ok(mut g) = usage_capture.lock() {
-                                        *g = Some(v);
+                            match result {
+                                Ok(resp) => {
+                                    let resp: PromptResponse = resp;
+                                    tracing::debug!(
+                                        stop_reason = ?resp.stop_reason,
+                                        "ACP prompt completed"
+                                    );
+                                    // Capture the turn's final token totals (ACP
+                                    // unstable usage). `None` when the agent reports
+                                    // no usage.
+                                    if let Some(usage) = resp.usage.as_ref() {
+                                        if let Ok(v) = serde_json::to_value(usage) {
+                                            if let Ok(mut g) = usage_capture.lock() {
+                                                *g = Some(v);
+                                            }
+                                        }
+                                    }
+                                }
+                                // The prompt request itself failed. Historically this
+                                // error was swallowed (`result?` dropped it and the
+                                // turn ended clean). Capture it so the update loop can
+                                // surface a real error frame instead of a silent close.
+                                Err(e) => {
+                                    tracing::error!(error = %e, "ACP prompt result: Err");
+                                    if let Ok(mut g) = error_capture.lock() {
+                                        *g = Some(e.to_string());
                                     }
                                 }
                             }
@@ -2308,6 +2336,29 @@ pub async fn run_acp_instance(
                         clear_cancel(&instance_conversation);
                     }
                     let _ = cancelled;
+
+                    // Surface a swallowed provider failure. When the `session/prompt`
+                    // request errored (no model configured / provider unreachable —
+                    // seen as a transport error or ~timeout), the turn produced no real
+                    // completion. Emit a real error frame instead of the normal
+                    // usage-done/`finish` so the client gets an actionable failure
+                    // rather than a silent close that passes off a pre-failure agent
+                    // banner as a successful reply. `AcpEvent::Error` (mod.rs) tears the
+                    // turn down (error/finish/[DONE] frames + `set_run_status("failed")`),
+                    // so we skip the usage-done frame and loop back for the next turn.
+                    if let Some(detail) = turn_error.lock().ok().and_then(|g| g.clone()) {
+                        tracing::warn!(detail = %detail, "ACP turn failed; surfacing error frame");
+                        let _ = tx.send(AcpEvent::Error(format!(
+                            "The agent could not complete the turn — no model is \
+                             configured, or the model provider is unreachable. Open \
+                             Settings > Engines to configure or download a model. \
+                             (details: {detail})"
+                        )));
+                        if let Ok(mut g) = sink.lock() {
+                            *g = None;
+                        }
+                        continue;
+                    }
 
                     // Final usage frame for the turn (`done: true`). Carries the
                     // turn's token totals when the agent reported them

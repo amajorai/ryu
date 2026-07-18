@@ -216,8 +216,23 @@ fn mark_initialized() {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
+/// Emit the deprecation notice to stderr on every startup. The Ryu CLI is in
+/// maintenance mode: it stays building and keeps its existing (incl. headless)
+/// commands, but new features land in the Ryu TUI (`apps/tui`, `ryu-tui`), which
+/// has reached full feature parity. On interactive launch this flashes before the
+/// ratatui alternate screen takes over; on any headless subcommand it stays
+/// visible above the command's output. See apps/cli/README.md.
+fn print_deprecation_notice() {
+    eprintln!(
+        "\x1b[33m▲ Ryu CLI is deprecated (maintenance mode).\x1b[0m It has been \
+         superseded by the Ryu TUI — run `ryu-tui` (apps/tui) for the actively \
+         developed client at full feature parity. See apps/cli/README.md."
+    );
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    print_deprecation_notice();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.is_empty() {
         return run_command(args).await;

@@ -1,0 +1,1400 @@
+{
+  "$defs": {
+    "AppDependency": {
+      "description": "A single plugin-to-plugin dependency edge.",
+      "properties": {
+        "id": {
+          "description": "The `id` of the plugin this one depends on.",
+          "type": "string"
+        },
+        "min_version": {
+          "description": "Optional **minimum** version the dependency must satisfy.\n\nA bare version (`\"1.2.0\"`) is a *minimum*, i.e. `\">=1.2.0\"` — deliberately\nNOT semver's default caret (`^1.2.0`), which would reject `2.0.0`. Explicit\ncomparator syntax (`\">=1.2, <2\"`, `\"^1.2\"`, `\"~1.2\"`) is honoured verbatim.\nSee [`parse_min_version`], the single parser both validation and resolution\nuse.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "AssetSpec": {
+      "description": "A single asset an external runtime needs, fetched before first run. Either a\ndirect https URL or an `hf:<owner>/<repo>/<path>` reference; `dest_under_ryu`\nis the relative directory beneath `~/.ryu` where it lands (Core-owned) — the\nfilename is derived from the source's last path segment.",
+      "properties": {
+        "dest_under_ryu": {
+          "description": "Destination directory relative to `~/.ryu` (e.g. `\"models/hf\"`); the\nfetched file lands at `~/.ryu/<dest_under_ryu>/<filename>`. Must be a\ntraversal-safe relative path (no `..`, not absolute).",
+          "type": "string"
+        },
+        "sha256": {
+          "default": null,
+          "description": "Optional SHA-256 for checksum verification (direct-URL assets).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "description": "A direct **https** URL, or an `hf:<owner>/<repo>/<path>` reference to a\nsingle file on the Hub. A repo-only `hf:<owner>/<repo>` ref (no file path)\nis **not** provisionable yet — full-repo snapshot needs Hub tree-listing\nthat is not wired into the provisioner. The provisioner\n(`crate::sidecar::external_runtime`) rejects `http://` and other schemes.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "dest_under_ryu"
+      ],
+      "type": "object"
+    },
+    "BinarySpec": {
+      "description": "A downloadable binary sidecar process. The artifact is fetched via the shared\nCore `DownloadCenter` (streaming `.part` + resume + checksum), never a\nhand-rolled fetcher. The URL may point at a **raw executable** (the default) or\nan **archive** (`tar.gz` / `tar.bz2` / `zip`) that is extracted with the\nco-located libraries preserved.",
+      "properties": {
+        "archive": {
+          "default": null,
+          "description": "Archive format the URL points at: `\"tar.gz\"` | `\"tar.bz2\"` | `\"zip\"`. When\nset, the artifact is extracted (whole tree, so sibling libraries stay next\nto the executable) and [`binary_name`] names the executable to run. Absent =\nthe URL is a raw executable.\n\n[`binary_name`]: BinarySpec::binary_name",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "args": {
+          "default": [],
+          "description": "CLI arguments passed to the spawned binary.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "binary_name": {
+          "default": null,
+          "description": "The executable to run, as a path relative to the extraction root (e.g.\n`\"bin/my-engine\"` or just `\"my-engine\"`). **Required** when [`archive`] is\nset; ignored for a raw binary (the filename is derived from the URL). Must be\na traversal-safe relative path.\n\n[`archive`]: BinarySpec::archive",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Extra environment variables layered on top of the inherited environment.",
+          "type": "object"
+        },
+        "sha256": {
+          "default": null,
+          "description": "Optional lower-case-hex SHA-256 of the **downloaded artifact** (the raw\nbinary, or the archive file). When present the download is verified and\nre-fetched on mismatch (fail-closed); when absent an already-present\nartifact is trusted (idempotent skip).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Direct **https** URL to the executable, or to an archive when [`archive`] is\nset. Non-https is rejected by the SSRF egress screen at download time.\n\n[`archive`]: BinarySpec::archive",
+          "type": "string"
+        },
+        "version": {
+          "description": "Version string recorded on-disk and used to namespace the install\n(`bin/<version>/…`), so bumping it re-downloads a fresh copy.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "version"
+      ],
+      "type": "object"
+    },
+    "CapabilityReq": {
+      "description": "One **required capability** edge (in [`Requires::capabilities`]).\n\nNames an abstract capability plus an optional minimum *capability* version. The\nversion floor is checked at bind time against the bound provider's\n[`ProvidesEntry::version`] — NOT against the provider plugin's own semver — so a\nlowered graph edge carries no `min_version` (the app-version gate would compare\nthe wrong number). See the capability broker in Core.",
+      "properties": {
+        "capability": {
+          "description": "The capability name (e.g. `\"rag\"`, `\"tts\"`). Matched against a provider's\n[`ProvidesEntry::capability`].",
+          "type": "string"
+        },
+        "min_version": {
+          "description": "Optional minimum **capability** version the bound provider must satisfy\n(bare `\"1.2.0\"` = `\">=1.2.0\"`, via [`parse_min_version`]). Absent = any\nversion of the capability is acceptable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "capability"
+      ],
+      "type": "object"
+    },
+    "CliCommandSpec": {
+      "description": "One terminal subcommand an app contributes to the `cli` surface (the TUI's\n`ryu <app> <cmd>` dispatcher). Routed through Core's `ext_proxy` to the app's\nsidecar: Core forwards `<method> /api/ext/<plugin_id><path>`. `path` MUST be a\nroute the app's sidecar declares in `http.routes`, or the proxy 404s.",
+      "properties": {
+        "method": {
+          "description": "HTTP method for the `ext_proxy` call. Absent = `POST`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Subcommand token, e.g. `status` in `ryu mail status`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Sub-path appended after `/api/ext/<plugin_id>`. Validated by\n[`validate_cli_command_path`] at manifest load: it MUST be an absolute\n(`/`-leading), traversal-free sub-path — no `..` segment in any form — so it\ncannot escape the plugin's proxy scope when a URL parser normalizes it.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "One-line help shown in `ryu <app>` / `ryu <app> --help`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "type": "object"
+    },
+    "CompanionSurface": {
+      "description": "Companion surface descriptor — an optional in-desktop overlay or sidebar panel\nan App may register. Fields mirror the UX primitives a Companion widget needs;\nall are optional except `label`.",
+      "properties": {
+        "icon": {
+          "default": null,
+          "description": "Icon identifier (resolved by the desktop shell).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "description": "Display label for the companion panel tab or tooltip.",
+          "type": "string"
+        },
+        "shortcut": {
+          "default": null,
+          "description": "Keyboard shortcut string (e.g. `\"ctrl+shift+r\"`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "type": "object"
+    },
+    "Contributes": {
+      "description": "VS-Code-style **contribution points** (`contributes` in `package.json`).\n\nEach field is a list of [`ContributionId`] references into the manifest's\n`runnables`: the plugin *declares* that runnable `X` contributes to the\n`commands`/`tools`/`agents`/… surface. This is declare-by-id, not a second\ncopy of the runnable — the loader cross-validates that every referenced id\nexists in `runnables`, so a typo is caught at load.\n\n# Extending\n\nAdd a new surface = add a new `#[serde(default)] pub <surface>: Vec<ContributionId>`\nfield here. The cross-validation in [`Contributes::referenced_ids`] picks it\nup automatically.",
+      "properties": {
+        "agents": {
+          "default": [],
+          "description": "Agents the plugin contributes (referenced by runnable id).",
+          "items": {
+            "$ref": "#/$defs/ContributionId"
+          },
+          "type": "array"
+        },
+        "commands": {
+          "default": [],
+          "description": "Command-palette commands the plugin contributes (referenced by runnable id).",
+          "items": {
+            "$ref": "#/$defs/ContributionId"
+          },
+          "type": "array"
+        },
+        "composer_controls": {
+          "default": [],
+          "description": "Declarative **native** UI widgets the plugin contributes to the desktop\ncomposer (e.g. a `toggle` that sets a `plugin_flags` entry, or a `chip`).\nCore stores these verbatim and serves them via `GET /api/plugins/contributions`;\nthe desktop renders the known widget types. Opaque to Core (the renderer\nowns interpretation) so new widget types need no Core change.",
+          "items": true,
+          "type": "array"
+        },
+        "policies": {
+          "default": [],
+          "description": "Gateway policies the plugin contributes (referenced by runnable id).",
+          "items": {
+            "$ref": "#/$defs/ContributionId"
+          },
+          "type": "array"
+        },
+        "settings_tabs": {
+          "default": [],
+          "description": "Declarative settings tabs the plugin contributes (model pickers, text\nfields bound to preference keys). Served + rendered the same way.",
+          "items": true,
+          "type": "array"
+        },
+        "slash_commands": {
+          "default": [],
+          "description": "Slash commands the plugin contributes (e.g. `/goal`). The desktop maps the\ncommand to a `plugin_flags`/message action; the plugin's turn hook reads\nthe resulting message. Served + rendered the same way.",
+          "items": true,
+          "type": "array"
+        },
+        "tools": {
+          "default": [],
+          "description": "Callable tools the plugin contributes (referenced by runnable id).",
+          "items": {
+            "$ref": "#/$defs/ContributionId"
+          },
+          "type": "array"
+        },
+        "turn_hooks": {
+          "default": [],
+          "description": "Chat turn hooks the plugin contributes — server-side logic that runs at a\nturn boundary (e.g. `post_assistant_turn`) and returns a directive. These\nare **self-contained** (they carry their own inline `code`), so they are\nNOT cross-validated against `runnables` like the id-reference surfaces\nabove; the Core `plugin_host` runtime executes them in the sandbox.",
+          "items": {
+            "$ref": "#/$defs/TurnHookContribution"
+          },
+          "type": "array"
+        },
+        "views": {
+          "default": [],
+          "description": "**Declarative views** the plugin contributes (the Raycast tier). Each entry\nis a [`ViewContribution`]: a typed envelope (`id`/`view`) around an **opaque**\n`spec` payload the host renderer interprets. The app returns DATA\n(`items`/`columns`/`actions`/`fields`) — never code — and the shell renders it\nwith the host's own `@ryu/ui` components (desktop) or the compact command-bar\nidiom (island), so one spec renders natively on every surface and cannot be\nmade ugly. Like [`composer_controls`]/[`settings_tabs`] this is **self-contained**\n(not cross-validated against `runnables`), and the `view` discriminant + `spec`\nstay opaque to Core so a new view kind needs no Core change — the renderer owns\nthe vocabulary (`list-detail`, `data-table`, `form`, `action-panel`,\n`filter-bar`, `empty-state`, `stat-card-row`).\n\n[`composer_controls`]: Contributes::composer_controls\n[`settings_tabs`]: Contributes::settings_tabs",
+          "items": {
+            "$ref": "#/$defs/ViewContribution"
+          },
+          "type": "array"
+        },
+        "widgets": {
+          "default": [],
+          "description": "App widgets the plugin contributes (Ryu Apps). Each binds a tool id to a\n`ui://widget/<slug>.html` template the tool renders inline in chat. The\nfield is shape-identical to the SDK `manifest.ts` `WidgetContribution`.",
+          "items": {
+            "$ref": "#/$defs/WidgetContribution"
+          },
+          "type": "array"
+        },
+        "workflows": {
+          "default": [],
+          "description": "Workflows the plugin contributes (referenced by runnable id).",
+          "items": {
+            "$ref": "#/$defs/ContributionId"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ContributionId": {
+      "description": "A single contribution: a reference (by `id`) to a runnable declared in the\nmanifest's `runnables` list, optionally with a human-facing title (e.g. the\nlabel a command shows in the palette).",
+      "properties": {
+        "id": {
+          "description": "The runnable id this contribution points at. Must exist in `runnables`.",
+          "type": "string"
+        },
+        "title": {
+          "default": null,
+          "description": "Optional display title (e.g. the palette label for a command).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "EnginesReq": {
+      "description": "`engines` block — the required Ryu version, mirroring VS-Code's\n`engines.vscode`. `ryu` is a semver **requirement** string.",
+      "properties": {
+        "ryu": {
+          "description": "Semver requirement the running Core version must satisfy (e.g. `\">=0.3.0\"`,\n`\"^1.2\"`). Parsed as a [`semver::VersionReq`]; an unparseable value or an\nunsatisfied requirement causes the loader to reject the manifest.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ryu"
+      ],
+      "type": "object"
+    },
+    "ExternalRuntimeConfig": {
+      "description": "code surface the Gateway must permit before it runs.",
+      "properties": {
+        "assets": {
+          "default": [],
+          "description": "Assets to fetch into `~/.ryu` before first run.",
+          "items": {
+            "$ref": "#/$defs/AssetSpec"
+          },
+          "type": "array"
+        },
+        "entry": {
+          "description": "The module/entrypoint to run (e.g. `\"ryu_tts\"` → `python -m ryu_tts`).",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Environment variables layered onto the runtime process at spawn. Values may\nuse `${RYU_DIR}` — expanded to the Core data dir (`~/.ryu`) at spawn — so a\nruntime can point caches/outputs at Core-owned paths without hardcoding an\nabsolute path in the (portable) manifest. Nothing else is interpolated.",
+          "type": "object"
+        },
+        "health_path": {
+          "default": null,
+          "description": "Health-check path on the runtime's server (e.g. `\"/health\"`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "default": "python",
+          "description": "Runtime kind. `\"python\"` is the only provisionable kind today; others are\naccepted (round-trip) but provisioning returns an \"unsupported\" error.\n\nDefaults to `\"python\"` so this config can be nested inside the internally\n`#[serde(tag = \"kind\")]`-tagged [`SidecarProcess::Python`] variant: there the\nouter enum consumes the `\"kind\"` key as its discriminant, so the inner field\nwould otherwise be reported missing — the classic internally-tagged collision.\nStandalone use still round-trips an explicit `kind`.",
+          "type": "string"
+        },
+        "port": {
+          "default": null,
+          "description": "Port the runtime's HTTP server binds to (adopt-or-spawn check).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "port_env": {
+          "description": "Optional env var the Python child reads for its **bind port**. When set, Core\ninjects `<port_env> = profile-shifted([`SidecarSpec::port`])` at spawn, so the\nchild binds the same profile-aware port Core health-checks + proxies to — the\nPython-sidecar analogue of [`LocalProcessSpec::port_env`] (without it a static\nport env collides across concurrent Core profiles).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pyproject_extra": {
+          "default": null,
+          "description": "Optional pyproject *extra* to install (`pip install -e \".[<extra>]\"`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "python_version": {
+          "default": null,
+          "description": "Optional Python version hint (e.g. `\"3.11\"`). Advisory.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requirements": {
+          "default": [],
+          "description": "pip requirement specs to install into the venv.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceArchiveSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional **source archive** to extract into the runtime dir before the venv\nis built. Needed when the entry module is a *first-party package the plugin\nships* (not on PyPI): a `pip install -e \".[extra]\"` needs the package's\n`pyproject.toml` + sources on disk first. Single-file `assets` cannot deliver\na source tree; this does. Omit for a pure-PyPI runtime."
+        }
+      },
+      "required": [
+        "entry"
+      ],
+      "type": "object"
+    },
+    "FsPermissions": {
+      "description": "Filesystem read/write path allowlists. Empty sets = no filesystem access, which\nis the deny-all default.",
+      "properties": {
+        "read": {
+          "description": "Absolute paths the sandbox may **read**. Empty = no read access.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "write": {
+          "description": "Absolute paths the sandbox may **write**. Empty = no write access.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "HookMatch": {
+      "description": "A declarative pre-gate for a [`TurnHookContribution`]. The conditions are\nOR-ed: the hook runs if **any** present condition matches. An empty match\n(every field default) means \"always run\". Kept intentionally small — richer\nmatching belongs inside the hook JS, this only exists to skip the sandbox\nspawn on turns where the hook provably cannot act.",
+      "properties": {
+        "commands": {
+          "default": [],
+          "description": "Run if the last user message (trimmed) starts with any of these prefixes,\ne.g. `[\"/goal\"]`. This is how a slash-command hook wakes up.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "flag": {
+          "default": null,
+          "description": "Run only if the request set this composer flag true (`ctx.flags[flag]`),\ne.g. `\"io.ryu.double-check\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stateful": {
+          "default": false,
+          "description": "Run if the plugin has stored state for this conversation (its default KV\nnamespace has a value keyed by `conversation_id`), e.g. an active goal.",
+          "type": "boolean"
+        },
+        "tools": {
+          "default": [],
+          "description": "Run if the tool being called (`ctx.tool_name`) matches any of these\npatterns — for `pre_tool_use` / `post_tool_use` hooks. A pattern is a tool\nid with optional leading/trailing `*` wildcards (`\"*\"` = every tool,\n`\"bash*\"` = ids starting with `bash`). This keeps a tool-firewall hook from\nspawning the sandbox on every unrelated tool call.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "HostApiSpec": {
+      "description": "Declares the host-API grant subset a sidecar *process* may exercise via the\nauthenticated `/api/host/*` callback into Core. The listed grants are the ceiling;\nCore still intersects them with the plugin's *approved* grants (post-Gateway\nvalidation) at call time, so a manifest can never widen its own authority here.",
+      "properties": {
+        "grants": {
+          "default": [],
+          "description": "The grant strings (same vocabulary as `permission_grants`, e.g.\n`\"hook:side-model\"`) the sidecar backend may exercise via `/api/host/*`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "HttpProxySpec": {
+      "description": "Declares the reverse-proxy front Core mounts onto a [`SidecarSpec`]. This is the\n**data** form of what `apps/core/src/sidecar/mail.rs` hand-codes: the exact set of\nexternal routes and their per-route auth posture. Core rejects any request whose\nsub-path is not one of [`routes`] (404), preserving mail's exact-route safety as a\ndeclaration instead of a hardcoded router.\n\n[`routes`]: HttpProxySpec::routes",
+      "properties": {
+        "max_body_bytes": {
+          "default": null,
+          "description": "Maximum request body Core will buffer and forward, in bytes. Absent ⇒ Core's\nconservative default. Caps the proxy's memory exposure per request.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mount": {
+          "default": null,
+          "description": "Optional path prefix prepended to the forwarded sub-path when Core builds the\nupstream URL on the sidecar (e.g. `mount = \"/api/mail\"` turns an external\n`/api/ext/<id>/status` into an upstream `/api/mail/status`). Absent/empty ⇒\nthe sub-path after `/api/ext/<plugin_id>` is forwarded verbatim. Must start\nwith `/` when present.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "public_mount": {
+          "default": null,
+          "description": "Optional **public mount** — a stable, externally-committed URL prefix under\nwhich Core ALSO exposes this sidecar's routes, instead of only the generic\n`/api/ext/<plugin_id>/*` catch-all (e.g. `\"/api/mail\"` for a mail app whose\ninbound-webhook URL is baked into an external forwarder). Registered at\n`create_router` build time and only honoured for **built-in** manifests\n(axum routers are immutable after serve, so a runtime-installed third-party\napp cannot claim a custom prefix — it keeps `/api/ext/<id>/*`). Absent = no\npublic mount (the common case). The routes + per-route auth are the SAME\n[`routes`] list; this only changes the public prefix they answer on.\n\n[`routes`]: HttpProxySpec::routes",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "routes": {
+          "default": [],
+          "description": "The exact set of proxied routes. Each entry's [`RouteSpec::path`] is matched\nagainst the incoming sub-path (the segment after `/api/ext/<plugin_id>`),\nsupporting `:param` and trailing `*rest` wildcards. A request whose sub-path\nmatches **none** of these is refused with 404 — undeclared paths are never\nforwarded (the security property that makes this a safe generalization of the\nmail proxy's fixed route list).",
+          "items": {
+            "$ref": "#/$defs/RouteSpec"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "LocalProcessSpec": {
+      "description": "A [`SidecarProcess::Local`] spec: spawn a binary already on the host, no fetch.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "CLI args passed to the process.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "description": "The program to spawn — a bare name resolved on `PATH` (e.g. `\"ryu-mail\"`), or\nan absolute path.",
+          "type": "string"
+        },
+        "command_env": {
+          "description": "Optional env var whose value, when set and non-empty, **overrides** `command`\n(e.g. `\"RYU_MAIL_BIN\"` to point at a local dev build). Absent = always use\n`command`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Extra environment for the child (the reserved `RYU_EXT_*` vars are injected\nlast, so a manifest can never override them).",
+          "type": "object"
+        },
+        "port_env": {
+          "description": "Optional env var the child reads for its **bind port**. When set, Core injects\n`<port_env> = profile-shifted(port)` at spawn, so the child binds the SAME\nprofile-aware port Core health-checks + proxies to. Without this, a static\nmanifest port collides across concurrent Core profiles (dev shifts ports by\n+offset; the child would bind the release port while Core proxies the dev\none). Absent = the child chooses its own port (must match the manifest `port`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "NetworkPermission": {
+      "anyOf": [
+        {
+          "description": "Allow all hosts (`true`) or none (`false`).",
+          "type": "boolean"
+        },
+        {
+          "description": "Allow only these `host[:port]` entries.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "Outbound network permission, in the shape Deno's `--allow-net` supports: a bare\nboolean (`false` = deny all, `true` = allow all) or an explicit `host[:port]`\nallowlist.\n\nUntagged so the wire form is natural: `false` / `true` deserialize to\n[`NetworkPermission::All`]; a JSON array deserializes to\n[`NetworkPermission::Hosts`]."
+    },
+    "NodeProcessSpec": {
+      "description": "A [`SidecarProcess::Node`] spec: run a plugin's JavaScript backend under a managed\nNode/Bun runtime via Core's embedded host bootstrap. Nothing is hardcoded — the\nentry module, runtime preference, port, and health path are all data.",
+      "properties": {
+        "entry": {
+          "description": "Relative path (traversal-safe: no absolute, no `..`) inside the plugin dir to\nthe backend entry module — a `.js`/`.mjs`/`.cjs` bundle exporting `activate`.\nCore writes the owning manifest's `backend_code` here at spawn (when present)\nand passes it to the bootstrap as the module to load. This is the single\noperational source of the entry path (the manifest carries only the payload +\nits hash, not a second copy of the path).",
+          "type": "string"
+        },
+        "runtime": {
+          "description": "Which runtime to use: `\"bun\"` or `\"node\"`. Absent = auto-detect, preferring\n`bun` on `PATH` then `node`. The bootstrap is dependency-free (`node:http`\nonly) so it runs identically on either.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "entry"
+      ],
+      "type": "object"
+    },
+    "PermissionSet": {
+      "description": "The single, typed, **deny-by-default** permission set a plugin manifest\ndeclares, lowered by Core to every sandbox backend.\n\nThis is the one grammar that replaces three historically-disjoint ones:\nthe wasmtime/Docker [`crate`]-external `SandboxCapabilities` (typed but\nunreachable from a manifest), the Deno PTC's hardcoded zero-allow-flag spawn,\nand the opaque grant strings. A manifest declares ONE `permissions` block and\nCore lowers it to WASI preopens, Docker mount/network flags, or Deno\n`--allow-*` flags as appropriate.\n\n**Every field defaults to empty/false — the zero value is deny-all.** A missing\n`permissions` block (or an explicit `{}`) is byte-for-byte the same posture as\ntoday's zero-permission sandbox, which is what preserves the existing live\ndeny-all tests.",
+      "properties": {
+        "child_process": {
+          "description": "Whether the sandboxed code may spawn child processes. `false` (default) =\nno subprocess execution. Lowers to Deno's `--allow-run`; the wasmtime/Docker\nlowering has no subprocess channel to open, so this is a no-op there (a WASI\nmodule cannot fork, and the Docker exec is a single fixed argv).",
+          "type": "boolean"
+        },
+        "fs": {
+          "$ref": "#/$defs/FsPermissions",
+          "description": "Filesystem read/write path allowlists. Empty = no FS access."
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkPermission",
+          "description": "Outbound network permission. `false`/absent (default) = no network; `true` =\nall hosts; a list of `host[:port]` entries = only those hosts (the shape\nDeno's `--allow-net` supports). See [`NetworkPermission`]."
+        },
+        "tool": {
+          "description": "**Declaration-only** in v1: the registry tool ids this plugin's sandboxed\ncode may call through the stdio `tools.*` bridge. Tools are brokered over\nstdout/stdin by Core (never an OS capability), so this does NOT lower to any\n`--allow-*` flag; it records intent and is a clean future extension for the\n`SandboxToolInvoker` allowlist. Empty (default) records no extra tool intent.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ProvidesEntry": {
+      "description": "One **provided capability** entry (in [`PluginManifest::provides`]).\n\nBinds an abstract capability name to a concrete serving surface on THIS\nmanifest: the local `sidecar` name whose declared HTTP `route` implements the\ncapability, plus the `grant` a consumer must hold to invoke it. The broker\nroutes a consumer's `/api/host/capability/<cap>` call to this sidecar's route\nusing the *provider's* minted token — the consumer never sees it.",
+      "properties": {
+        "capability": {
+          "description": "The capability name this plugin serves (e.g. `\"rag\"`). Consumers match on\nthis against their [`Requires::capabilities`].",
+          "type": "string"
+        },
+        "grant": {
+          "description": "The grant a consumer must hold (Gateway-approved) to invoke this capability\nvia the broker. Absent = no extra grant beyond declaring the edge.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "route": {
+          "description": "The proxied sub-path (on the named sidecar's [`crate::schema::HttpProxySpec`])\nthe broker forwards capability calls to (e.g. `\"/rag/query\"`). The loader\ncross-validates that the named sidecar declares a matching route.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sidecar": {
+          "description": "The local `name` of one of this manifest's declared `sidecars` that serves\nthe capability. The loader cross-validates it exists. Absent = an in-process\ncapability with no dedicated sidecar (the broker declines to proxy it).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "description": "The capability's own semver version (independent of the plugin version), so\na consumer's [`CapabilityReq::min_version`] floor can be checked against the\ncapability contract rather than the app release.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "capability",
+        "version"
+      ],
+      "type": "object"
+    },
+    "Requires": {
+      "description": "`requires` block — the plugin's **plugin-to-plugin** dependencies.\n\nThis is the npm-shaped edge that lets the app decompose into a minimal kernel\nplus features: a plugin declares the other plugins it needs, and the lifecycle\n(Core's `plugins::graph`) resolves them into a topological enable order.\n\nDistinct from [`EnginesReq`], which constrains plugin→**Core** (the engine\nversion). `requires` constrains plugin→**plugin**.\n\nAbsent (the default, and the case for every manifest that predates this field)\nmeans *no dependencies* — the plugin enables standalone exactly as before.",
+      "properties": {
+        "apps": {
+          "description": "Other plugins that must be installed (and are auto-enabled, in dependency\norder) before this one can enable.",
+          "items": {
+            "$ref": "#/$defs/AppDependency"
+          },
+          "type": "array"
+        },
+        "capabilities": {
+          "description": "**Capabilities** this plugin requires — the layered, provider-agnostic edge\n(`requires: [rag]`) that the capability broker resolves to a concrete\nprovider app at bind time. Distinct from [`apps`]: an `apps` edge names a\nspecific plugin id; a `capabilities` edge names an abstract capability and\nlets the binding registry pick (or the user override) which enabled provider\nserves it. Each is lowered to an app-id graph edge once bound, so the\ntopological enable/disable/cycle machinery is shared. Empty for the common\ncase.\n\n[`apps`]: Requires::apps",
+          "items": {
+            "$ref": "#/$defs/CapabilityReq"
+          },
+          "type": "array"
+        },
+        "grants": {
+          "description": "Permission grants implied by the dependencies. Declaration only — the\nGateway remains the sole authority on what a grant *allows* (Core decides\nwhat runs; the Gateway decides what is permitted).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RouteAuth": {
+      "description": "The auth posture of a proxied [`RouteSpec`] (serde kebab-case).",
+      "oneOf": [
+        {
+          "const": "protected",
+          "description": "The request must carry the node bearer (the default; same gate as any other\nprotected Core route).",
+          "type": "string"
+        },
+        {
+          "const": "public",
+          "description": "No node-bearer requirement — the route authenticates itself end-to-end (e.g.\na per-resource HMAC on an inbound webhook), like the mail inbound path.",
+          "type": "string"
+        }
+      ]
+    },
+    "RouteSpec": {
+      "description": "One declared proxied route: a path pattern plus its auth posture.",
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/RouteAuth",
+          "default": "protected",
+          "description": "Auth posture for this route. Defaults to [`RouteAuth::Protected`] (secure by\ndefault): the request must carry the node bearer exactly as any other\nprotected Core route. `public` opts a route out (e.g. an HMAC-authed inbound\nwebhook whose external caller cannot hold the node token)."
+        },
+        "path": {
+          "description": "Path pattern for the sub-path after `/api/ext/<plugin_id>` (must start with\n`/`). Supports `:param` (matches one non-empty segment) and a trailing\n`*rest` (matches the remainder), mirroring axum/matchit patterns so a\nsidecar's REST routes (`/inboxes/:id`) can be declared faithfully.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "RunnableEntry": {
+      "description": "A single Runnable entry inside a `plugin.json` manifest.\n\nEach entry carries the identity fields from [`crate::runnable::RunnableMeta`]\nplus an optional typed config blob. The `kind` field drives which config shape\nis expected; validation via [`validate_runnable`] checks that\nrequired-per-kind fields are present.",
+      "properties": {
+        "config": {
+          "default": null,
+          "description": "Per-kind configuration. Some kinds (e.g. `agent`) treat this as\noptional (sensible defaults apply); others (e.g. `tool`, `workflow`)\nrequire it. [`validate_runnable`] enforces the rules."
+        },
+        "id": {
+          "description": "Stable unique identifier within this app (e.g. `\"tool-web-search\"`).",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RunnableKind",
+          "description": "Discriminant that determines which per-kind config struct is required."
+        },
+        "name": {
+          "description": "Human-readable display name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "RunnableKind": {
+      "description": "The kind of a Runnable. The union of every executable thing in Ryu.\n\n# Extending with a new kind\n\nTo add a new kind:\n1. Add a variant here (no default/catch-all arm anywhere).\n2. Add a corresponding `*Config` struct in the `schema` module.\n3. Add the variant to the `validate_runnable` match in `schema`.\n4. Extend `as_str()` with the new arm.\n\nThe design intentionally avoids `_` / wildcard arms in every `match` so the\ncompiler flags every site that must be updated — the \"nothing hardcoded\"\nguarantee is enforced at compile time.",
+      "oneOf": [
+        {
+          "const": "agent",
+          "description": "A configured agent (system prompt + tools + model/engine binding).",
+          "type": "string"
+        },
+        {
+          "const": "workflow",
+          "description": "A DAG workflow of typed nodes.",
+          "type": "string"
+        },
+        {
+          "const": "tool",
+          "description": "A callable tool. Net-new: not yet a standalone Runnable type in Core\n(today only a `NodeKind::Tool` exists inside the workflow graph).",
+          "type": "string"
+        },
+        {
+          "const": "skill",
+          "description": "An Agent Skill (the Skills standard). Net-new: unrepresented in Core today.",
+          "type": "string"
+        },
+        {
+          "const": "companion",
+          "description": "An in-desktop overlay or sidebar Companion surface.",
+          "type": "string"
+        },
+        {
+          "const": "channel",
+          "description": "A channel bot adapter (Telegram, Slack, WhatsApp, Discord, …).",
+          "type": "string"
+        },
+        {
+          "const": "engine",
+          "description": "A pluggable model/inference engine binding (llama.cpp, Ollama, OpenAI-compat, …).",
+          "type": "string"
+        },
+        {
+          "const": "policy",
+          "description": "A Gateway policy fragment (firewall rule, PII/DLP filter, budget cap, …).\nNote: policy *enforcement* belongs to the Gateway; this kind lets an App\ndeclare and bundle a policy that the Gateway activates on install.",
+          "type": "string"
+        }
+      ]
+    },
+    "SidecarProcess": {
+      "description": "How a [`SidecarSpec`] obtains its runnable process. Tagged by `kind`\n(`\"binary\"` | `\"python\"` | `\"local\"` | `\"node\"`) so a future runtime (`\"deno\"`) is\na data change, not a code change (\"nothing hardcoded\").",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/BinarySpec",
+          "description": "A single downloaded executable: fetched (checksum-verified) into the\nplugin's `bin/` dir, made executable, then spawned with `args` + `env`.",
+          "properties": {
+            "kind": {
+              "const": "binary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ExternalRuntimeConfig",
+          "description": "A Python runtime: the existing external-runtime provisioner (venv + pip +\nassets) builds the environment, then `python -m <entry>` is spawned.\nReuses [`ExternalRuntimeConfig`] verbatim (its `port`/`health_path` are\nignored here — the [`SidecarSpec`]'s own fields drive the health check).",
+          "properties": {
+            "kind": {
+              "const": "python",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/LocalProcessSpec",
+          "description": "A binary **already present on the host** — a sibling Ryu ships alongside Core\n(e.g. `ryu-mail`), or something on `PATH`. Spawned directly with **no download**.\nThis is the escape hatch for first-party sidecars built in the same repo, which\nhave no release-artifact URL. Not for third-party apps (they should declare a\ndownloadable [`Binary`]).\n\n[`Binary`]: SidecarProcess::Binary",
+          "properties": {
+            "kind": {
+              "const": "local",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/NodeProcessSpec",
+          "description": "A **managed JavaScript backend** — the extension-host runtime (RFC Option B).\nCore spawns a small first-party bootstrap (embedded in the binary) under `bun`\n(preferred) or `node`, which loads the plugin's declared `entry` module and\ncalls its exported `activate(context)`; the module may register an HTTP request\nhandler that the `/api/ext/<id>/*` proxy forwards to. The `entry` bundle rides\nas the owning manifest's `backend_code` payload (mirroring `ui_code`) and is\nwritten to the plugin dir + integrity-checked against `backend_sha256` at spawn.\nBecause it is still a [`SidecarSpec`] it inherits the whole managed lifecycle\n(lazy/wake, idle-stop, health monitor, PATH cap-shims, per-plugin `RYU_EXT_*`\ntoken, `RouteAuth` proxying). Gated by the experimental-plugin-runtime flag and,\nfor Community-tier plugins, by the `sidecar:process` grant exactly like a binary.",
+          "properties": {
+            "kind": {
+              "const": "node",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SidecarSpec": {
+      "description": "A declarative **managed sidecar** a plugin may declare: a long-running child\nprocess Core owns end-to-end (download/provision → spawn → health-check →\nstop), registered into the Core `SidecarManager` on enable so it rides the\n*same* managed lifecycle (health monitor + resource sampler +\n`/api/sidecar/status`) as a built-in sidecar.\n\nThis is the **app ⇄ sidecar bridge**: it lets a capability sidecar (ghost,\nshadow, a TTS engine, …) be a fully manifest-defined app instead of hardcoded\nRust, and lets a third-party app ship its own process under a Gateway grant.\nInfra sidecars (llama.cpp, the gateway, embeddings) stay Core substrate and are\ndeliberately NOT expressible here.\n\nThe process is obtained one of two ways ([`SidecarProcess`]): a downloaded\n**binary**, or a **Python** runtime (reusing [`ExternalRuntimeConfig`] — venv +\npip + assets). Both are gated at enable by the `sidecar:process` grant; nothing\nis hardcoded — the binary URL, args, env, port, and health path are all data.",
+      "properties": {
+        "health_path": {
+          "default": "/health",
+          "description": "Health-check path on the process's server (default `\"/health\"`). A GET to\n`http://127.0.0.1:<port><health_path>` returning 2xx marks it healthy.",
+          "type": "string"
+        },
+        "host_api": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostApiSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional **host-API** declaration: the subset of the owning plugin's approved\ngrants the sidecar *process* may exercise via an authenticated callback into\nCore (`/api/host/*`, bearer = the plugin's minted `RYU_EXT_TOKEN`). Absent =\nthe sidecar may not call back into Core at all (deny-all). Additive."
+        },
+        "http": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpProxySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional **HTTP proxy** declaration: when present, Core exposes a public\nreverse-proxy front (`/api/ext/<plugin_id>/*`) onto this sidecar, so a\nmanifest-declared sidecar becomes a full first-class *app* reachable by any\nclient — the generic form of the hand-coded `ryu-mail` proxy. Absent = the\nsidecar is an internal capability with no external HTTP surface (only Core's\nown health probe reaches it). Additive: existing sidecars get `None`."
+        },
+        "idle_stop_secs": {
+          "description": "**Idle-stop timeout**, in seconds — scale-to-zero for this sidecar. When set,\nCore stops the process after it has served no request for this long (and has\nnone in flight); the next proxy/broker hit wakes it again (see [`lazy`]). Must\nbe `>= 30` (a shorter window churns the process). Absent = never idle-stopped\nby manifest declaration (the operator-level [`RYU_SIDECAR_IDLE_SECS`] env can\nstill opt a sidecar in). Additive; independent of [`lazy`] — an eager sidecar\nmay declare an idle timeout and will then wake-on-demand after a reap.\n\n[`lazy`]: SidecarSpec::lazy\n[`RYU_SIDECAR_IDLE_SECS`]: the manager's env-seeded idle config.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lazy": {
+          "description": "**Lazy activation** — spawn-on-first-use instead of at plugin-enable. When\n`true` the sidecar is *registered* (claims its port, appears in\n`/api/sidecar/status` as not-running) at enable but its process is NOT started\nuntil the first proxy/broker hit wakes it on demand; a bounded health-wait\nwarms it before the request is forwarded. `false` (the default) keeps the\neager behaviour every existing manifest has: started at enable. Additive.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Local name, unique within the plugin. Namespaced to `<plugin_id>/<name>` at\nregistration so it never collides with a built-in sidecar or another\nplugin's. Must be a safe single path segment (no `/`, `\\`, `..`, or NUL).",
+          "type": "string"
+        },
+        "port": {
+          "description": "TCP port the process's HTTP server binds to, used to build the health-check\nURL. The plugin is responsible for choosing a free port — there is **no port\nregistry in v1**, so a collision with a built-in (e.g. llama.cpp on 8080) is\nthe plugin author's responsibility to avoid.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "process": {
+          "$ref": "#/$defs/SidecarProcess",
+          "description": "How Core obtains and runs the process."
+        }
+      },
+      "required": [
+        "name",
+        "process",
+        "port"
+      ],
+      "type": "object"
+    },
+    "SourceArchiveSpec": {
+      "description": "A source-tree archive an external runtime extracts into its runtime dir before\nprovisioning (venv + `pip install -e .`). Distinct from [`AssetSpec`], which\nfetches a *single file* into `~/.ryu`; this delivers a whole package tree the\nplugin owns.",
+      "properties": {
+        "format": {
+          "description": "Archive format: `\"tar.gz\"` or `\"zip\"`. Extracted whole-tree into the runtime\ndir so the package's `pyproject.toml` lands at its root.",
+          "type": "string"
+        },
+        "sha256": {
+          "default": null,
+          "description": "Optional lower-case-hex SHA-256 of the archive; when present the download is\nverified and re-fetched on mismatch (fail-closed).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Direct **https** URL to the archive. Non-https is rejected by the SSRF egress\nscreen at download time.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "format"
+      ],
+      "type": "object"
+    },
+    "Surface": {
+      "description": "A host surface a plugin can declare support for via `targets`.\n\n`core` is the headless node (a Core running with no UI at all).\n\nAn **empty/absent** `targets` list means the plugin runs on *every* surface —\nthat is the backward-compatible default and MUST NOT be read as \"hidden\".",
+      "oneOf": [
+        {
+          "const": "gateway",
+          "description": "The Ryu Gateway.",
+          "type": "string"
+        },
+        {
+          "const": "core",
+          "description": "A headless Core node (no UI).",
+          "type": "string"
+        },
+        {
+          "const": "desktop",
+          "description": "The Tauri desktop app.",
+          "type": "string"
+        },
+        {
+          "const": "island",
+          "description": "The Electron dynamic-island companion.",
+          "type": "string"
+        },
+        {
+          "const": "mobile",
+          "description": "The Expo/React-Native mobile app.",
+          "type": "string"
+        },
+        {
+          "const": "extension",
+          "description": "The browser extension.",
+          "type": "string"
+        },
+        {
+          "const": "web",
+          "description": "The Next.js web app.",
+          "type": "string"
+        },
+        {
+          "const": "cli",
+          "description": "The terminal client.",
+          "type": "string"
+        }
+      ]
+    },
+    "SurfaceEntry": {
+      "description": "One [`PluginManifest::surfaces`] entry: the support level plus an optional UI\ndescriptor the surface shell resolves (opaque here — pure data).",
+      "properties": {
+        "commands": {
+          "description": "Terminal subcommands this app contributes to the `cli` surface (the TUI's\n`ryu <app> <cmd>` dispatcher). Only meaningful on the `cli` surface entry;\nignored on other surfaces. Empty/absent = the app contributes no commands.",
+          "items": {
+            "$ref": "#/$defs/CliCommandSpec"
+          },
+          "type": "array"
+        },
+        "support": {
+          "$ref": "#/$defs/SurfaceSupport",
+          "default": "none",
+          "description": "How much of the plugin this surface supports."
+        },
+        "ui": {
+          "description": "Optional surface-specific UI descriptor (bundle id, mount point, …),\ninterpreted by the surface's app host. Opaque to the contract."
+        }
+      },
+      "type": "object"
+    },
+    "SurfaceSupport": {
+      "description": "Per-surface support level a plugin declares for a [`Surface`] in the\n[`PluginManifest::surfaces`] map. Governs both whether the plugin appears on the\nsurface and how much of its UI that surface renders.",
+      "oneOf": [
+        {
+          "const": "full",
+          "description": "Full first-class UI + backend on this surface.",
+          "type": "string"
+        },
+        {
+          "const": "limited",
+          "description": "A reduced/limited UI (e.g. a read-only or single-pane view).",
+          "type": "string"
+        },
+        {
+          "const": "list",
+          "description": "A list/index entry only (no dedicated page).",
+          "type": "string"
+        },
+        {
+          "const": "commands",
+          "description": "Command-palette / CLI commands only (no rendered UI) — e.g. the TUI tier.",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Explicitly unsupported on this surface. Equivalent to omitting the key, made\nexplicit so a manifest can document intent.",
+          "type": "string"
+        }
+      ]
+    },
+    "TurnHookContribution": {
+      "description": "A server-side chat turn hook contributed by a plugin. The `code` is a JS body\nrun in the plugin sandbox with `ctx` (the turn context) and `host` (the\ncapability bridge: `host.sideModel`, `host.storage`, `host.log`) in scope; it\nreturns a directive (`{kind:\"none\"}` | `{kind:\"note\",text}` |\n`{kind:\"continue\",text}`). See Core's `plugin_host`.",
+      "properties": {
+        "code": {
+          "description": "The JS hook body executed in the sandbox (returns a directive).",
+          "type": "string"
+        },
+        "id": {
+          "description": "Stable id for this hook (for logging/audit), unique within the plugin.",
+          "type": "string"
+        },
+        "match": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookMatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional cheap pre-gate. When present, Core's `plugin_host` evaluates it\nin Rust **before** spawning the sandbox, so an idle hook (e.g. double-check\nwith its toggle off, or goal with no active condition) costs a flag/prefix\ncheck or one KV read instead of a Deno process. This is what makes it safe\nto ship these hooks **enabled by default** on every surface. Absent (or all\nfields empty) → the hook always runs, preserving prior behaviour."
+        },
+        "on": {
+          "description": "The turn boundary this hook fires on. Today only `\"post_assistant_turn\"`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "on",
+        "code"
+      ],
+      "type": "object"
+    },
+    "ViewContribution": {
+      "description": "One **declarative view** contribution (the Raycast tier — see [`Contributes::views`]).\n\nA typed envelope around an opaque `spec`: Core stores it verbatim, tags it with\nthe owning `plugin` id at `GET /api/plugins/contributions`, and forwards it to the\nsurface shell, which maps `view` + `spec` to native components. The `spec` shape is\nowned by the shared TS vocabulary (`@ryu/app-host/views`), NOT by this contract, so\nadding a view kind is a renderer change, never a Core change.",
+      "properties": {
+        "id": {
+          "description": "Stable id for this view within the plugin (route/anchor key, unique per plugin).",
+          "type": "string"
+        },
+        "spec": {
+          "description": "The DATA payload for the view (items/columns/actions/fields/…). Opaque to Core\n— the shared renderer interprets it per the `view` kind. Absent = an empty view."
+        },
+        "title": {
+          "description": "Optional human-facing title (tab label / palette entry). Absent = the shell\nderives one from the view kind or the plugin name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "view": {
+          "description": "The vocabulary member this view renders as — the discriminant the per-surface\nrenderer switches on (`\"list-detail\"`, `\"data-table\"`, `\"form\"`,\n`\"action-panel\"`, `\"filter-bar\"`, `\"empty-state\"`, `\"stat-card-row\"`). Opaque\nto Core; an unknown kind is passed through so a newer shell can render it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "view"
+      ],
+      "type": "object"
+    },
+    "WidgetContribution": {
+      "description": "One app-widget contribution (Ryu Apps). Binds the tool that renders the widget\nto its HTML template. `ui_entry` is the source entry the SDK `ryu pack` builds\ninto the self-contained HTML for third-party apps; built-in apps serve HTML\nfrom the in-process provider and leave it unset.",
+      "properties": {
+        "default_display_mode": {
+          "default": "inline",
+          "description": "Default display mode (`inline` | `fullscreen` | `pip`).",
+          "type": "string"
+        },
+        "mime": {
+          "default": "text/html+skybridge",
+          "description": "Widget MIME dialect (default `text/html+skybridge`).",
+          "type": "string"
+        },
+        "tool_id": {
+          "description": "The fully-qualified tool id whose result renders this widget.",
+          "type": "string"
+        },
+        "ui_entry": {
+          "description": "Source entry (e.g. `src/apps/checklist/index.tsx`) for `ryu pack`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "uri": {
+          "description": "`ui://widget/<slug>.html` — the widget resource uri.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_id",
+        "uri"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "An installable Ryu App manifest (`plugin.json`).\n\nModelled on Codex's `plugin.json` pattern: a thin descriptor that bundles one or\nmore [`RunnableEntry`] items (agents, workflows, tools, skills, companions,\nchannels, engines, policies), lists the permission grants the app requires, and\noptionally declares a Companion surface (an in-desktop overlay or sidebar panel).\n\n# Per-kind config\n\nEach Runnable entry carries an optional `config` blob whose schema is\ndetermined by its `kind`. See [`crate::schema`] for the per-kind structs and the\n[`crate::schema::validate_runnable`] function.",
+  "properties": {
+    "activation_events": {
+      "default": [],
+      "description": "Activation events that lazily wake the plugin — VS-Code `activationEvents`.\nRecognised tokens: `\"*\"` (always active / eager), `\"onStartup\"`, `\"onChat\"`,\n`\"onCommand:<id>\"`, `\"onRoute\"` (fired the first time a lazy sidecar is woken\nby an inbound proxy hit), and `\"onCapabilityCall\"` (the broker analogue —\nfired when a lazy provider sidecar is woken by a capability-broker hit). An\n**empty** list means *eager* activation (back-compat: every existing manifest\nkeeps activating on enable). The activation runtime firing these events lives\nin Core's `RunnableRegistry::register_active` + `fire_activation_event`;\n`onStartup`/`onChat`/`onRoute`/`onCapabilityCall` fire from Core, while\n`onCommand:<id>` fires from the desktop command palette.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "author": {
+      "description": "Publisher/author. Claude `author` — a bare string or an object with a\n`name` field; the detail builder extracts the display string into\n`developer`. Kept as a raw value so both shapes round-trip."
+    },
+    "backend_code": {
+      "description": "The plugin's **backend bundle** — the JavaScript source of the extension-host\nentry module a [`crate::schema::SidecarProcess::Node`] sidecar runs (RFC Option\nB). This is the backend analogue of `ui_code`: a payload blob that Core writes\nto the plugin dir at the node sidecar's declared `entry` path at spawn, then\nloads via the embedded host bootstrap. Unlike `ui_code` (which the install path\nsplits into a DB column so the on-disk manifest stays small), the backend blob\nrides **inline** in the manifest so the spawn path is self-contained (it reads\nthe reconstituted manifest, no separate carriage channel) AND, for a\nmarketplace plugin, the code is INSIDE the Gateway-signed surface — the whole\nbackend is signed, not merely hash-bound. Absent for a plugin with no node\nbackend. Written by `ryu pack`/`ryu publish`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "backend_sha256": {
+      "description": "Lower-case hex `sha256(utf8_bytes(backend_code))` — the integrity gate for the\nnode backend, mirroring [`ui_code_sha256`]. When present, Core recomputes the\nhash over the on-disk entry file at spawn and **refuses to start** the node\nsidecar on mismatch (fail-closed), so an entry file swapped on disk between\ninstall and spawn can never run. Absent = trust the bundle as written (the same\nposture `ui_code_sha256` uses when omitted).\n\n[`ui_code_sha256`]: PluginManifest::ui_code_sha256",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capabilities": {
+      "description": "Human-readable capability strings (Ryu extension). When absent the detail\nbuilder DERIVES these from `permission_grants` via\n[`crate::schema::capabilities_from_grants`]; declared values are used verbatim.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "category": {
+      "description": "Free-text category (Claude `category`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "companion": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CompanionSurface"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional Companion surface descriptor: an in-desktop overlay or sidebar panel\nthe app may register. Absent when the app has no Companion surface."
+    },
+    "contributes": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Contributes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "VS-Code-style **contribution points**: a declare-by-id block naming which\nof the manifest's `runnables` the plugin contributes to each extensible\nsurface. Every id referenced here MUST exist in `runnables` (the loader\ncross-validates). Absent when the plugin contributes nothing extra\n(the common case — a plugin's `runnables` are already its contributions)."
+    },
+    "description": {
+      "description": "Long plaintext/markdown description. Empty when absent (the built-in card\nhistorically emitted `\"\"` for this; preserved).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "engines": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EnginesReq"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Required Ryu engine version (VS-Code `engines.vscode` analogue). When\npresent, `engines.ryu` is a semver **requirement** (e.g. `\">=0.3.0\"`) and\nthe loader rejects the manifest if the running Core version does not\nsatisfy it. Absent = compatible with any Core version."
+    },
+    "examplePrompts": {
+      "description": "Prompt-chip examples (contract key `examplePrompts`; Ryu extension).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "homepage": {
+      "description": "Homepage/website URL (Claude `homepage`; emitted as `website`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "iconUrl": {
+      "description": "Logo URL (contract key `iconUrl`; Ryu extension).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "description": "Reverse-domain unique identifier for the app (e.g. `\"com.example.my-app\"`).",
+      "type": "string"
+    },
+    "keywords": {
+      "description": "Search keywords / tags (Claude `keywords`).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "license": {
+      "description": "SPDX license identifier (Claude `license`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Human-readable display name shown in the app store / launcher.",
+      "type": "string"
+    },
+    "permission_grants": {
+      "default": [],
+      "description": "Permission grants this app declares it needs (e.g. `\"mcp:web_search\"`).\nThese are *declarations only* at this layer — no enforcement happens here;\nthe Gateway owns grant enforcement.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "permissions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PermissionSet"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "**Unified, deny-by-default runtime permission set** — the single typed\ngrammar (`{fs, child_process, network, tool}`) Core lowers to every sandbox\nbackend (wasmtime WASI preopens, Docker `--mount`/`--network` flags, Deno\n`--allow-*` flags). Absent = **deny-all** (the default for every manifest\npredating this field), so an app that declares nothing keeps today's exact\nzero-permission sandbox posture.\n\n# Relationship to [`permission_grants`]\n\nThese are **two distinct lanes** that must not be conflated:\n- [`permission_grants`] are opaque strings the **Gateway** approves at\n  install/enable time — the *approval* lane (who is allowed to ask).\n- `permissions` is the typed set **Core** lowers into the actual sandbox at\n  spawn/exec time — the *runtime-enforcement* lane (what the code can touch).\n\nA grant says \"this app may use the filesystem capability\"; `permissions.fs`\nsays \"…and here are the exact read/write paths the sandbox is opened with.\"\n\n# Altitude (manifest-level, per-runnable override is a followup)\n\nDeclared at the manifest root because **both** current enforcement sites\nresolve their config from the owning manifest, not from a sub-entry: an\n`inline_deno` tool's backend is resolved from the manifest by\n`McpRegistry::resolve_app_tool_backend`, and a managed sidecar is spawned\nfrom the manifest by `ManifestSidecar`. A per-[`crate::schema::ToolConfig`] /\nper-[`crate::schema::SidecarSpec`] override is a clean future extension (the\nresolver would fall back to this manifest-level set) but is intentionally not\nin v1."
+    },
+    "privacyPolicyUrl": {
+      "description": "Privacy policy URL (contract key `privacyPolicyUrl`; Ryu extension).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provides": {
+      "description": "**Capabilities this plugin provides** — the inverse of\n[`Requires::capabilities`]. Each entry names a capability the plugin's\nsidecar can serve for other plugins through the capability broker, binding\nthe capability to one of this manifest's declared `sidecars` + a proxied\nroute. Absent/empty for the common case (a plugin that consumes but does not\nprovide capabilities). The loader cross-validates that every referenced\n`sidecar`/`route` exists (like `contributes`).",
+      "items": {
+        "$ref": "#/$defs/ProvidesEntry"
+      },
+      "type": "array"
+    },
+    "requires": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Requires"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "**Plugin-to-plugin dependencies** — the other plugins this one needs (the\nnpm-shaped edge that lets the app decompose into a kernel + features).\nResolved into a topological enable order by Core's `plugins::graph`.\n\nAbsent = **no dependencies** (every manifest predating this field)."
+    },
+    "runnables": {
+      "description": "The Runnables this app bundles. Each entry uses [`RunnableEntry`] from the\n[`crate::schema`] module so heterogeneous Runnables (agents, workflows,\ntools, skills, companions, channels, engines, policies) can be listed\ntogether with their per-kind config.",
+      "items": {
+        "$ref": "#/$defs/RunnableEntry"
+      },
+      "type": "array"
+    },
+    "runtime": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExternalRuntimeConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional declarative **external runtime** the plugin needs (e.g. a Python\nvenv + pip deps + assets, like the TTS sidecar). The provisioner lives in\nCore (`crate::sidecar::external_runtime`); this is the declaration (#449).\nAbsent for the common case (no external interpreter needed)."
+    },
+    "screenshots": {
+      "description": "App-Store gallery screenshot URLs (Ryu extension).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "setup": {
+      "description": "Optional companion/config setup card, or an array of such steps (Ryu\nextension). Opaque to Core — passed through to the detail payload verbatim."
+    },
+    "sidecars": {
+      "default": [],
+      "description": "Declarative **managed sidecars** the plugin ships (the app ⇄ sidecar\nbridge): each is a long-running child process Core downloads/provisions,\nspawns, and health-monitors via the Core `SidecarManager` on enable,\nexactly like a built-in sidecar. Gated at enable by the `sidecar:process`\ngrant (Core-tier auto; Community needs the approved grant). Empty for the\ncommon case (no bundled process).",
+      "items": {
+        "$ref": "#/$defs/SidecarSpec"
+      },
+      "type": "array"
+    },
+    "surfaces": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SurfaceEntry"
+      },
+      "description": "Per-surface support + UI declaration — the richer successor to [`targets`].\n\nWhen **present**, this map is authoritative and [`targets`] is ignored: a\nsurface is supported iff it has an entry whose [`SurfaceSupport`] is not\n[`SurfaceSupport::None`], and an **absent key means the surface is not\nsupported** (see [`PluginManifest::supports_surface`]). When **absent**, the\npredicate falls back to the legacy [`targets`] semantics (empty/absent =\nevery surface) — so every manifest that predates this field keeps its exact\nbehaviour. Never make an absent `surfaces` mean \"no surfaces\".\n\n[`targets`]: PluginManifest::targets",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "tagline": {
+      "description": "Short one-line tagline shown under the name (Ryu extension).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "targets": {
+      "description": "Host surfaces this plugin runs on (desktop / island / mobile / …).\n\n**Empty or absent = runs on EVERY surface.** This is the backward-compatible\ndefault and must never be read as \"runs nowhere\" — every manifest that\npredates this field declares no targets and must keep surfacing everywhere.\nFiltering happens ONLY when this list is explicitly non-empty, and only at\nthe read/surface boundary (see [`PluginManifest::supports_surface`]) — never\nin the storage layer, so an unsupported-target plugin stays installable and\ninspectable.",
+      "items": {
+        "$ref": "#/$defs/Surface"
+      },
+      "type": "array"
+    },
+    "termsOfServiceUrl": {
+      "description": "Terms-of-service URL (contract key `termsOfServiceUrl`; Ryu extension).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ui_code_sha256": {
+      "description": "Lower-case hex `sha256(utf8_bytes(ui_code))` binding the plugin's bundled\nsandboxed-UI code to this manifest. Because the Gateway signs the manifest\nverbatim (canonical key-sorted encoding), this hash is INSIDE the signed\nsurface while the `ui_code` blob itself rides OUTSIDE it as payload; the\ninstall path recomputes the hash over the fetched code and rejects a\nmismatch fail-closed. Absent for a manifest-only plugin (no bundled UI) and\nfor unsigned seed items. Written by `ryu pack`/`ryu publish`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "description": "Semver version string (e.g. `\"1.0.0\"`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "runnables"
+  ],
+  "title": "PluginManifest",
+  "type": "object"
+}

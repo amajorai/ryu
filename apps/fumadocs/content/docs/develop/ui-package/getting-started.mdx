@@ -1,0 +1,116 @@
+---
+title: "Getting Started"
+description: "Install @ryu/ui, wire up the design tokens, and use your first component."
+---
+
+## Installation
+
+`@ryu/ui` is a workspace package inside the Ryu monorepo. In any app that depends on it:
+
+```json title="package.json"
+{
+  "dependencies": {
+    "@ryu/ui": "workspace:*"
+  }
+}
+```
+
+## Wire up the design tokens
+
+Import the global stylesheet at the root of your app. This injects all OKLCH color tokens, animation keyframes, and Tailwind theme extensions:
+
+```tsx title="app/layout.tsx"
+import "@ryu/ui/globals.css";
+```
+
+If you are using PostCSS, add the Ryu UI PostCSS config:
+
+```js title="postcss.config.mjs"
+export { default } from "@ryu/ui/postcss.config";
+```
+
+## Use a component
+
+All components are tree-shakable and export from `@ryu/ui/components/<name>`:
+
+```tsx
+import { Button } from "@ryu/ui/components/button";
+import { Dialog, DialogContent, DialogTitle } from "@ryu/ui/components/dialog";
+import { Badge } from "@ryu/ui/components/badge";
+
+export function MyPage() {
+  return (
+    <div>
+      <Badge variant="secondary">New</Badge>
+      <Button variant="default" size="lg">
+        Save changes
+      </Button>
+      <Dialog>
+        <DialogContent>
+          <DialogTitle>Confirm</DialogTitle>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+```
+
+## The `cn()` utility
+
+Use `cn()` to merge conditional Tailwind classes. It combines `clsx` (conditional classes) with `tailwind-merge` (deduplication):
+
+```tsx
+import { cn } from "@ryu/ui/lib/utils";
+
+<div className={cn(
+  "px-4 py-2",
+  isActive && "bg-primary text-primary-foreground",
+  className
+)} />
+```
+
+## Variant pattern (CVA)
+
+Most components export their variant definitions alongside the component. This lets you reuse the style without the component's DOM structure:
+
+```tsx
+import { buttonVariants } from "@ryu/ui/components/button";
+
+<a className={buttonVariants({ variant: "outline", size: "sm" })}>
+  I look like a button but I'm a link
+</a>
+```
+
+## CSS variable tokens
+
+All colors are CSS custom properties. Reference them directly in Tailwind or in custom CSS:
+
+| Token | What it controls |
+|---|---|
+| `--background` / `--foreground` | Page background and text |
+| `--card` / `--card-foreground` | Card surfaces |
+| `--primary` / `--primary-foreground` | Primary action color |
+| `--secondary` / `--secondary-foreground` | Secondary surfaces |
+| `--muted` / `--muted-foreground` | Subdued text and surfaces |
+| `--accent` / `--accent-foreground` | Accent highlights |
+| `--destructive` | Error / danger actions |
+| `--success` / `--warning` / `--info` | Status colors |
+| `--border` / `--input` / `--ring` | Borders, inputs, focus rings |
+| `--radius` | Border radius base |
+| `--sidebar-*` | Sidebar-specific tokens |
+
+In Tailwind, use the `bg-primary`, `text-muted-foreground`, `border-border` utilities — they map to these tokens automatically.
+
+## Dark mode
+
+Dark mode is class-based (`.dark` on `<html>`). The design tokens flip automatically:
+
+```tsx
+// Using next-themes
+<html className="dark">
+
+// Or manually
+<html className={isDark ? "dark" : ""}>
+```
+
+See [Themes](/docs/develop/ui-package/themes) for the full preset catalog and runtime switching.

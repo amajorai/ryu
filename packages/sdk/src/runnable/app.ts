@@ -64,6 +64,11 @@ export interface AppToolSpec {
 export interface DefineAppRequires {
 	/** Plugins that must be installed + enabled before this app enables. */
 	apps?: Requires["apps"];
+	/**
+	 * Abstract capability edges the broker binds to a provider at enable time
+	 * (`[{ capability: "rag" }]`). This is what composable agent slots lower to.
+	 */
+	capabilities?: Requires["capabilities"];
 	/** Grants implied by those dependencies (declaration only). */
 	grants?: string[];
 }
@@ -210,6 +215,7 @@ export function defineApp(options: DefineAppOptions): PluginManifest {
 			? {
 					requires: {
 						apps: options.requires.apps ?? [],
+						capabilities: options.requires.capabilities ?? [],
 						grants: options.requires.grants ?? [],
 					},
 				}

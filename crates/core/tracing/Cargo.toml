@@ -1,0 +1,23 @@
+[package]
+name = "ryu-tracing"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Per-run observability trace primitive for Ryu: the ordered-span store (`Span` v1 contract + SQLite-backed `TraceStore`) that records tool-call/model-call spans keyed by `conversation_id` (the run id) — open/close spans, args-hash privacy fingerprinting, and newest-first per-run span reads that back the desktop per-run trace viewer (M4). Placement rationale (Core, not Gateway): span ordering and tool-call sequencing are *what ran* (orchestration); token counts and cost are *what is measured/paid* and stay Gateway-side — this store deliberately holds NO tokens/cost fields. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the store opens at boot and backs a `ServerState` field). `TraceStore::open` takes an explicit db path, so the crate has ZERO dependency on apps/core — the default-path choice (`~/.ryu/traces.db`) stays Core-side wiring."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+anyhow = "1"
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+# sync: `Mutex` guards the SQLite connection.
+tokio = { version = "1", features = ["sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

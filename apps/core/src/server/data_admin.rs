@@ -20,13 +20,6 @@ use serde_json::json;
 
 use super::ServerState;
 
-/// The scheduler job a monitor mirrors. Kept in sync with
-/// `monitors_api::job_id_for` (a monitor auto-creates `monitor-<id>`); clearing
-/// all monitors must also remove these or they tick forever.
-fn monitor_job_id(monitor_id: &str) -> String {
-    format!("monitor-{monitor_id}")
-}
-
 /// The data categories a danger-zone clear can target.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -65,13 +58,13 @@ pub async fn data_counts(State(state): State<ServerState>) -> Json<serde_json::V
     let chats = state.conversations.count_conversations().await.unwrap_or(0);
     let spaces = state.spaces.count_spaces().await.unwrap_or(0);
     let memory = state.memory.count().await.unwrap_or(0);
-    let monitors = state
-        .monitors
-        .store
-        .list_monitors()
-        .await
-        .map(|m| m.len() as u64)
-        .unwrap_or(0);
+    // Monitors are out-of-process (`ryu-monitors` sidecar); count over the loopback
+    // client (an unreachable sidecar yields an empty list ⇒ 0, matching the old
+    // store-error fallback).
+    let monitors = match crate::monitors_client::global_client() {
+        Some(client) => client.list_monitors().await.map(|m| m.len()).unwrap_or(0) as u64,
+        None => 0,
+    };
     let meetings = state
         .meetings
         .list()
@@ -174,26 +167,24 @@ pub async fn data_clear(
     }
 }
 
-/// Loop the per-monitor delete so each monitor's backing scheduler job is torn
-/// down (a flat SQL truncate would leave `monitor-<id>` jobs ticking forever).
-async fn clear_all_monitors(state: &ServerState) -> Result<u64, String> {
-    let monitors = state
-        .monitors
-        .store
-        .list_monitors()
-        .await
-        .map_err(|e| e.to_string())?;
+/// Loop the per-monitor delete so each monitor's backing scheduler job is torn down
+/// (a flat SQL truncate would leave `monitor-<id>` jobs ticking forever). Monitors are
+/// out-of-process (`ryu-monitors` sidecar): list + delete rows over the loopback
+/// client, and tear the `JobTarget::Monitor` job down Core-side (the sidecar stubs
+/// `remove_backing_job`).
+async fn clear_all_monitors(_state: &ServerState) -> Result<u64, String> {
+    let Some(client) = crate::monitors_client::global_client() else {
+        return Ok(0);
+    };
+    let monitors = client.list_monitors().await.unwrap_or_default();
     let mut removed = 0u64;
     for monitor in monitors {
+        let Some(id) = monitor.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
         // Tear down the backing scheduler job first (best-effort), then the row.
-        let _ = crate::scheduler::store::delete_job(&monitor_job_id(&monitor.id));
-        if state
-            .monitors
-            .store
-            .delete_monitor(&monitor.id)
-            .await
-            .map_err(|e| e.to_string())?
-        {
+        crate::monitors_client::clear_backing_job(id);
+        if client.delete_monitor(id).await.unwrap_or(false) {
             removed += 1;
         }
     }
@@ -201,12 +192,16 @@ async fn clear_all_monitors(state: &ServerState) -> Result<u64, String> {
 }
 
 /// Loop the per-meeting delete so each delete broadcasts on the meetings SSE
-/// stream the desktop/island listen to.
+/// stream the desktop/island listen to. Meetings is out-of-process (`ryu-meetings`
+/// sidecar): list + delete rows over the loopback client.
 async fn clear_all_meetings(state: &ServerState) -> Result<u64, String> {
     let meetings = state.meetings.list().await?;
     let mut removed = 0u64;
     for meeting in meetings {
-        if state.meetings.delete(&meeting.id).await? {
+        let Some(id) = meeting.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if state.meetings.delete(id).await? {
             removed += 1;
         }
     }

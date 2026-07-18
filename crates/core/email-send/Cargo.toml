@@ -1,0 +1,18 @@
+[package]
+name = "ryu-email-send"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "BYOK SMTP email sink for Ryu self-host: a swappable outbound-email transport (the SES agent-inbox path in `packages/mail` is the other) delivering policy/monitor alerts and, later, agent-inbox send. A rich multi-recipient / cc-bcc / text+html multipart / threaded / attachment builder plus a one-line alert helper, over a BYO relay resolved prefs-first then `RYU_SMTP_*` env — no default provider, no-op when unconfigured. An extracted Core capability crate; secret custody stays kernel-side via an injected password resolver, so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core consumes this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+tokio = { version = "1", features = ["time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lettre = { version = "0.11", default-features = false, features = ["tokio1-native-tls", "smtp-transport", "builder"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "time"] }

@@ -1,6 +1,6 @@
 [package]
 name = "ryu-core"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -21,12 +21,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 toml = "0.8"
 reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
-# BYOK SMTP sink for self-host alerts + agent-inbox send. `tokio1-native-tls`
-# reuses the tree's existing native-tls stack (see the sentry dep) — no second
-# TLS stack. No `pool` feature: the sink builds a fresh transport per send.
-lettre = { version = "0.11", default-features = false, features = ["tokio1-native-tls", "smtp-transport", "builder"] }
-# Pure-Rust MIME parser for self-host inbound agent mail (Stage 3 inboxes).
-mail-parser = "0.9"
+# BYOK SMTP sink for self-host alerts + agent-inbox send — extracted to the
+# `ryu-email-send` crate (owns the lettre transport). Core injects the SMTP
+# password resolver at startup; secret custody stays kernel-side in `smtp_auth`.
+ryu-email-send = { path = "../../crates/core/email-send" }
 dirs = "5"
 anyhow = "1"
 notify = "6"
@@ -64,7 +62,6 @@ rand = "0.8"
 # define a tiny self-framed DocSync protocol over the existing realtime DocSync
 # channel rather than pulling y-sync/yrs-axum (version traps). See src/collab/.
 yrs = "0.27"
-chacha20poly1305 = "0.10"
 # Ryu Hardware Protocol (RHP v1) audio bridging: the device link speaks Opus
 # while the rest of Core speaks WAV/PCM (whisper STT, OuteTTS). The `opus` crate
 # wraps libopus through `audiopus-sys`/`opus-sys`, whose build script BUILDS
@@ -116,10 +113,374 @@ serde_yml = "0.0.12"
 # Reused so Core and the ghost desktop-automation server agree on the recipe
 # schema and the `~/.ghost/recipes/` store path. ghost-core is cross-platform
 # (no native input-tap deps — those live in ghost-eyes/ghost-hands).
-ghost-core = { path = "../../crates/ghost-core" }
+ghost-core = { path = "../../crates/ghost/core" }
 # Shared automation-permission gates. Core detects & reports (never prompts — it
 # is a background service); the desktop app / `ghost setup` do the prompting.
-ghost-permissions = { path = "../../crates/ghost-permissions" }
+ghost-permissions = { path = "../../crates/ghost/permissions" }
+# The single, pure-data definition of the `plugin.json` manifest contract
+# (PluginManifest + Runnable/schema types + validation). Core re-exports these
+# from `plugin_manifest`/`runnable` so every existing call site is unchanged; the
+# Ryu SDK depends on the same crate, ending the historical manifest drift.
+ryu-kernel-contracts = { path = "../../crates/core/kernel-contracts" }
+# Agent Skills — extracted Core capability crate (SKILL.md registry + dual-root scan
+# + progressive-disclosure injection block + authoring/version store + the
+# `/api/skills` CRUD surface). NON-optional (no cargo feature): the registry is
+# injected into EVERY chat turn (`ServerState.skills`, adapters, ACP/voice/hardware
+# sessions), so it must always compile — only the HTTP surface is AppGate'd. Core
+# publishes the ryu data dir + implements `Runnable for SkillRecord` host-side
+# (`skills_host.rs`), so the crate has ZERO dependency on apps/core.
+ryu-skills = { path = "../../crates/core/skills" }
+# Home dashboards are now OUT-OF-PROCESS: the `ryu-dashboards` sidecar
+# (`apps-store/dashboards/backend`) owns `dashboards.db`, the refresh loop, the
+# device-image renderer, and the `/api/dashboards/*` surface (served through the
+# ext-proxy `public_mount`). Core links NO dashboard code; the hardware device-
+# dashboard renderer + nudge loop reach it through the `ryu_hardware::DashboardFeed`
+# seam, and the `dashboard_builder` MCP runnable over its REST surface — both over
+# loopback via `dashboards_client`, so there is no `ryu-dashboards` dependency.
+# Quests is now OUT-OF-PROCESS: the `ryu-quests` sidecar (`apps-store/quests/backend`)
+# owns `quests.db`, the engine, and the `/api/quests/*` surface (served via the
+# manifest `public_mount`). Core links NO quest code; its three reverse-couplings
+# (scheduler judge, `JobTarget::Quest` job lifecycle, activity feed) reach the
+# sidecar over loopback via `quests_client`, so there is no `ryu-quests` dependency.
+# Clips is now OUT-OF-PROCESS: the `ryu-clips` sidecar owns the `/api/clips/*`
+# Core→Shadow capture proxy and serves it via the manifest `public_mount` (generic
+# ext-proxy loader), so Core no longer links the crate, merges an in-process
+# `clips_routes`, or runs a `clips_host` shim. The two `ClipsHost` couplings (yt-dlp
+# URL ingest + `Clips`-Space filing) degrade cleanly in the standalone sidecar; the
+# Shadow record/browse half is fully live there (it reads `RYU_SHADOW_URL` itself).
+# There is no `clips` cargo feature and no `ryu-clips` dependency.
+# Recipes (ghost-os record→replay parity) — extracted Core capability crate (store
+# surface + replay/record engine + `/api/recipes/*` surface). NON-optional: the
+# workflow executor's `Recipe`/`GhostAction` nodes call `ryu_recipes::run` +
+# `extract_mcp_json` unconditionally (kernel), so the crate compiles in every build
+# including the lean one; the `recipes` feature gates ONLY the HTTP routes + OpenAPI.
+# Core injects a `RecipesHost` impl (`recipes_host.rs`) — the live-ghost couplings
+# (shared MCP registry + recording McpSession) — so the crate has ZERO dependency
+# on apps/core.
+ryu-recipes = { path = "../../apps-store/recipes/backend" }
+# Teams (agent rosters + coordination strategy, addressed as one unit via `@team`) —
+# extracted Core capability crate: SQLite store + `/api/teams/*` CRUD surface.
+# NON-optional: the `@team` chat orchestration (`sidecar::adapters::route_team_chat_stream`
+# / `run_team_reply_text`) and the `agent_builder` `create_agent_team` tool consume
+# `ryu_teams::{TeamStore,TeamRecord,Coordination}` in every build (they stay in Core's
+# session loop, welded to the streaming chat path), so the crate compiles in every build
+# including the lean one; the `teams` feature gates ONLY the HTTP routes + OpenAPI. The
+# store's only host coupling (the data-dir path) is injected at open time, so the crate
+# has ZERO dependency on apps/core and needs no `TeamsHost` shim.
+ryu-teams = { path = "../../apps-store/teams/backend" }
+# Research (autoresearch experiment runner) — extracted Core capability crate: the
+# `/api/research/*` proxy handlers + the `research__*` MCP tool contract (8 schemas +
+# HTTP dispatch) in front of the Python autoresearch sidecar (:8087). NON-optional:
+# the MCP tool listing (`ryu_research::tool_specs`, surfaced via the `sidecar::mcp::research`
+# shim) compiles in every build including the lean one, so the `research` feature gates
+# ONLY the HTTP route merge (`research_routes`) + the OpenAPI sub-doc. Core injects a
+# `ResearchHost` impl (`research_host.rs`) — the lazy sidecar-start + on-disk install
+# check — so the crate has ZERO dependency on apps/core. The sidecar-lifecycle manager
+# (`ResearchManager: Sidecar`) stays Core-side (kernel plumbing, the RyuTtsManager analog).
+ryu-research = { path = "../../apps-store/research/backend" }
+# Self-healing loop — extracted Core capability crate. The diagnose→propose engine,
+# the loop-prevention decision logic, the per-source attempt cap, the `healing.*`
+# prefs, the Gateway diagnosis, and the `/api/healing/*` surface now run OUT-OF-PROCESS
+# in the crate's `[[bin]] ryu-healing` sidecar (`com.ryu.healing`, served via
+# `public_mount`). NON-optional path dep because Core still links the crate for its
+# types (`HealVerdict`, `HealSource`) + `apply_verdict` + the `HealingHost` trait:
+# `healing_client` posts a failed run to the sidecar, then applies the returned verdict
+# against Core's `CoreHealingHost` (the welded approvals write + agent/workflow re-run).
+# The crate has ZERO dependency on apps/core.
+ryu-healing = { path = "../../apps-store/healing/backend" }
+# Meetings is now OUT-OF-PROCESS: the `ryu-meetings` sidecar
+# (`apps-store/meetings/backend`) owns `meetings.db`, the engine + audio/diarize
+# pipeline, and the `/api/meetings/*` surface (served to the desktop via the ext-proxy
+# `public_mount`). Core links NO meeting code; its reverse couplings — the kernel
+# hardware ambient-audio path (`ryu_hardware::MeetingIngest`), the activity-feed fold,
+# the data-admin clear, and the `save-notes` Space-filing host callback — reach the
+# sidecar over loopback via `crate::meetings_client`.
+# Fine-tuning is now OUT-OF-PROCESS: the `ryu-finetune` control-plane sidecar
+# (`apps-store/finetune/backend`) owns `finetune.db`, the trained-adapter catalog,
+# the Python `unsloth` worker (over `RYU_UNSLOTH_URL`), and the `/api/finetune/*`
+# surface (served via the manifest `public_mount`). Core links NO finetune code; its
+# one reverse-coupling (the `host.finetune_*` plugin-host bridge) reaches the sidecar
+# over loopback via `finetune_client`, so there is no `ryu-finetune` dependency.
+# Website monitors are OUT-OF-PROCESS (`ryu-monitors` sidecar): Core links NO monitor
+# code. The sidecar owns `monitors.db` + the engine + the `/api/monitors/*` surface
+# (served via the manifest `public_mount`); Core reaches it over loopback via
+# `monitors_client` (scheduler run + backing-job reconcile), and the sidecar reaches
+# BACK via two ext-bearer host callbacks (Spider fetch + alert fan-out). The kernel
+# notification-delivery store + fan-out stay in Core (`crate::notify`), sharing the
+# dep-light `ryu-notify` wire types with the sidecar.
+ryu-notify = { path = "../../crates/core/notify" }
+# Continual-learning loop + experience buffer — extracted Core capability crate
+# (`apps-store/learning/backend`): the MetaClaw-style sweep / PRM-score /
+# synthesize-skill / reward-filtered retrain engine + the durable `ExperienceStore`
+# (`experience.db`) + the `/api/learn/*` surface. Every Core-owned callback
+# (conversation-store read, Gateway PRM/synth side-model, skill-synthesis approvals
+# inbox, skills-registry reload, fine-tune dispatch, preference store) inverts
+# through `LearningHost` (implemented in `apps/core/src/learning/mod.rs`
+# `CoreLearningHost`) — the crate has ZERO dependency on apps/core. Kept COMPILED IN
+# (not a `public_mount` sidecar): the loop is welded to those kernel subsystems, so
+# it stays served in-process; the `ryu-learning` sidecar bin is scaffolding until
+# broker-back endpoints exist. Core keeps only the thumbs-feedback fan-out (RAG
+# memory/retrieval sink) and the conversation-read ACL on `/api/learn/synthesize`.
+ryu-learning = { path = "../../apps-store/learning/backend" }
+# Predictive-typing brain — extracted Core capability crate: the completion engine
+# (config, per-app allowlist, secure-field denylist, prompt assembly, reply cleanup)
+# + the `/api/predict/*` surface. Cross-cutting couplings (the plugin-owned enabled
+# flag, preferences, the agent's bound model, the default model id, the Gateway
+# side-model call) invert through `PredictHost` (implemented in
+# `apps/core/src/predict_host.rs`) — the crate has ZERO dependency on apps/core. The
+# process-global on/off flag + boot seeding stay in the kernel (`apps/core/src/predict.rs`).
+# Non-optional (the routes are always mounted, like the old inline module).
+ryu-predict = { path = "../../crates/core/predict" }
+# Ryu Hardware Protocol (RHP v1) node backend — extracted Core capability crate:
+# the paired-device registry (SQLite store + revocable per-device tokens), pairing,
+# the Opus/WAV codec edge (also used by the voice module), the per-connection
+# realtime session state machine, the live device-sender registry, the display-nudge
+# loop, and the device-registry + TRMNL display HTTP surface. NON-optional (the store
+# backs `ServerState` + the codec is used by `voice` in every build). The public
+# ws/pair ingress (`server::hardware_ws`/`hardware_public`) and the chat-turn
+# orchestration (`hardware::turn`, welded to `run_text_turn`/voice/TTS) stay Core-side
+# as consumers of this crate's types — the teams `@team`-orchestration precedent.
+ryu-hardware = { path = "../../crates/core/hardware" }
+# Webhook ingress primitive — extracted Core capability crate: the swappable
+# public-reachability seam (RyuRelay push / Tailscale Funnel / cloudflared / BYO
+# own-relay), the path-routed inbound dispatcher with fail-closed HMAC
+# re-verification, delivery dedup, and the replay window. NON-optional: the public
+# webhook routes in `server/mod.rs` (kernel-ingress, program §5) and the ingress
+# start task in `main.rs` reach it unconditionally in every build. Core injects a
+# `WebhookIngressHost` impl (`webhook_ingress_host.rs`) — composio verify/run,
+# workflow-secret lookup, mesh Funnel, auth token, `~/.ryu` data dir — so the
+# crate has ZERO dependency on apps/core.
+ryu-webhook-ingress = { path = "../../crates/core/webhook-ingress" }
+# Composio integration orchestration (Core side) — extracted Core capability
+# crate: key resolver, catalog/connect client, trigger-subscription store + HMAC
+# webhook verify, and the MCP execute path. Consumed unconditionally (webhook +
+# settings + tool routes reach it in every build). The workflow/agent-engine
+# fan-out stays in Core (`composio_host`) via the `ComposioHost` seam, so this
+# crate has ZERO dependency on apps/core.
+ryu-composio = { path = "../../crates/core/composio" }
+# Search (conversation search primitive) — extracted Core capability crate: the
+# sqlite-vec (`vec0`) semantic KNN index + the contentless FTS5 lexical index over
+# past chat messages (schema, KNN/FTS query, dims reconciliation), storing
+# vectors/inverted-index + metadata only, never message text. NON-optional: the
+# `ConversationStore` (a kernel store) holds these unconditionally. In-process,
+# function-call hot path (no IPC). ZERO dependency on apps/core — the embedder is
+# injected via the narrow `SearchEmbedder` trait and the default `~/.ryu` db paths
+# stay Core-side in the `search_host` shim (like `crypto_host`/`recipes_host`). The
+# backfill/decrypt-snippet orchestration in `ConversationStore::{search,fts_search}
+# _messages` stays in Core (coupled to the cipher + `messages` table).
+ryu-search = { path = "../../crates/core/search" }
+# Speech-to-text modality primitive — extracted Core capability crate. NON-optional
+# (the voice/meetings/hardware data paths reach `transcribe_wav*` unconditionally);
+# the in-process parakeet ONNX engine is behind the crate's `voice-parakeet`
+# feature, forwarded by Core's `voice-parakeet` feature. See `apps/core/src/stt_host.rs`.
+ryu-stt = { path = "../../crates/core/stt" }
+# Image-generation modality primitive — extracted Core capability crate. NON-optional
+# (the `POST /api/images/generate` + `/api/video/generate` data paths reach the
+# `generate`/`cloud_provider`/`forward_to_gateway`/`proxy` routing unconditionally).
+# Owns the image-gen abstraction + local(sd.cpp)-vs-cloud(Gateway) routing; the host
+# couplings it can't own (sd-server base-url, Gateway url/token, lazy-starting the
+# sdcpp sidecar) are injected via the crate's `ImageHost` trait. See
+# `apps/core/src/image_host.rs`.
+ryu-image = { path = "../../crates/core/image" }
+# Voice-activity-detection modality primitive — extracted Core capability crate.
+# In-process FOREVER (per-frame hot path, never IPC): the endpointing/barge-in gate
+# + energy backend are always compiled; the Silero VAD ONNX inference is behind the
+# crate's `voice-vad` feature, forwarded by Core's `voice-vad` feature (which pulls
+# transcribe-rs there). See `apps/core/src/voice/vad.rs`.
+ryu-vad = { path = "../../crates/core/vad" }
+# Engine-agnostic inference-configuration primitive — extracted Core capability
+# crate: `Engine`/`SamplingConfig`/`LaunchConfig`, the per-request + per-launch
+# tuning surface translated per engine (llama.cpp/Ollama/vLLM/SGLang/MLX). Owns
+# the continuous-batching *launch flags*, NOT the runtime admission queue (blocked
+# on ryu-queue) nor the provider launch lifecycle (`sidecar/providers`, kernel-
+# coupled) nor embed (`Embedder`, deferred to ryu-rag). NON-optional: providers +
+# adapters build launch/sampling args unconditionally. In-process, ZERO dep on
+# apps/core; `crate::inference` (`apps/core/src/inference.rs`) is a re-export shim.
+ryu-engines = { path = "../../crates/core/engines" }
+# Retrieval-augmented-generation primitive — extracted Core capability crate: the
+# `RagProvider` swap-seam trait plus the `Embedder`/`Reranker`/`RetrievalStore`
+# in-process default impl. NON-optional: chat retrieval injection, agent
+# auto-routing, tool/space/search embedding all reach it unconditionally. Model/
+# provider selection stays Core-side in the single resolver `src/rag_host.rs`;
+# `crate::server::retrieval` is a re-export shim over this crate.
+ryu-rag = { path = "../../crates/core/rag" }
+# Durable-execution primitive — extracted Core capability crate: the swap-seam
+# `DurableEngine` trait plus `FileCheckpointStore`, the atomically-durable
+# (temp + fsync + rename) run-state store. NON-optional: the workflow store
+# (`workflow::store::{save_run,load_run}`) checkpoints every node through it, so
+# the executor consumes it on the durable run hot path. In-process, function-call
+# hot path (no IPC). ZERO dependency on apps/core — the trait is generic over the
+# run/workflow types, so the petgraph executor (the `execute` impl) and the
+# concrete `WorkflowRun` model stay Core-side (`workflow/{store,durable}.rs`).
+ryu-durable = { path = "../../crates/core/durable" }
+# Workspace (git-native git/worktree engine) — extracted Core capability crate:
+# per-run worktrees (create → isolated `ryu/run-<id>` branch → Drop-cleanup), the
+# aggregate run diff, whole-tree apply (merge / `gh pr create`), and the read-only
+# git status/branches/checkout/create-branch/commit-push helpers — everything that
+# shells `git`/`gh`. NON-optional: the ACP chat loop (`sidecar/adapters`) opens a
+# worktree per isolated run. In-process, function-call hot path (no IPC). ZERO
+# dependency on apps/core — no host shim needed (the only kernel coupling is the
+# Windows `NoWindow` console-suppression util, vendored). The thin axum handlers,
+# the live `WorktreeDiffStore` run-state, the pure node-fs `/api/workspace/*`
+# handlers, and the ChatStreamRequest→cwd threading all stay in Core.
+ryu-workspace = { path = "../../crates/core/workspace" }
+# Knowledge (Open Knowledge Format, OKF) — extracted Core capability crate: the
+# format's in-memory model, permissive parser, and serializer (Concept / Bundle /
+# IndexDoc / LogDoc, `Bundle::from_dir`/`from_git`/`write`). NON-optional: the
+# retrieval ingest layer (`server::retrieval::ingest_okf_bundle`), the knowledge
+# catalog source (`catalog_source::sources::OkfBundleSource`), and the HTTP export
+# handler (`server::okf_export`) reference these types unconditionally in every
+# build. In-process, function-call hot path (no IPC). ZERO dependency on
+# apps/core — no host shim needed (the only kernel coupling is the Windows
+# `NoWindow` console-suppression util used by the `git clone` path, vendored). The
+# retrieval/catalog/HTTP consumers that assemble and index these types from
+# Ryu-internal state (`build_okf_export_bundle`, `load_okf_bundle`,
+# `reconstruct_okf_concepts`, the `okf_chunks` table) all stay in Core.
+ryu-knowledge = { path = "../../crates/core/knowledge" }
+# Spaces primitive (U16/U17/U046) — extracted Core capability crate: the
+# `SpaceStore` (sqlite-vec `vec0` vector store + content-addressed blob store),
+# documents/chunks schema + wikilink graph, the per-space embedder, and the
+# GraphRAG (entity/relation) retrieval strategy. NON-optional: `ServerState.spaces`
+# holds a `SpaceStore` and chat/artifacts/meetings/clips/canvas all reach it
+# unconditionally. In-process, function-call hot path (no IPC). ZERO dependency on
+# apps/core — embedders/rerankers are injected as `ryu_rag` instances, so the
+# registry-driven model choice, `~/.ryu` paths, `Tenancy`→`DocOwner` lowering,
+# `DocAccessMeta`→`ResourceTenancy` mapping, and preferences all stay Core-side
+# (`crate::server::spaces` re-export shim).
+ryu-spaces = { path = "../../crates/core/spaces" }
+# Mesh read/shape primitive (#478 P5–P7) — extracted Core capability crate: the
+# `RYU_MESH_ENABLED` gate, the `GET /api/mesh/status` (Contract 6) shaping from
+# `tailscale status --json`, the fail-closed shared-mesh-token bearer resolution
+# for `GET /api/mesh/peers`, and the Funnel helpers P6 consumes. NON-optional: the
+# fail-closed startup gate in `server::create_router` reads `is_enabled()` and
+# `enforce_remote_auth` consults `is_insecure_auth_token_placeholder` (the
+# node-admittance security model this crate anchors) unconditionally in every
+# build. In-process, function-call hot path (no IPC). Core injects a `MeshHost`
+# impl (`mesh_host.rs`) — the `tailscale`/`tailscaled` process shell-outs, the
+# "what runs" half of the mesh — so the crate has ZERO dependency on apps/core.
+ryu-mesh = { path = "../../crates/core/mesh" }
+# Crypto (encryption-at-rest primitive) — extracted Core capability crate: the
+# `FieldCipher` AEAD + `enc:v1:` envelope + the master-key custody ladder (env →
+# keychain → file). NON-optional: the session/chat loop (`conversations.rs`) and
+# long-term memory (`memory.rs`) call `ryu_crypto::global_cipher` to seal every
+# row unconditionally (kernel), so it compiles in every build including the lean
+# one. Core injects a `CryptoHost` impl (`crypto_host.rs`) — the profile-scoped
+# keychain suffix + `~/.ryu` data dir — so the crate has ZERO dependency on
+# apps/core; it also owns the keyring/chacha20poly1305 deps that used to live here.
+ryu-crypto = { path = "../../crates/core/crypto" }
+ryu-memory = { path = "../../crates/core/memory" }
+# Realtime (room-keyed fan-out primitive) — extracted Core capability crate: the
+# transport-agnostic `RoomRegistry` of per-room tokio actors (isolated presence +
+# idle clock, bounded broadcast, RAII membership, hibernation). NON-optional: the
+# chat fan-out path (`conversations.rs` `append_message`) and the `/api/realtime/ws`
+# handler (`server/realtime_ws.rs`) drive it in-process, never over IPC (per-frame
+# hot path). It has ZERO kernel callbacks (only `tracing`), so no host shim is
+# needed; Core consumes `ryu_realtime::{RoomRegistry, Frame, ...}` directly.
+ryu-realtime = { path = "../../crates/core/realtime" }
+# Collab (authoritative CRDT document engine) — extracted Core capability crate:
+# the `DocRegistry` (per-doc `yrs` replica behind a single-writer Mutex), the
+# `CollabStore` rusqlite persistence (`~/.ryu/collab.db`), the `DocSyncMessage`
+# wire protocol + pure `classify_doc_sync` write-ACL gate, and the `Y.Doc->source`
+# projection. NON-optional: `ServerState` holds a `DocRegistry` in every build and
+# `server/realtime_ws.rs` drives it in-process (never over IPC). Core injects a
+# `CollabHost` impl (`collab_host.rs`) — the `~/.ryu` data dir for `collab.db` — so
+# the crate has ZERO dependency on apps/core. Conceptual siblings realtime+storage
+# have NO code coupling here: the `Frame::DocSync` wire bridge is kernel-side
+# (`realtime_ws.rs`) and collab drives `rusqlite` directly, so no crate-to-crate dep.
+ryu-collab = { path = "../../crates/core/collab" }
+# Usage (per-agent subscription usage-metering primitive) — extracted Core
+# capability crate: the vendor OAuth-token readers (Claude Code / Codex), the
+# never-refresh token safety, and the normalized `UsageSnapshot` windows behind
+# `GET /api/agents/:id/usage`. NON-optional: the route is mounted unconditionally
+# (`server/mod.rs`, kernel ingress via `usage_api.rs`), so it compiles in every
+# build including the lean one. Core injects a `UsageHost` impl (`usage_host.rs`)
+# — the Ryu-isolated `CODEX_HOME` — so the crate has ZERO dependency on apps/core.
+ryu-usage = { path = "../../crates/core/usage" }
+# Tracing (per-run observability trace primitive) — extracted Core capability
+# crate: the ordered-span `TraceStore` (open/close spans, args-hash privacy
+# fingerprint, per-run reads) that backs the desktop per-run trace viewer (M4).
+# NON-optional: the store opens at boot (`main.rs`) and backs a `ServerState`
+# field read by the always-mounted `GET /api/runs/:id/trace` + support-access
+# routes. `TraceStore::open` takes an explicit path so the default-path choice
+# (`~/.ryu/traces.db`) stays Core-side wiring — the crate has ZERO dep on apps/core.
+ryu-tracing = { path = "../../crates/core/tracing" }
+# Identity Vault (the crypto-sealed per-domain credential-store primitive) —
+# extracted Core capability crate: the SQLite `IdentityStore` (seal/open via
+# ryu-crypto), the `CredentialSource` capture/rotation seam, and the staleness
+# health sweep. NON-optional: the identity governance kernel (the `identity.read`
+# grant+audit read chokepoint, tool-call consult, elicitation) in
+# `src/identity/` consumes it unconditionally. In-process, function-call hot path
+# (no IPC). The one kernel coupling — the `~/.ryu` data dir — is inverted as the
+# `IdentityStore::open(dir)` parameter (Core passes `paths::ryu_dir()`), so the
+# crate has ZERO dependency on apps/core.
+ryu-vault = { path = "../../crates/core/vault" }
+# Downloads (the DownloadCenter artifact-fetch primitive) — extracted Core
+# capability crate: the process-wide registry + stream-to-`.part` transfer engine
+# (Range/If-Range resume, bounded retry, checksum-verify + atomic rename,
+# pause/resume/cancel, SSE progress, durable history). NON-optional: it is a
+# primitive by REUSE not swap — the sidecar loader, model catalog, engines, and
+# marketplace install all fetch through it (kernel), so it compiles in every build
+# including the lean one. Core injects a `DownloadsHost` impl (`downloads/mod.rs`)
+# — the `~/.ryu` data dir + version-store checksum-skip + Hugging Face auth — so
+# the crate has ZERO dependency on apps/core.
+ryu-downloads = { path = "../../crates/core/downloads" }
+# Model weight-format primitive (`ModelFormat` + pure format→engine capability
+# tables). Leaf crate, ZERO dependency on apps/core; re-exported as
+# `crate::model_format`. NON-optional: the model catalog, sidecar providers, and
+# chat adapters reference the format types unconditionally in the default build.
+ryu-model-format = { path = "../../crates/core/model-format" }
+# Hugging Face model catalog + device-fit primitive (HF search/detail, GGUF tree
+# inspection, per-node device detection + fit estimation, installed-model
+# tracking, capability overrides). Extracted Core capability crate: its five
+# kernel couplings invert through `ryu_model_catalog::ModelCatalogHost`
+# (implemented in `model_catalog_host.rs`), so it has ZERO dependency on
+# apps/core. Re-exported as `crate::model_catalog`. NON-optional: the catalog
+# HTTP routes are mounted in every build.
+ryu-model-catalog = { path = "../../crates/core/model-catalog" }
+# MCP server catalog primitive (browse/install MCP servers from the official
+# registry + Smithery / Ryu-hosted sources) — extracted Core capability crate:
+# the tolerant server.json parser, card/detail shaping, and hardened install-plan
+# builder. Re-exported as `crate::mcp_catalog`. Its one kernel coupling (the
+# SSRF-guarded registry fetch) inverts through `mcp_catalog_host`. NON-optional:
+# the MCP catalog HTTP routes are mounted in every build.
+ryu-mcp-catalog = { path = "../../crates/core/mcp-catalog" }
+# Unified tool catalog (#474): the Contract-1 descriptor types, the swappable
+# `ToolRanker` (BM25 + Semantic seam), argument-schema parsing, and the pure
+# search/describe bodies. NON-optional: the `/api/tools/{search,describe}`
+# handlers + the mcp_bridge tool-search meta-tool reach it in every build
+# (including lean). The `RegistryTool`→`ToolDescriptor` ingest adapter + the
+# built-in server inventory classification stay Core-side
+# (`sidecar/mcp/catalog.rs`); the Semantic ranker's embedder inverts through the
+# `ToolEmbedder` trait, implemented in `tool_registry_host.rs`. In-process,
+# function-call hot path (no IPC).
+ryu-tool-registry = { path = "../../crates/core/tool-registry" }
+# The PTC code-execution sandbox primitive (Deno/secure-exec subprocess). NON-optional:
+# Core's tool-exec host shim (`src/tool_exec/mod.rs`) links `run_sandboxed`/`resume_parked`/
+# `is_available` in every build (incl. lean). Backend features forward to the crate.
+ryu-tool-exec = { path = "../../crates/core/tool-exec", default-features = false }
+# Core-side code evaluators (unified-evaluator P4): runs user scoring functions
+# (JS/Python) to merge real scores into the gateway eval-run proxy response.
+# NON-optional: the `POST /api/gateway/evals/run` handler links it in every
+# build. The JS path forwards to the tool-exec-deno backend (feature below).
+ryu-eval-code = { path = "../../crates/core/eval-code", default-features = false }
+# Plugin-owned KV storage (the plugin-host `storage:kv` capability's backing
+# store) — extracted Core capability crate: the `(plugin_id, namespace, key)`
+# SQLite table + get/set/delete/keys API. NON-optional: the plugin turn-hook
+# runtime (`plugin_host`) reaches it unconditionally. In-process, function-call
+# hot path (no IPC). `PluginStorage::open` takes an explicit db path, so the
+# crate has ZERO dependency on apps/core — the default-path choice and the
+# process-global handle stay Core-side as wiring (`src/plugin_storage`).
+ryu-storage = { path = "../../crates/core/storage" }
+# Unified activity-feed primitive (`ActivityItem`/`ActivityLevel` contract + the
+# SQLite-backed `ActivityStore`). NON-optional: the store opens at boot, backs a
+# `ServerState` field, and the `/api/activity*` routes are always mounted. The
+# per-engine event mappers stay Core-side in `src/activity/ingest.rs` (they
+# consume Core types), so this crate keeps ZERO dependency on apps/core.
+ryu-activity = { path = "../../crates/core/activity" }
+# Needed by the `recipes_host.rs` shim to implement the extracted crate's
+# `#[async_trait]` host trait. `recipes_host` is unconditional (the recipes crate
+# dep is non-optional), so this is non-optional too.
+async-trait = { version = "0.1" }
 # OpenAPI spec generated from the Axum handlers. `--dump-openapi` writes the spec
 # the docs site (apps/fumadocs) renders; see src/openapi.rs.
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
@@ -151,44 +512,38 @@ tracing-opentelemetry = "0.33"
 # transport matches the tree's existing reqwest (no second TLS stack pulled).
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "native-tls"] }
 
-# Parakeet v3 STT (ONNX) inference — the default STT engine (feature
-# `voice-parakeet`). transcribe-rs is git-only and pulls a heavy native ONNX
-# Runtime through `ort`. Cross-platform (macOS/Windows/Linux), so — exactly like
-# `wasmtime` below — these MUST live in the main [dependencies] table, NOT under a
-# per-OS [target...] block, or `dep:transcribe-rs` resolves to nothing off that OS
-# and the feature fails to compile there. The model download, catalog, lifecycle,
-# and /api/voice/transcribe routing are always compiled in; only the ONNX
-# inference (src/sidecar/providers/parakeet engine module) is behind the feature.
-# Lean builds without the feature fall back to whisper.cpp (see
-# `server::voice::default_stt_engine`). `tempfile` (also used by the engine
-# module) is already a non-optional dependency above, so it is not re-declared.
-transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "d97ae65debaa9bacd5d56aa7d308d13df43c97ec", default-features = false, features = ["onnx"], optional = true }
-once_cell = { version = "1", optional = true }
+# transcribe-rs (the git-only ONNX Runtime dep) is no longer a direct Core dep: the
+# parakeet STT engine moved to `ryu-stt` and the Silero VAD engine moved to
+# `ryu-vad`, each carrying its own copy at the same git rev behind its own feature.
+# Core reaches both only through those crates' forwarded features (`voice-parakeet`
+# / `voice-vad`), so nothing in `apps/core/src` uses `transcribe_rs` directly.
+
+# The sidecar sandbox execution primitive, extracted into `ryu-sandbox`
+# (in-process default). Non-optional: Core's sidecar/session/eval-code data paths
+# reach it unconditionally. Its wasmtime backend moved into the crate; Core's own
+# `sandbox-wasmtime` feature forwards to `ryu-sandbox/sandbox-wasmtime`.
+ryu-sandbox = { path = "../../crates/core/sandbox" }
 
 # Optional: wasmtime sandbox backend (feature sandbox-wasmtime). Cross-platform
 # (macOS/Windows/Linux), so it MUST live in the main [dependencies] table — not
 # under a per-OS [target...] block, or `dep:wasmtime` resolves to nothing off
-# that OS and the feature fails to compile there. Binary-size delta (release):
-# measured in docs/spikes/0188-wasmtime-wasi-ceiling.md
+# that OS and the feature fails to compile there. Still needed here by the
+# pre-existing #188 M6 spike (`src/sandbox/mod.rs::wasmtime_backend`), which is a
+# separate module from the extracted `sidecar/sandbox` and uses wasmtime directly;
+# Cargo dedupes the shared build with `ryu-sandbox`'s copy. Binary-size delta
+# (release): measured in docs/spikes/0188-wasmtime-wasi-ceiling.md
 wasmtime = { version = "45", optional = true }
 wasmtime-wasi = { version = "45", features = ["p1", "p2"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal"] }
 
-# OS keychain for the at-rest master key (see src/crypto/mod.rs). Per-platform
-# native backend so the key lives outside ~/.ryu: Windows Credential Manager,
-# macOS Keychain, Linux Secret Service. Falls back to a file key when absent.
+# The at-rest master-key OS keychain deps moved to `crates/ryu-crypto` with the
+# crypto primitive. `winreg`/`winapi` stay here — they are used by
+# `sidecar/path_manager.rs` (Windows PATH management), not crypto.
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
 winapi = { version = "0.3", features = ["winuser"] }
-keyring = { version = "3", features = ["windows-native"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
 # (Parakeet v3 STT optional deps — transcribe-rs + once_cell — live in the main
 # [dependencies] table above, NOT here: they are cross-platform and must not be
@@ -204,20 +559,58 @@ keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 # registered/selectable but gated as stubs until their Node/Bun runtime + stdio
 # tool-bridge harness land (same posture as tool-exec-quickjs).
 default = ["tool-exec-deno"]
-tool-exec-deno = []
+tool-exec-deno = ["ryu-tool-exec/tool-exec-deno", "ryu-eval-code/tool-exec-deno"]
+# Deep-research is now OUT-OF-PROCESS: the `ryu-research` sidecar serves `/api/research/*`
+# via the manifest `public_mount` (generic ext-proxy loader), so Core no longer merges an
+# in-process `research_routes` and there is no `research` cargo feature. The `ryu-research`
+# crate stays a NON-optional dependency ONLY for its `research__*` MCP tool contract
+# (`sidecar::mcp::research`, pure HTTP to the Python autoresearch engine on :8087 — no Core
+# coupling). The Python engine lifecycle (`ResearchManager` + `sidecar::tools::research`)
+# stays Core-side; the Rust sidecar's `ResearchHost::start_sidecar` is a deliberate no-op.
+# (The former in-process `clips` feature was retired in the CoreDecouple wave: clips
+# is now the out-of-process `com.ryu.clips` app — `apps-store/clips/backend` spawned
+# by the generic sidecar loader, `/api/clips/*` served via `public_mount`. The two
+# `ClipsHost` kernel couplings degrade cleanly in the standalone sidecar.)
+# Recipes is now OUT-OF-PROCESS: the `ryu-recipes` sidecar owns the `/api/recipes/*`
+# surface (over Ghost's shared `~/.ghost/recipes/` RecipeStore) and serves it via the
+# manifest `public_mount` (generic ext-proxy loader), so there is no in-process
+# `recipes_routes` merge and no `recipes` cargo feature. The `ryu-recipes` crate stays
+# a NON-optional dependency: the workflow executor's `Recipe`/`GhostAction` nodes call
+# `ryu_recipes::run`/`extract_mcp_json` in every build (in-process, no HTTP), and Core
+# installs the live-ghost `RecipesHost` (`recipes_host::CoreRecipesHost`) at boot —
+# reached by that executor path AND by the sidecar via `/api/host/recipes/*`
+# (`recipes_client`). The recorder subprocess + shared MCP registry stay Core-side.
+# Teams is now OUT-OF-PROCESS: the `ryu-teams` sidecar owns `teams.db` and serves
+# `/api/teams/*` via the manifest `public_mount` (generic ext-proxy loader), so there is
+# no in-process `teams_routes` merge and no `teams` cargo feature. The `ryu-teams` crate
+# stays a NON-optional dependency ONLY for its `TeamRecord`/`Coordination`/`CreateTeam`
+# types: the `@team` chat orchestration + `agent_builder__create_agent_team` reach the
+# store over loopback HTTP (`crate::teams_client::TeamsClient`) rather than opening the DB,
+# so the sidecar is the single owner of `teams.db`.
+# (The former in-process `healing` feature was retired in the CoreDecouple wave:
+# self-healing is now the out-of-process `com.ryu.healing` app — `crates/ryu-healing`
+# `[[bin]]` spawned by the generic sidecar loader, `/api/healing/*` served via
+# `public_mount`. Core keeps only the welded action side via `healing_client`; the
+# run-status bus loop stays kernel and posts to the sidecar.)
+# (The former in-process `mail` feature was retired in Track C: mail is now the
+# out-of-process `com.ryu.mail` app — `crates/ryu-mail` spawned by the generic
+# sidecar loader, `/api/mail/*` served via `public_mount`. `mail-parser` moved
+# to that crate.)
 tool-exec-quickjs = []
-tool-exec-securexec = []
+tool-exec-securexec = ["ryu-tool-exec/tool-exec-securexec"]
 tool-exec-justbash = []
 # Off in `default` on purpose (spike 0188: keep `cargo test`/CI lean). The dev
 # and release binaries the user actually runs DO enable it — see the `dev`/
 # `dev:watch`/`build` scripts in apps/core/package.json — so the shipped app has
 # the default WASM sandbox compiled in and `detect_backend("wasmtime")` is true.
-sandbox-wasmtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
-# Parakeet STT inference (the default STT engine). Pulls the transcribe-rs/
-# once_cell/tempfile optional deps above. Off in Cargo `default` on purpose (keep
-# `cargo test`/CI lean, same posture as `sandbox-wasmtime`); the shipped dev/
-# release binaries enable it via the package.json scripts.
-voice-parakeet = ["dep:transcribe-rs", "dep:once_cell"]
+sandbox-wasmtime = ["dep:wasmtime", "dep:wasmtime-wasi", "ryu-sandbox/sandbox-wasmtime"]
+# Parakeet STT inference (the default STT engine). The in-process ONNX engine now
+# lives in the extracted `ryu-stt` crate; this feature forwards to the crate's own
+# `voice-parakeet` (which pulls transcribe-rs/once_cell there). Off in Cargo
+# `default` on purpose (keep `cargo test`/CI lean, same posture as
+# `sandbox-wasmtime`); the shipped dev/release binaries enable it via the
+# package.json scripts.
+voice-parakeet = ["ryu-stt/voice-parakeet"]
 # Neural VAD for voice mode (the default). The endpointing/barge-in state machine
 # + an energy-based probability backend are always compiled (voice mode works
 # without this); enabling `voice-vad` swaps in the noise-robust Silero VAD ONNX
@@ -228,10 +621,15 @@ voice-parakeet = ["dep:transcribe-rs", "dep:once_cell"]
 # (keep `cargo test`/CI lean, same posture as `sandbox-wasmtime`/`voice-parakeet`);
 # the shipped dev/release binaries enable it via the package.json scripts. Any
 # inference error falls back per-hop to the always-compiled energy VAD.
-voice-vad = ["dep:transcribe-rs", "transcribe-rs/vad-silero"]
+voice-vad = ["ryu-vad/voice-vad"]
 
 [dev-dependencies]
 tempfile = "3"
+# The identity-governance tests (`src/identity/{consult,elicitation,governed}.rs`)
+# drive the extracted vault's `IdentityStore::open_in_memory()` + cipher seeding,
+# which are gated behind ryu-vault's `test-support` feature. Cargo unifies this
+# with the regular `ryu-vault` dep, so the feature is on only for test builds.
+ryu-vault = { path = "../../crates/core/vault", features = ["test-support"] }
 # `tower::ServiceExt::oneshot`, to drive a Router in-process from a test (the App
 # route-gate tests in `server/mod.rs`). Test-only on purpose: the production build
 # uses tower for layers and does not need the `util` feature, so this stays a

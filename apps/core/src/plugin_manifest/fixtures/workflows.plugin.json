@@ -1,0 +1,31 @@
+{
+	"id": "com.ryu.workflows",
+	"name": "Workflows",
+	"version": "1.0.0",
+	"description": "Workflows: petgraph DAG automation with triggers, durable execution, and a natural-language workflow builder.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "workflows-companion",
+			"name": "Workflows",
+			"kind": "companion",
+			"config": {
+				"label": "Workflows",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"permission_grants": [
+		"workflows:crud",
+		"workflows:runstate",
+		"workflows:catalogs",
+		"ghost:record"
+	],
+	"companion": {
+		"label": "Workflows",
+		"icon": "workflow-square-01"
+	}
+}

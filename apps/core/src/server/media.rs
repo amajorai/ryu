@@ -18,7 +18,6 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use axum::{
@@ -28,10 +27,17 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use ryu_image::ImageHost;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::sidecar::providers::sdcpp::sd_base_url;
+use crate::image_host::CoreImageHost;
+
+/// Map a [`ryu_image`] response code back to an `axum` `StatusCode`, preserving
+/// the pre-extraction wire status (unknown codes fall back to 502).
+fn status(code: u16) -> StatusCode {
+    StatusCode::from_u16(code).unwrap_or(StatusCode::BAD_GATEWAY)
+}
 
 // ── Local media storage (Notion editor image/file uploads) ──────────────────────
 //
@@ -255,115 +261,10 @@ pub async fn serve_media(
     }
 }
 
-/// Diffusion on CPU can take minutes; use a generous client timeout independent
-/// of the short-lived shared `ServerState` client.
-fn media_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .user_agent("ryu-core/0.1")
-        .timeout(Duration::from_secs(600))
-        .build()
-        .expect("reqwest client")
-}
-
-/// Cloud media providers routed through the Gateway (governed, metered) rather
-/// than the local stable-diffusion.cpp engine. A request selects one via a
-/// `"provider"` field in the body; anything else (or absent) uses the local
-/// engine, so the default local path is unchanged.
-const CLOUD_PROVIDERS: [&str; 3] = ["openrouter", "replicate", "fal"];
-
-/// Returns the normalized cloud provider id when the body selects one, else
-/// `None` (⇒ the local sd-server path).
-fn cloud_provider(body: &Value) -> Option<String> {
-    body.get("provider")
-        .and_then(Value::as_str)
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| CLOUD_PROVIDERS.contains(&s.as_str()))
-}
-
-/// Forward a media request to the Gateway, routing to `provider` via the
-/// per-request slot header for `modality` (image/video). The Gateway runs the
-/// full firewall/budget/metering pipeline and returns a normalized body.
-async fn forward_to_gateway(
-    modality: &str,
-    endpoint: &str,
-    provider: &str,
-    body: Value,
-) -> (StatusCode, Json<Value>) {
-    use crate::sidecar::gateway::{gateway_token, gateway_url};
-    let base = gateway_url();
-    let url = format!("{}{endpoint}", base.trim_end_matches('/'));
-    let slot_header = format!("x-ryu-slot-{modality}-provider");
-
-    let mut req = media_client()
-        .post(&url)
-        .header(slot_header, provider)
-        .json(&body);
-    if let Some(t) = gateway_token() {
-        req = req.bearer_auth(t);
-    }
-    let resp = match req.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": format!("cloud media gateway not reachable at {url}: {e}")
-                })),
-            );
-        }
-    };
-    let status = resp.status();
-    let bytes = resp.bytes().await.unwrap_or_default();
-    let value: Value = serde_json::from_slice(&bytes)
-        .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }));
-    if !status.is_success() {
-        // Preserve 202 Accepted (video job submitted) as success; treat other
-        // non-2xx as an error with the upstream detail.
-        return (
-            StatusCode::BAD_GATEWAY,
-            Json(
-                json!({ "error": format!("cloud media provider returned {status}"), "detail": value }),
-            ),
-        );
-    }
-    (StatusCode::OK, Json(value))
-}
-
-/// Forward a JSON body to a media-engine endpoint and pass the response through.
-async fn proxy(endpoint: &str, body: Value) -> (StatusCode, Json<Value>) {
-    let url = format!("{}{endpoint}", sd_base_url());
-    let resp = match media_client().post(&url).json(&body).send().await {
-        Ok(r) => r,
-        Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": format!(
-                        "stable-diffusion.cpp media engine not reachable at {url}: {e}. \
-                         Install + start `sdcpp` from the Store first."
-                    )
-                })),
-            );
-        }
-    };
-
-    let status = resp.status();
-    let bytes = resp.bytes().await.unwrap_or_default();
-    // Pass the upstream body through verbatim when it is JSON; otherwise wrap it.
-    let value: Value = serde_json::from_slice(&bytes)
-        .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }));
-
-    if !status.is_success() {
-        return (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": format!("media engine returned {status}"), "detail": value })),
-        );
-    }
-    (StatusCode::OK, Json(value))
-}
-
 /// `POST /api/images/generate` — text-to-image via sd-server's OpenAI-compatible
-/// `/v1/images/generations`. Requires at least `{ "prompt": "..." }`.
+/// `/v1/images/generations`. Requires at least `{ "prompt": "..." }`. A thin
+/// wrapper over [`ryu_image::generate`] (the extracted image-gen abstraction +
+/// routing), injecting Core's [`CoreImageHost`].
 #[utoipa::path(
     post,
     path = "/api/images/generate",
@@ -374,7 +275,32 @@ async fn proxy(endpoint: &str, body: Value) -> (StatusCode, Json<Value>) {
 )]
 pub async fn generate_image(
     State(state): State<super::ServerState>,
-    Json(mut body): Json<Value>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    let host = CoreImageHost::new(state.manager.clone());
+    let (code, value) = ryu_image::generate(&host, body).await;
+    (status(code), Json(value))
+}
+
+/// `POST /api/video/generate` — text/image-to-video via sd-server's native
+/// `/sdcpp/v1/vid_gen`. Requires at least `{ "prompt": "..." }`. Video models
+/// (Wan / LTX) are large and GPU-preferred; point `RYU_SD_MODEL` at a video model
+/// and use the CUDA sd-server build for usable speed.
+///
+/// Video is a sibling modality out of `ryu-image`'s scope, but it reuses the
+/// crate's generic media routing (`cloud_provider`/`forward_to_gateway`/`proxy`)
+/// rather than duplicating it.
+#[utoipa::path(
+    post,
+    path = "/api/video/generate",
+    tag = "Media",
+    summary = "text/image-to-video via sd-server's native",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+pub async fn generate_video(
+    State(state): State<super::ServerState>,
+    Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if body
         .get("prompt")
@@ -388,56 +314,17 @@ pub async fn generate_image(
             Json(json!({ "error": "missing `prompt` (the text to render)" })),
         );
     }
-    // Default to a single image when the caller doesn't specify a count.
-    if let Some(obj) = body.as_object_mut() {
-        obj.entry("n").or_insert(json!(1));
-    }
-    // Cloud provider selected → route through the Gateway; else the local engine.
-    if let Some(provider) = cloud_provider(&body) {
-        return forward_to_gateway("image", "/v1/images/generations", &provider, body).await;
-    }
-    // Lazily start the (off-by-default) image engine so text-to-image works
-    // out of the box once onboarding has installed the sd-server binary + model.
-    // `start_sidecar` adopts an already-running server (fast) or spawns it and
-    // waits for the port; on failure we fall through and `proxy` returns a clear
-    // "install from the Store first" error.
-    if let Err(e) = state.manager.start_sidecar("sdcpp").await {
-        tracing::debug!("sdcpp lazy start skipped: {e:#}");
-    }
-    proxy("/v1/images/generations", body).await
-}
-
-/// `POST /api/video/generate` — text/image-to-video via sd-server's native
-/// `/sdcpp/v1/vid_gen`. Requires at least `{ "prompt": "..." }`. Video models
-/// (Wan / LTX) are large and GPU-preferred; point `RYU_SD_MODEL` at a video model
-/// and use the CUDA sd-server build for usable speed.
-#[utoipa::path(
-    post,
-    path = "/api/video/generate",
-    tag = "Media",
-    summary = "text/image-to-video via sd-server's native",
-    request_body = serde_json::Value,
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-pub async fn generate_video(Json(body): Json<Value>) -> impl IntoResponse {
-    if body
-        .get("prompt")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .is_empty()
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "missing `prompt` (the text to render)" })),
-        );
-    }
+    let host = CoreImageHost::new(state.manager.clone());
     // Cloud provider selected → submit a Gateway video job (job-based; poll via
     // `GET /api/video/jobs/:id`). Else the local engine (synchronous).
-    if let Some(provider) = cloud_provider(&body) {
-        return forward_to_gateway("video", "/v1/videos/generations", &provider, body).await;
+    if let Some(provider) = ryu_image::cloud_provider(&body) {
+        let (code, value) =
+            ryu_image::forward_to_gateway(&host, "video", "/v1/videos/generations", &provider, body)
+                .await;
+        return (status(code), Json(value));
     }
-    proxy("/sdcpp/v1/vid_gen", body).await
+    let (code, value) = ryu_image::proxy(&host.sd_base_url(), "/sdcpp/v1/vid_gen", body).await;
+    (status(code), Json(value))
 }
 
 /// `GET /api/video/jobs/:id` — poll a cloud video-generation job submitted via
@@ -456,7 +343,7 @@ pub async fn poll_video_job(Path(id): Path<String>) -> impl IntoResponse {
     use crate::sidecar::gateway::{gateway_token, gateway_url};
     let base = gateway_url();
     let url = format!("{}/v1/videos/generations/{id}", base.trim_end_matches('/'));
-    let mut req = media_client().get(&url);
+    let mut req = ryu_image::media_client().get(&url);
     if let Some(t) = gateway_token() {
         req = req.bearer_auth(t);
     }

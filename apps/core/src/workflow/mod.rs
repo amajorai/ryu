@@ -370,7 +370,7 @@ pub enum NodeKind {
     /// Placement (Core vs Gateway): this decides *what runs* (fire a message on a
     /// node) → Core. The BYO channel credential (`bot_token` / `webhook_url`) is
     /// carried inline on the node, mirroring the swappable-channel shape of
-    /// [`crate::monitors::notify::NotifyTarget`], whose send primitives it reuses.
+    /// [`ryu_notify::NotifyTarget`], whose send primitives it reuses.
     ///
     /// `recipient`/`text` are templates (`{{input}}`, `{{nodes.<id>}}`,
     /// `{{state.<key>}}`, `{{trigger.*}}`) resolved before delivery.

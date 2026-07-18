@@ -1,0 +1,34 @@
+{
+	"id": "com.ryu.teams",
+	"name": "Teams",
+	"version": "1.0.0",
+	"description": "Teams: named groups of agents you can address as one. Governance shell over the in-crate teams store (agent-id membership only); no documents, no external dependencies. Runs the out-of-process ryu-teams sidecar; Core proxies /api/teams/* to it.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"sidecars": [
+		{
+			"name": "ryu-teams",
+			"process": {
+				"kind": "local",
+				"command": "ryu-teams",
+				"command_env": "RYU_TEAMS_BIN",
+				"port_env": "RYU_TEAMS_PORT"
+			},
+			"port": 7994,
+			"health_path": "/health",
+			"http": {
+				"mount": "/api/teams",
+				"public_mount": "/api/teams",
+				"routes": [
+					{ "path": "/" },
+					{ "path": "/:id" },
+					{ "path": "/:id/members" },
+					{ "path": "/:id/members/:agent_id" }
+				]
+			}
+		}
+	],
+	"permission_grants": []
+}

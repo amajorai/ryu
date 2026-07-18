@@ -1,6 +1,6 @@
 ---
 title: Core vs Gateway
-description: The single design rule that decides where every piece of code lives.
+description: The single design rule that decides where every piece of code lives, with a request-flow walkthrough.
 ---
 
 Ryu has two Rust services, and one rule decides which one any given feature belongs to.
@@ -17,13 +17,44 @@ the shared part a team adopts and an enterprise buys.
 The Gateway is the moat. Agents are commoditized; the control layer around them is not. Keeping
 all policy in one place means:
 
-- A single chokepoint governs every model call - firewall, PII/DLP, budgets, audit.
+- A single chokepoint governs every model call — firewall, PII/DLP, budgets, audit.
 - The same Gateway can front any engine or any third-party agent framework with no code change.
 - Core stays a clean orchestration layer that is easy to open-source and self-host.
 
 ## How a request flows
 
-A default chat request travels through both services.
+A default chat request travels through both services:
+
+```mermaid
+flowchart TD
+  Client["🖥️ Client\n Desktop · Web · Mobile · TUI"]
+
+  subgraph Core["Ryu Core (:7980)"]
+    C1["1. Receive request\nPOST /api/chat/stream"]
+    C2["2. Pick agent\nresolve agent_id → AgentRoute"]
+    C3["3. Assemble context\nmemory · tools · persona"]
+    C4["4. Forward to Gateway\nvia_gateway: true"]
+    C5["8. Stream to client\nSSE back to caller"]
+  end
+
+  subgraph Gateway["Ryu Gateway (:7981)"]
+    G1["5. Route\nsmart routing → ModelRouter"]
+    G2["6. Govern\nfirewall → budget → cache"]
+    G3["7. Call provider\nforward to upstream"]
+  end
+
+  Engine["🌐 Upstream Provider\nOpenAI · Anthropic · Local"]
+
+  Client --> C1
+  C1 --> C2 --> C3 --> C4
+  C4 --> G1 --> G2 --> G3
+  G3 --> Engine
+  Engine -->|"response"| G3
+  G3 -->|"stream"| C5
+  C5 --> Client
+```
+
+### Step by step
 
 1. A client calls Core `POST /api/chat/stream` (`apps/core/src/server/mod.rs`).
 2. Core decides what runs: it picks the agent, assembles short-term and long-term memory,
@@ -48,10 +79,14 @@ engine is a routable provider.
 | Spaces (RAG), retrieval | Core | `apps/core/src/server/spaces.rs`, `retrieval.rs` |
 | Workflows, delegation, scheduler | Core | `apps/core/src/workflow/`, `scheduler/` |
 | Sidecar lifecycle, model and skill catalogs | Core | `apps/core/src/sidecar/`, `model_catalog/`, `skills_catalog/` |
+| Capability broker + binding registry | Core | `apps/core/src/plugins/binding.rs` |
+| Plugin lifecycle (install/enable/disable) | Core | `apps/core/src/plugins/` |
 | Model routing and fallback | Gateway | `apps/gateway/src/router/` |
 | Firewall, PII/DLP, prompt-injection | Gateway | `apps/gateway/src/firewall/` |
 | Caching, rate limiting, circuit breaker | Gateway | `apps/gateway/src/cache/`, `rate_limit/`, `circuit_breaker/` |
 | Budgets, evals, audit | Gateway | `apps/gateway/src/budget/`, `evals/`, `audit/` |
+| Passthrough proxy (Claude Code, Codex) | Gateway | `apps/gateway/src/passthrough/` |
+| Unified tool surface | Gateway | `apps/gateway/src/tools/` |
 
 ## The known bypass
 
@@ -63,8 +98,37 @@ The default OpenAI-compatible route and the `ryu`, `pi`, and `codex` ACP agents 
 Gateway. Closing the remaining ACP and registry bypass is tracked as ongoing work. When you need
 firewall, budget, and audit coverage to be absolute, use a gateway-routed agent.
 
+```mermaid
+flowchart LR
+  subgraph Governed["Fully governed (Gateway sees chat)"]
+    direction TB
+    G1["OpenAI-compat agents\nvia_gateway: true"]
+    G2["Ryu agent\nPi + Gateway"]
+    G3["Claude Code\npassthrough proxy"]
+    G4["Codex\npassthrough proxy"]
+  end
+
+  subgraph Bypass["Chat bypass (Gateway sees tools only)"]
+    direction TB
+    B1["Gemini CLI\nno base-URL hook"]
+    B2["OpenClaw\nown gateway"]
+    B3["Hermes\nown credentials"]
+  end
+
+  ToolEgress["Tool egress\nalways governed\nMCP bridge"]
+```
+
 <Callout type="info">
   The Gateway is already on the default chat path. The remaining Gateway work is moat **surfaces**
   (firewall, PII/DLP, and budget configuration UIs) and closing the ACP egress bypass, not the
   data-plane wiring.
 </Callout>
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/gateway/routing-planes" />
+  <DocCard href="/docs/gateway/gateway-for-any-agent" />
+  <DocCard href="/docs/start-here/architecture/runnable-model" />
+  <DocCard href="/docs/start-here/architecture/capability-layers" />
+</Cards>

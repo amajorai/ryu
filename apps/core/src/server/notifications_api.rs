@@ -93,12 +93,14 @@ pub async fn list_notifications(
         Err(code) => return (code, Json(json!({ "error": "unauthorized" }))),
     };
     let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-    match state
-        .monitors
-        .store
-        .list_notifications_for_user(&viewer, limit)
-        .await
-    {
+    let Some(store) = crate::notify::global_store() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "notify store not ready" })),
+        );
+    };
+    let _ = &state;
+    match store.list_notifications_for_user(&viewer, limit).await {
         Ok(items) => (StatusCode::OK, Json(json!({ "notifications": items }))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -127,7 +129,14 @@ pub async fn read_notification(
     Extension(caller): Extension<Option<VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Ok(Some(row)) = state.monitors.store.get_notification(&id).await else {
+    let Some(store) = crate::notify::global_store() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "notify store not ready" })),
+        );
+    };
+    let _ = &state;
+    let Ok(Some(row)) = store.get_notification(&id).await else {
         return (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "notification not found" })),
@@ -139,7 +148,7 @@ pub async fn read_notification(
         return (code, Json(json!({ "error": "unauthorized" })));
     }
 
-    match state.monitors.store.mark_notification_read(&id).await {
+    match store.mark_notification_read(&id).await {
         Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -171,7 +180,14 @@ pub async fn ack_notification(
     Extension(caller): Extension<Option<VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Ok(Some(row)) = state.monitors.store.get_notification(&id).await else {
+    let Some(store) = crate::notify::global_store() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "notify store not ready" })),
+        );
+    };
+    let _ = &state;
+    let Ok(Some(row)) = store.get_notification(&id).await else {
         return (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "notification not found" })),
@@ -185,7 +201,7 @@ pub async fn ack_notification(
     };
 
     // Mark the inbox row acked (best-effort) now that the actor is authorized.
-    let _ = state.monitors.store.mark_notification_acked(&id).await;
+    let _ = store.mark_notification_acked(&id).await;
 
     // Not a workflow gate → a plain read-style ack is all there is to do.
     let Some(run_id) = row.workflow_run_id.as_deref() else {
@@ -255,4 +271,80 @@ pub async fn notifications_stream(
         }
     });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+// -- Mobile push-token registration ------------------------------------------
+//
+// Expo push tokens are kernel notification-delivery state (used by the app-inbox
+// deliver, monitor alerts, and approval pings), so registration is served here on
+// the notify surface — NOT on the monitors router (which is moving out-of-process).
+// Relocated from `/api/monitors/push-tokens`.
+
+/// Request body for `POST /api/notifications/push-tokens`.
+#[derive(Debug, Deserialize)]
+pub struct PushTokenBody {
+    pub token: String,
+    #[serde(default)]
+    pub platform: Option<String>,
+    /// The member registering this device, so notifications can be pushed to a
+    /// specific person's phones. Omitted by anonymous / single-user nodes.
+    #[serde(default)]
+    pub user_id: Option<String>,
+}
+
+/// `POST /api/notifications/push-tokens` — register a mobile Expo push token.
+#[utoipa::path(
+    post,
+    path = "/api/notifications/push-tokens",
+    tag = "Notifications",
+    summary = "register a mobile Expo push token.",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+pub async fn register_push_token(
+    Json(body): Json<PushTokenBody>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(store) = crate::notify::global_store() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "notify store not ready" })),
+        );
+    };
+    match store
+        .register_push_token(&body.token, body.platform.as_deref(), body.user_id.as_deref())
+        .await
+    {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+/// `DELETE /api/notifications/push-tokens/:token` — unregister a push token.
+#[utoipa::path(
+    delete,
+    path = "/api/notifications/push-tokens/{token}",
+    tag = "Notifications",
+    summary = "unregister a push token.",
+    params(("token" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+pub async fn remove_push_token(
+    Path(token): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(store) = crate::notify::global_store() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "notify store not ready" })),
+        );
+    };
+    match store.remove_push_token(&token).await {
+        Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
 }

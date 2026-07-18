@@ -1,0 +1,49 @@
+[package]
+name = "ryu-meetings"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Meeting notes for Ryu (Granola/Notion-AI style): record a call, transcribe it live, auto-detect an in-progress meeting from mic-in-use, and generate structured AI notes — an extracted Core capability crate (engine + SQLite store + audio pipeline + HTTP surface). In-process default; Core consumes it as a path dependency. Cross-cutting deps (preferences, the STT transcribe path, the Gateway note-gen call, the Spaces note store, and the auto-title model call) are inverted through the `MeetingsHost` trait so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# The out-of-process sidecar binary. Core spawns it (`kind: local`, sibling on
+# PATH / `RYU_MEETINGS_BIN`), health-checks it, and proxies `/api/meetings/*` to it
+# on loopback — exactly like `ryu-quests` / `ryu-teams` / `ryu-mail`. The same crate
+# still compiles INTO Core as a lib path-dependency (in-process default); this bin
+# is just the process shell around the crate's `routes()` + `MeetingEngine`.
+[[bin]]
+name = "ryu-meetings"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
+# axum router has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+# `full` (was `sync`) so the `[[bin]]` gets the multi-thread runtime + macros + net
+# for `#[tokio::main]` / `axum::serve` / `TcpListener`. Additive for the in-process
+# build (Core already enables `full`); the lib itself only uses `sync`.
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+futures-util = "0.3"
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+tracing = "0.1"
+async-trait = "0.1"
+hound = "3"
+# The extracted STT primitive: the sidecar's `transcribe` host callback reuses the
+# SAME code path Core runs (whisper.cpp `/inference` + Gateway `/v1/audio/transcriptions`
+# HTTP proxies) via `ryu_stt::transcribe_wav`, injecting an env-resolved `SttHost`.
+# Built at DEFAULT features (NO `voice-parakeet`) so the sidecar stays free of the
+# heavy git `transcribe-rs` + native ONNX Runtime dep; `default_stt_engine()` then
+# resolves to whisper, matching Core's lean-build fallback. ZERO apps/core dep.
+ryu-stt = { path = "../../../crates/core/stt" }
+# Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-quests` /
+# `ryu-teams`. Core already pulls all of these, so there is no new dependency in the
+# in-process build.
+dirs = "5"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

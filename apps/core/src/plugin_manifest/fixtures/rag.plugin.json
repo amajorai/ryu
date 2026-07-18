@@ -1,0 +1,21 @@
+{
+  "id": "com.ryu.rag",
+  "name": "RAG (retrieval-augmented generation)",
+  "version": "1.0.0",
+  "runnables": [],
+  "requires": {
+    "capabilities": [
+      { "capability": "engines" }
+    ]
+  },
+  "provides": [
+    {
+      "capability": "rag",
+      "version": "1.0.0"
+    }
+  ],
+  "description": "The default in-process RAG capability: embeds text (via the engines embed sidecar) and serves vector retrieval. A GraphRAG or third-party RAG provider app can bind the `rag` capability to swap the implementation.",
+  "tagline": "Embeddings + retrieval",
+  "category": "Core",
+  "permission_grants": []
+}

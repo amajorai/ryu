@@ -26,6 +26,10 @@ pub enum GatewayError {
     #[error("Blocked by control-plane policy: {0}")]
     PolicyViolation(String),
 
+    // Never constructed since #218/#362 (f4e22a92) replaced the "no provider"
+    // path with a structured degraded-mode 503; kept as the reserved public
+    // error contract with its stable 404 `model_not_found` mapping below.
+    #[allow(dead_code)]
     #[error("No provider available for model: {0}")]
     NoProvider(String),
 
@@ -46,7 +50,7 @@ pub enum GatewayError {
     },
 
     #[error("Circuit open for provider: {0}")]
-    CircuitOpen(&'static str),
+    CircuitOpen(String),
 
     /// The local-engine admission queue is full — too many requests are already
     /// waiting for the resident model's batch slots. Retryable. Stable code:
@@ -80,6 +84,31 @@ pub enum GatewayError {
     Internal(#[from] anyhow::Error),
 }
 
+/// Map the provider-crate's boundary error 1:1 to the gateway error. The
+/// providers (`ryu-gw-providers`) cannot name `GatewayError` (it carries
+/// `PolicyAlert` → `budget`/`config` + the axum `IntoResponse` HTTP layer), so
+/// the `Provider` trait returns a narrow [`ryu_gw_providers::ProviderError`] and
+/// the pipeline converts at the call boundary. Doing it here — never by
+/// inspecting `ProviderError` downstream — is what preserves the pipeline's
+/// rate-limit-vs-fault distinction: `RateLimited` demotes tiers / rotates
+/// accounts WITHOUT tripping the circuit breaker, `Provider` trips it.
+impl From<ryu_gw_providers::ProviderError> for GatewayError {
+    fn from(e: ryu_gw_providers::ProviderError) -> Self {
+        match e {
+            ryu_gw_providers::ProviderError::Provider(msg) => GatewayError::ProviderError(msg),
+            ryu_gw_providers::ProviderError::RateLimited {
+                provider,
+                retry_after,
+                reset_at,
+            } => GatewayError::ProviderRateLimited {
+                provider,
+                retry_after,
+                reset_at,
+            },
+        }
+    }
+}
+
 impl IntoResponse for GatewayError {
     fn into_response(self) -> Response {
         let (status, type_str, message) = match &self {
@@ -109,7 +138,7 @@ impl IntoResponse for GatewayError {
                 "Upstream provider rate limit reached. Please retry after a moment.",
             ),
             GatewayError::CircuitOpen(provider) => {
-                (StatusCode::SERVICE_UNAVAILABLE, "circuit_open", *provider)
+                (StatusCode::SERVICE_UNAVAILABLE, "circuit_open", provider.as_str())
             }
             GatewayError::Overloaded(msg) => (
                 StatusCode::SERVICE_UNAVAILABLE,

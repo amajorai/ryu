@@ -7,7 +7,8 @@
 //! limited) carry `available=false` + a `reason` rather than an HTTP error, so
 //! the desktop's dumb bar never branches on status codes — it just hides on
 //! `unsupported` and shows a hint otherwise. All the provider logic + the
-//! never-refresh token safety lives in [`crate::usage`].
+//! never-refresh token safety lives in the extracted [`ryu_usage`] crate; this
+//! handler is the kernel-side route ingress that delegates to it.
 
 use axum::{extract::Path, response::IntoResponse, Json};
 
@@ -25,5 +26,5 @@ use axum::{extract::Path, response::IntoResponse, Json};
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn agent_usage(Path(id): Path<String>) -> impl IntoResponse {
-    Json(crate::usage::fetch_usage(&id).await)
+    Json(ryu_usage::fetch_usage(&id).await)
 }

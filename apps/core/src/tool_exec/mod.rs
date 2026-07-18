@@ -1,259 +1,96 @@
-//! **Programmatic tool calling (PTC)** — a JS code-execution sandbox in Core
-//! (#476, P4). The model emits one JavaScript program that fans out across many
-//! tools via a `tools` proxy; only its final `return` value + console logs come
-//! back. Intermediate tool results never re-enter the model — that is the
-//! context-saving win over one-tool-call-per-turn.
+//! **Programmatic tool calling (PTC)** — Core host shim for the extracted
+//! [`ryu_tool_exec`] sandbox primitive.
 //!
-//! **Core vs Gateway:** *what runs* is Core (this module spawns the sandbox and
-//! routes tool calls through [`McpRegistry`]). *What is allowed / measured* is
-//! the Gateway: every execution posts `/v1/exec/budget/check` (pre, fail-closed)
-//! and `/v1/exec/audit` (post). The per-agent **allowlist** travels unchanged —
-//! a program cannot reach a tool the agent could not call in chat (no
-//! escalation; `None`/unknown `agent_id` is rejected fail-closed).
+//! The sandbox itself (#476, P4) — the Deno / secure-exec subprocess machinery,
+//! the parked-execution store, the `CodeExecutor` backend enum, the
+//! `SandboxToolInvoker`/`SandboxBridge` bridge, the Contract-4 schema defs — now
+//! lives in the `ryu-tool-exec` crate (in-process, function-call hot path). This
+//! module keeps only what belongs to a *different plane*, re-exports the crate's
+//! surface so every `crate::tool_exec::*` consumer is unchanged, and installs the
+//! crate's Core-side seams:
 //!
-//! **Backend (scope-review HIGH #2/#3):** the v1 default is a **Deno
-//! subprocess** — real process isolation, killable, deny-by-default
-//! permissions, `Send` futures (so enum-dispatch, no `async-trait`/`dyn`, per
-//! scope-review HIGH #1/#8). The [`CodeExecutor`] enum is the swappable registry
-//! (AGENTS.md §"nothing hardcoded"): the second real backend, `securexec`, plugs
-//! in behind its own feature flag and is selected by [`CodeExecutor::default_backend`]
-//! with no code change here.
-//!
-//! **Only backends that can actually RUN are offered.** Two placeholder backends
-//! (`rquickjs`, `just-bash`) used to sit in this enum; both were stubs whose
-//! `execute` unconditionally returned "not yet wired" and whose `*_available()`
-//! was a hardcoded `false`. They were unreachable in the default build (Deno wins
-//! in `default_backend`), so they were not a user-facing lie — but a
-//! `--no-default-features --features tool-exec-quickjs` build produced a Core
-//! whose PTC path could never execute anything. A registry that lists a backend
-//! that cannot run is not a swappable default, it is a trap; they are removed.
-//! The seam they were supposed to demonstrate is the enum itself, which stays.
-//!
-//! **Bounds (security HIGH, non-negotiable):** the sandbox has **no network and
-//! no filesystem**; each run carries a wall-clock deadline, a memory cap, and a
-//! max-output cap ([`MAX_PREVIEW_CHARS`]); a runaway is killed. Paused
-//! executions (awaiting a Composio connect/resume) are held in a **bounded** map
-//! (cap [`MAX_PARKED`], TTL [`PARKED_TTL`]) so suspended subprocesses cannot
-//! accumulate without limit.
+//! - **Gateway governance bracket** (*what is allowed / measured*): [`execute_code`],
+//!   [`resume_execution`]/[`resume_execution_opt`], and the governed `http`
+//!   plugin-tool egress [`run_http_tool`] wrap the crate's `run_sandboxed` /
+//!   `resume_parked` with the fail-closed budget/scan/audit calls
+//!   (`/v1/exec/*`). This is Gateway-plane, so it stays in Core.
+//! - **Core registry coupling**: [`resolve_agent_allowlist`] (the `AcpAgentRegistry`
+//!   lookup) and the [`ToolCaller`] impl for `McpRegistry` below — the crate's
+//!   narrow MCP seam (the `ToolEmbedder`/`tool_registry_host` precedent).
+//! - **Security-scrubber seam**: `install_tool_exec_host_hooks` (called from
+//!   `main.rs`) hands the crate Core's single-source `strip_template_tokens` +
+//!   `scrub_child_env` so they never drift.
 
-// P4 *produces* Contract 4 (`is_available`, `schema::{execute,resume}_tool_def`,
-// `detect_elicitation`, `tool_path_to_id`, the `CodeExecutor` enum). The
-// consumers are separate P-units: P2 surfaces the defs on the gateway plane and
-// P3 wires `is_available`-gated `execute`/`resume` into the ACP bridge. Until
-// those land, parts of this surface are reachable only from tests — by design,
-// not dead code.
-#![allow(dead_code)]
-
-pub mod schema;
-
-mod invoker;
-mod parked;
-
-#[cfg(feature = "tool-exec-deno")]
-mod deno_backend;
-
-// The pure eval-function runner (P4). Reuses the same deny-all Deno sandbox as
-// the PTC path but with NO tool bridge — a `(ctx) -> {score,pass?,detail?}`
-// function. Consumed by [`crate::eval_code`]; gated on the Deno backend feature.
-#[cfg(feature = "tool-exec-deno")]
-pub(crate) use deno_backend::{run_eval_js, EvalJsOutcome};
+// Re-export the crate's full Contract-4 surface so every `crate::tool_exec::*`
+// consumer is unchanged. Some items are part of the public surface but not used
+// inside Core today (the original module carried the same allow).
+#[allow(unused_imports)]
+pub use ryu_tool_exec::{
+    build_inline_tool_program, detect_elicitation, is_available, run_sandboxed, schema,
+    tool_path_to_id, CodeExecutor, Elicitation, ExecOutcome, InvokeOutcome, RegistryToolInvoker,
+    ResumeDecision, SandboxBridge, SandboxToolInvoker, ToolCaller, ToolInvocation, ToolInvokeResult,
+    BACKEND_DENO, DEFAULT_DEADLINE_SECS, DEFAULT_MEMORY_MB, GRANT_TOOL_EXECUTE, MAX_PARKED,
+    MAX_PREVIEW_CHARS, PARKED_TTL,
+};
 
 #[cfg(feature = "tool-exec-securexec")]
-mod securexec_backend;
+pub use ryu_tool_exec::BACKEND_SECUREXEC;
 
-// `detect_elicitation`/`tool_path_to_id` are re-exported as part of the public
-// Contract 4 surface (P3 imports them); not used inside Core yet.
-#[allow(unused_imports)]
-pub use invoker::{detect_elicitation, tool_path_to_id, SandboxBridge, SandboxToolInvoker};
+// The pure JS eval-evaluator runner (`run_eval_js`/`EvalJsOutcome`) is consumed
+// directly from `ryu_tool_exec` by the `ryu-eval-code` crate — Core no longer
+// re-exports it here.
 
-use serde::Serialize;
+use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 
-/// Max bytes of program output (logs + final value, serialized) returned to the
-/// model. Reused from the exec-sandbox cap so PTC output and shell-exec preview
-/// share one ceiling (spec: "reuse `MAX_PREVIEW_CHARS = 30_000`").
-pub const MAX_PREVIEW_CHARS: usize = 30_000;
+use crate::sidecar::mcp::McpRegistry;
 
-/// Wall-clock ceiling for a single program. A runaway is killed at this bound.
-pub const DEFAULT_DEADLINE_SECS: u64 = 30;
-
-/// V8 old-space memory cap (MiB) handed to Deno via `--v8-flags`.
-pub const DEFAULT_MEMORY_MB: u64 = 256;
-
-/// Max number of simultaneously-parked (suspended, awaiting-resume) executions.
-/// Each parked entry pins a real blocked subprocess, so this is a hard bound.
-pub const MAX_PARKED: usize = 64;
-
-/// How long a parked execution may wait for `resume` before it is evicted.
-pub const PARKED_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
-
-/// The Deno backend label (the default; used for audit).
-pub const BACKEND_DENO: &str = "deno";
-
-/// The secure-exec backend label (gated behind `tool-exec-securexec`).
-#[cfg(feature = "tool-exec-securexec")]
-pub const BACKEND_SECUREXEC: &str = securexec_backend::BACKEND_SECUREXEC;
-
-/// A single tool call the sandbox program made (`tools.<server>.<tool>(args)`).
-#[derive(Debug, Clone)]
-pub struct ToolInvocation {
-    pub path: String,
-    pub args: Value,
+/// Install the crate's Core-side security-scrubber seams. Called once from
+/// `main.rs` at startup so the sandbox's final-value/log scrub and child-env
+/// scrub stay single-source with Core's `untrusted::strip_template_tokens` /
+/// `env_scrub::scrub_child_env` (no duplicated, drift-prone copies in the crate).
+pub fn install_tool_exec_host_hooks() {
+    ryu_tool_exec::install_host_hooks(ryu_tool_exec::HostHooks {
+        scrub_child_env: |vars| crate::sidecar::env_scrub::scrub_child_env(vars, &[]),
+        strip_template_tokens: crate::sidecar::untrusted::strip_template_tokens,
+    });
 }
 
-/// The result of one tool call relayed back into the sandbox.
-#[derive(Debug, Clone)]
-pub struct ToolInvokeResult {
-    pub value: Value,
-    pub is_error: bool,
-    pub error: Option<String>,
-}
-
-/// What an invoke produced: a normal result the program continues on, or a
-/// suspend (a Composio connect/consent step) that pauses the whole program.
-#[derive(Debug, Clone)]
-pub enum InvokeOutcome {
-    Result(ToolInvokeResult),
-    Suspend(Elicitation),
-}
-
-/// A human-completable step that pauses an execution (P1 `__ryu_elicitation__`
-/// envelope, B-7). Mirrors the Composio shape: `kind` ∈ `url|form|confirm`.
-#[derive(Debug, Clone, Serialize)]
-pub struct Elicitation {
-    pub kind: String,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub requested_schema: Option<Value>,
-}
-
-/// The model's decision when resuming a paused execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResumeDecision {
-    Accept,
-    Decline,
-    Cancel,
-}
-
-impl ResumeDecision {
-    /// Parse the `resume` tool's `action` enum (`accept|decline|cancel`).
-    pub fn parse(action: &str) -> Option<Self> {
-        match action {
-            "accept" => Some(ResumeDecision::Accept),
-            "decline" => Some(ResumeDecision::Decline),
-            "cancel" => Some(ResumeDecision::Cancel),
-            _ => None,
-        }
+/// Core's implementation of the crate's narrow [`ToolCaller`] seam: routes a PTC
+/// program's `tools.*` call through the same [`McpRegistry::call_tool_with_identity`]
+/// path (and the same resolved allowlist) the chat tool loop uses. Keeping this
+/// impl Core-side is what frees `ryu-tool-exec` of any `apps/core` dependency —
+/// the `tool_registry_host`/`ToolEmbedder` precedent. `Arc<McpRegistry>` coerces
+/// to `Arc<dyn ToolCaller>` at the invoker construction sites unchanged.
+#[async_trait]
+impl ToolCaller for McpRegistry {
+    async fn call_tool_with_identity(
+        &self,
+        tool_id: &str,
+        arguments: Value,
+        allowlist: Option<&[String]>,
+        user_id: Option<&str>,
+        profile_ids: &[String],
+        session_id: Option<String>,
+        host_conversation_id: Option<&str>,
+    ) -> Result<Value, String> {
+        // The inherent method wins path resolution over this trait method.
+        McpRegistry::call_tool_with_identity(
+            self,
+            tool_id,
+            arguments,
+            allowlist,
+            user_id,
+            profile_ids,
+            session_id,
+            host_conversation_id,
+        )
+        .await
+        .map_err(|e| e.to_string())
     }
 }
 
-/// The canonical terminal/suspended outcome, consumed verbatim by P2/P3
-/// (Contract 4). Serializes flattened under a `status` tag — the wire shape the
-/// `/api/tools/exec[/resume]` handlers return.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum ExecOutcome {
-    Completed {
-        result: Option<Value>,
-        logs: Vec<String>,
-        is_error: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    Paused {
-        execution_id: String,
-        message: String,
-        elicitation: Elicitation,
-    },
-}
-
-impl ExecOutcome {
-    /// Build a hard-error completion (used when the backend is missing or the
-    /// program could not even start).
-    pub fn error(message: impl Into<String>) -> Self {
-        ExecOutcome::Completed {
-            result: None,
-            logs: Vec::new(),
-            is_error: true,
-            error: Some(message.into()),
-        }
-    }
-}
-
-/// Heterogeneous code backends, closed-enum match-dispatched (no `dyn`/
-/// `async-trait` on the default Deno-first path). `backend()` reports the label
-/// for audit.
-///
-/// This enum IS the swappable-backend registry. Every variant is a backend that
-/// can really execute a program on a machine that satisfies its preconditions —
-/// nothing is listed here that is guaranteed to fail.
-pub enum CodeExecutor {
-    /// Deno subprocess (the default): real process isolation, deny-by-default
-    /// permissions, killable. Runnable when the `deno` binary is on `PATH`.
-    #[cfg(feature = "tool-exec-deno")]
-    Deno(deno_backend::DenoExecutor),
-    /// secure-exec V8-isolate backend (gated behind `tool-exec-securexec`).
-    /// Runnable on Linux with `bun` on `PATH` + `RYU_SECUREXEC_DIR` set.
-    #[cfg(feature = "tool-exec-securexec")]
-    SecureExec(securexec_backend::SecureExecExecutor),
-    /// Always-present fallback so the type is non-empty even with no backend
-    /// feature; it reports unavailability instead of running anything.
-    Unavailable,
-}
-
-impl CodeExecutor {
-    /// The backend label ("deno" | "securexec" | "none").
-    pub fn backend(&self) -> &'static str {
-        match self {
-            #[cfg(feature = "tool-exec-deno")]
-            CodeExecutor::Deno(_) => BACKEND_DENO,
-            #[cfg(feature = "tool-exec-securexec")]
-            CodeExecutor::SecureExec(_) => BACKEND_SECUREXEC,
-            CodeExecutor::Unavailable => "none",
-        }
-    }
-
-    /// Construct the default executor for this build. Deno wins whenever it is
-    /// compiled in (the spec's v1 default); `securexec` is selected only when
-    /// Deno is not. With no backend feature at all this is
-    /// [`CodeExecutor::Unavailable`], which reports the miss instead of pretending.
-    pub fn default_backend() -> Self {
-        #[cfg(feature = "tool-exec-deno")]
-        {
-            CodeExecutor::Deno(deno_backend::DenoExecutor::new())
-        }
-        #[cfg(all(not(feature = "tool-exec-deno"), feature = "tool-exec-securexec"))]
-        {
-            CodeExecutor::SecureExec(securexec_backend::SecureExecExecutor::new())
-        }
-        #[cfg(not(any(feature = "tool-exec-deno", feature = "tool-exec-securexec")))]
-        {
-            CodeExecutor::Unavailable
-        }
-    }
-}
-
-/// Whether a code-execution backend is actually runnable on this machine. P3
-/// gates wiring the `execute`/`resume` defs into the bridge on this. For Deno
-/// that means the binary is on `PATH`; with no backend feature it is always
-/// `false`.
-pub fn is_available() -> bool {
-    #[cfg(feature = "tool-exec-deno")]
-    {
-        deno_backend::deno_on_path()
-    }
-    #[cfg(all(not(feature = "tool-exec-deno"), feature = "tool-exec-securexec"))]
-    {
-        securexec_backend::securexec_available()
-    }
-    #[cfg(not(any(feature = "tool-exec-deno", feature = "tool-exec-securexec")))]
-    {
-        false
-    }
-}
 
 /// Resolve an agent's tool allowlist, rejecting an absent or unknown agent
 /// (fail-closed, mirrors `call_mcp_tool`). `Ok(None)` means "no restriction"
@@ -284,8 +121,7 @@ pub async fn execute_code(
     invoker: Arc<SandboxToolInvoker>,
     agent_id: &str,
 ) -> ExecOutcome {
-    let executor = CodeExecutor::default_backend();
-    let backend = executor.backend();
+    let backend = CodeExecutor::default_backend().backend();
 
     // Pre-run gateway budget gate (fail-closed).
     use crate::sidecar::gateway::{
@@ -338,15 +174,9 @@ pub async fn execute_code(
     }
 
     let started = std::time::Instant::now();
-    let outcome = match executor {
-        #[cfg(feature = "tool-exec-deno")]
-        CodeExecutor::Deno(exec) => exec.execute(&code, invoker, agent_id).await,
-        #[cfg(feature = "tool-exec-securexec")]
-        CodeExecutor::SecureExec(exec) => exec.execute(&code, invoker, agent_id).await,
-        CodeExecutor::Unavailable => {
-            ExecOutcome::error("no code-execution backend is built (enable feature tool-exec-deno)")
-        }
-    };
+    // The sandbox run itself is the crate's job (governance-free); this Core shim
+    // brackets it with the budget/scan (above) + audit (below).
+    let outcome = run_sandboxed(code, invoker, agent_id).await;
 
     let (exit_code, err) = match &outcome {
         ExecOutcome::Completed {
@@ -367,82 +197,9 @@ pub async fn execute_code(
 
     outcome
 }
-
-/// Run a JS `program` in the sandbox with a caller-supplied `invoker`, **without**
-/// the PTC gateway exec-budget/audit framing. Used by the plugin turn-hook
-/// runtime ([`crate::plugin_host`]): a hook is orchestration, and any side-model
-/// call it makes is itself gateway-governed inside `call_side_model`, so the hook
-/// run must not be double-budgeted or mislabeled as `tool_exec`.
-///
-/// Returns [`ExecOutcome::Completed`] (final value + logs) or
-/// [`ExecOutcome::Paused`] (unused by hooks today; treated as a no-op by the
-/// caller). When no backend is built / Deno is absent, returns an error outcome
-/// so the caller can degrade gracefully (chat is never blocked).
-pub async fn run_sandboxed(
-    program: String,
-    invoker: Arc<SandboxToolInvoker>,
-    agent_id: &str,
-) -> ExecOutcome {
-    let executor = CodeExecutor::default_backend();
-    match executor {
-        #[cfg(feature = "tool-exec-deno")]
-        CodeExecutor::Deno(exec) => exec.execute(&program, invoker, agent_id).await,
-        #[cfg(feature = "tool-exec-securexec")]
-        CodeExecutor::SecureExec(exec) => exec.execute(&program, invoker, agent_id).await,
-        CodeExecutor::Unavailable => {
-            ExecOutcome::error("no code-execution backend is built (enable feature tool-exec-deno)")
-        }
-    }
-}
-
-// ── Plugin tool backends (plugin-tools, M3) ──────────────────────────────────
-//
-// A plugin's `kind:"tool"` Runnable can ship NET-NEW behavior (not just alias an
-// existing tool) via two swappable config backends — the "nothing hardcoded, the
-// tool backend is a swappable config kind" seam:
-//   - `inline_deno` runs the tool body in the SAME Deno sandbox as a turn hook,
-//     with the SAME grant model (`host.*` gated by the plugin's grants);
-//   - `http` proxies the call to a declared URL under Gateway egress governance.
-// The dispatch that selects between them lives in `sidecar/mcp` (it owns the
-// registry + the plugin grant set); this module owns the two execution shapes.
-
-/// Grant a plugin must hold for an `inline_deno` tool to execute.
-pub const GRANT_TOOL_EXECUTE: &str = "tool:execute";
-
 /// Grant prefix authorizing an `http` tool's egress to a domain:
 /// `tool:http-egress:<domain>` (or the wildcard `tool:http-egress:*`).
 pub const GRANT_HTTP_EGRESS_PREFIX: &str = "tool:http-egress:";
-
-/// Wrap a plugin tool's `inline_deno` body into a sandbox program.
-///
-/// Mirrors the turn-hook substrate (`crate::plugin_host::build_hook_program`) but
-/// injects `input` (the call arguments) instead of `ctx`. The `host` facade is
-/// identical, so the same [`crate::plugin_host::PluginHookBridge`] serves both:
-/// `host.sideModel` / `host.runAgent` / `host.storage.*` / `host.log`, each gated
-/// by the plugin's grants. `code` is the SDK-serialized body — it references
-/// `input` + `host` and `return`s the tool result, which the sandbox reports as
-/// the program's final value.
-pub fn build_inline_tool_program(input: &Value, code: &str) -> String {
-    let input_json = serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string());
-    format!(
-        r#"const input = {input};
-const host = {{
-  sideModel: (a) => tools.host.sideModel(a ?? {{}}),
-  runAgent: (a) => tools.host.runAgent(a ?? {{}}),
-  storage: {{
-    get: (k, ns) => tools.host.storage_get({{ key: String(k), namespace: ns }}),
-    set: (k, v, ns) => tools.host.storage_set({{ key: String(k), value: typeof v === "string" ? v : JSON.stringify(v), namespace: ns }}),
-    delete: (k, ns) => tools.host.storage_delete({{ key: String(k), namespace: ns }}),
-    keys: (ns) => tools.host.storage_keys({{ namespace: ns }}),
-  }},
-  log: (...a) => console.log(...a),
-}};
-{code}
-"#,
-        input = input_json,
-        code = code,
-    )
-}
 
 /// Extract the egress domain (host) from an `http` tool's URL, for the
 /// `tool:http-egress:<domain>` grant check. `None` for a URL with no host.
@@ -722,21 +479,10 @@ pub async fn resume_execution_opt(
     }
 
     let started = std::time::Instant::now();
-    let outcome = {
-        #[cfg(feature = "tool-exec-deno")]
-        {
-            deno_backend::resume_parked(&execution_id, agent_id, decision, content).await
-        }
-        #[cfg(all(not(feature = "tool-exec-deno"), feature = "tool-exec-securexec"))]
-        {
-            securexec_backend::resume_parked(&execution_id, agent_id, decision, content).await
-        }
-        #[cfg(not(any(feature = "tool-exec-deno", feature = "tool-exec-securexec")))]
-        {
-            let _ = (&execution_id, agent_id, decision, content);
-            None
-        }
-    };
+    // The parked-subprocess resume is the crate's job (governance-free); this Core
+    // shim brackets it with the same budget/scan (above) + audit (below) as the
+    // initial run so a resumed segment is metered too (security M1).
+    let outcome = ryu_tool_exec::resume_parked(execution_id, agent_id, decision, content).await;
 
     // Audit the resumed segment (post) when it actually ran. An unknown id /
     // ownership mismatch (`None`) never resumed anything, so there is nothing to

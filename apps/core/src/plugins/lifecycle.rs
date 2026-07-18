@@ -47,6 +47,14 @@ pub enum EnableError {
     /// low, cycle, …). Nothing was enabled — the graph resolves BEFORE any
     /// enabled bit is flipped, so this is never a partial enable.
     Dependency(DependencyError),
+    /// A required **capability** could not be bound to a provider (none installed,
+    /// ambiguous with no override, or a version floor unmet). `plugin` names which
+    /// plugin in the enable order carried the unbindable requirement — nothing was
+    /// enabled (bindings resolve BEFORE any bit is flipped).
+    Binding {
+        plugin: String,
+        source: super::binding::BindingError,
+    },
     /// A store or manifest error.
     Other(anyhow::Error),
 }
@@ -65,6 +73,9 @@ impl std::fmt::Display for EnableError {
                 write!(f, "Gateway unreachable (fail-closed): {reason}")
             }
             Self::Dependency(e) => write!(f, "{e}"),
+            Self::Binding { plugin, source } => {
+                write!(f, "capability binding failed for '{plugin}': {source}")
+            }
             Self::Other(e) => write!(f, "{e}"),
         }
     }
@@ -302,7 +313,47 @@ pub async fn enable_app(
     // Resolve the full enable order BEFORE touching any enabled bit. Missing /
     // version-mismatched / cyclic dependencies all fail here, so a failed enable
     // never leaves the system half-enabled.
-    let order = graph::resolve_enable_order(&manifest.id, &installed)?;
+    //
+    // Capability edges (`requires.capabilities`) are lowered to concrete app-id
+    // edges against the installed set + active bindings FIRST, so the graph pulls
+    // each bound provider into the enable order transitively (as an ordinary app
+    // dep). Lowering silently skips an unbindable capability; the explicit refusal
+    // is the binding-validation pass below, which surfaces the real cause
+    // (Unprovided / Ambiguous / version) instead of a downstream MissingDependency.
+    let binding_cfg = super::binding::active_config();
+    let lowered = super::binding::lower_manifests(&installed, &binding_cfg);
+    let order = graph::resolve_enable_order(&manifest.id, &lowered)?;
+
+    // Capability governance gate. Bindings are validated over the POST-ENABLE
+    // ENABLED set — every plugin that will be enabled after this call
+    // (currently-enabled ∪ the enable order) — NOT the installed set. This is what
+    // the broker sees at call time, and it catches BOTH failure modes:
+    //   * the target or an auto-enabled dep whose capability is unbound/ambiguous;
+    //   * a pre-existing enabled CONSUMER that THIS enable would render ambiguous
+    //     (e.g. enabling a second `rag` provider) — the hole a target-only check
+    //     misses. Refuse before any bit flips, naming the affected plugin.
+    // Resolving over the enabled (not installed) set also avoids a false ambiguity
+    // from a merely-installed-but-disabled second provider.
+    let post_enabled_ids: std::collections::HashSet<&str> = order
+        .iter()
+        .map(String::as_str)
+        .chain(
+            records
+                .iter()
+                .filter(|r| r.enabled)
+                .map(|r| r.id.as_str()),
+        )
+        .collect();
+    let post_enabled: Vec<PluginManifest> = installed
+        .iter()
+        .filter(|m| post_enabled_ids.contains(m.id.as_str()))
+        .cloned()
+        .collect();
+    if let Some((plugin, source)) =
+        super::binding::first_binding_error(&post_enabled, &binding_cfg)
+    {
+        return Err(EnableError::Binding { plugin, source });
+    }
 
     // ── Phase 2: validate EVERY plugin's grants, flipping NOTHING ─────────────
     // The target is enabled last, so its denial is the most likely failure. If we
@@ -567,6 +618,14 @@ pub async fn disable_app(
         .filter(|m| enabled_ids.contains(m.id.as_str()))
         .cloned()
         .collect();
+
+    // Lower capability edges over the ENABLED set so a consumer bound to `id`
+    // (via `requires.capabilities`, not a hard `requires.apps`) counts as a
+    // dependent and blocks/cascades the disable symmetrically with the enable path.
+    // Every enabled consumer has a deterministic binding (single provider, or an
+    // override — an ambiguous one could never have enabled), so this reconstructs
+    // the exact consumer→provider edge chosen at enable time.
+    let enabled = super::binding::lower_manifests(&enabled, &super::binding::active_config());
 
     let dependents = graph::dependents_of(id, &enabled);
 
@@ -1474,6 +1533,7 @@ mod tests {
                         min_version: mv.map(str::to_owned),
                     })
                     .collect(),
+                capabilities: vec![],
                 grants: vec![],
             }),
             ..make_manifest(id, version, vec![])

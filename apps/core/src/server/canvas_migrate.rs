@@ -59,7 +59,15 @@ pub async fn migrate_legacy_canvases(store: &SpaceStore, space_id: &str) -> usiz
         }
         let source = scene.to_string();
 
-        match store.app_create_doc(CANVAS_PLUGIN_ID, space_id, &name).await {
+        match store
+            .app_create_doc(
+                CANVAS_PLUGIN_ID,
+                space_id,
+                &name,
+                &crate::server::spaces::background_owner(),
+            )
+            .await
+        {
             Ok(doc_id) => {
                 if let Err(e) = store
                     .app_update_doc(CANVAS_PLUGIN_ID, &doc_id, Some(&name), &source)

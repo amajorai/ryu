@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod budget;
 pub mod chat;
 pub mod config;
 pub mod evals;
@@ -92,6 +93,10 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/manifests/sign", post(governance::sign_manifest))
         .route("/v1/manifests/verify", post(governance::verify_manifest))
         .route("/v1/manifests/pubkey", get(governance::get_pubkey))
+        // Live per-scope budget spend (read-only; same admin gate as config/audit).
+        // Exposes the in-memory per-user/agent/session token counters the budget
+        // stage tracks so the desktop can render live spend (P2 #1).
+        .route("/v1/budget/spend", get(budget::get_spend))
         // Audit log (local query; master-key only)
         .route("/v1/audit", get(audit::query_audit))
         // Exec audit ingest + pre-run budget gate (M6 / #192)

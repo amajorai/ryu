@@ -4,7 +4,8 @@
 //! reimplementation) in **userspace networking** mode so a Ryu node can reach a
 //! remote node over the tailnet without a kernel TUN device or root. This is the
 //! "what runs" half of the mesh (Core); the read side + Funnel helpers live in
-//! [`crate::mesh`].
+//! the extracted [`ryu_mesh`] crate (Core bridges to these shell-outs via the
+//! `MeshHost` shim in [`crate::mesh_host`]).
 //!
 //! Opt-in only: `TailscaleManager` is registered in `all_sidecars` but **never**
 //! in `startup_order`. It starts when (and only when) `RYU_MESH_ENABLED` is set
@@ -309,7 +310,7 @@ impl Sidecar for TailscaleManager {
         let daemon = self.daemon.clone();
         let running = Arc::clone(&self.running);
         Box::pin(async move {
-            if !crate::mesh::is_enabled() {
+            if !ryu_mesh::is_enabled() {
                 anyhow::bail!(
                     "mesh disabled: set RYU_MESH_ENABLED=1 to start the Tailscale daemon"
                 );

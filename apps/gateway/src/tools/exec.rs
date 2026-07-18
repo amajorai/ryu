@@ -50,6 +50,27 @@ pub struct ExecToolBody {
     pub user_id: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
+    /// The **server-derived** host conversation this exec runs on behalf of
+    /// (additive; absent on legacy callers). Forwarded to Core so a gateway-exec'd
+    /// tool resolves `ToolPrincipal::Owned` on an org-bound node instead of the
+    /// fail-closed `Unresolved`. Distinct from `user_id` (client-supplied,
+    /// spoofable, never an authorization principal). Absent ⇒ fail-closed default
+    /// unchanged.
+    ///
+    /// TRUST BOUNDARY (why this is safe to accept on the wire): `exec_tool` gates
+    /// the whole endpoint to a **trusted-forwarder or master key**, refused when
+    /// mesh is on (see the gate below). The gateway is stateless w.r.t. Core
+    /// sessions and *cannot* derive a conversation itself — only Core knows which
+    /// conversation an agent's turn runs on, so Core (the trusted forwarder) sets
+    /// this field from its own session context, not from agent-controlled tool
+    /// arguments. A master-key caller is already fully privileged, so supplying an
+    /// arbitrary value grants nothing it doesn't already have. It is therefore
+    /// **not agent-spoofable**: an agent never reaches this endpoint with a crafted
+    /// body. Core re-resolves the principal from its own record of the named
+    /// conversation on receipt, so a bad id yields at most that conversation's own
+    /// owner scope — never a cross-tenant escalation beyond the forwarder's trust.
+    #[serde(default)]
+    pub host_conversation_id: Option<String>,
     /// Product-surface tag (`x-ryu-feature`); `"widget"` for widget round-trips.
     /// Accepted for transport tolerance; the widget branch keys off the presence
     /// of the `widget` envelope and hardcodes `feature="widget"` on the audit row.
@@ -244,6 +265,7 @@ async fn exec_widget_tool(
             body.arguments.clone(),
             body.agent_id.as_deref(),
             body.user_id.as_deref(),
+            body.host_conversation_id.as_deref(),
         )
         .await;
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -280,6 +302,7 @@ async fn exec_kind_tool(
             body.arguments,
             body.agent_id.as_deref(),
             body.user_id.as_deref(),
+            body.host_conversation_id.as_deref(),
         )
         .await
     {
@@ -303,6 +326,11 @@ async fn exec_kind_forward(
         "user_id": body.user_id,
         "session_id": body.session_id,
         "conversation_id": body.session_id,
+        // Server-derived host conversation for the PTC plane. Core's `ToolExecBody`
+        // ignores unknown fields today, so this is a no-op until the Core PTC
+        // invoker (`ryu-tool-exec`) threads it into `ToolPrincipal` (followup); the
+        // gateway wire is ready now, and it is harmless in the interim.
+        "host_conversation_id": body.host_conversation_id,
         "code": body.code,
         "execution_id": body.execution_id,
         "action": body.action,
@@ -371,6 +399,29 @@ mod tests {
         assert_eq!(body.kind, "tool");
     }
 
+    /// Gateway body passthrough (task C2, deliverable #2): the additive
+    /// `host_conversation_id` parses when present and defaults to `None` when
+    /// absent (the fail-closed default — a legacy caller resolves `Unresolved` on a
+    /// bound node, unchanged).
+    #[test]
+    fn exec_body_carries_host_conversation_id() {
+        // Present → threaded to Core so the tool resolves `Owned` on a bound node.
+        let with_id: ExecToolBody = serde_json::from_value(json!({
+            "kind": "tool",
+            "tool_id": "threads__list",
+            "agent_id": "a",
+            "host_conversation_id": "conv-123",
+        }))
+        .unwrap();
+        assert_eq!(with_id.host_conversation_id.as_deref(), Some("conv-123"));
+
+        // Absent → None: fail-closed default is preserved (no accidental fail-open).
+        let without_id: ExecToolBody =
+            serde_json::from_value(json!({ "kind": "tool", "tool_id": "x", "agent_id": "a" }))
+                .unwrap();
+        assert_eq!(without_id.host_conversation_id, None);
+    }
+
     #[test]
     fn exec_response_omits_none_fields() {
         let ok = ExecToolResponse::ok(json!({"a":1}));
@@ -409,7 +460,7 @@ mod tests {
         // Default config: no master key, require_auth=false, no Core wiring.
         // authenticate() yields is_master_key=false + key_config=None, so the
         // caller is neither master nor a trusted forwarder → must be rejected.
-        let state = Arc::new(AppState::new(crate::config::GatewayConfig::default()));
+        let state = Arc::new(AppState::new(crate::config::GatewayConfig::default()).unwrap());
         let headers = HeaderMap::new();
         let body: ExecToolBody =
             serde_json::from_value(json!({ "kind": "tool", "tool_id": "x", "agent_id": "a" }))
@@ -430,7 +481,7 @@ mod tests {
         use axum::extract::State;
         use std::sync::Arc;
 
-        let state = Arc::new(AppState::new(crate::config::GatewayConfig::default()));
+        let state = Arc::new(AppState::new(crate::config::GatewayConfig::default()).unwrap());
         let headers = HeaderMap::new();
         let body: ExecScanBody =
             serde_json::from_value(json!({ "backend": "bash", "command": "ls" })).unwrap();

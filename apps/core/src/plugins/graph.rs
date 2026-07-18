@@ -400,6 +400,7 @@ mod tests {
                             min_version: mv.map(str::to_owned),
                         })
                         .collect(),
+                    capabilities: vec![],
                     grants: vec![],
                 })
             },

@@ -100,6 +100,12 @@ impl Drop for AdmissionPermit {
 /// Returned when the admission queue for a provider is full.
 #[derive(Debug, Clone)]
 pub struct QueueFull {
+    /// FLAGGED (latent, not rewired here): carries the name of the provider
+    /// whose queue overflowed, but the two consumer sites in `pipeline` discard
+    /// it and hardcode "Local engine busy" in the overload message. Wiring it in
+    /// would change user-facing error text (behavior), so it is left as-is;
+    /// kept so a future non-local overload message / audit can surface it.
+    #[allow(dead_code)]
     pub provider: String,
     pub queued: u32,
 }

@@ -206,7 +206,7 @@ impl Sidecar for RyuTtsManager {
             let dir = sidecar_dir();
             if !dir.exists() {
                 anyhow::bail!(
-                    "Ryu TTS sidecar not found at {}. Install it (copy `apps/tts-sidecar` there \
+                    "Ryu TTS sidecar not found at {}. Install it (copy `apps-store/voice/sidecar` there \
                      and `pip install -e \".[kitten]\"`), set RYU_TTS_DIR to its path, or run \
                      `bun run dev:tts` and Core will adopt it.",
                     dir.display()
@@ -249,7 +249,7 @@ impl Sidecar for RyuTtsManager {
                 .with_context(|| {
                     format!(
                         "spawning the Ryu TTS sidecar ({program} -m ryu_tts). Is Python installed \
-                         and the base deps available? See apps/tts-sidecar/README.md."
+                         and the base deps available? See apps-store/voice/sidecar/README.md."
                     )
                 })?;
 

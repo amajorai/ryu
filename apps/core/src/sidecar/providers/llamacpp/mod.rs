@@ -94,6 +94,17 @@ async fn resolve_active_chat_model(
     )
 }
 
+/// Whether the GGUF weight file the chat sidecar would serve — the user's active
+/// model override if one is set and its file exists, else the registry default —
+/// is present on disk. A cheap disk stat: no download, no process start, and it
+/// mirrors exactly what [`resolve_active_chat_model`] resolves at spawn, so it is
+/// a faithful "can llama.cpp serve a completion right now?" predicate (weights
+/// present ⇒ the sidecar lazily starts and serves; absent ⇒ every completion
+/// 503s). Used by the chat router's fresh-node degradation guard.
+pub async fn active_chat_model_present(registry: &crate::registry::ModelRegistry) -> bool {
+    resolve_active_chat_model(registry).await.1.exists()
+}
+
 impl Sidecar for LlamaCppManager {
     fn name(&self) -> &'static str {
         "llamacpp"

@@ -247,6 +247,11 @@ pub fn plan_install_closure(
         }
     }
 
+    // Lower capability edges so a required capability's provider is pulled into the
+    // install closure too (fetched + installed like any transitive app dep).
+    let combined =
+        crate::plugins::binding::lower_manifests(&combined, &crate::plugins::binding::active_config());
+
     // One resolver, one semver comparison, one cycle detector — graph.rs.
     let order = resolve_enable_order(target_id, &combined)?;
 
@@ -444,6 +449,7 @@ mod tests {
                             min_version: mv.map(str::to_owned),
                         })
                         .collect(),
+                    capabilities: vec![],
                     grants: vec![],
                 })
             },

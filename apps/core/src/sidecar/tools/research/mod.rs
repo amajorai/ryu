@@ -18,25 +18,22 @@
 //! than spawning a competitor; otherwise provision a Python venv and spawn
 //! `python -m ryu_research` from the installed sidecar dir. It is **opt-in** —
 //! registered so the catalog/routes can reach it, but never in `startup_order`.
+//!
+//! This module is the kernel side of the research decomposition: the `/api/research/*`
+//! proxy handlers and the `research__*` MCP tool contract moved to the `ryu-research`
+//! crate (`apps-store/research/backend`); what stays here is the generic
+//! sidecar-lifecycle plumbing (the `RyuTtsManager` analog). The port + base-URL are
+//! now defined once in the crate ([`ryu_research::RESEARCH_PORT`] /
+//! [`ryu_research::research_base_url`]) and referenced here so Core and the moved
+//! surface never disagree about where the sidecar lives.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::Context;
+use ryu_research::{research_base_url, RESEARCH_ADDR, RESEARCH_PORT};
 
 use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
-
-/// Loopback port the research sidecar binds to. Distinct from llama.cpp (8080),
-/// embeddings (8081), rerank (8082), sd (8083), mlx-vlm (8084), tts (8085),
-/// whisper (8090).
-pub const RESEARCH_PORT: u16 = 8087;
-const RESEARCH_ADDR: &str = "127.0.0.1:8087";
-
-/// Base URL the sidecar serves on once resident. The proxy (`server::research`)
-/// and the `research__*` tools call this.
-pub fn research_base_url() -> String {
-    format!("http://{RESEARCH_ADDR}")
-}
 
 /// Directory holding the installed `ryu_research` package + bundled experiments.
 /// Overridable via `RESEARCH_DIR`; defaults to `~/.ryu/research-sidecar`.
@@ -181,7 +178,7 @@ impl Sidecar for ResearchManager {
             let dir = sidecar_dir();
             if !dir.exists() {
                 anyhow::bail!(
-                    "Ryu Research sidecar not found at {}. Install it (copy `apps/research-sidecar` \
+                    "Ryu Research sidecar not found at {}. Install it (copy `apps-store/research/sidecar` \
                      there), set RESEARCH_DIR to its path, or run `python -m ryu_research` and Core \
                      will adopt it.",
                     dir.display()
@@ -225,7 +222,7 @@ impl Sidecar for ResearchManager {
                 .with_context(|| {
                     format!(
                         "spawning the Ryu Research sidecar ({program} -m ryu_research). Is Python \
-                         installed? See apps/research-sidecar/README.md."
+                         installed? See apps-store/research/sidecar/README.md."
                     )
                 })?;
 
@@ -301,15 +298,4 @@ impl Sidecar for ResearchManager {
             Ok(())
         })
     }
-}
-
-/// Whether a research sidecar is currently answering `/health` on the port.
-/// Used by the status endpoint to report `running` without holding a manager.
-pub async fn is_running_now(client: &reqwest::Client) -> bool {
-    client
-        .get(format!("{}/health", research_base_url()))
-        .send()
-        .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
 }

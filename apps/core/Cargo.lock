@@ -1802,7 +1802,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-core"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1818,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-permissions"
-version = "0.0.4"
+version = "0.0.5"
 
 [[package]]
 name = "gif"
@@ -2642,15 +2642,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "mail-parser"
-version = "0.9.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93c3b9e5d8b17faf573330bbc43b37d6e918c0a3bf8a88e7d0a220ebc84af9fc"
-dependencies = [
- "encoding_rs",
 ]
 
 [[package]]
@@ -4293,17 +4284,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "ryu-clips"
+version = "0.0.5"
+dependencies = [
+ "async-trait",
+ "axum",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
 name = "ryu-core"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-tokio",
  "anyhow",
  "async-stream",
+ "async-trait",
  "axum",
  "base64",
  "bzip2 0.5.2",
- "chacha20poly1305",
  "chrono",
  "dirs 5.0.1",
  "flate2",
@@ -4315,9 +4321,7 @@ dependencies = [
  "humantime",
  "indicatif",
  "jsonwebtoken",
- "keyring",
  "lettre",
- "mail-parser",
  "nix 0.29.0",
  "notify",
  "once_cell",
@@ -4333,6 +4337,16 @@ dependencies = [
  "resvg",
  "rmcp",
  "rusqlite",
+ "ryu-clips",
+ "ryu-crypto",
+ "ryu-downloads",
+ "ryu-kernel-contracts",
+ "ryu-mesh",
+ "ryu-quests",
+ "ryu-recipes",
+ "ryu-storage",
+ "ryu-vault",
+ "ryu-webhook-ingress",
  "schemars 1.2.1",
  "semver",
  "sentry",
@@ -4364,6 +4378,127 @@ dependencies = [
  "yrs",
  "zip",
  "zstd 0.13.3",
+]
+
+[[package]]
+name = "ryu-crypto"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chacha20poly1305",
+ "keyring",
+ "rand 0.8.6",
+ "tracing",
+]
+
+[[package]]
+name = "ryu-downloads"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures-util",
+ "hex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ryu-kernel-contracts"
+version = "0.0.5"
+dependencies = [
+ "schemars 1.2.1",
+ "semver",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ryu-mesh"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "ryu-quests"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "futures-util",
+ "humantime",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "ryu-recipes"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "ghost-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "utoipa",
+]
+
+[[package]]
+name = "ryu-storage"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "rusqlite",
+ "tokio",
+]
+
+[[package]]
+name = "ryu-vault"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "humantime",
+ "rusqlite",
+ "ryu-crypto",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ryu-webhook-ingress"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

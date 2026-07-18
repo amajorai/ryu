@@ -1,0 +1,18 @@
+[package]
+name = "ryu-engines"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Engine-agnostic inference-configuration primitive for Ryu: the per-request `SamplingConfig` (temperature/top_p/top_k/min_p/penalties/mirostat/DRY/seed …) and per-launch `LaunchConfig` (context size, GPU layers, MoE offload, chat template/jinja, speculative draft, quantization, continuous-batching flags), translated per `Engine` (llama.cpp/Ollama/vLLM/SGLang/MLX/Other) into OpenAI-compat bodies, `llama-server` CLI args, and Ollama Modelfile params. An extracted Core capability crate; in-process by default, consumed as a NON-optional path dependency (providers + adapters build launch/sampling args unconditionally). ZERO dependency on apps/core. NOTE: this crate owns the engine *configuration/translation* surface (incl. the batching launch flags), NOT the provider launch lifecycle (`sidecar/providers`, sidecar-kernel-coupled) nor the runtime priority-admission queue (blocked on ryu-queue) nor the embed surface (`Embedder`/`Reranker`, deferred to ryu-rag)."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Memory-aware continuous-batching defaults (`device::{DeviceInfo::detect,
+# default_parallel_slots}`) are computed from detected hardware; that detection
+# lives in the model-catalog crate. No cycle: ryu-model-catalog never depends on
+# ryu-engines.
+ryu-model-catalog = { path = "../model-catalog" }

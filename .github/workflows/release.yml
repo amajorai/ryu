@@ -1,10 +1,19 @@
 name: release
 
-# Builds the headless binaries and attaches them to a GitHub Release.
+# Builds the full headless binary set and attaches it to a GitHub Release.
 # Triggers on a pushed v* tag, or manually via workflow_dispatch with a tag input.
 #
-# NOTE: first-run validation pending — the build matrix has not yet run on CI.
-# ghost/shadow are Windows-first; their non-Windows builds may need platform tweaks.
+# The set is the 3 headless binaries (core / gateway / cli) plus the 11 feature-app
+# backend sidecars (mail / teams / research / clips / finetune / quests / healing /
+# monitors / dashboards / meetings / recipes) — 14 bins × {linux-x86_64, macos-aarch64,
+# windows-x86_64}. Asset names match Core's updater + installer contract
+# (apps/desktop/src-tauri/src/core/install.rs OPTIONAL_SIDECARS, release-local.sh):
+# ryu-core / ryu-gateway / ryu-cli / ryu-<app>, each `<asset>-<os>-<arch>[.exe]`, with a
+# sibling `<asset>.sha256` the installers verify against.
+#
+# Standalone builds: this runs on the public mirror (amajorai/ryu), which ships NO root
+# Cargo.toml, so every manifest builds as its own workspace and its binary lands in
+# `<manifest-dir>/target/release/`.
 
 on:
   push:
@@ -13,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build and attach binaries to (e.g. v0.0.1)"
+        description: "Tag to build and attach binaries to (e.g. v0.0.5)"
         required: true
 
 permissions:
@@ -21,38 +30,50 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.bin }} (${{ matrix.os }})
+    name: ${{ matrix.target.asset }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # audiopus_sys (transitive: opus codec) vendors a CMakeLists that requires
+    # cmake_minimum_required(<3.5); CMake >= 4.0 (current runner images) removed that
+    # compatibility. CMake honours this env var to configure the legacy project anyway.
+    env:
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # headless trio — all three desktop OSes
-          - { os: ubuntu-latest,  dir: core,    bin: ryu-core,    ext: "" }
-          - { os: macos-latest,   dir: core,    bin: ryu-core,    ext: "" }
-          - { os: windows-latest, dir: core,    bin: ryu-core,    ext: ".exe" }
-          - { os: ubuntu-latest,  dir: gateway, bin: ryu-gateway, ext: "" }
-          - { os: macos-latest,   dir: gateway, bin: ryu-gateway, ext: "" }
-          - { os: windows-latest, dir: gateway, bin: ryu-gateway, ext: ".exe" }
-          - { os: ubuntu-latest,  dir: cli,     bin: ryu,         ext: "" }
-          - { os: macos-latest,   dir: cli,     bin: ryu,         ext: "" }
-          - { os: windows-latest, dir: cli,     bin: ryu,         ext: ".exe" }
-          # Windows-first sidecars
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        target:
+          # headless trio (standalone [package] manifests under apps/)
+          - { asset: ryu-core,       bin: ryu-core,       dir: apps/core }
+          - { asset: ryu-gateway,    bin: ryu-gateway,    dir: apps/gateway }
+          - { asset: ryu-cli,        bin: ryu,            dir: apps/cli }
+          # the 11 feature-app backend sidecars (apps-store/<app>/backend)
+          - { asset: ryu-mail,       bin: ryu-mail,       dir: apps-store/mail/backend }
+          - { asset: ryu-teams,      bin: ryu-teams,      dir: apps-store/teams/backend }
+          - { asset: ryu-research,   bin: ryu-research,   dir: apps-store/research/backend }
+          - { asset: ryu-clips,      bin: ryu-clips,      dir: apps-store/clips/backend }
+          - { asset: ryu-finetune,   bin: ryu-finetune,   dir: apps-store/finetune/backend }
+          - { asset: ryu-quests,     bin: ryu-quests,     dir: apps-store/quests/backend }
+          - { asset: ryu-healing,    bin: ryu-healing,    dir: apps-store/healing/backend }
+          - { asset: ryu-monitors,   bin: ryu-monitors,   dir: apps-store/monitors/backend }
+          - { asset: ryu-dashboards, bin: ryu-dashboards, dir: apps-store/dashboards/backend }
+          - { asset: ryu-meetings,   bin: ryu-meetings,   dir: apps-store/meetings/backend }
+          - { asset: ryu-recipes,    bin: ryu-recipes,    dir: apps-store/recipes/backend }
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      # Full build-dep union for every bin (opus for the audio crates was the actual
+      # v0.0.4 macOS failure — pkg-config could not find Opus).
       - name: Linux build deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libopus-dev
 
-      - name: macOS build deps (Core)
-        if: runner.os == 'macOS' && matrix.dir == 'core'
-        run: brew install dbus pkg-config
+      - name: macOS build deps
+        if: runner.os == 'macOS'
+        run: brew install dbus pkg-config opus
 
-      - name: Install protoc (Core needs prost-build)
-        if: matrix.dir == 'core'
+      - name: Install protoc (prost-build)
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -60,27 +81,33 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/${{ matrix.dir }}
+          workspaces: ${{ matrix.target.dir }}
 
       - name: Build
-        run: cargo build --release --manifest-path apps/${{ matrix.dir }}/Cargo.toml
+        run: cargo build --release --manifest-path ${{ matrix.target.dir }}/Cargo.toml
 
       - name: Package
         shell: bash
         run: |
           set -e
-          src="apps/${{ matrix.dir }}/target/release/${{ matrix.bin }}${{ matrix.ext }}"
-          name="${{ matrix.bin }}"; [ "$name" = "ryu" ] && name="ryu-cli"
-          # Accurate os-arch labels matching Core's updater (update::platform_match_score);
-          # macos-latest is Apple Silicon, so aarch64 — not x64.
+          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          # Accurate os-arch labels matching Core's updater (update::platform_match_score
+          # / install.rs platform_slug); macos-latest is Apple Silicon, so aarch64.
           case "${{ runner.os }}" in
             Linux)   plat="linux-x86_64" ;;
             macOS)   plat="macos-aarch64" ;;
             Windows) plat="windows-x86_64" ;;
           esac
-          asset="${name}-${plat}${{ matrix.ext }}"
+          src="${{ matrix.target.dir }}/target/release/${{ matrix.target.bin }}${ext}"
+          asset="${{ matrix.target.asset }}-${plat}${ext}"
           mkdir -p dist
           cp "$src" "dist/$asset"
+          # Portable sha256 (Linux/Windows-git ship sha256sum; macOS ships shasum) in the
+          # standard `<hash>  <name>` form the installers read (field 1). Basename only.
+          ( cd dist
+            if command -v sha256sum >/dev/null 2>&1; then sha256sum "$asset" > "$asset.sha256"
+            elif command -v shasum   >/dev/null 2>&1; then shasum -a 256 "$asset" > "$asset.sha256"
+            else echo "! no sha256 tool — skipping checksum for $asset" >&2; fi )
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
@@ -88,3 +115,6 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: dist/*
           fail_on_unmatched_files: true
+          # Only a real v* release claims `releases/latest` (the updater + installers
+          # fetch /releases/latest/download/<asset>); anything else must not steal it.
+          make_latest: ${{ startsWith(github.event.inputs.tag || github.ref_name, 'v') && 'true' || 'false' }}

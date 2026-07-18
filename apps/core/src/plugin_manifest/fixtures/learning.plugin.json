@@ -1,0 +1,34 @@
+{
+	"id": "com.ryu.learning",
+	"name": "Learning",
+	"version": "1.0.0",
+	"description": "Learning loop: turn chats and runs into reusable skills, gated by the approval Inbox, with an experience log of what was learned.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "learning-companion",
+			"name": "Learning",
+			"kind": "companion",
+			"config": {
+				"label": "Learning",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"requires": {
+		"apps": [
+			{
+				"id": "com.ryu.skills",
+				"min_version": "1.0.0"
+			}
+		]
+	},
+	"permission_grants": ["learning:crud"],
+	"companion": {
+		"label": "Learning",
+		"icon": "mortarboard-01"
+	}
+}

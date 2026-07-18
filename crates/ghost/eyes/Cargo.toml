@@ -1,0 +1,52 @@
+[package]
+name = "ghost-eyes"
+version = "0.0.5"
+edition = "2021"
+description = "Screen perception (AX tree, screen capture, input monitoring) for Ghost — cross-platform."
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ghost"
+
+[lib]
+name = "ghost_eyes"
+
+[dependencies]
+ghost-permissions = { path = "../permissions" }
+anyhow = "1"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Input",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Accessibility",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Diagnostics_ToolHelp",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.24"
+objc2 = "0.5"
+# Decode the PNG produced by the `screencapture` CLI (modern capture path; the old
+# CGDisplayCreateImage returns NULL on macOS 15+/Tahoe). png-only to stay light.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.13"
+evdev = "0.12"
+# AT-SPI2 (the Linux equivalent of AXUIElement / IUIAutomation), pure-Rust over D-Bus.
+# default-features off so we pin the tokio runtime instead of async-io/async-std.
+atspi = { version = "0.30", default-features = false, features = ["connection", "proxies", "tokio", "zbus"] }

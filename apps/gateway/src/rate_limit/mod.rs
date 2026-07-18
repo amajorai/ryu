@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
@@ -126,5 +128,147 @@ impl RateLimiter {
             .retain(|_, b| now.duration_since(b.last_refill) < max_idle);
         self.burst_buckets
             .retain(|_, b| now.duration_since(b.last_refill) < max_idle);
+    }
+}
+
+// ─── Swappable rate limiter (Lg decomposition) ───────────────────────────────
+
+/// The per-key rate limiter as a swappable, in-process capability. The built-in
+/// [`RateLimiter`] (token-bucket over local `DashMap`s) is the default; an
+/// alternative (e.g. a fleet-shared limiter) can register without touching the
+/// pipeline. This is a HOT per-request primitive, so the swap is in-process only
+/// (never IPC) — the trait is a swap-seam, mirroring the
+/// [`crate::providers::ProviderRegistry`] inversion.
+pub trait RateLimiterBackend: Send + Sync {
+    /// Per-second burst check for bot/abuse detection.
+    fn check_burst(&self, key: &str) -> bool;
+    /// Per-minute request check, honouring per-key RBAC overrides.
+    fn check_request_for_key(&self, key: &str, key_cfg: Option<&ApiKeyConfig>) -> bool;
+    /// Per-minute token check, honouring per-key RBAC overrides.
+    fn check_tokens_for_key(
+        &self,
+        key: &str,
+        token_count: u64,
+        key_cfg: Option<&ApiKeyConfig>,
+    ) -> bool;
+    /// Evict idle buckets older than `max_idle` (background sweep).
+    fn evict_stale(&self, max_idle: Duration);
+}
+
+impl RateLimiterBackend for RateLimiter {
+    fn check_burst(&self, key: &str) -> bool {
+        RateLimiter::check_burst(self, key)
+    }
+    fn check_request_for_key(&self, key: &str, key_cfg: Option<&ApiKeyConfig>) -> bool {
+        RateLimiter::check_request_for_key(self, key, key_cfg)
+    }
+    fn check_tokens_for_key(
+        &self,
+        key: &str,
+        token_count: u64,
+        key_cfg: Option<&ApiKeyConfig>,
+    ) -> bool {
+        RateLimiter::check_tokens_for_key(self, key, token_count, key_cfg)
+    }
+    fn evict_stale(&self, max_idle: Duration) {
+        RateLimiter::evict_stale(self, max_idle);
+    }
+}
+
+/// Id-keyed registry over [`RateLimiterBackend`] implementations. The built-in
+/// [`RateLimiter`] is registered first under [`RateLimiterRegistry::BUILTIN`] and
+/// active by default, so behavior is byte-identical with no config change.
+/// Delegating verbs forward to the active backend, keeping every call site
+/// unchanged.
+pub struct RateLimiterRegistry {
+    backends: HashMap<String, Arc<dyn RateLimiterBackend>>,
+    order: Vec<String>,
+    active_id: String,
+    active: Arc<dyn RateLimiterBackend>,
+}
+
+impl RateLimiterRegistry {
+    /// Stable id of the built-in in-process rate limiter.
+    pub const BUILTIN: &'static str = "builtin";
+
+    /// Build the registry from config, registering the built-in [`RateLimiter`]
+    /// as the default active backend.
+    pub fn new(config: RateLimitConfig) -> Self {
+        let builtin: Arc<dyn RateLimiterBackend> = Arc::new(RateLimiter::new(config));
+        let mut registry = Self {
+            backends: HashMap::new(),
+            order: Vec::new(),
+            active_id: Self::BUILTIN.to_string(),
+            active: Arc::clone(&builtin),
+        };
+        registry.register(Self::BUILTIN, builtin);
+        registry
+    }
+
+    /// Register a backend under a stable id (open extension point). Re-registering
+    /// replaces in place; refreshes the live handle if it is the active id.
+    pub fn register(&mut self, id: impl Into<String>, backend: Arc<dyn RateLimiterBackend>) {
+        let id = id.into();
+        if !self.backends.contains_key(&id) {
+            self.order.push(id.clone());
+        }
+        let is_active = id == self.active_id;
+        self.backends.insert(id, Arc::clone(&backend));
+        if is_active {
+            self.active = backend;
+        }
+    }
+
+    /// Select the active backend by id. `false` (unchanged) if `id` is unknown.
+
+    pub fn set_active(&mut self, id: &str) -> bool {
+        match self.backends.get(id) {
+            Some(backend) => {
+                self.active = Arc::clone(backend);
+                self.active_id = id.to_string();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The id of the currently active backend.
+
+    #[allow(dead_code)]
+    pub fn active_id(&self) -> &str {
+        &self.active_id
+    }
+
+    /// The registered backend ids in registration order.
+
+    pub fn available(&self) -> Vec<String> {
+        self.order.clone()
+    }
+
+    // ─── Delegating hot-path verbs (byte-identical call sites) ───────────────
+
+    /// See [`RateLimiterBackend::check_burst`].
+    pub fn check_burst(&self, key: &str) -> bool {
+        self.active.check_burst(key)
+    }
+
+    /// See [`RateLimiterBackend::check_request_for_key`].
+    pub fn check_request_for_key(&self, key: &str, key_cfg: Option<&ApiKeyConfig>) -> bool {
+        self.active.check_request_for_key(key, key_cfg)
+    }
+
+    /// See [`RateLimiterBackend::check_tokens_for_key`].
+    pub fn check_tokens_for_key(
+        &self,
+        key: &str,
+        token_count: u64,
+        key_cfg: Option<&ApiKeyConfig>,
+    ) -> bool {
+        self.active.check_tokens_for_key(key, token_count, key_cfg)
+    }
+
+    /// See [`RateLimiterBackend::evict_stale`].
+    pub fn evict_stale(&self, max_idle: Duration) {
+        self.active.evict_stale(max_idle);
     }
 }

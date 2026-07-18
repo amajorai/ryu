@@ -1,0 +1,31 @@
+[package]
+name = "ryu-crypto"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Encryption-at-rest primitive for Ryu: the FieldCipher (ChaCha20-Poly1305 AEAD with a self-describing `enc:v1:` field envelope + legacy-plaintext passthrough) and the swappable master-key custody ladder (env → OS keychain → file fallback, with legacy memory-key migration). An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the session/chat loop and long-term memory encrypt every row unconditionally). The two kernel couplings — the profile-scoped keychain suffix and the `~/.ryu` data dir — invert through the narrow `CryptoHost` trait so this crate has ZERO dependency on apps/core; the local-key→KMS swap story lives on the internal `Keychain` port."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+anyhow = "1"
+base64 = { version = "0.22", features = ["alloc"] }
+chacha20poly1305 = "0.10"
+rand = "0.8"
+tracing = "0.1"
+
+# OS keychain for the at-rest master key. Per-platform native backend so the key
+# lives outside ~/.ryu: Windows Credential Manager, macOS Keychain, Linux Secret
+# Service. Falls back to a file key when absent.
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[dev-dependencies]
+tempfile = "3"

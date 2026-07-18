@@ -2,7 +2,7 @@ mod api;
 mod audit;
 mod budget;
 mod cache;
-mod channels;
+mod channels_host;
 mod circuit_breaker;
 mod composio;
 mod compression;
@@ -134,13 +134,19 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    let state = Arc::new(AppState::new(config));
+    // Build the shared state, applying the config-selected active backend for
+    // every inverted stage. An unknown backend id refuses startup (fail-closed)
+    // rather than silently falling back to the built-in.
+    let state = Arc::new(
+        AppState::new(config)
+            .map_err(|e| anyhow::anyhow!("refusing to start: {e}"))?,
+    );
 
     // Channels: register configured messaging surfaces (Telegram, etc.). Each
     // runs its own inbound loop and routes messages through the gateway pipeline.
     // Loads enabled bot configs from the control-plane store first (M11 / #230);
     // env-configured channels are used as a fallback when the store is absent.
-    channels::spawn_registered(Arc::clone(&state)).await;
+    channels_host::spawn_registered(Arc::clone(&state)).await;
 
     // U28: if this gateway is bound to a control plane, fetch its effective
     // policy now and refresh it periodically. The control plane has already
@@ -216,7 +222,7 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 interval.tick().await;
                 s.cache.evict_expired();
-                if let Some(sc) = &s.semantic_cache {
+                if let Some(sc) = s.semantic_cache.active() {
                     sc.evict_expired();
                 }
             }

@@ -121,6 +121,23 @@ export async function deleteMeeting(
 	await request(target, `/api/meetings/${id}`, { method: "DELETE" });
 }
 
+/** Rename a meeting (`POST /api/meetings/:id/title`; locks out auto-rename). */
+export async function renameMeeting(
+	target: ApiTarget,
+	id: string,
+	title: string
+): Promise<Meeting> {
+	const json = await request<{ meeting?: Meeting; error?: string }>(
+		target,
+		`/api/meetings/${id}/title`,
+		{ method: "POST", body: { title } }
+	);
+	if (!json.meeting) {
+		throw new Error(json.error ?? "failed to rename meeting");
+	}
+	return json.meeting;
+}
+
 export interface Transcript {
 	segments: Segment[];
 	text: string;

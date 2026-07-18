@@ -104,8 +104,7 @@ use utoipa::OpenApi;
         super::skills_catalog_detail,
         super::skills_catalog_install,
         super::skills_install_from_source,
-        super::skills_activate,
-        super::list_skills,
+        // (`skills_activate` + `list_skills` moved to `ryu_skills::api`, merged below)
         super::list_engines,
         super::engine_models,
         super::system_status,
@@ -142,13 +141,8 @@ use utoipa::OpenApi;
         super::delete_acp_session_handler,
         super::agent_update_check,
         super::agent_update,
-        super::list_teams,
-        super::create_team,
-        super::get_team,
-        super::update_team,
-        super::delete_team,
-        super::add_team_member,
-        super::remove_team_member,
+        // Teams `/api/teams/*` handlers moved to the extracted `ryu_teams` crate,
+        // merged as a feature-gated sub-doc in `api_doc()` (see below).
         super::list_mcp_servers,
         super::create_mcp_server,
         super::list_mcp_tools,
@@ -267,6 +261,8 @@ use utoipa::OpenApi;
         super::preferences_stream,
         super::get_preference,
         super::set_preference,
+        super::get_capability_bindings,
+        super::set_capability_bindings,
 // Activity
         super::activity_api::activity_stream,
         super::activity_api::create_activity,
@@ -292,19 +288,7 @@ use utoipa::OpenApi;
         super::chat_permission,
         super::chat_stream_resume,
         super::chat_suggestions::chat_suggestions,
-        // Clips
-        super::clips::get_context,
-        super::clips::get_file,
-        super::clips::get_frame,
-        super::clips::get_sources,
-        super::clips::ingest,
-        super::clips::list_clips,
-        super::clips::pause_clip,
-        super::clips::post_diagnostics,
-        super::clips::recent_activity,
-        super::clips::resume_clip,
-        super::clips::start_clip,
-        super::clips::stop_clip,
+        // Clips → feature-gated sub-doc merged in `api_doc()` (see Research note).
         // Composio
         super::composio_actions,
         super::composio_connection_initiate,
@@ -326,21 +310,8 @@ use utoipa::OpenApi;
         // Core
         super::list_btw_handler,
         super::realtime_ws::realtime_ws,
-        super::whiteboard_generate_handler,
-        // Dashboards
-        super::dashboard_api::catalog,
-        super::dashboard_api::create_dashboard,
-        super::dashboard_api::create_widget,
-        super::dashboard_api::dashboard_events,
-        super::dashboard_api::delete_dashboard,
-        super::dashboard_api::delete_widget,
-        super::dashboard_api::get_dashboard,
-        super::dashboard_api::list_dashboards,
-        super::dashboard_api::list_widgets,
-        super::dashboard_api::refresh_widget,
-        super::dashboard_api::update_dashboard,
-        super::dashboard_api::update_widget,
-        super::dashboard_api::update_widget_layout,
+        // Dashboards runs out-of-process (`ryu-dashboards` sidecar); its
+        // `/api/dashboards/*` spec is owned by the sidecar, not merged here.
         // Data
         super::export_data_path,
         super::get_data_path,
@@ -351,15 +322,9 @@ use utoipa::OpenApi;
         super::downloads_history,
         // Events
         super::notifications_stream,
-        // Finetune
-        super::finetune::cancel,
-        super::finetune::capability,
-        super::finetune::get,
-        super::finetune::list,
-        super::finetune::list_adapters,
-        super::finetune::merge,
-        super::finetune::start,
-        super::finetune::stream,
+        super::navigation_stream,
+        // Finetune `/api/finetune/*` is served out-of-process by the `ryu-finetune`
+        // sidecar (manifest `public_mount`), so its paths are no longer in Core's spec.
         // Gateway
         super::engine_concurrency,
         // Git
@@ -370,21 +335,13 @@ use utoipa::OpenApi;
         super::git::git_create_branch,
         super::git::git_status,
         super::git::list_directory,
-        // Hardware
-        super::hardware_api::delete_device,
-        super::hardware_api::display_image,
-        super::hardware_api::display_manifest,
-        super::hardware_api::get_device_dashboard,
+        // Hardware — the device-registry CRUD + TRMNL display handlers moved to the
+        // extracted `ryu_hardware::api` crate, merged as a sub-doc in `api_doc()`
+        // (non-optional dep, so no cfg gate). The public WS link + pairing ingress
+        // keep their `#[utoipa::path]` annotations Core-side.
         super::hardware_ws::hardware_ws,
-        super::hardware_api::list_devices,
-        super::hardware_api::pair_device,
-        super::hardware_api::set_device_dashboard,
-        super::hardware_api::update_device,
-        // Healing
-        super::healing_api::config,
-        super::healing_api::set_config,
-        super::healing_api::simulate_failure,
-        super::healing_api::status,
+        super::hardware_public::pair_device,
+        // Healing → feature-gated sub-doc merged in `api_doc()` (see Research note).
         // Knowledge
         super::knowledge_catalog_detail,
         super::knowledge_catalog_install,
@@ -408,21 +365,9 @@ use utoipa::OpenApi;
         super::gifs::search,
         super::media::serve_media,
         super::media::upload_media,
-        // Meetings
-        super::meetings_api::create_meeting,
-        super::meetings_api::delete_meeting,
-        super::meetings_api::detect,
-        super::meetings_api::finalize_meeting,
-        super::meetings_api::get_detection_config,
-        super::meetings_api::get_meeting,
-        super::meetings_api::get_transcript,
-        super::meetings_api::import_meeting,
-        super::meetings_api::ingest_chunk,
-        super::meetings_api::list_meetings,
-        super::meetings_api::list_templates,
-        super::meetings_api::meetings_stream,
-        super::meetings_api::put_detection_config,
-        super::meetings_api::rename_meeting,
+        // Meetings runs out-of-process (`ryu-meetings` sidecar); its `/api/meetings/*`
+        // spec is owned by the sidecar and served through the ext-proxy `public_mount`,
+        // so it is NOT merged into Core's spec — same posture as monitors/quests.
         // Memory
         super::get_memory,
         super::list_memory,
@@ -433,20 +378,8 @@ use utoipa::OpenApi;
         super::models_llmfit_estimate,
         super::models_updates,
         super::set_model_launch_config,
-        // Monitors
-        super::monitors_api::ack_alert,
-        super::monitors_api::alerts_stream,
-        super::monitors_api::create_monitor,
-        super::monitors_api::delete_monitor,
-        super::monitors_api::get_monitor,
-        super::monitors_api::list_all_alerts,
-        super::monitors_api::list_monitor_alerts,
-        super::monitors_api::list_monitors,
-        super::monitors_api::list_snapshots,
-        super::monitors_api::register_push_token,
-        super::monitors_api::remove_push_token,
-        super::monitors_api::run_monitor,
-        super::monitors_api::update_monitor,
+        // Monitors: OUT-OF-PROCESS (`ryu-monitors` sidecar) — its handler
+        // `#[utoipa::path]` annotations live on the sidecar, not in Core's spec.
         // Nodes
         super::list_connections,
         // Notifications
@@ -460,6 +393,8 @@ use utoipa::OpenApi;
         super::put_alert_delivery,
         super::put_email_transport,
         super::notifications_api::read_notification,
+        super::notifications_api::register_push_token,
+        super::notifications_api::remove_push_token,
         // Plugins
         super::widgets::apps_ui_bundle,
         super::fire_activation_event_handler,
@@ -472,50 +407,23 @@ use utoipa::OpenApi;
         super::plugin_contributions,
         super::plugin_ui_bundle,
         super::set_app_grants_handler,
-        // Predict
-        super::predict_api::complete,
-        super::predict_api::get_config,
-        super::predict_api::put_config,
-        // Quests
-        super::quests_api::accept_suggestion,
-        super::quests_api::complete_quest,
-        super::quests_api::create_quest,
-        super::quests_api::delete_quest,
-        super::quests_api::dismiss_quest,
-        super::quests_api::dismiss_suggestion,
-        super::quests_api::get_detection_config,
-        super::quests_api::get_quest,
-        super::quests_api::judge_quest,
-        super::quests_api::list_quests,
-        super::quests_api::quest_events,
-        super::quests_api::set_detection_config,
-        super::quests_api::update_quest,
-        // Recipes
-        super::recipes_api::delete_recipe,
-        super::recipes_api::get_recipe,
-        super::recipes_api::list_recipes,
-        super::recipes_api::record_start,
-        super::recipes_api::record_status,
-        super::recipes_api::record_stop,
-        super::recipes_api::run_recipe,
-        super::recipes_api::save_recipe,
-        // Research
-        super::research::research_init_workspace,
-        super::research::research_ledger,
-        super::research::research_status,
+        // Predict → sub-doc from the extracted `ryu_predict` crate, merged in
+        // `api_doc()` (the crate owns its own `#[utoipa::path]` annotations).
+        // Quests → served OUT-OF-PROCESS by the `ryu-quests` sidecar (manifest
+        // `public_mount`), so its OpenAPI sub-doc is no longer merged into Core's spec.
+        // Recipes → feature-gated sub-doc merged in `api_doc()` (see Research note).
+        // Research/Clips/Recipes live in feature-gated sub-docs merged at build time
+        // (see `api_doc()`), because utoipa's `paths(...)` macro drops `#[cfg]` on
+        // entries — so a per-entry gate can't compile out with the module.
         // Sandboxes
         super::destroy_sandbox,
         super::exec_sandbox,
         super::get_sandbox_backend,
         super::list_sandboxes,
         super::set_sandbox_backend,
-        // Skills
-        super::get_skill_source,
-        super::get_skill_version_handler,
-        super::list_skill_versions_handler,
-        super::restore_skill_version_handler,
+        // Skills — only the Core-owned catalog leaf remains; the CRUD/version/source
+        // handlers moved to `ryu_skills::api` (merged as a sub-doc below).
         super::skills_updates,
-        super::update_skill_handler,
         // Spaces
         super::create_database,
         super::create_document_version,
@@ -557,6 +465,66 @@ use utoipa::OpenApi;
 )]
 pub struct ApiDoc;
 
+// ── Feature-gated leaf sub-docs ───────────────────────────────────────────────
+//
+// `research`/`clips`/`recipes` are compile-out-able leaves. Their handler
+// paths can't live in `ApiDoc`'s `paths(...)` because utoipa's macro drops `#[cfg]`
+// on individual entries — so a per-entry gate would still emit `super::*` for an
+// absent module (E0433). Each extracted crate instead owns its own `#[utoipa::path]`
+// annotations and exposes an `api::openapi()` sub-doc, merged into the base spec at
+// build time by [`api_doc()`]. When the feature is on (the default), the merged
+// output is identical in content to the old inline listing (paths land at the end of
+// the map, which is functional-identical, not literally byte-identical JSON).
+
+/// The full Core spec: the base [`ApiDoc`] plus any compile-out-able leaf sub-docs
+/// that are enabled in this build. The single source of truth for both
+/// `--dump-openapi` and `GET /api/openapi.json`, so the served spec and the dumped
+/// spec never diverge on which features are compiled in.
+pub fn api_doc() -> utoipa::openapi::OpenApi {
+    #[allow(unused_mut)]
+    let mut doc = ApiDoc::openapi();
+    // Dashboards runs out-of-process (`ryu-dashboards` sidecar); its `/api/dashboards/*`
+    // spec is owned by the sidecar and served through the ext-proxy `public_mount`, so
+    // Core no longer merges it into this doc.
+    // Hardware: the extracted `ryu_hardware` crate owns the `/api/hardware/devices*`
+    // + `/api/hardware/display*` handler `#[utoipa::path]` annotations and exposes
+    // them as a merged sub-doc. Non-optional dep, so merged unconditionally.
+    doc.merge(ryu_hardware::api::openapi());
+    // Predict: the extracted `ryu_predict` crate owns its `/api/predict/*` handler
+    // `#[utoipa::path]` annotations and exposes them as a merged sub-doc (non-optional
+    // dep, so no cfg gate — the routes are always mounted).
+    doc.merge(ryu_predict::api::openapi());
+    // Research `/api/research/*` is served out-of-process by the `ryu-research`
+    // sidecar (manifest `public_mount`), so its OpenAPI sub-doc is no longer merged
+    // into Core's spec — the sidecar owns that surface.
+    // Clips `/api/clips/*` is served out-of-process by the `ryu-clips` sidecar
+    // (manifest `public_mount`), so its OpenAPI sub-doc is no longer merged into
+    // Core's spec — the sidecar owns that surface.
+    // Recipes `/api/recipes/*` is served out-of-process by the `ryu-recipes` sidecar
+    // (manifest `public_mount`), so its OpenAPI sub-doc is no longer merged into
+    // Core's spec — the sidecar owns that surface.
+    // Healing `/api/healing/*` is served out-of-process by the `ryu-healing` sidecar
+    // (manifest `public_mount`), so its OpenAPI sub-doc is no longer merged into
+    // Core's spec — the sidecar owns that surface.
+    // Quests `/api/quests/*` is served out-of-process by the `ryu-quests` sidecar
+    // (manifest `public_mount`), so its OpenAPI sub-doc is no longer merged into
+    // Core's spec — the sidecar owns that surface.
+    // Teams `/api/teams/*` is served out-of-process by the `ryu-teams` sidecar
+    // (manifest `public_mount`), so its OpenAPI sub-doc is no longer merged into
+    // Core's spec — the sidecar owns that surface.
+    // Meetings runs out-of-process (`ryu-meetings` sidecar); its `/api/meetings/*` spec
+    // is owned by the sidecar and served through the ext-proxy `public_mount`, so Core
+    // no longer merges it into this doc.
+    // Monitors: OUT-OF-PROCESS (`ryu-monitors` sidecar) — the sidecar owns the
+    // `/api/monitors/*` surface + its OpenAPI, so it is NOT merged into Core's spec.
+    // Skills: the CRUD/version/source/activate handlers live in the extracted
+    // `ryu-skills` crate (which owns their `#[utoipa::path]` annotations); the
+    // Core-side `catalog`/`updates`/`install-from-source` handlers stay in the main
+    // doc above. Non-optional dep (the registry is kernel-required), so no cfg gate.
+    doc.merge(ryu_skills::api::openapi());
+    doc
+}
+
 /// `GET /api/openapi.json` — serve the generated spec from a running Core.
 #[utoipa::path(
     get,
@@ -566,5 +534,5 @@ pub struct ApiDoc;
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn serve_openapi() -> axum::Json<utoipa::openapi::OpenApi> {
-    axum::Json(ApiDoc::openapi())
+    axum::Json(api_doc())
 }

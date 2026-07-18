@@ -2,7 +2,7 @@ name: Publish @ryu/sdk-native (napi)
 
 # Builds the napi addon for every platform and publishes @ryu/sdk-native to npm
 # from the PUBLIC repo, where Actions are free/unlimited. The napi source
-# (crates/ryu-sdk-napi) + ryu-sdk are open-core mirrored, so this never needs the
+# (crates/sdk/napi) + ryu-sdk are open-core mirrored, so this never needs the
 # private repo. Fires on the mirrored `rust-sdk-v*` tag or manual dispatch.
 #
 # Required secret: NPM_TOKEN (npm automation token, set on amajorai/ryu).
@@ -48,45 +48,60 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/ryu-sdk-napi
+          workspaces: crates/sdk/napi
       - name: Install binding deps
-        working-directory: crates/ryu-sdk-napi
+        working-directory: crates/sdk/napi
         run: bun install
       - name: Build napi addon
-        working-directory: crates/ryu-sdk-napi
+        working-directory: crates/sdk/napi
         run: bun x napi build --platform --release --target ${{ matrix.target }}
       - name: Upload prebuilt addon
         uses: actions/upload-artifact@v4
         with:
           name: napi-${{ matrix.target }}
-          path: crates/ryu-sdk-napi/*.node
+          path: crates/sdk/napi/*.node
           if-no-files-found: error
 
   publish-napi:
     name: Publish @ryu/sdk-native to npm
     needs: build-napi
     runs-on: ubuntu-latest
+    # Cleanly no-op when NPM_TOKEN is absent (mirrors publish-sdk.yml) instead of
+    # hard-failing on `missing authentication`.
+    env:
+      HAS_NPM: ${{ secrets.NPM_TOKEN != '' }}
     steps:
+      - name: Skip notice
+        if: env.HAS_NPM != 'true'
+        run: echo "NPM_TOKEN secret not set — skipping @ryu/sdk-native npm publish."
+
       - uses: actions/checkout@v4
+        if: env.HAS_NPM == 'true'
       - uses: oven-sh/setup-bun@v2
+        if: env.HAS_NPM == 'true'
         with:
           bun-version: 1.3.14
       - uses: actions/setup-node@v4
+        if: env.HAS_NPM == 'true'
         with:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
       - name: Install binding deps
-        working-directory: crates/ryu-sdk-napi
+        if: env.HAS_NPM == 'true'
+        working-directory: crates/sdk/napi
         run: bun install
       - name: Download prebuilt addons
+        if: env.HAS_NPM == 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: napi-*
-          path: crates/ryu-sdk-napi
+          path: crates/sdk/napi
           merge-multiple: true
       - name: Publish to npm
-        working-directory: crates/ryu-sdk-napi
-        run: bun publish --access public
+        if: env.HAS_NPM == 'true'
+        working-directory: crates/sdk/napi
+        # npm (not `bun publish`) reads the token from the .npmrc that setup-node writes
+        # (//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}); bun ignores NODE_AUTH_TOKEN.
+        run: npm publish --access public
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -3,8 +3,8 @@
 //!
 //! Placement (Core vs Gateway): this decides *what runs* (fire a message on a
 //! node) → Core. It reuses the swappable channel send primitives in
-//! [`crate::monitors::notify`] so "add another channel" is one match arm, never
-//! a new transport — the same "nothing hardcoded, everything swappable" rule the
+//! [`ryu_notify`] so "add another channel" is one match arm, never a new
+//! transport — the same "nothing hardcoded, everything swappable" rule the
 //! monitor notify targets follow.
 //!
 //! `recipient` and `text` are already template-resolved by the executor before
@@ -14,7 +14,7 @@
 use std::time::Instant;
 
 use super::ChannelPlatform;
-use crate::monitors::notify::{send_telegram_text, send_webhook_text};
+use ryu_notify::{send_telegram_text, send_webhook_text};
 
 /// Send one message to the configured channel. Returns a JSON receipt string on
 /// success, or an error string that fails the node.

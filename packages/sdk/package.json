@@ -1,6 +1,6 @@
 {
   "name": "@ryuhq/sdk",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "type": "module",
   "description": "Ryu developer SDK: typed builders and CLI for authoring plugin.json Plugin bundles",
   "main": "./dist/index.cjs",
@@ -39,6 +39,7 @@
   "scripts": {
     "build": "tsup",
     "check-types": "tsc --noEmit",
+    "generate:contracts": "bun run scripts/generate-contracts.ts",
     "test": "bun test",
     "clean": "rm -rf dist"
   },
@@ -48,6 +49,7 @@
   },
   "devDependencies": {
     "@types/bun": "catalog:",
+    "json-schema-to-typescript": "^15.0.4",
     "tsup": "^8.5.1",
     "typescript": "^5"
   }

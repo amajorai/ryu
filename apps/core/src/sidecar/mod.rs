@@ -2,9 +2,11 @@ pub mod active_engine;
 pub mod adapters;
 pub mod agent_runner;
 pub mod agents;
+pub mod cli_shims;
 pub mod control_plane;
 pub mod download_manager;
 pub mod env_scrub;
+pub mod ext_proxy;
 pub mod external_runtime;
 pub mod gateway;
 pub mod gateway_policy;
@@ -18,7 +20,13 @@ pub mod path_manager;
 pub mod process;
 pub mod providers;
 pub mod resources;
-pub mod sandbox;
+/// The sandbox execution primitive, extracted into the `ryu-sandbox` crate
+/// (in-process default). Re-exported at its historical path so consumers
+/// (`server`, the MCP sandbox front) and every
+/// `crate::sidecar::sandbox::*` call site are unchanged. Core installs the
+/// crate's host seam (Gateway metering url/bearer, ryu-dir, org, default
+/// budget) once at startup via [`crate::sandbox_host`].
+pub use ryu_sandbox as sandbox;
 pub mod tailscale;
 pub mod tools;
 pub mod untrusted;
@@ -129,6 +137,13 @@ pub(crate) async fn remove_dir(path: &std::path::Path) {
 pub struct SidecarStatus {
     pub name: String,
     pub running: bool,
+    /// True when this sidecar is a **lazy** (spawn-on-first-use) manifest sidecar
+    /// that is currently scaled to zero — registered and reachable, its process
+    /// started on the next proxy/broker hit. Lets status UIs distinguish an
+    /// intentional scale-to-zero (`running: false, lazy: true`) from a crash
+    /// (`running: false, lazy: false`). Always present; `false` for eager/built-in
+    /// sidecars (additive — existing readers ignore it).
+    pub lazy: bool,
     /// OS process id, when Core owns a resident child for this sidecar. Omitted
     /// otherwise (adopt-mode / serverless / in-process engines).
     #[serde(skip_serializing_if = "Option::is_none")]

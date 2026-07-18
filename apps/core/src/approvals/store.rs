@@ -6,8 +6,8 @@
 //!     pending-by-source dedup and status filters don't have to scan JSON).
 //!
 //! A broadcast channel fans freshly-changed requests out to SSE subscribers (the
-//! desktop inbox page + the island chip), mirroring [`crate::quests::store`] and
-//! [`crate::monitors::store`].
+//! desktop inbox page + the island chip), mirroring `ryu_quests` and
+//! the monitors store.
 //!
 //! Placement note (Core vs Gateway): this stores *what is queued to run and what
 //! the user decided* — the queue and the resume machinery decide what runs — so it

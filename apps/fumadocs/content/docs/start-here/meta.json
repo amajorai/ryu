@@ -1,7 +1,7 @@
 {
   "root": true,
   "title": "Start Here",
-  "description": "Install Ryu, understand how the pieces fit together, and send your first message. Covers architecture, the Core/Gateway split, and the runnable model.",
+  "description": "Install Ryu, understand how the pieces fit together, and send your first message. Covers architecture, the Core/Gateway split, capability layers, and the decomposition model.",
   "icon": "Rocket",
   "pages": [
     "index",
@@ -11,8 +11,15 @@
     "environment-variables",
     "architecture/index",
     "architecture/why-ryu",
+    "architecture/three-products",
     "architecture/core-vs-gateway",
+    "architecture/runnable-model",
+    "architecture/capability-layers",
     "architecture/batteries-included",
-    "architecture/runnable-model"
+    "architecture/acp-agents",
+    "architecture/providers",
+    "architecture/platform-decomposition",
+    "architecture/decomposition-program",
+    "architecture/open-core"
   ]
 }

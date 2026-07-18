@@ -1,0 +1,48 @@
+[package]
+name = "ryu-finetune"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Fine-tuning (Unsloth) durable state + HTTP surface for Ryu: Core's system-of-record for fine-tune jobs (SQLite `finetune.db`) and the trained-adapter catalog (`installed-adapters.json`), plus the `/api/finetune/*` control-plane surface. The training itself runs out-of-process in the `apps-store/finetune/sidecar` Python sidecar; this crate owns the durable records that survive a Core restart (the sidecar's in-process registry does not) and the thin proxy that drives the training worker over HTTP. An extracted Core capability crate — in-process default, consumed by Core as a path dependency. Its lone kernel coupling (the `~/.ryu` data directory) is inverted through `init_data_dir`, so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# The out-of-process control-plane sidecar binary. Core spawns it (`kind: local`,
+# sibling on PATH / `RYU_FINETUNE_BIN`), health-checks it, and proxies
+# `/api/finetune/*` to it on loopback — exactly like `ryu-research` fronts the
+# Python autoresearch engine. This bin sits IN FRONT of the Python `unsloth`
+# training worker (reached at `RYU_UNSLOTH_URL`, default `http://127.0.0.1:8086`).
+# The same crate still compiles INTO Core as a lib path-dependency (in-process
+# default); this bin is just the process shell around the crate's `routes()`.
+[[bin]]
+name = "ryu-finetune"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
+# axum router has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+tokio = { version = "1", features = ["sync"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+axum = "0.7"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+chrono = { version = "0.4", features = ["serde"] }
+utoipa = { version = "5", features = ["axum_extras", "chrono"] }
+# The `/api/finetune/*` surface reaches into the shared model catalog for the
+# local-training GPU gate (`device::DeviceInfo`) and to register a merged adapter
+# GGUF as a selectable installed model (`installed::record`). Both are extracted
+# crates (ZERO apps/core dependency); the sidecar shares the SAME on-disk indices
+# under `${RYU_DIR}` that Core reads.
+ryu-model-catalog = { path = "../../../crates/core/model-catalog" }
+ryu-model-format = { path = "../../../crates/core/model-format" }
+# Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-mail`
+# and `ryu-teams`. Core already pulls all of these, so there is no new dependency
+# in the in-process build.
+async-trait = "0.1"
+dirs = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

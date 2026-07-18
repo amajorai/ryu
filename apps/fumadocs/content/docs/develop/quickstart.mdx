@@ -20,6 +20,14 @@ You write plugins with `@ryuhq/sdk` (the Ryu developer SDK) and scaffold them wi
 
 ## What you build
 
+```mermaid
+flowchart LR
+  A[bunx create-ryu-app] --> B[plugin.json + src/agent.ts]
+  B --> C[bun dev — stream via Gateway]
+  C --> D[bun run pack — validate + bundle]
+  D --> E[Install in Ryu]
+```
+
 The scaffold emits a directory with three files that matter:
 
 | File | What it is |
@@ -168,6 +176,8 @@ here.
 <Cards>
   <DocCard href="/docs/develop/sdk" />
   <DocCard href="/docs/develop/sdk/plugin-api" />
+  <DocCard href="/docs/develop/extensions/hooks-lifecycle" />
   <DocCard href="/docs/develop/extensions/marketplace" />
+  <DocCard href="/docs/develop/contributing" />
   <DocCard href="/docs/start-here/architecture/runnable-model" />
 </Cards>

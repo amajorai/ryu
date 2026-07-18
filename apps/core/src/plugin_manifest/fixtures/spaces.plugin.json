@@ -7,5 +7,10 @@
 		"ryu": ">=0.0.1"
 	},
 	"runnables": [],
+	"requires": {
+		"capabilities": [
+			{ "capability": "rag" }
+		]
+	},
 	"permission_grants": []
 }

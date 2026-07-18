@@ -56,23 +56,10 @@ pub async fn query_audit(
     let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
 
     // Audit data is tenant-wide, so the master key is always sufficient. Without
-    // it, access is allowed ONLY from a loopback peer in no-auth mode — never
-    // from a remote host. The gateway can bind 0.0.0.0 (config default), so
-    // `require_auth` alone (a *base*-auth flag) must not gate this admin surface.
-    if !ctx.is_master_key {
-        let require_auth = state.with_auth(|a| a.require_auth);
-        // Loopback trust is neutralized under EITHER mesh (#478, B-9) or fleet
-        // mode (managed-cloud WS2): userspace-networking tailnet peers appear as
-        // 127.0.0.1, and a co-located fleet LB makes external callers appear as
-        // 127.0.0.1 too — a bare loopback check fails OPEN in both topologies.
-        let loopback_trusted =
-            peer.ip().is_loopback() && !crate::tools::mesh_enabled() && !state.config.fleet;
-        if require_auth || !loopback_trusted {
-            return Err(GatewayError::Unauthorized(
-                "Audit log access requires the master key.".to_string(),
-            ));
-        }
-    }
+    // it, access is allowed ONLY under the zero-config dev posture (loopback peer,
+    // no base auth, no mesh/fleet, no provisioned master key). The shared gate
+    // (config/audit/budget-spend) owns this decision so it cannot drift.
+    crate::api::config::require_local_admin(&state, &peer, ctx.is_master_key, "Audit log access")?;
 
     if !state.audit.is_enabled() {
         return Err(GatewayError::Internal(anyhow::anyhow!(

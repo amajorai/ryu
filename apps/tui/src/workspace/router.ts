@@ -28,10 +28,13 @@ import type { ReactNode } from "react";
 import { agentsSurface } from "../surfaces/agents/index.tsx";
 import { calendarSurface } from "../surfaces/calendar/index.tsx";
 import { chatSurface } from "../surfaces/chat/index.tsx";
+import { downloadsSurface } from "../surfaces/downloads/index.tsx";
 import { homeSurface } from "../surfaces/home/index.tsx";
+import { inboxSurface } from "../surfaces/inbox/index.tsx";
 import { librarySurface } from "../surfaces/library/index.tsx";
 import { meetingsSurface } from "../surfaces/meetings/index.tsx";
 import { monitorsSurface } from "../surfaces/monitors/index.tsx";
+import { setupSurface } from "../surfaces/setup/index.tsx";
 import { spacesSurface } from "../surfaces/spaces/index.tsx";
 import {
 	storeEnginesSurface,
@@ -41,6 +44,7 @@ import {
 	storeSurface,
 } from "../surfaces/store/index.tsx";
 import { tasksSurface } from "../surfaces/tasks/index.tsx";
+import { teamsSurface } from "../surfaces/teams/index.tsx";
 import { timelineSurface } from "../surfaces/timeline/index.tsx";
 import { toolsSurface } from "../surfaces/tools/index.tsx";
 import { workflowsSurface } from "../surfaces/workflows/index.tsx";
@@ -96,6 +100,7 @@ export function listSurfaces(): readonly SurfaceModule[] {
 registerSurface(homeSurface);
 registerSurface(chatSurface);
 registerSurface(agentsSurface);
+registerSurface(teamsSurface);
 registerSurface(storeSurface);
 registerSurface(storeModelsSurface);
 registerSurface(storeSkillsSurface);
@@ -110,3 +115,6 @@ registerSurface(timelineSurface);
 registerSurface(monitorsSurface);
 registerSurface(tasksSurface);
 registerSurface(meetingsSurface);
+registerSurface(inboxSurface);
+registerSurface(downloadsSurface);
+registerSurface(setupSurface);

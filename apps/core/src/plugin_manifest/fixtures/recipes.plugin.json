@@ -1,0 +1,46 @@
+{
+	"id": "com.ryu.recipes",
+	"name": "Recipes",
+	"version": "1.0.0",
+	"description": "Desktop-automation recipes: record → save → replay UI action sequences. Backed by Ghost's RecipeStore, so it declares Ghost as a dependency and the graph refuses to disable Ghost out from under it.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"requires": {
+		"apps": [
+			{
+				"id": "ghost",
+				"min_version": "1.0.0"
+			}
+		]
+	},
+	"sidecars": [
+		{
+			"name": "ryu-recipes",
+			"process": {
+				"kind": "local",
+				"command": "ryu-recipes",
+				"command_env": "RYU_RECIPES_BIN",
+				"port_env": "RYU_RECIPES_PORT"
+			},
+			"port": 7999,
+			"health_path": "/health",
+			"lazy": true,
+			"idle_stop_secs": 300,
+			"http": {
+				"mount": "/api/recipes",
+				"public_mount": "/api/recipes",
+				"routes": [
+					{ "path": "/" },
+					{ "path": "/:name" },
+					{ "path": "/:name/run" },
+					{ "path": "/record/start" },
+					{ "path": "/record/status" },
+					{ "path": "/record/stop" }
+				]
+			}
+		}
+	],
+	"permission_grants": []
+}

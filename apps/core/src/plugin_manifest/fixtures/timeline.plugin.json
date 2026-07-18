@@ -1,0 +1,26 @@
+{
+	"id": "com.ryu.timeline",
+	"name": "Timeline",
+	"version": "1.0.0",
+	"description": "The activity replay timeline: a CapCut-style scrubber over Shadow's captured screen/input/window/audio lanes with a keyframe preview, a Dayflow work journal, and jump-to-moment focus.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "timeline-companion",
+			"name": "Timeline",
+			"kind": "companion",
+			"config": {
+				"label": "Timeline",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"permission_grants": ["timeline:read"],
+	"companion": {
+		"label": "Timeline",
+		"icon": "timeline"
+	}
+}

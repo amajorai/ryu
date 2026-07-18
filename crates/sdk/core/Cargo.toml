@@ -1,0 +1,60 @@
+[package]
+name = "ryu-sdk"
+version = "0.0.5"
+edition = "2021"
+description = "Ryu developer SDK core — the shared Rust kernel (manifest model, gateway egress rules, gateway-mandatory model client) that every language binding builds on."
+license = "Apache-2.0"
+
+[lib]
+name = "ryu_sdk"
+
+[features]
+default = []
+# Best-effort OpenAPI client codegen from the vendored specs (see `build.rs`).
+# OFF by default: the vendored specs are OpenAPI 3.1, which the progenitor
+# generator does not fully support, so the default build never depends on it and
+# can never be reddened by a generator change. The hand-written `model` client is
+# the shipping transport; the spec is still vendored as the canonical contract
+# and exercised by the `spec_conformance` test.
+codegen = ["dep:progenitor", "dep:prettyplease", "dep:syn", "dep:openapiv3"]
+
+[dependencies]
+# The single, pure-data definition of the plugin.json manifest contract. The SDK
+# re-exports these types from `manifest`/`runnable` instead of maintaining a
+# drifting copy — apps/core depends on the same crate, so the SDK and Core now
+# validate against one identical definition.
+ryu-kernel-contracts = { path = "../../core/kernel-contracts", version = "0.0.5" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+schemars = "1"
+semver = "1"
+regex = "1"
+thiserror = "2"
+url = "2"
+dirs = "6"
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json",
+    "stream",
+] }
+futures-util = "0.3"
+async-stream = "0.3"
+bytes = "1"
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+
+[build-dependencies]
+# Only pulled in when the `codegen` feature is enabled. `openapiv3` is the
+# OpenAPI 3.0 model progenitor consumes (pinned to progenitor 0.8's version);
+# the spec is parsed in the build script's own dependency scope, so serde_yaml
+# is needed here too (aliased to avoid clashing with the main-dep serde_yaml).
+progenitor = { version = "0.8", optional = true }
+prettyplease = { version = "0.2", optional = true }
+syn = { version = "2", optional = true }
+openapiv3 = { version = "2.0.0", optional = true }
+# Light + already compiled for the main crate; only used inside build.rs's
+# `cfg(codegen)` block, so keeping it non-optional costs ~nothing.
+serde_yaml = "0.9"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

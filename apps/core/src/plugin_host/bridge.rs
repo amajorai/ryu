@@ -28,6 +28,43 @@ const GRANT_SPACES: &str = "spaces:docs";
 /// `com.ryu.finetune` app; Core still owns the orchestration + job store, the app
 /// reaches it through this governed bridge.
 const GRANT_FINETUNE: &str = "finetune:runs";
+/// Grant required to call `host.navigate` (ask the host shell to navigate/deep-link).
+const GRANT_NAVIGATE: &str = "shell:navigate";
+
+/// Map a kernel-contracts host-API method name (dotted, e.g. `"model.complete"`,
+/// `"storage.get"`, `"spaces.createDoc"`) to the closed `host.<...>` path
+/// [`PluginHookBridge::handle`] matches (`handle_inner` strips the `host.` prefix).
+/// A method absent here is NOT bridge-dispatchable — the caller can never forward a
+/// verbatim path into a different capability namespace.
+///
+/// This is the SAME set the HTTP app-host relay (`server::plugin_bridge_api`) maps;
+/// the extension-host `/api/host/rpc` route reuses THIS one so the node runtime and
+/// the iframe host share one dotted→bridge vocabulary. A unit test pins it to the
+/// kernel-contracts `grant_for` table so a new bridge method can't silently omit a
+/// path here.
+pub fn dispatch_path_for(method: &str) -> Option<&'static str> {
+    Some(match method {
+        "model.complete" => "host.sideModel",
+        "agent.run" => "host.runAgent",
+        "storage.get" => "host.storage_get",
+        "storage.set" => "host.storage_set",
+        "storage.delete" => "host.storage_delete",
+        "storage.keys" => "host.storage_keys",
+        "spaces.createDoc" => "host.spaces_create_doc",
+        "spaces.getDoc" => "host.spaces_get_doc",
+        "spaces.updateDoc" => "host.spaces_update_doc",
+        "spaces.listDocs" => "host.spaces_list_docs",
+        "spaces.deleteDoc" => "host.spaces_delete_doc",
+        "finetune.capability" => "host.finetune_capability",
+        "finetune.start" => "host.finetune_start",
+        "finetune.list" => "host.finetune_list",
+        "finetune.get" => "host.finetune_get",
+        "finetune.cancel" => "host.finetune_cancel",
+        "finetune.adapters" => "host.finetune_adapters",
+        "finetune.merge" => "host.finetune_merge",
+        _ => return None,
+    })
+}
 
 /// Bridges sandbox `host.*` calls for one plugin hook run.
 pub struct PluginHookBridge {
@@ -66,6 +103,7 @@ impl PluginHookBridge {
             | "finetune_cancel"
             | "finetune_adapters"
             | "finetune_merge" => self.finetune(method, args).await,
+            "navigate" => self.navigate(args),
             other => err(format!("unknown host capability '{other}'")),
         }
     }
@@ -80,6 +118,34 @@ impl PluginHookBridge {
     /// gather actual evidence (read files, run tests, hit endpoints) rather than
     /// guess from the conversation. This is the "proof of work" primitive: an
     /// independent agent that must *prove* a goal was done, not merely judge it.
+    /// `host.navigate({ target, params? })` — ask the host shell to navigate or
+    /// deep-link on the app's behalf. A sandboxed app UI can't drive the shell
+    /// router directly; this grant-gated primitive publishes a [`NavigationRequest`]
+    /// that the connected surface consumes over SSE and acts on. Fire-and-forget:
+    /// success means "queued", not "the shell navigated" (no surface may be live).
+    fn navigate(&self, args: Value) -> InvokeOutcome {
+        if !self.grants.contains(GRANT_NAVIGATE) {
+            return err(format!(
+                "capability '{GRANT_NAVIGATE}' not granted to plugin '{}'",
+                self.plugin_id
+            ));
+        }
+        let target = args
+            .get("target")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        if target.is_empty() {
+            return err("host.navigate requires a non-empty 'target'".to_string());
+        }
+        crate::events::publish_navigation(crate::events::NavigationRequest {
+            plugin_id: self.plugin_id.clone(),
+            target: target.to_string(),
+            params: args.get("params").cloned(),
+        });
+        ok(serde_json::json!({ "queued": true, "target": target }))
+    }
+
     async fn run_agent(&self, args: Value) -> InvokeOutcome {
         if !self.grants.contains(GRANT_RUN_AGENT) {
             return err(format!(
@@ -251,7 +317,15 @@ impl PluginHookBridge {
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .unwrap_or("Untitled");
-                match store.app_create_doc(&self.plugin_id, space_id, title).await {
+                match store
+                    .app_create_doc(
+                        &self.plugin_id,
+                        space_id,
+                        title,
+                        &crate::server::spaces::background_owner(),
+                    )
+                    .await
+                {
                     Ok(id) => ok(json!(id)),
                     Err(e) => err(e.to_string()),
                 }
@@ -316,13 +390,14 @@ impl PluginHookBridge {
         }
     }
 
-    /// `host.finetune_*` — the `com.ryu.finetune` app drives fine-tune runs. Core
-    /// owns the orchestration, GPU gate, durable job store, and adapter→GGUF merge
-    /// (`crate::server::finetune`); the app reaches them through this governed
-    /// bridge (host holds the node token; the frame never does). Every arm delegates
-    /// to the SAME shared value fns the `/api/finetune/*` HTTP handlers use, so the
-    /// two surfaces never drift. Live progress is streamed separately over the
-    /// plugin-host streaming endpoint (`finetune.stream`), not here.
+    /// `host.finetune_*` — the `com.ryu.finetune` app drives fine-tune runs. The
+    /// orchestration, GPU gate, durable job store, adapter→GGUF merge, and Python
+    /// `unsloth` worker now live OUT-OF-PROCESS in the `ryu-finetune` sidecar; the
+    /// app reaches them through this governed bridge (host holds the node token; the
+    /// frame never does), which forwards each call to the sidecar over loopback via
+    /// [`crate::finetune_client::FinetuneClient`] — the SAME `/api/finetune/*` surface
+    /// the sidecar serves publicly, so the two never drift. Live progress is streamed
+    /// separately over the plugin-host streaming endpoint (`finetune.stream`), not here.
     async fn finetune(&self, method: &str, args: Value) -> InvokeOutcome {
         if !self.grants.contains(GRANT_FINETUNE) {
             return err(format!(
@@ -330,49 +405,36 @@ impl PluginHookBridge {
                 self.plugin_id
             ));
         }
-        use crate::server::finetune as ft;
+        let ft = &self.state.finetune;
         let id = args
             .get("id")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .trim()
             .to_string();
-        match method {
-            "finetune_capability" => ok(ft::capability_value(&self.state).await),
-            "finetune_adapters" => {
-                ok(json!({ "adapters": crate::finetune::adapters::load_present() }))
-            }
-            "finetune_list" => match ft::list_value(&self.state).await {
-                Ok(v) => ok(v),
-                Err(e) => err(e),
-            },
-            "finetune_start" => match ft::dispatch(&self.state, args).await {
-                Ok(v) => ok(v),
-                Err((_, body)) => err(status_error(&body)),
-            },
-            "finetune_merge" => match ft::merge_value(&self.state, args).await {
-                Ok(v) => ok(v),
-                Err((_, body)) => err(status_error(&body)),
-            },
+        let result = match method {
+            "finetune_capability" => ft.capability().await,
+            "finetune_adapters" => ft.adapters().await,
+            "finetune_list" => ft.list().await,
+            "finetune_start" => ft.start(args).await,
+            "finetune_merge" => ft.merge(args).await,
             "finetune_get" => {
                 if id.is_empty() {
                     return err("host.finetune.get requires a non-empty 'id'".to_string());
                 }
-                match ft::get_value(&self.state, &id).await {
-                    Ok(v) => ok(v),
-                    Err((_, body)) => err(status_error(&body)),
-                }
+                ft.get(&id).await
             }
             "finetune_cancel" => {
                 if id.is_empty() {
                     return err("host.finetune.cancel requires a non-empty 'id'".to_string());
                 }
-                match ft::cancel_value(&self.state, &id).await {
-                    Ok(v) => ok(v),
-                    Err((_, body)) => err(status_error(&body)),
-                }
+                ft.cancel(&id).await
             }
-            _ => err(format!("unknown finetune method '{method}'")),
+            _ => return err(format!("unknown finetune method '{method}'")),
+        };
+        match result {
+            Ok(v) => ok(v),
+            Err(e) => err(e),
         }
     }
 
@@ -471,6 +533,103 @@ mod tests {
         assert_eq!(GRANT_RUN_AGENT, "hook:run-agent");
         assert_eq!(GRANT_SPACES, "spaces:docs");
         assert_eq!(GRANT_FINETUNE, "finetune:runs");
+    }
+
+    /// The bridge's local grant consts MUST equal the single-sourced grant the
+    /// `ryu-kernel-contracts` host-API table assigns to the corresponding method,
+    /// so this gate and the TS app host / `required_grant_for` never drift. Each
+    /// const family maps to one representative method in the table. (`GRANT_NAVIGATE`
+    /// is intentionally absent: `host.navigate` is a broker verb, not an
+    /// `/api/plugins/:id/host` RPC method, so it has no row in the table.)
+    #[test]
+    fn grant_constants_match_kernel_contracts_table() {
+        use ryu_kernel_contracts::host_api::grant_for;
+        assert_eq!(grant_for("model.complete"), Some(GRANT_SIDE_MODEL));
+        assert_eq!(grant_for("agent.run"), Some(GRANT_RUN_AGENT));
+        assert_eq!(grant_for("storage.get"), Some(GRANT_STORAGE));
+        assert_eq!(grant_for("spaces.createDoc"), Some(GRANT_SPACES));
+        assert_eq!(grant_for("finetune.start"), Some(GRANT_FINETUNE));
+    }
+
+    /// Every method `dispatch_path_for` maps MUST (a) carry a grant in the
+    /// single-sourced kernel-contracts table (so `/api/host/rpc` can always grant-gate
+    /// it) and (b) resolve to a `host.*` path the bridge's `handle_inner` actually
+    /// matches. The bridge deliberately dispatches a SUBSET of the grant families
+    /// (e.g. `agent.cancel` / `*.stream` are not unary-bridged), so we assert the
+    /// forward direction — a mapped method is always grantable + handled — rather than
+    /// requiring every grant-family method to have a path.
+    #[test]
+    fn dispatch_paths_are_grantable_and_handled() {
+        use ryu_kernel_contracts::host_api::{grant_for, HOST_API_METHODS};
+        for m in HOST_API_METHODS {
+            let Some(path) = dispatch_path_for(m.method) else {
+                continue;
+            };
+            assert!(
+                grant_for(m.method).is_some(),
+                "dispatch path for '{}' but no grant in the kernel-contracts table",
+                m.method
+            );
+            let internal = path.strip_prefix("host.").expect("dispatch path is host.<...>");
+            assert!(
+                handled_method(internal),
+                "dispatch path '{path}' for '{}' is not matched by the bridge",
+                m.method
+            );
+        }
+    }
+
+    /// Positive coverage: every bridge capability family has at least one representative
+    /// method that maps, so a family accidentally dropped from `dispatch_path_for` is
+    /// caught.
+    #[test]
+    fn dispatch_path_covers_every_bridge_family() {
+        for method in [
+            "model.complete",
+            "agent.run",
+            "storage.get",
+            "spaces.createDoc",
+            "finetune.start",
+        ] {
+            assert!(
+                dispatch_path_for(method).is_some(),
+                "missing dispatch path for representative method '{method}'"
+            );
+        }
+    }
+
+    /// The set of `host.<method>` names `handle_inner` matches (kept in sync with the
+    /// `match` in that fn). Used to prove every `dispatch_path_for` target is real.
+    fn handled_method(m: &str) -> bool {
+        matches!(
+            m,
+            "sideModel"
+                | "runAgent"
+                | "storage_get"
+                | "storage_set"
+                | "storage_delete"
+                | "storage_keys"
+                | "spaces_create_doc"
+                | "spaces_get_doc"
+                | "spaces_update_doc"
+                | "spaces_list_docs"
+                | "spaces_delete_doc"
+                | "finetune_capability"
+                | "finetune_start"
+                | "finetune_list"
+                | "finetune_get"
+                | "finetune_cancel"
+                | "finetune_adapters"
+                | "finetune_merge"
+                | "navigate"
+        )
+    }
+
+    #[test]
+    fn dispatch_path_rejects_unknown_method() {
+        assert_eq!(dispatch_path_for("widget.setState"), None);
+        assert_eq!(dispatch_path_for("nonsense.method"), None);
+        assert_eq!(dispatch_path_for("model.complete"), Some("host.sideModel"));
     }
 
     #[test]

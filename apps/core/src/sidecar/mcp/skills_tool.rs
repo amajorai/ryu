@@ -52,7 +52,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::RegistryTool;
-use crate::skills::SkillRegistry;
+use ryu_skills::SkillRegistry;
 
 /// Reserved registry server name for the built-in skills provider.
 pub const SERVER_NAME: &str = "skills";
@@ -274,7 +274,7 @@ fn do_search(arguments: Value, registry: &SkillRegistry) -> Result<Value> {
 
 /// Cheap relevance score: weight name/id hits over description over body. A
 /// blank-ish query (already filtered out) never reaches here.
-fn skill_match_score(s: &crate::skills::SkillRecord, needle: &str) -> i32 {
+fn skill_match_score(s: &ryu_skills::SkillRecord, needle: &str) -> i32 {
     let mut score = 0;
     if s.name.to_lowercase().contains(needle) {
         score += 5;
@@ -457,7 +457,7 @@ fn do_author(arguments: Value, registry: &SkillRegistry) -> Result<Value> {
 
     // Fail closed: the file we are about to persist must parse back through the
     // exact loader `reload()` uses, so we never leave an unreadable skill on disk.
-    crate::skills::parse_skill_md(&slug, &md).map_err(|e| {
+    ryu_skills::parse_skill_md(&slug, &md).map_err(|e| {
         anyhow::anyhow!("authored skill did not round-trip through the loader: {e}")
     })?;
 
@@ -478,7 +478,7 @@ fn do_author(arguments: Value, registry: &SkillRegistry) -> Result<Value> {
 
     // A self-authored skill is active by default (it injects on the default route),
     // matching the catalog install paths. Then reload so search/load see it now.
-    crate::skills::set_active(&slug, true);
+    ryu_skills::set_active(&slug, true);
     registry.reload();
 
     Ok(json!({
@@ -492,7 +492,7 @@ fn do_author(arguments: Value, registry: &SkillRegistry) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::skills::SkillRecord;
+    use ryu_skills::SkillRecord;
 
     fn registry_with(skills: Vec<SkillRecord>) -> SkillRegistry {
         let reg = SkillRegistry::empty();
@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn lists_two_read_tools_by_default() {
         // Serialize on the shared env lock: another test may be toggling the flag.
-        let _env = crate::skills::SKILLS_ENV_LOCK
+        let _env = ryu_skills::SKILLS_ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::remove_var(AUTHOR_FLAG_ENV);
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn lists_author_tool_when_enabled() {
-        let _env = crate::skills::SKILLS_ENV_LOCK
+        let _env = ryu_skills::SKILLS_ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var(AUTHOR_FLAG_ENV, "1");
@@ -632,7 +632,7 @@ mod tests {
         // Shared with the `skills` and `skills_catalog::from_source` test modules:
         // all three point the global RYU_SKILLS_* vars at their own tempdirs, so
         // they must serialize or a clobbered set_var falls through to the real dir.
-        let guard = crate::skills::SKILLS_ENV_LOCK
+        let guard = ryu_skills::SKILLS_ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let skills = tempfile::tempdir().expect("skills tempdir");
@@ -682,7 +682,7 @@ mod tests {
         assert!(md_path.exists(), "SKILL.md written to skills_dir/<slug>");
 
         let contents = std::fs::read_to_string(&md_path).expect("read back");
-        let rec = crate::skills::parse_skill_md("my-skill", &contents)
+        let rec = ryu_skills::parse_skill_md("my-skill", &contents)
             .expect("authored file parses through the loader");
         assert_eq!(rec.name, "My Skill");
         assert!(rec.instructions.contains("## Purpose"));
@@ -763,7 +763,7 @@ mod tests {
 
     #[tokio::test]
     async fn author_is_a_noop_when_disabled() {
-        let _guard = crate::skills::SKILLS_ENV_LOCK
+        let _guard = ryu_skills::SKILLS_ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let skills = tempfile::tempdir().expect("skills tempdir");
@@ -854,7 +854,7 @@ mod tests {
         let md = std::fs::read_to_string(env.skills_dir.join("tricky").join("SKILL.md"))
             .expect("read back");
         let rec =
-            crate::skills::parse_skill_md("tricky", &md).expect("escaped front-matter round-trips");
+            ryu_skills::parse_skill_md("tricky", &md).expect("escaped front-matter round-trips");
         assert_eq!(rec.name, tricky);
     }
 }

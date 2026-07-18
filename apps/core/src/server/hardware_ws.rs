@@ -40,9 +40,10 @@ use axum::{
 use tokio::sync::mpsc;
 
 use super::ServerState;
-use crate::hardware::protocol::{RhpClientMsg, RhpServerMsg};
-use crate::hardware::session::{HardwareSession, SessionDeps, SessionOutput};
-use crate::meetings::MeetingSource;
+use crate::hardware::turn::{run_chat_turn, ChatTurn, SessionDeps};
+use ryu_hardware::protocol::{RhpClientMsg, RhpServerMsg};
+use ryu_hardware::session::{live, HardwareSession, SessionOutput, TurnInput};
+use ryu_hardware::MeetingIngest;
 
 /// `GET /api/hardware/ws` — upgrade to the RHP WebSocket. The Bearer device token
 /// rides on the upgrade request headers; it is captured here and verified inside
@@ -81,8 +82,10 @@ async fn device_chat_agent(state: &ServerState) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Build the in-process seam bundle the session drives, cloning the same store
-/// handles `ServerState` already holds.
+/// Build the in-process seam bundle the chat turn drives, cloning the same store
+/// handles `ServerState` already holds. The ambient meetings engine is no longer
+/// part of this bundle — it moved to the crate's [`HardwareSession`] (the buffering
+/// side); this bundle carries only what [`run_chat_turn`] consumes.
 fn session_deps(state: &ServerState, agent_id: Option<String>) -> SessionDeps {
     SessionDeps {
         registry: Arc::clone(&state.agents),
@@ -95,8 +98,19 @@ fn session_deps(state: &ServerState, agent_id: Option<String>) -> SessionDeps {
         skills: state.skills.clone(),
         traces: state.traces.clone(),
         client: state.client.clone(),
-        meetings: state.meetings.clone(),
         agent_id,
+    }
+}
+
+/// Wrap a pure [`TurnInput`] (taken from the crate's session buffer) in the
+/// kernel-welded [`ChatTurn`] the WS pump spawns. The session owns the stable
+/// per-device `conversation_id` + the resolved `agent_id`; the deps come from
+/// `ServerState`.
+fn build_turn(state: &ServerState, session: &HardwareSession, input: TurnInput) -> ChatTurn {
+    ChatTurn {
+        input,
+        deps: session_deps(state, session.agent_id.clone()),
+        conversation_id: session.conversation_id.clone(),
     }
 }
 
@@ -105,31 +119,33 @@ fn session_deps(state: &ServerState, agent_id: Option<String>) -> SessionDeps {
 /// the same meeting (so the 24/7 transcript is continuous) rather than spawning a
 /// fresh one each `hello`. Returns the meeting id, or `None` on failure (the
 /// device still works for chat).
-async fn open_or_resume_ambient(state: &ServerState, device_id: &str) -> Option<String> {
+async fn open_or_resume_ambient(
+    state: &ServerState,
+    ingest: &dyn MeetingIngest,
+    device_id: &str,
+) -> Option<String> {
     // Prefer the saved meeting if it still exists.
     if let Ok(Some(record)) = state.hardware.get(device_id).await {
         if let Some(prev) = record.ambient_meeting_id {
-            if matches!(state.meetings.get(&prev).await, Ok(Some(_))) {
+            if ingest.meeting_exists(&prev).await {
                 return Some(prev);
             }
         }
     }
-    // Otherwise start a new ambient meeting and remember it on the device row.
+    // Otherwise start a new ambient meeting and remember it on the device row. The
+    // ambient provenance (app = `ryu-hardware`, source = auto) is baked into the
+    // `MeetingIngest` impl.
     let title = format!("Ambient — {device_id}");
-    match state
-        .meetings
-        .start(title, Some("ryu-hardware".to_string()), MeetingSource::Auto)
-        .await
-    {
-        Ok(meeting) => {
+    match ingest.start_meeting(title).await {
+        Ok(meeting_id) => {
             let _ = state
                 .hardware
-                .set_ambient_meeting(device_id, &meeting.id)
+                .set_ambient_meeting(device_id, &meeting_id)
                 .await;
-            Some(meeting.id)
+            Some(meeting_id)
         }
         Err(e) => {
-            tracing::warn!("hardware: opening ambient meeting failed: {e:#}");
+            tracing::warn!("hardware: opening ambient meeting failed: {e}");
             None
         }
     }
@@ -204,23 +220,30 @@ async fn handle_socket(socket: WebSocket, state: ServerState, bearer: Option<Str
         return;
     }
 
+    // ── Meeting-ingest seam ─────────────────────────────────────────────────
+    // The ambient audio path reaches meetings through the `MeetingIngest` trait
+    // (not a direct engine field), so the kernel `ryu-hardware` crate links no
+    // meetings code. Meetings is out-of-process; the `MeetingsClient` IS the
+    // sidecar-backed impl (each call is one loopback hop to `ryu-meetings`).
+    let ingest: Arc<dyn MeetingIngest> = Arc::new(state.meetings.clone());
+
     // ── Open/resume the ambient session for ambient-capable devices ─────────
     let ambient_capable = device_type.ambient_capable() && caps.mic;
     let ambient_session_id = if ambient_capable {
-        open_or_resume_ambient(&state, &device_id).await
+        open_or_resume_ambient(&state, ingest.as_ref(), &device_id).await
     } else {
         None
     };
 
     // ── Build the session ───────────────────────────────────────────────────
     let agent_id = device_chat_agent(&state).await;
-    let deps = session_deps(&state, agent_id);
     let mut session = match HardwareSession::new(
         device_id.clone(),
         device_type,
         caps,
         ambient_session_id.clone(),
-        deps,
+        Arc::clone(&ingest),
+        agent_id,
     ) {
         Ok(s) => s,
         Err(e) => {
@@ -247,7 +270,7 @@ async fn handle_socket(socket: WebSocket, state: ServerState, bearer: Option<Str
     // Register this device's outbound sender so out-of-band producers (the
     // dashboard nudge loop, the ambient rolling-summary) can push a `display`
     // re-poll signal to it without holding the socket (review gap #4).
-    crate::hardware::session::live::register(&device_id, out_tx.clone()).await;
+    live::register(&device_id, out_tx.clone()).await;
     // Shared barge-in flag: set by the recv side on `abort`, read by the send
     // side to drop queued TTS audio mid-stream.
     let abort = Arc::new(AtomicBool::new(false));
@@ -307,7 +330,7 @@ async fn handle_socket(socket: WebSocket, state: ServerState, bearer: Option<Str
                             let _ = prev.await;
                         }
                         abort.store(false, Ordering::SeqCst);
-                        turn_handle = Some(tokio::spawn(crate::hardware::session::run_chat_turn(
+                        turn_handle = Some(tokio::spawn(run_chat_turn(
                             turn,
                             Arc::clone(&abort),
                             out_tx.clone(),
@@ -335,7 +358,7 @@ async fn handle_socket(socket: WebSocket, state: ServerState, bearer: Option<Str
 
     // Tear down: signal abort, drop the sender so the send task ends, and wait for
     // any in-flight turn + the send task to finish.
-    crate::hardware::session::live::unregister(&device_id).await;
+    live::unregister(&device_id).await;
     abort.store(true, Ordering::SeqCst);
     drop(out_tx);
     if let Some(handle) = turn_handle.take() {
@@ -349,7 +372,7 @@ enum ControlOutcome {
     /// Keep looping.
     Continue,
     /// Spawn this chat turn (the loop owns the join handle for serialization).
-    StartTurn(crate::hardware::session::ChatTurn),
+    StartTurn(ChatTurn),
 }
 
 /// Dispatch one decoded control message. Side-effecting frames (mode, telemetry,
@@ -371,7 +394,7 @@ async fn handle_control(
             session.set_mode(value);
         }
         RhpClientMsg::Listen { state: listen } => match listen {
-            crate::hardware::protocol::ListenState::Start => {
+            ryu_hardware::protocol::ListenState::Start => {
                 // Do NOT clear `abort` here: a `listen:start` arriving while an old
                 // turn is still speaking (user talks over the assistant) must not
                 // un-abort that turn. The flag is reset by the `StartTurn` path
@@ -379,19 +402,19 @@ async fn handle_control(
                 session.on_listen_start();
                 let _ = out_tx
                     .send(SessionOutput::Control(RhpServerMsg::Emotion {
-                        value: crate::hardware::protocol::Emotion::Listening,
+                        value: ryu_hardware::protocol::Emotion::Listening,
                     }))
                     .await;
             }
-            crate::hardware::protocol::ListenState::Stop => {
-                if let Some(turn) = session.take_voice_turn() {
-                    return ControlOutcome::StartTurn(turn);
+            ryu_hardware::protocol::ListenState::Stop => {
+                if let Some(input) = session.take_voice_turn() {
+                    return ControlOutcome::StartTurn(build_turn(state, session, input));
                 }
             }
         },
         RhpClientMsg::Text { content } => {
-            if let Some(turn) = session.take_text_turn(&content) {
-                return ControlOutcome::StartTurn(turn);
+            if let Some(input) = session.take_text_turn(&content) {
+                return ControlOutcome::StartTurn(build_turn(state, session, input));
             }
         }
         RhpClientMsg::Abort => {

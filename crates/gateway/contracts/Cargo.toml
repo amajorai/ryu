@@ -1,0 +1,10 @@
+[package]
+name = "ryu-gw-contracts"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+description = "Shared value-types exchanged between Ryu Gateway stages (e.g. AlertTier). The neutral home for cross-stage vocabulary so peer stage crates (budget, firewall, …) never depend on each other."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

@@ -560,9 +560,10 @@ impl rmcp::ServerHandler for RyuMcpHandler {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
+                let caller: Arc<dyn tool_exec::ToolCaller> = self.mcp.clone();
                 let invoker =
                     std::sync::Arc::new(tool_exec::SandboxToolInvoker::registry_with_identity(
-                        Arc::clone(&self.mcp),
+                        caller,
                         self.agent_id.clone(),
                         self.allowlist.clone(),
                         None,

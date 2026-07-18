@@ -171,6 +171,11 @@ impl PolicyAlert {
 
     /// Decode a `base64(json)` header value. Lenient: any decode/parse failure
     /// returns `None` so a malformed header is skipped, never fatal.
+    ///
+    /// Decode half of the wire codec: the gateway only *encodes*
+    /// ([`to_header`]); the consumer that decodes is Core. Kept here so the
+    /// header shape has a single owner and the round-trip is unit-tested.
+    #[allow(dead_code)]
     pub fn from_header(value: &str) -> Option<PolicyAlert> {
         let bytes = B64.decode(value.trim()).ok()?;
         serde_json::from_slice(&bytes).ok()

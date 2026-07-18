@@ -1,0 +1,22 @@
+[package]
+name = "ryu-model-catalog"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Hugging Face model catalog + device-fit verdict primitive for Ryu: HF search/detail, GGUF tree inspection, per-node device detection and fit estimation, installed-model tracking, capability overrides, and A Major (aa) / models.dev metadata sources. An extracted Core capability crate with ZERO dependency on apps/core — its cross-cutting kernel couplings (the `~/.ryu` data dir, Hugging Face bearer auth, the active-model preference, the per-node engine-support gate, and the bundled default-model repos) invert through the narrow `ModelCatalogHost` trait, which Core installs at boot. Artifact downloads route through the extracted `ryu-downloads` primitive; the `ModelFormat` type comes from `ryu-model-format`."
+repository = "https://github.com/amajorai/ryu"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "rt", "macros", "time", "process"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tracing = "0.1"
+async-trait = "0.1"
+urlencoding = "2"
+ryu-downloads = { path = "../downloads" }
+ryu-model-format = { path = "../model-format" }
+
+[dev-dependencies]
+tempfile = "3"

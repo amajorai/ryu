@@ -396,9 +396,9 @@ pub enum ApprovalEvent {
 pub struct ApprovalEngine {
     pub store: ApprovalStore,
     http: reqwest::Client,
-    /// Borrowed from the monitors engine for push-token reuse (mobile push).
-    /// Optional so the engine works headless / in tests with no monitors store.
-    monitors: Option<crate::monitors::store::MonitorStore>,
+    /// Borrowed from the kernel notify store for push-token reuse (mobile push).
+    /// Optional so the engine works headless / in tests with no notify store.
+    push_store: Option<crate::notify::NotifyStore>,
     /// The MCP registry, used to *execute* an approved [`PendingAction::ToolCall`]
     /// on approve (re-dispatching through the no-gate entry so it doesn't re-gate).
     /// Optional so the engine works in tests without a registry.
@@ -408,7 +408,7 @@ pub struct ApprovalEngine {
     /// Skills registry (cloned — shares the inner `Arc`), used to *materialize* an
     /// approved [`PendingAction::ActivateSkill`]: write the deferred `SKILL.md`,
     /// flip it active, and hot-reload. Optional so the engine works in tests.
-    skills: Option<crate::skills::SkillRegistry>,
+    skills: Option<ryu_skills::SkillRegistry>,
 }
 
 impl ApprovalEngine {
@@ -416,17 +416,18 @@ impl ApprovalEngine {
         Self {
             store,
             http,
-            monitors: None,
+            push_store: None,
             registry: None,
             preferences: None,
             skills: None,
         }
     }
 
-    /// Attach the monitors store so approval notifications reuse its registered
-    /// Expo push tokens (the mobile-push fan-out). Builder-style; no-op if unset.
-    pub fn with_monitors(mut self, monitors: crate::monitors::store::MonitorStore) -> Self {
-        self.monitors = Some(monitors);
+    /// Attach the kernel notify store so approval notifications reuse its
+    /// registered Expo push tokens (the mobile-push fan-out). Builder-style;
+    /// no-op if unset.
+    pub fn with_push_store(mut self, push_store: crate::notify::NotifyStore) -> Self {
+        self.push_store = Some(push_store);
         self
     }
 
@@ -453,24 +454,25 @@ impl ApprovalEngine {
     /// Attach the skills registry so an approved learning-synthesized skill can be
     /// written + activated + hot-reloaded. Builder-style; without it an
     /// `ActivateSkill` approval fails with a clear error on approve.
-    pub fn with_skills(mut self, skills: crate::skills::SkillRegistry) -> Self {
+    pub fn with_skills(mut self, skills: ryu_skills::SkillRegistry) -> Self {
         self.skills = Some(skills);
         self
+    }
+
+    /// The raw `approval-mode` preference value, if any. `None` = no preferences
+    /// store attached or the key is unset; `Some("off")` = the explicit escape
+    /// hatch. The CoreApi-mutation gate (Layer B′) needs to tell an unset pref
+    /// from an explicit `off`, which the collapsed [`policy::ApprovalMode`] loses.
+    pub async fn approval_mode_pref(&self) -> Option<String> {
+        let prefs = self.preferences.as_ref()?;
+        prefs.get(policy::APPROVAL_MODE_PREF).await.ok().flatten()
     }
 
     /// The current global approval mode (Layer B), read from the `approval-mode`
     /// preference. Resolves to `Off` when unset or no preferences store attached.
     pub async fn approval_mode(&self) -> policy::ApprovalMode {
-        let Some(prefs) = &self.preferences else {
-            return policy::ApprovalMode::Off;
-        };
-        let raw = prefs
-            .get(policy::APPROVAL_MODE_PREF)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-        policy::ApprovalMode::from_pref(&raw)
+        let raw = self.approval_mode_pref().await;
+        policy::ApprovalMode::from_pref(raw.as_deref().unwrap_or_default())
     }
 
     /// Raise a pending approval request (deferred, non-blocking). Persists +
@@ -634,10 +636,10 @@ impl ApprovalEngine {
     /// desktop/island surface it over SSE (handled by the store broadcast); this
     /// adds Expo push so a phone learns about a pending decision while away.
     async fn notify_created(&self, req: &ApprovalRequest) {
-        let Some(monitors) = &self.monitors else {
+        let Some(push_store) = &self.push_store else {
             return;
         };
-        let tokens = match monitors.push_tokens().await {
+        let tokens = match push_store.push_tokens().await {
             Ok(t) if !t.is_empty() => t,
             _ => return,
         };
@@ -689,7 +691,7 @@ impl ApprovalEngine {
                 workflow_id,
                 payload_json,
             } => {
-                crate::composio_triggers::run_workflow_for_trigger(workflow_id, payload_json)
+                crate::composio_host::run_workflow_for_trigger(workflow_id, payload_json)
                     .await?;
                 Ok(None)
             }
@@ -724,10 +726,10 @@ impl ApprovalEngine {
                 })?;
                 // Deferred write happens now (on approve) so a rejected suggestion
                 // never landed on disk. Then flip active + hot-reload the registry.
-                crate::learning::write_synthesized_skill(slug, skill_md)
+                ryu_learning::write_synthesized_skill(slug, skill_md)
                     .await
                     .map_err(|e| anyhow::anyhow!("writing approved skill `{slug}`: {e}"))?;
-                crate::skills::set_active(slug, true);
+                ryu_skills::set_active(slug, true);
                 skills.reload();
                 Ok(Some(format!("Added the skill \"{slug}\" to your library.")))
             }
@@ -816,8 +818,9 @@ pub async fn gate_tool_call(
         return None;
     }
     let engine = global_engine()?;
-    let mode = engine.approval_mode().await;
-    let tags = policy::should_require_approval_local(&[], tool_id, mode)?;
+    let raw_pref = engine.approval_mode_pref().await;
+    let mode = policy::ApprovalMode::from_pref(raw_pref.as_deref().unwrap_or_default());
+    let tags = policy::should_require_approval_local(&[], tool_id, mode, raw_pref.as_deref())?;
 
     let action = PendingAction::ToolCall {
         tool_id: tool_id.to_owned(),

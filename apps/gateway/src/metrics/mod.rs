@@ -117,17 +117,20 @@ impl Metrics {
 
     /// Return a JSON snapshot of all counters.
     ///
-    /// Pass the evals runner to include per-provider rolling scores in the
-    /// snapshot under the `"evals"` key. Existing consumers that call
-    /// `snapshot()` without evals (e.g. unit tests) still work unchanged.
+    /// Evals-free snapshot convenience wrapper. Production converged on
+    /// [`snapshot_with_evals_and_health`] (see `api/metrics.rs`); this layer is
+    /// retained for the unit tests and as the simplest public entry point.
+    #[allow(dead_code)]
     pub fn snapshot(&self) -> Value {
         self.snapshot_with_evals(None)
     }
 
     /// Like [`snapshot`] but includes an `"evals"` object sourced from the
-    /// provided runner and an optional `"provider_health"` map from the circuit
-    /// breaker. Called by the metrics handler so that `/metrics` and
-    /// `/v1/metrics` expose both without requiring separate round-trips.
+    /// provided runner. Superseded in production by
+    /// [`snapshot_with_evals_and_health`] (which the metrics handler now calls
+    /// to add per-provider circuit-breaker health); retained for tests and as a
+    /// public wrapper for callers that do not need the health map.
+    #[allow(dead_code)]
     pub fn snapshot_with_evals(
         &self,
         evals: Option<(&std::collections::HashMap<String, f32>, bool, f32, u64)>,

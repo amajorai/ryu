@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
+    "ryu": "./src/index.tsx",
     "ryu-tui": "./src/index.tsx"
   },
   "scripts": {

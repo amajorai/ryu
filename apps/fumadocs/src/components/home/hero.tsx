@@ -155,6 +155,8 @@ const QUICK_LINKS: QuickLink[] = [
   },
   { id: "cookbook", label: "Cookbook", href: "/docs/cookbook" },
   { id: "api", label: "API reference", href: "/docs/develop/api-reference" },
+  { id: "security", label: "Security", href: "/docs/security" },
+  { id: "benchmark", label: "Benchmarks", href: "/docs/benchmark" },
 ];
 
 type Stat = {
@@ -164,10 +166,10 @@ type Stat = {
 };
 
 const STATS: Stat[] = [
-  { id: "guides", value: "285", label: "hand-written guides" },
-  { id: "endpoints", value: "176", label: "API endpoints" },
-  { id: "sections", value: "9", label: "documentation sections" },
-  { id: "diagrams", value: "36", label: "architecture diagrams" },
+  { id: "guides", value: "200+", label: "hand-written guides" },
+  { id: "api", value: "480+", label: "API reference pages" },
+  { id: "sections", value: "14", label: "documentation sections" },
+  { id: "diagrams", value: "75+", label: "architecture diagrams" },
 ];
 
 type Featured = {
@@ -241,7 +243,7 @@ function SearchTrigger() {
         className="size-5 shrink-0 text-fd-muted-foreground transition-colors group-hover:text-fd-foreground"
       />
       <span className="flex-1 text-base text-fd-muted-foreground">
-        Search 285 guides and 176 endpoints…
+        Search 200+ guides and 480+ API pages…
       </span>
       <kbd className="hidden shrink-0 items-center gap-1 rounded-md bg-fd-background px-2 py-1 font-medium font-mono text-fd-muted-foreground text-xs sm:inline-flex">
         {isMac ? "⌘" : "Ctrl"} K
@@ -366,9 +368,9 @@ export function Realms() {
         Explore the docs
       </h2>
       <p className="mt-1 text-fd-muted-foreground text-sm">
-        Nine sections, one per surface and plane: get started, the desktop app,
-        CLI, mobile, the Gateway control plane, Core internals, the SDK, recipes,
-        and the Academy.
+        Fourteen sections covering every surface: get started, the desktop app,
+        CLI, mobile, hardware, Gateway control plane, Core internals, security,
+        SDK, skills, MCP, recipes, benchmarks, and the Academy.
       </p>
       <nav
         aria-label="Documentation sections"

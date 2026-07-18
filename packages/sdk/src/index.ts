@@ -34,6 +34,7 @@ export {
 } from "./builder.ts";
 export type {
 	AppDependency,
+	CapabilityReq,
 	CompanionSurface,
 	Contributes,
 	PluginManifest,
@@ -47,6 +48,7 @@ export type {
 } from "./manifest.ts";
 export {
 	AppDependencySchema,
+	CapabilityReqSchema,
 	CompanionSurfaceSchema,
 	coreManifestJsonSchema,
 	PluginManifestSchema,
@@ -72,7 +74,15 @@ export {
 	resolveGatewayToken,
 	resolveGatewayUrl,
 } from "./model/gateway.ts";
-export type { AgentOptions } from "./runnable/agent.ts";
+export type {
+	AgentCard,
+	AgentManifestOptions,
+	AgentOptions,
+	AgentRunnable,
+	AgentSlots,
+	CapabilitySlot,
+	ChatSlot,
+} from "./runnable/agent.ts";
 export { defineAgent } from "./runnable/agent.ts";
 export type {
 	AppToolSpec,
@@ -80,6 +90,29 @@ export type {
 	DefineAppRequires,
 } from "./runnable/app.ts";
 export { appToolId, defineApp } from "./runnable/app.ts";
+export type {
+	DurableClient,
+	EnginesClient,
+	HttpPrimitiveTransportOptions,
+	ImageClient,
+	MemoryClient,
+	MemoryItem,
+	PrimitiveBinding,
+	PrimitiveTransport,
+	RagChunk,
+	RagClient,
+	RagRerankResult,
+	RealtimeClient,
+	RealtimeSubscription,
+	RyuPrimitives,
+	SttClient,
+	TtsClient,
+} from "./runnable/primitives.ts";
+export {
+	createPrimitives,
+	httpPrimitiveTransport,
+	PRIMITIVE_BINDINGS,
+} from "./runnable/primitives.ts";
 export type {
 	GatewayClient,
 	Runnable,

@@ -14,6 +14,10 @@
 
 import { defineModel } from "../model/client.ts";
 import { resolveGatewayToken, resolveGatewayUrl } from "../model/gateway.ts";
+import {
+	createPrimitives,
+	httpPrimitiveTransport,
+} from "../runnable/primitives.ts";
 import type { GatewayClient } from "../runnable/runnable-types.ts";
 import {
 	type AgentEvent,
@@ -49,6 +53,14 @@ export interface AgentConfig {
 	name: string;
 	/** Target node for inference. Defaults to the local gateway. */
 	node?: Endpoint;
+	/**
+	 * Reverse-domain plugin id. When set, the composable primitive surface
+	 * (`ctx.rag`, `ctx.memory`, `ctx.engines`, …) is mounted on the run context,
+	 * routed through this node via the governed host bridge / capability broker.
+	 * Omitted = no primitives mounted (the bridge families authenticate a plugin
+	 * id, so a half-wired transport is never attached).
+	 */
+	pluginId?: string;
 	/** Tools keyed by the model-facing name. */
 	tools?: Record<string, AgentTool>;
 	/** Composio connected-account entity selector. */
@@ -130,6 +142,18 @@ export class Agent {
 					gatewayToken
 				),
 				signal,
+				// Mount the composable primitive surface only when a plugin id is
+				// present — the bridge families authenticate it, so we never attach a
+				// half-wired transport (advisor guidance / §6b).
+				...(this.config.pluginId
+					? createPrimitives(
+							httpPrimitiveTransport({
+								nodeUrl: coreBaseUrl,
+								token: coreToken,
+								pluginId: this.config.pluginId,
+							})
+						)
+					: {}),
 			},
 		};
 

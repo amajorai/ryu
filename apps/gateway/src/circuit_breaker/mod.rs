@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
@@ -30,7 +32,10 @@ pub struct ProviderHealthSnapshot {
 }
 
 pub struct CircuitBreakers {
-    states: DashMap<&'static str, CircuitState>,
+    // Keyed by the provider's open registry id (owned `String`), so a provider
+    // registered under a novel runtime id is trackable — not limited to the
+    // former closed set of `&'static str` names.
+    states: DashMap<String, CircuitState>,
     config: CircuitBreakerConfig,
 }
 
@@ -43,16 +48,19 @@ impl CircuitBreakers {
     }
 
     /// Returns `true` if the circuit is open and this provider should be skipped.
-    pub fn is_open(&self, provider: &'static str) -> bool {
+    pub fn is_open(&self, provider: &str) -> bool {
         if !self.config.enabled {
             return false;
         }
 
         let reset_timeout = Duration::from_secs(self.config.reset_timeout_secs);
 
-        let mut entry = self.states.entry(provider).or_insert(CircuitState::Closed {
-            consecutive_failures: 0,
-        });
+        let mut entry = self
+            .states
+            .entry(provider.to_string())
+            .or_insert(CircuitState::Closed {
+                consecutive_failures: 0,
+            });
 
         match *entry {
             CircuitState::Closed { .. } | CircuitState::HalfOpen => false,
@@ -73,7 +81,7 @@ impl CircuitBreakers {
     }
 
     /// Record a successful provider response. Closes the circuit.
-    pub fn record_success(&self, provider: &'static str) {
+    pub fn record_success(&self, provider: &str) {
         if !self.config.enabled {
             return;
         }
@@ -82,7 +90,7 @@ impl CircuitBreakers {
             Some(CircuitState::HalfOpen | CircuitState::Open { .. })
         );
         self.states.insert(
-            provider,
+            provider.to_string(),
             CircuitState::Closed {
                 consecutive_failures: 0,
             },
@@ -125,13 +133,16 @@ impl CircuitBreakers {
     }
 
     /// Record a provider failure. Opens the circuit after `failure_threshold` consecutive failures.
-    pub fn record_failure(&self, provider: &'static str) {
+    pub fn record_failure(&self, provider: &str) {
         if !self.config.enabled {
             return;
         }
-        let mut entry = self.states.entry(provider).or_insert(CircuitState::Closed {
-            consecutive_failures: 0,
-        });
+        let mut entry = self
+            .states
+            .entry(provider.to_string())
+            .or_insert(CircuitState::Closed {
+                consecutive_failures: 0,
+            });
 
         *entry = match *entry {
             CircuitState::Closed {
@@ -165,5 +176,132 @@ impl CircuitBreakers {
             }
             CircuitState::Open { .. } => return,
         };
+    }
+}
+
+// ─── Swappable circuit breaker (Lg decomposition) ────────────────────────────
+
+/// The per-provider circuit breaker as a swappable, in-process capability. The
+/// built-in [`CircuitBreakers`] (in-memory failure counting) is the default; an
+/// alternative (e.g. one sharing state across a gateway fleet) can register
+/// without touching the pipeline. This is a HOT per-request primitive, so the
+/// swap is in-process only (never IPC) — the trait is a swap-seam, mirroring the
+/// [`crate::providers::ProviderRegistry`] inversion.
+pub trait CircuitBreakerBackend: Send + Sync {
+    /// `true` if the provider's circuit is open and it should be skipped.
+    fn is_open(&self, provider: &str) -> bool;
+    /// Record a successful response, closing the circuit.
+    fn record_success(&self, provider: &str);
+    /// Record a failure, opening the circuit past the threshold.
+    fn record_failure(&self, provider: &str);
+    /// Health snapshot of every observed provider (for `/metrics`).
+    fn snapshot(&self) -> HashMap<String, ProviderHealthSnapshot>;
+}
+
+impl CircuitBreakerBackend for CircuitBreakers {
+    fn is_open(&self, provider: &str) -> bool {
+        CircuitBreakers::is_open(self, provider)
+    }
+    fn record_success(&self, provider: &str) {
+        CircuitBreakers::record_success(self, provider);
+    }
+    fn record_failure(&self, provider: &str) {
+        CircuitBreakers::record_failure(self, provider);
+    }
+    fn snapshot(&self) -> HashMap<String, ProviderHealthSnapshot> {
+        CircuitBreakers::snapshot(self)
+    }
+}
+
+/// Id-keyed registry over [`CircuitBreakerBackend`] implementations. The
+/// built-in [`CircuitBreakers`] is registered first under
+/// [`CircuitBreakerRegistry::BUILTIN`] and active by default, so behavior is
+/// byte-identical with no config change. Delegating verbs forward to the active
+/// backend, keeping every call site unchanged.
+pub struct CircuitBreakerRegistry {
+    backends: HashMap<String, Arc<dyn CircuitBreakerBackend>>,
+    order: Vec<String>,
+    active_id: String,
+    active: Arc<dyn CircuitBreakerBackend>,
+}
+
+impl CircuitBreakerRegistry {
+    /// Stable id of the built-in in-process circuit breaker.
+    pub const BUILTIN: &'static str = "builtin";
+
+    /// Build the registry from config, registering the built-in
+    /// [`CircuitBreakers`] as the default active backend.
+    pub fn new(config: CircuitBreakerConfig) -> Self {
+        let builtin: Arc<dyn CircuitBreakerBackend> = Arc::new(CircuitBreakers::new(config));
+        let mut registry = Self {
+            backends: HashMap::new(),
+            order: Vec::new(),
+            active_id: Self::BUILTIN.to_string(),
+            active: Arc::clone(&builtin),
+        };
+        registry.register(Self::BUILTIN, builtin);
+        registry
+    }
+
+    /// Register a backend under a stable id (open extension point). Re-registering
+    /// replaces in place; refreshes the live handle if it is the active id.
+    pub fn register(&mut self, id: impl Into<String>, backend: Arc<dyn CircuitBreakerBackend>) {
+        let id = id.into();
+        if !self.backends.contains_key(&id) {
+            self.order.push(id.clone());
+        }
+        let is_active = id == self.active_id;
+        self.backends.insert(id, Arc::clone(&backend));
+        if is_active {
+            self.active = backend;
+        }
+    }
+
+    /// Select the active backend by id. `false` (unchanged) if `id` is unknown.
+
+    pub fn set_active(&mut self, id: &str) -> bool {
+        match self.backends.get(id) {
+            Some(backend) => {
+                self.active = Arc::clone(backend);
+                self.active_id = id.to_string();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The id of the currently active backend.
+
+    #[allow(dead_code)]
+    pub fn active_id(&self) -> &str {
+        &self.active_id
+    }
+
+    /// The registered backend ids in registration order.
+
+    pub fn available(&self) -> Vec<String> {
+        self.order.clone()
+    }
+
+    // ─── Delegating hot-path verbs (byte-identical call sites) ───────────────
+
+    /// See [`CircuitBreakerBackend::is_open`].
+    pub fn is_open(&self, provider: &str) -> bool {
+        self.active.is_open(provider)
+    }
+
+    /// See [`CircuitBreakerBackend::record_success`].
+    pub fn record_success(&self, provider: &str) {
+        self.active.record_success(provider);
+    }
+
+    /// See [`CircuitBreakerBackend::record_failure`].
+    pub fn record_failure(&self, provider: &str) {
+        self.active.record_failure(provider);
+    }
+
+    /// See [`CircuitBreakerBackend::snapshot`].
+    pub fn snapshot(&self) -> HashMap<String, ProviderHealthSnapshot> {
+        self.active.snapshot()
     }
 }

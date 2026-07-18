@@ -31,13 +31,13 @@ use super::vad::{Vad, VadEvent, VAD_RATE};
 use crate::agents::AgentStore;
 use crate::server::conversations::ConversationStore;
 use crate::server::memory::MemoryStore;
-use crate::server::trace::TraceStore;
+use ryu_tracing::TraceStore;
 use crate::sidecar::adapters::{
     stream_text_reply, AcpAgentRegistry, ChatStreamRequest, UiContent, UiMessage,
 };
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::SidecarManager;
-use crate::skills::SkillRegistry;
+use ryu_skills::SkillRegistry;
 
 /// TTS downlink sample rate advertised to the client (informational — WAV frames
 /// are self-describing). RyuTTS/OuteTTS emit 24 kHz.
@@ -116,7 +116,7 @@ impl VoiceSession {
     /// Resamples to 16 kHz, drives the VAD, and manages the pre-roll + capture
     /// buffers so a completed utterance is ready on `SpeechEnd`.
     pub fn on_audio(&mut self, pcm_client: &[i16]) -> Vec<VoiceEvent> {
-        let pcm16 = crate::hardware::codec::resample_to(pcm_client, self.cfg.client_rate, VAD_RATE);
+        let pcm16 = ryu_hardware::codec::resample_to(pcm_client, self.cfg.client_rate, VAD_RATE);
 
         // Maintain the pre-roll ring and, when capturing, append the utterance.
         for &s in &pcm16 {
@@ -411,7 +411,7 @@ async fn transcribe(
     cfg: &VoiceConfig,
     pcm: &[i16],
 ) -> Result<String, String> {
-    let wav = crate::hardware::codec::pcm16_to_wav(pcm, VAD_RATE).map_err(|e| e.to_string())?;
+    let wav = ryu_hardware::codec::pcm16_to_wav(pcm, VAD_RATE).map_err(|e| e.to_string())?;
     crate::server::voice::transcribe_wav(
         &deps.client,
         wav,

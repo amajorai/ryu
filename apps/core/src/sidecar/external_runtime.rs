@@ -515,6 +515,7 @@ mod tests {
         let cfg = ExternalRuntimeConfig {
             kind: "python".to_owned(),
             entry: "ryu_tts".to_owned(),
+            port_env: None,
             python_version: Some("3.11".to_owned()),
             requirements: vec!["fastapi".to_owned()],
             pyproject_extra: Some("kitten".to_owned()),

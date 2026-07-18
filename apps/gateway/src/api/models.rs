@@ -60,10 +60,10 @@ async fn cached_or_discover(state: &SharedState) -> Vec<Value> {
 /// Probe every configured provider concurrently and merge the discovered models
 /// with the static fallback list, deduped by `id` (discovery-first).
 async fn discover_and_merge(state: &SharedState) -> Vec<Value> {
-    let kinds = state.providers.available_providers();
-    let probes = kinds
+    let ids = state.providers.available_providers();
+    let probes = ids
         .iter()
-        .filter_map(|kind| state.providers.get(kind))
+        .filter_map(|id| state.providers.get(id))
         .map(|provider| provider.discover_models());
     let results = futures_util::future::join_all(probes).await;
     let discovered: Vec<Vec<Value>> = results.into_iter().flatten().collect();

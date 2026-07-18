@@ -126,3 +126,39 @@ export async function fetchComposioTriggers(
 		toolkit: t.toolkit ?? toolkit,
 	}));
 }
+
+/** One of the user's Composio connected accounts. */
+export interface ComposioConnection {
+	/** Whether the connection is active (ready for tool execution). */
+	active: boolean;
+	/** The connected-account id (poll this after the OAuth redirect). */
+	id: string;
+	/** Raw Composio status (e.g. ACTIVE, INITIATED, EXPIRED, FAILED). */
+	status: string;
+	/** Toolkit slug the connection is for. */
+	toolkit: string;
+}
+
+interface ConnectionWire {
+	active?: boolean;
+	id?: string;
+	status?: string;
+	toolkit?: string;
+}
+
+/** List the user's connections, optionally filtered to one toolkit. */
+export async function fetchComposioConnections(
+	target: ApiTarget,
+	toolkit = ""
+): Promise<ComposioConnection[]> {
+	const path = toolkit
+		? `/api/composio/connections?toolkit=${encodeURIComponent(toolkit)}`
+		: "/api/composio/connections";
+	const json = await request<{ data?: ConnectionWire[] }>(target, path);
+	return (json.data ?? []).map((c) => ({
+		id: c.id ?? "",
+		toolkit: c.toolkit ?? toolkit,
+		status: c.status ?? "",
+		active: c.active ?? false,
+	}));
+}

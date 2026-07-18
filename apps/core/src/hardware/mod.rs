@@ -1,39 +1,21 @@
-//! Ryu hardware support (RHP v1) — node side of the device protocol.
+//! Core-side kernel remainder of the Ryu Hardware Protocol (RHP v1).
 //!
-//! This module is the Core half of the Ryu Hardware Protocol defined in
-//! `apps/hardware/PROTOCOL.md`. Ryu hardware (watch / necklace / desk, all
-//! ESP32-S3) talks to a node over a WebSocket (`/api/hardware/ws`), either
-//! directly over WiFi (Mode B) or tunneled through the mobile app over BLE
-//! (Mode A — transparent to the node).
+//! The device registry, protocol wire types, pairing, the Opus/WAV codec, the
+//! per-connection buffering session, the live sender registry, the display-nudge
+//! loop, and the device-registry + display HTTP surface were all extracted into
+//! the [`ryu_hardware`] crate (`crates/ryu-hardware`). Core consumes it as a
+//! NON-optional path dependency (the codec is also used by the voice module, the
+//! store backs `ServerState` in every build).
 //!
-//! ## Layout
+//! What stays here is the irreducible kernel weld:
 //!
-//! - [`protocol`] — serde structs/enums mirroring PROTOCOL.md §3. The wire
-//!   contract, shared by the firmware (C) and mobile relay (TS) mirrors.
-//! - [`store`] — the device registry (SQLite): paired devices, per-device
-//!   revocable Bearer tokens, last-seen/battery presence. Extends the
-//!   connections/presence model (§6). **Stub** this phase.
-//! - [`pairing`] — pairing-nonce verification and token issuance for
-//!   `POST /api/hardware/pair` (§5). **Stub** this phase.
-//! - [`session`] — per-connection WS session state: decode Opus uplink →
-//!   whisper.cpp transcribe → chat turn (in-process) → TTS (OuteTTS) → Opus
-//!   downlink; and the ambient path → meetings chunk pipeline. Reuses existing
-//!   Core seams (`server::chat_stream`, `server::voice`, `meetings_api`). The
-//!   WS handler itself lands in `server::hardware_ws` in a later phase.
-//!   **Stub** this phase.
+//! - [`turn`] — the chat-turn orchestration that runs a captured device turn
+//!   through Core's own session seams (`run_text_turn` + voice ASR + OuteTTS). It
+//!   is welded to `apps/core` kernel types, so it stays Core-side as a consumer of
+//!   the crate's `TurnInput`/`SessionOutput`/`protocol` types — the teams
+//!   `@team`-orchestration precedent.
 //!
-//! ## Placement (Core vs Gateway)
-//!
-//! Per `CLAUDE.md` §1, the device registry, token lifecycle, and the realtime
-//! session decide *what runs*, so they live in Core. None of this is wired into
-//! the router yet — the Core agent does that in the next phase.
+//! The public ws/pair ingress lives in `server::hardware_ws` +
+//! `server::hardware_public` (kernel ingress that forwards to the crate).
 
-pub mod protocol;
-
-// Realtime + registry implementation. Consumed by `server::hardware_ws` (the WS
-// handler) and `server::hardware_api` (the REST registry surface).
-pub mod codec;
-pub mod nudge;
-pub mod pairing;
-pub mod session;
-pub mod store;
+pub mod turn;

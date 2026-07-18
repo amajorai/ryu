@@ -7,7 +7,7 @@
 //! installing a Skill is "what runs" (orchestration), so it belongs in Core. A
 //! freshly installed Skill lands in the universal Agent Skills directory as
 //! `~/.claude/skills/<slug>/SKILL.md`, exactly where
-//! [`crate::skills::SkillRegistry`] loads from — and the same location Claude
+//! [`ryu_skills::SkillRegistry`] loads from — and the same location Claude
 //! Code and the skills CLI read — so it's usable everywhere immediately.
 //!
 //! Zero setup, no key: the public `skills.sh` CLI talks to two anonymous
@@ -202,7 +202,7 @@ pub async fn search_skills(
 fn installed_cards() -> Vec<SkillCard> {
     let provenance = load_provenance();
     let mut cards: Vec<SkillCard> = Vec::new();
-    for found in crate::skills::scan_all_skill_dirs() {
+    for found in ryu_skills::scan_all_skill_dirs() {
         let slug = found.id;
         let contents = std::fs::read_to_string(&found.skill_md).unwrap_or_default();
         let (fm, _) = split_front_matter(&contents);
@@ -882,7 +882,7 @@ pub struct InstallResult {
 /// Download a Skill and write it into the universal Agent Skills directory in the
 /// standard one-directory-per-skill layout: `~/.claude/skills/<slug>/SKILL.md`
 /// plus every bundled resource at its declared relative path. The
-/// [`crate::skills::SkillRegistry`] loads it on next scan, and so do Claude Code
+/// [`ryu_skills::SkillRegistry`] loads it on next scan, and so do Claude Code
 /// and the skills CLI, which read the same directory.
 pub async fn install_skill(client: &reqwest::Client, id: &str) -> Result<InstallResult> {
     let files = download(client, id).await?;
@@ -895,7 +895,7 @@ pub async fn install_skill(client: &reqwest::Client, id: &str) -> Result<Install
         anyhow::bail!("package has no SKILL.md — cannot install");
     }
 
-    let skill_dir = crate::skills::SkillRegistry::skills_dir().join(&slug);
+    let skill_dir = ryu_skills::SkillRegistry::skills_dir().join(&slug);
     tokio::fs::create_dir_all(&skill_dir)
         .await
         .with_context(|| format!("creating skill dir {}", skill_dir.display()))?;
@@ -935,7 +935,7 @@ pub async fn install_skill(client: &reqwest::Client, id: &str) -> Result<Install
     // A skill the user installed *through Ryu* is active by default — it injects
     // on the default chat route (bulk-discovered shared-dir skills do not until
     // the user activates them).
-    crate::skills::set_active(&slug, true);
+    ryu_skills::set_active(&slug, true);
 
     Ok(InstallResult {
         slug,
@@ -972,7 +972,7 @@ pub async fn check_updates(client: &reqwest::Client) -> Vec<SkillUpdate> {
     let provenance = load_provenance();
     let mut out = Vec::new();
     for (slug, id) in provenance {
-        let local_path = crate::skills::SkillRegistry::skills_dir()
+        let local_path = ryu_skills::SkillRegistry::skills_dir()
             .join(&slug)
             .join("SKILL.md");
         let Ok(local) = tokio::fs::read_to_string(&local_path).await else {
@@ -1072,7 +1072,7 @@ fn record_provenance(slug: &str, id: &str) {
 /// or the vendor-neutral `~/.agents/skills` (standard `<slug>/SKILL.md` layout, or
 /// a legacy flat `<slug>.md` in the primary root).
 fn installed_slugs() -> std::collections::HashSet<String> {
-    crate::skills::scan_all_skill_dirs()
+    ryu_skills::scan_all_skill_dirs()
         .into_iter()
         .map(|s| s.id)
         .collect()

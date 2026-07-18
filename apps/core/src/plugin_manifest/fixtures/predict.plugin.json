@@ -14,7 +14,7 @@
         "policy_type": "predict",
         "definition": {
           "surface": "system-wide",
-          "note": "On/off switch for system-wide inline autocomplete: the /api/predict/* brain used by the apps/predict overlay and any predict client. Enabling this plugin is the single switch — there is no separate settings toggle. Each prediction still routes through the Gateway. Core-local — no gateway restart."
+          "note": "On/off switch for system-wide inline autocomplete: the /api/predict/* brain used by the apps-store/predict overlay and any predict client. Enabling this plugin is the single switch — there is no separate settings toggle. Each prediction still routes through the Gateway. Core-local — no gateway restart."
         }
       }
     }

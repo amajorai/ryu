@@ -1,0 +1,22 @@
+[package]
+name = "ryu-webhook-ingress"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Webhook ingress: the swappable public-reachability seam that lets a loopback-bound Ryu Core receive third-party webhooks (Composio triggers, per-workflow webhooks). Owns the four ingress backends (managed RyuRelay outbound SSE push, Tailscale Funnel, cloudflared quick tunnel, BYO own-relay), the path-routed inbound dispatcher with fail-closed HMAC re-verification, replay-window + delivery dedup, and the ingress-URL registry. An extracted Core capability crate — in-process default (no IPC on any hot path); the kernel couplings (composio verify/run, workflow-secret lookup, mesh funnel, auth token, data dir) are inverted through the WebhookIngressHost trait so this crate has ZERO dependency on apps/core. Public webhook ROUTES stay kernel-ingress in Core and forward into this engine (program §5)."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so the in-process consumption by
+# Core has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "process", "io-util", "sync"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+async-trait = "0.1"
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }

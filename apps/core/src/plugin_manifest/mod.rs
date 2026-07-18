@@ -34,692 +34,15 @@ pub mod schema;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use crate::runnable::{RunnableKind, RunnableMeta};
-use schema::{validate_runnable, RunnableEntry};
-
-/// Maximum length of an app `id`. Reverse-domain ids are short; a generous cap
-/// prevents pathological filesystem paths and absurdly long directory names.
-const MAX_PLUGIN_ID_LEN: usize = 128;
-
-/// Validate an app `id` for use as both an identity key **and** a filesystem
-/// directory name under the apps dir.
-///
-/// The `id` is written to disk as `apps_dir().join(id)` by the install-from-URL
-/// path, so an unvalidated id is a path-traversal / arbitrary-write sink. This
-/// uses a strict **allowlist** (not a blocklist) because the project is
-/// Windows-first: `\`, `/`, `:`, and a leading `.` must all be rejected, and on
-/// Windows `PathBuf::join` with an absolute or drive-qualified component silently
-/// replaces the base. The legal alphabet accepts both bare-kebab ids the built-in
-/// manifests use (e.g. `ghost`, `data-grid-explorer`) and any legacy dotted
-/// third-party id (e.g. `com.example.research-assistant`) for back-compat:
-///
-/// - non-empty, at most [`MAX_PLUGIN_ID_LEN`] bytes
-/// - characters limited to ASCII `[a-zA-Z0-9.-_]`
-/// - no `..` sequence anywhere, no leading/trailing `.`, no leading `-`
-///
-/// Returns `Ok(())` when the id is safe, else a descriptive `Err(String)`.
-pub fn validate_plugin_id(id: &str) -> Result<(), String> {
-    if id.is_empty() {
-        return Err("app id must not be empty".to_string());
-    }
-    if id.len() > MAX_PLUGIN_ID_LEN {
-        return Err(format!(
-            "app id is too long ({} bytes, max {MAX_PLUGIN_ID_LEN})",
-            id.len()
-        ));
-    }
-    let valid_chars = id
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_');
-    if !valid_chars {
-        return Err(format!(
-            "app id '{id}' contains illegal characters (allowed: a-z A-Z 0-9 . - _)"
-        ));
-    }
-    if id.contains("..") {
-        return Err(format!("app id '{id}' must not contain '..'"));
-    }
-    if id.starts_with('.') || id.ends_with('.') {
-        return Err(format!("app id '{id}' must not start or end with '.'"));
-    }
-    if id.starts_with('-') {
-        return Err(format!("app id '{id}' must not start with '-'"));
-    }
-    Ok(())
-}
-
-/// An installable Ryu App manifest (`ryu.json`).
-///
-/// Modelled on Codex's `plugin.json` pattern: a thin descriptor that bundles one or
-/// more [`RunnableEntry`] items (agents, workflows, tools, skills, companions,
-/// channels, engines, policies), lists the permission grants the app requires, and
-/// optionally declares a Companion surface (an in-desktop overlay or sidebar panel).
-///
-/// # M0 scope note
-///
-/// This type is **type + parse + Runnable mapping only**. There is no install/enable
-/// lifecycle here (that is M3 / App-store) and no grant enforcement (that is
-/// Gateway — the Gateway decides what is *allowed*, Core decides what *runs*).
-///
-/// # Per-kind config
-///
-/// Each Runnable entry carries an optional `config` blob whose schema is
-/// determined by its `kind`. See [`schema`] for the per-kind structs and the
-/// [`schema::validate_runnable`] function. The loader validates every entry during
-/// loading; a manifest with any invalid entry is rejected.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-pub struct PluginManifest {
-    /// Reverse-domain unique identifier for the app (e.g. `"com.example.my-app"`).
-    pub id: String,
-
-    /// Human-readable display name shown in the app store / launcher.
-    pub name: String,
-
-    /// Semver version string (e.g. `"1.0.0"`).
-    pub version: String,
-
-    /// Lower-case hex `sha256(utf8_bytes(ui_code))` binding the plugin's bundled
-    /// sandboxed-UI code to this manifest. Because the Gateway signs the manifest
-    /// verbatim (canonical key-sorted encoding), this hash is INSIDE the signed
-    /// surface while the `ui_code` blob itself rides OUTSIDE it as payload; the
-    /// install path recomputes the hash over the fetched code and rejects a
-    /// mismatch fail-closed. Absent for a manifest-only plugin (no bundled UI) and
-    /// for unsigned seed items. Written by `ryu pack`/`ryu publish`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ui_code_sha256: Option<String>,
-
-    /// The Runnables this app bundles. Each entry uses [`RunnableEntry`] from the
-    /// [`schema`] submodule so heterogeneous Runnables (agents, workflows, tools,
-    /// skills, companions, channels, engines, policies) can be listed together with
-    /// their per-kind config.
-    pub runnables: Vec<RunnableEntry>,
-
-    /// Permission grants this app declares it needs (e.g. `"mcp:web_search"`).
-    /// These are *declarations only* at this layer — no enforcement happens here;
-    /// the Gateway owns grant enforcement.
-    #[serde(default)]
-    pub permission_grants: Vec<String>,
-
-    /// Optional Companion surface descriptor: an in-desktop overlay or sidebar panel
-    /// the app may register. Absent when the app has no Companion surface.
-    #[serde(default)]
-    pub companion: Option<CompanionSurface>,
-
-    /// VS-Code-style **contribution points**: a declare-by-id block naming which
-    /// of the manifest's `runnables` the plugin contributes to each extensible
-    /// surface. Every id referenced here MUST exist in `runnables` (the loader
-    /// cross-validates). Absent when the plugin contributes nothing extra
-    /// (the common case — a plugin's `runnables` are already its contributions).
-    #[serde(default)]
-    pub contributes: Option<Contributes>,
-
-    /// Activation events that lazily wake the plugin — VS-Code `activationEvents`.
-    /// Recognised tokens: `"*"` (always active / eager), `"onStartup"`,
-    /// `"onChat"`, and `"onCommand:<id>"`. An **empty** list means *eager*
-    /// activation (back-compat: every existing manifest keeps activating on
-    /// enable). The activation runtime (firing these events) is scaffolded in
-    /// [`crate::runnable::RunnableRegistry::register_active`]; the wiring that
-    /// fires `onChat`/`onCommand` from the chat/palette paths is a follow-on.
-    #[serde(default)]
-    pub activation_events: Vec<String>,
-
-    /// Required Ryu engine version (VS-Code `engines.vscode` analogue). When
-    /// present, `engines.ryu` is a semver **requirement** (e.g. `">=0.3.0"`) and
-    /// the loader rejects the manifest if the running Core version does not
-    /// satisfy it. Absent = compatible with any Core version.
-    #[serde(default)]
-    pub engines: Option<EnginesReq>,
-
-    /// **Plugin-to-plugin dependencies** — the other plugins this one needs (the
-    /// npm-shaped edge that lets the app decompose into a kernel + features).
-    /// Resolved into a topological enable order by [`crate::plugins::graph`].
-    ///
-    /// Absent = **no dependencies** (every manifest predating this field).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub requires: Option<Requires>,
-
-    /// Host surfaces this plugin runs on (desktop / island / mobile / …).
-    ///
-    /// **Empty or absent = runs on EVERY surface.** This is the backward-compatible
-    /// default and must never be read as "runs nowhere" — every manifest that
-    /// predates this field declares no targets and must keep surfacing everywhere.
-    /// Filtering happens ONLY when this list is explicitly non-empty, and only at
-    /// the read/surface boundary (see [`PluginManifest::supports_surface`]) — never
-    /// in the storage layer, so an unsupported-target plugin stays installable and
-    /// inspectable.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub targets: Vec<Surface>,
-
-    /// Optional declarative **external runtime** the plugin needs (e.g. a Python
-    /// venv + pip deps + assets, like the TTS sidecar). The provisioner lives in
-    /// [`crate::sidecar::external_runtime`]; this is the declaration (#449).
-    /// Absent for the common case (no external interpreter needed).
-    #[serde(default)]
-    pub runtime: Option<schema::ExternalRuntimeConfig>,
-
-    /// Declarative **managed sidecars** the plugin ships (the app ⇄ sidecar
-    /// bridge): each is a long-running child process Core downloads/provisions,
-    /// spawns, and health-monitors via the [`crate::sidecar::SidecarManager`] on
-    /// enable, exactly like a built-in sidecar. Gated at enable by the
-    /// `sidecar:process` grant (Core-tier auto; Community needs the approved
-    /// grant). Empty for the common case (no bundled process).
-    #[serde(default)]
-    pub sidecars: Vec<schema::SidecarSpec>,
-
-    // ── Rich marketplace metadata (Phase 1.5) ─────────────────────────────────
-    //
-    // All optional/additive so older manifests still load and render. These feed
-    // the marketplace **detail** contract the desktop dialog consumes; where a
-    // field aligns with the Claude `.claude-plugin/marketplace.json` plugin-entry
-    // standard it keeps that JSON key (`author`, `homepage`, `category`,
-    // `license`, `keywords`), and the Ryu extensions use their contract key.
-    /// Long plaintext/markdown description. Empty when absent (the built-in card
-    /// historically emitted `""` for this; preserved).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
-    /// Short one-line tagline shown under the name (Ryu extension).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tagline: Option<String>,
-
-    /// Logo URL (contract key `iconUrl`; Ryu extension).
-    #[serde(default, rename = "iconUrl", skip_serializing_if = "Option::is_none")]
-    pub icon_url: Option<String>,
-
-    /// App-Store gallery screenshot URLs (Ryu extension).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub screenshots: Vec<String>,
-
-    /// Publisher/author. Claude `author` — a bare string or an object with a
-    /// `name` field; the detail builder extracts the display string into
-    /// `developer`. Kept as a raw value so both shapes round-trip.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub author: Option<serde_json::Value>,
-
-    /// Free-text category (Claude `category`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-
-    /// Homepage/website URL (Claude `homepage`; emitted as `website`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub homepage: Option<String>,
-
-    /// SPDX license identifier (Claude `license`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub license: Option<String>,
-
-    /// Search keywords / tags (Claude `keywords`).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub keywords: Vec<String>,
-
-    /// Privacy policy URL (contract key `privacyPolicyUrl`; Ryu extension).
-    #[serde(
-        default,
-        rename = "privacyPolicyUrl",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub privacy_policy_url: Option<String>,
-
-    /// Terms-of-service URL (contract key `termsOfServiceUrl`; Ryu extension).
-    #[serde(
-        default,
-        rename = "termsOfServiceUrl",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub terms_of_service_url: Option<String>,
-
-    /// Human-readable capability strings (Ryu extension). When absent the detail
-    /// builder DERIVES these from `permission_grants` via
-    /// [`schema::capabilities_from_grants`]; declared values are used verbatim.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub capabilities: Vec<String>,
-
-    /// Prompt-chip examples (contract key `examplePrompts`; Ryu extension).
-    #[serde(
-        default,
-        rename = "examplePrompts",
-        skip_serializing_if = "Vec::is_empty"
-    )]
-    pub example_prompts: Vec<String>,
-
-    /// Optional companion/config setup card, or an array of such steps (Ryu
-    /// extension). Opaque to Core — passed through to the detail payload verbatim.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub setup: Option<serde_json::Value>,
-}
-
-impl PluginManifest {
-    /// The `developer` display string for the detail contract, extracted from the
-    /// Claude `author` field: a bare string is used directly, an object's `name`
-    /// field is read, any other shape yields `None`.
-    pub fn developer(&self) -> Option<String> {
-        match self.author.as_ref()? {
-            serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
-            serde_json::Value::Object(map) => map
-                .get("name")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string),
-            _ => None,
-        }
-    }
-
-    /// Resolve the `capabilities` label list for the detail contract: declared
-    /// values verbatim, else derived from `permission_grants`.
-    pub fn resolved_capabilities(&self) -> Vec<String> {
-        if self.capabilities.is_empty() {
-            schema::capabilities_from_grants(&self.permission_grants)
-        } else {
-            self.capabilities.clone()
-        }
-    }
-
-    /// The plugin-to-plugin dependency edges this manifest declares. Empty when
-    /// `requires` is absent (no dependencies) — the common case.
-    pub fn dependencies(&self) -> &[AppDependency] {
-        self.requires.as_ref().map_or(&[], |r| r.apps.as_slice())
-    }
-
-    /// Whether this plugin should be surfaced on `surface`.
-    ///
-    /// **An empty `targets` list means every surface** — the backward-compatible
-    /// default. Filtering applies only when `targets` is explicitly non-empty.
-    pub fn supports_surface(&self, surface: Surface) -> bool {
-        self.targets.is_empty() || self.targets.contains(&surface)
-    }
-}
-
-impl PluginManifest {
-    /// Returns the list of [`RunnableEntry`] items bundled by this manifest.
-    ///
-    /// Each entry carries `id`, `name`, [`RunnableKind`], and an optional per-kind
-    /// `config` blob so callers can distinguish all eight Runnable kinds in a single
-    /// heterogeneous list without downcasting.
-    pub fn runnables(&self) -> &[RunnableEntry] {
-        &self.runnables
-    }
-
-    /// Returns only the bundled Runnables of a specific [`RunnableKind`].
-    pub fn runnables_of_kind(&self, kind: RunnableKind) -> Vec<&RunnableEntry> {
-        self.runnables.iter().filter(|r| r.kind == kind).collect()
-    }
-
-    /// Returns a [`RunnableMeta`] view of each bundled Runnable (id + name + kind,
-    /// no per-kind config). Useful when callers only need identity metadata.
-    pub fn runnable_metas(&self) -> Vec<RunnableMeta> {
-        self.runnables
-            .iter()
-            .map(|e| RunnableMeta {
-                id: e.id.clone(),
-                name: e.name.clone(),
-                kind: e.kind,
-            })
-            .collect()
-    }
-}
-
-/// Companion surface descriptor — an optional in-desktop overlay or sidebar panel
-/// an App may register. Fields mirror the UX primitives a Companion widget needs;
-/// all are optional except `label`.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CompanionSurface {
-    /// Display label for the companion panel tab or tooltip.
-    pub label: String,
-
-    /// Icon identifier (resolved by the desktop shell).
-    #[serde(default)]
-    pub icon: Option<String>,
-
-    /// Keyboard shortcut string (e.g. `"ctrl+shift+r"`).
-    #[serde(default)]
-    pub shortcut: Option<String>,
-}
-
-/// VS-Code-style **contribution points** (`contributes` in `package.json`).
-///
-/// Each field is a list of [`ContributionId`] references into the manifest's
-/// `runnables`: the plugin *declares* that runnable `X` contributes to the
-/// `commands`/`tools`/`agents`/… surface. This is declare-by-id, not a second
-/// copy of the runnable — the loader cross-validates that every referenced id
-/// exists in `runnables`, so a typo is caught at load.
-///
-/// # Extending
-///
-/// Add a new surface = add a new `#[serde(default)] pub <surface>: Vec<ContributionId>`
-/// field here. The cross-validation in [`Contributes::referenced_ids`] picks it
-/// up automatically.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-pub struct Contributes {
-    /// Command-palette commands the plugin contributes (referenced by runnable id).
-    #[serde(default)]
-    pub commands: Vec<ContributionId>,
-
-    /// Callable tools the plugin contributes (referenced by runnable id).
-    #[serde(default)]
-    pub tools: Vec<ContributionId>,
-
-    /// Agents the plugin contributes (referenced by runnable id).
-    #[serde(default)]
-    pub agents: Vec<ContributionId>,
-
-    /// Workflows the plugin contributes (referenced by runnable id).
-    #[serde(default)]
-    pub workflows: Vec<ContributionId>,
-
-    /// Gateway policies the plugin contributes (referenced by runnable id).
-    #[serde(default)]
-    pub policies: Vec<ContributionId>,
-
-    /// Chat turn hooks the plugin contributes — server-side logic that runs at a
-    /// turn boundary (e.g. `post_assistant_turn`) and returns a directive. These
-    /// are **self-contained** (they carry their own inline `code`), so they are
-    /// NOT cross-validated against `runnables` like the id-reference surfaces
-    /// above; the [`crate::plugin_host`] runtime executes them in the sandbox.
-    #[serde(default)]
-    pub turn_hooks: Vec<TurnHookContribution>,
-
-    /// Declarative **native** UI widgets the plugin contributes to the desktop
-    /// composer (e.g. a `toggle` that sets a `plugin_flags` entry, or a `chip`).
-    /// Core stores these verbatim and serves them via `GET /api/plugins/contributions`;
-    /// the desktop renders the known widget types. Opaque to Core (the renderer
-    /// owns interpretation) so new widget types need no Core change.
-    #[serde(default)]
-    pub composer_controls: Vec<serde_json::Value>,
-
-    /// Declarative settings tabs the plugin contributes (model pickers, text
-    /// fields bound to preference keys). Served + rendered the same way.
-    #[serde(default)]
-    pub settings_tabs: Vec<serde_json::Value>,
-
-    /// Slash commands the plugin contributes (e.g. `/goal`). The desktop maps the
-    /// command to a `plugin_flags`/message action; the plugin's turn hook reads
-    /// the resulting message. Served + rendered the same way.
-    #[serde(default)]
-    pub slash_commands: Vec<serde_json::Value>,
-
-    /// App widgets the plugin contributes (Ryu Apps). Each binds a tool id to a
-    /// `ui://widget/<slug>.html` template the tool renders inline in chat. The
-    /// field is shape-identical to the SDK `manifest.ts` `WidgetContribution`.
-    #[serde(default)]
-    pub widgets: Vec<WidgetContribution>,
-}
-
-/// One app-widget contribution (Ryu Apps). Binds the tool that renders the widget
-/// to its HTML template. `ui_entry` is the source entry the SDK `ryu pack` builds
-/// into the self-contained HTML for third-party apps; built-in apps serve HTML
-/// from the in-process provider and leave it unset.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct WidgetContribution {
-    /// The fully-qualified tool id whose result renders this widget.
-    pub tool_id: String,
-    /// `ui://widget/<slug>.html` — the widget resource uri.
-    pub uri: String,
-    /// Source entry (e.g. `src/apps/checklist/index.tsx`) for `ryu pack`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ui_entry: Option<String>,
-    /// Widget MIME dialect (default `text/html+skybridge`).
-    #[serde(default = "default_widget_mime")]
-    pub mime: String,
-    /// Default display mode (`inline` | `fullscreen` | `pip`).
-    #[serde(default = "default_widget_display_mode")]
-    pub default_display_mode: String,
-}
-
-fn default_widget_mime() -> String {
-    "text/html+skybridge".to_owned()
-}
-
-fn default_widget_display_mode() -> String {
-    "inline".to_owned()
-}
-
-/// A server-side chat turn hook contributed by a plugin. The `code` is a JS body
-/// run in the plugin sandbox with `ctx` (the turn context) and `host` (the
-/// capability bridge: `host.sideModel`, `host.storage`, `host.log`) in scope; it
-/// returns a directive (`{kind:"none"}` | `{kind:"note",text}` |
-/// `{kind:"continue",text}`). See [`crate::plugin_host`].
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct TurnHookContribution {
-    /// Stable id for this hook (for logging/audit), unique within the plugin.
-    pub id: String,
-    /// The turn boundary this hook fires on. Today only `"post_assistant_turn"`.
-    pub on: String,
-    /// The JS hook body executed in the sandbox (returns a directive).
-    pub code: String,
-    /// Optional cheap pre-gate. When present, [`crate::plugin_host`] evaluates it
-    /// in Rust **before** spawning the sandbox, so an idle hook (e.g. double-check
-    /// with its toggle off, or goal with no active condition) costs a flag/prefix
-    /// check or one KV read instead of a Deno process. This is what makes it safe
-    /// to ship these hooks **enabled by default** on every surface. Absent (or all
-    /// fields empty) → the hook always runs, preserving prior behaviour.
-    #[serde(default, rename = "match")]
-    pub run_when: Option<HookMatch>,
-}
-
-/// A declarative pre-gate for a [`TurnHookContribution`]. The conditions are
-/// OR-ed: the hook runs if **any** present condition matches. An empty match
-/// (every field default) means "always run". Kept intentionally small — richer
-/// matching belongs inside the hook JS, this only exists to skip the sandbox
-/// spawn on turns where the hook provably cannot act.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-pub struct HookMatch {
-    /// Run only if the request set this composer flag true (`ctx.flags[flag]`),
-    /// e.g. `"io.ryu.double-check"`.
-    #[serde(default)]
-    pub flag: Option<String>,
-    /// Run if the last user message (trimmed) starts with any of these prefixes,
-    /// e.g. `["/goal"]`. This is how a slash-command hook wakes up.
-    #[serde(default)]
-    pub commands: Vec<String>,
-    /// Run if the plugin has stored state for this conversation (its default KV
-    /// namespace has a value keyed by `conversation_id`), e.g. an active goal.
-    #[serde(default)]
-    pub stateful: bool,
-    /// Run if the tool being called (`ctx.tool_name`) matches any of these
-    /// patterns — for `pre_tool_use` / `post_tool_use` hooks. A pattern is a tool
-    /// id with optional leading/trailing `*` wildcards (`"*"` = every tool,
-    /// `"bash*"` = ids starting with `bash`). This keeps a tool-firewall hook from
-    /// spawning the sandbox on every unrelated tool call.
-    #[serde(default)]
-    pub tools: Vec<String>,
-}
-
-impl Contributes {
-    /// Every runnable id referenced across all contribution surfaces. Used by the
-    /// loader to verify each one resolves to a `runnables` entry.
-    pub fn referenced_ids(&self) -> Vec<&str> {
-        self.commands
-            .iter()
-            .chain(self.tools.iter())
-            .chain(self.agents.iter())
-            .chain(self.workflows.iter())
-            .chain(self.policies.iter())
-            .map(|c| c.id.as_str())
-            .collect()
-    }
-}
-
-/// A single contribution: a reference (by `id`) to a runnable declared in the
-/// manifest's `runnables` list, optionally with a human-facing title (e.g. the
-/// label a command shows in the palette).
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ContributionId {
-    /// The runnable id this contribution points at. Must exist in `runnables`.
-    pub id: String,
-
-    /// Optional display title (e.g. the palette label for a command).
-    #[serde(default)]
-    pub title: Option<String>,
-}
-
-/// `engines` block — the required Ryu version, mirroring VS-Code's
-/// `engines.vscode`. `ryu` is a semver **requirement** string.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct EnginesReq {
-    /// Semver requirement the running Core version must satisfy (e.g. `">=0.3.0"`,
-    /// `"^1.2"`). Parsed as a [`semver::VersionReq`]; an unparseable value or an
-    /// unsatisfied requirement causes the loader to reject the manifest.
-    pub ryu: String,
-}
-
-/// `requires` block — the plugin's **plugin-to-plugin** dependencies.
-///
-/// This is the npm-shaped edge that lets the app decompose into a minimal kernel
-/// plus features: a plugin declares the other plugins it needs, and the lifecycle
-/// (see [`crate::plugins::graph`]) resolves them into a topological enable order.
-///
-/// Distinct from [`EnginesReq`], which constrains plugin→**Core** (the engine
-/// version). `requires` constrains plugin→**plugin**.
-///
-/// Absent (the default, and the case for every manifest that predates this field)
-/// means *no dependencies* — the plugin enables standalone exactly as before.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-pub struct Requires {
-    /// Other plugins that must be installed (and are auto-enabled, in dependency
-    /// order) before this one can enable.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub apps: Vec<AppDependency>,
-
-    /// Permission grants implied by the dependencies. Declaration only — the
-    /// Gateway remains the sole authority on what a grant *allows* (Core decides
-    /// what runs; the Gateway decides what is permitted).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub grants: Vec<String>,
-}
-
-/// A single plugin-to-plugin dependency edge.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AppDependency {
-    /// The `id` of the plugin this one depends on.
-    pub id: String,
-
-    /// Optional **minimum** version the dependency must satisfy.
-    ///
-    /// A bare version (`"1.2.0"`) is a *minimum*, i.e. `">=1.2.0"` — deliberately
-    /// NOT semver's default caret (`^1.2.0`), which would reject `2.0.0`. Explicit
-    /// comparator syntax (`">=1.2, <2"`, `"^1.2"`, `"~1.2"`) is honoured verbatim.
-    /// See [`parse_min_version`], the single parser both validation and resolution
-    /// use.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_version: Option<String>,
-}
-
-/// A host surface a plugin can declare support for via `targets`.
-///
-/// `core` is the headless node (a Core running with no UI at all).
-///
-/// An **empty/absent** `targets` list means the plugin runs on *every* surface —
-/// that is the backward-compatible default and MUST NOT be read as "hidden".
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
-#[serde(rename_all = "kebab-case")]
-pub enum Surface {
-    /// The Ryu Gateway.
-    Gateway,
-    /// A headless Core node (no UI).
-    Core,
-    /// The Tauri desktop app.
-    Desktop,
-    /// The Electron dynamic-island companion.
-    Island,
-    /// The Expo/React-Native mobile app.
-    Mobile,
-    /// The browser extension.
-    Extension,
-    /// The Next.js web app.
-    Web,
-    /// The terminal client.
-    Cli,
-}
-
-impl Surface {
-    /// Stable kebab-case identifier — the exact token used on the wire (in a
-    /// manifest's `targets` and in the `x-ryu-surface` request header).
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Surface::Gateway => "gateway",
-            Surface::Core => "core",
-            Surface::Desktop => "desktop",
-            Surface::Island => "island",
-            Surface::Mobile => "mobile",
-            Surface::Extension => "extension",
-            Surface::Web => "web",
-            Surface::Cli => "cli",
-        }
-    }
-
-    /// Parse a surface token (e.g. the `x-ryu-surface` header). Case-insensitive.
-    /// Returns `None` for an unknown surface, which callers MUST treat as
-    /// "unknown caller → do not filter" rather than "filter everything out".
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "gateway" => Some(Surface::Gateway),
-            "core" => Some(Surface::Core),
-            "desktop" => Some(Surface::Desktop),
-            "island" => Some(Surface::Island),
-            "mobile" => Some(Surface::Mobile),
-            "extension" => Some(Surface::Extension),
-            "web" => Some(Surface::Web),
-            "cli" => Some(Surface::Cli),
-            _ => None,
-        }
-    }
-}
-
-/// Parse a dependency `min_version` into a [`semver::VersionReq`].
-///
-/// **The single definition** of the min-version semantics, used by both the
-/// manifest shape-validation (which rejects a malformed requirement at load) and
-/// the graph resolver (which checks satisfiability against the installed set).
-///
-/// A bare version is a **minimum**, not a caret range:
-/// `"1.2.0"` → `">=1.2.0"` (so an installed `2.0.0` satisfies it). This differs
-/// from [`semver::VersionReq::parse`], whose bare form means `^1.2.0` and would
-/// reject `2.0.0`. Anything that is not a bare version (`"^1.2"`, `">=1.0, <2"`,
-/// `"*"`) is passed through to `VersionReq` verbatim.
-pub fn parse_min_version(raw: &str) -> Result<semver::VersionReq, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err("min_version must not be empty".to_string());
-    }
-    // A bare, fully-qualified version means ">= that version".
-    if let Ok(v) = semver::Version::parse(trimmed) {
-        return semver::VersionReq::parse(&format!(">={v}"))
-            .map_err(|e| format!("invalid min_version '{raw}': {e}"));
-    }
-    // Otherwise it is comparator syntax — honour it as written.
-    semver::VersionReq::parse(trimmed).map_err(|e| format!("invalid min_version '{raw}': {e}"))
-}
-
-/// The trust/distribution tier of a plugin.
-///
-/// - [`PluginTier::Core`] — a first-party, default-on plugin shipped with Ryu
-///   (ghost/shadow/headroom/engines/sandbox/…). Seeded enabled at startup.
-/// - [`PluginTier::Community`] — a third-party / user-installed plugin. Always
-///   install-then-enable opt-in; never auto-enabled.
-///
-/// Tier is **derived from membership** (see [`crate::plugins::builtins`]), not a
-/// field a manifest can self-assert — a plugin cannot promote itself to Core.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PluginTier {
-    /// First-party, default-on.
-    Core,
-    /// Third-party / user-installed, opt-in.
-    Community,
-}
-
-impl PluginTier {
-    /// Stable lowercase identifier for the tier (for the `GET /api/plugins` JSON).
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            PluginTier::Core => "core",
-            PluginTier::Community => "community",
-        }
-    }
-}
+use schema::validate_runnable;
+
+// The `plugin.json` data model + validation (PluginManifest, Surface, Requires,
+// the per-kind schema types, validate_plugin_id, parse_min_version, …) now has a
+// single definition in the `ryu-kernel-contracts` crate. Re-export the whole
+// surface so every `crate::plugin_manifest::<Type>` call site (hundreds of them)
+// resolves unchanged. Only Core-specific, I/O-bearing pieces stay below: the
+// `PluginManifestLoader`, `core_version`, the built-in fixtures, and UI consts.
+pub use ryu_kernel_contracts::manifest::*;
 
 /// The running Core version, as a parsed [`semver::Version`]. Authoritative
 /// source for the `engines.ryu` version-pin gate. Derived from the crate version
@@ -822,6 +145,24 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // registered here so those hot paths (esp. per tool call) stay lookup-free
     // until a user installs a plugin that actually uses them.
     include_str!("fixtures/hook-session-context.plugin.json"),
+    // RAG capability: the default in-process embeddings+retrieval provider. Declares
+    // `provides: [rag]` + `requires: [engines]` so the capability graph resolves
+    // rag→engines for real (disable-safety: engines can't be disabled out from under
+    // an enabled rag). A GraphRAG/third-party provider app can bind `rag` to swap it.
+    include_str!("fixtures/rag.plugin.json"),
+    // Mail (Agent Inboxes): a built-in app whose out-of-process `ryu-mail` sidecar
+    // Core spawns (local sibling binary) and proxies `/api/mail/*` to via the
+    // generic ext-proxy `public_mount` mechanism — the acceptance test proving the
+    // generic loader replaces the retired hand-coded `sidecar/mail.rs`. Default-on,
+    // so the externally-committed inbound-webhook URL resolves out of the box.
+    include_str!("fixtures/mail.plugin.json"),
+    // Browser (W9): a real-Chromium Electron browser Core runs as a `local` sidecar
+    // and exposes as the grant-gated `browser.control` capability (list/open/navigate
+    // tabs, screenshot, read titles, privileged JS eval). OPT-IN — deliberately NOT in
+    // `CORE_DEFAULT_ON`, so it stays a catalog install and the sidecar (an Electron
+    // GUI app) never spawns unless a user enables it. `lazy` + idle-stop keep it cold
+    // until the desktop Browser panel first calls it through the ext-proxy.
+    include_str!("fixtures/browser.plugin.json"),
     // Ryu Apps (widget-rendering in-process apps). Each declares its tool
     // runnables + `contributes.widgets[]`; apps that push a follow-up turn also
     // declare the `chat.sendFollowUp` grant (governance §4.2). Default-on Core.
@@ -849,9 +190,10 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // The Fine-tuning app — a full-page Companion (`ui_format:"html"`, Path B) that
     // drives Core's fine-tune orchestration + durable job store via the
     // `finetune:runs` bridge and OWNS its Unsloth training sidecar (a
-    // manifest-declared Python process, `sidecar:process`). Ships default-on with a
-    // UI bundle + those grants seeded in `main.rs`. Replaces the built-in
-    // fine-tuning page.
+    // manifest-declared Python process spawned on the Core-tier auto-run path, so it
+    // declares no `sidecar:process` grant — the Gateway denies that grant at enable).
+    // Ships default-on with a UI bundle + those grants seeded in `main.rs`. Replaces
+    // the built-in fine-tuning page.
     include_str!("fixtures/finetune.plugin.json"),
     // Spaces + Meetings — the first REAL plugin→plugin dependency edge.
     //
@@ -870,6 +212,111 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // would leave that write path pointing at a disabled capability, which is
     // exactly what `plugins::graph` now refuses.
     include_str!("fixtures/meetings.plugin.json"),
+    // Five clean LEAF features turned into governance-shell Apps (toggle via the
+    // plugin lifecycle + physically compile-out-able for a lean kernel). Each gates
+    // its own `/api/<feature>/*` route surface via `require_app_enabled`; the impl
+    // stays in-crate. All five are default-on (see `plugins::builtins`) so the gate
+    // is transparent on a fresh install — the routes were always-on before, so only
+    // a default-on seed keeps them reachable (identical to the Meetings/Spaces edge).
+    //
+    // `research`/`dashboards`/`teams` declare NO `requires`. `clips` requires the
+    // `shadow` capture app (it is a Core→Shadow proxy) and `recipes` requires the
+    // `ghost` automation app (Ghost owns the RecipeStore) — both real, satisfiable
+    // edges (shadow/ghost are default-on), so the graph refuses to disable the
+    // dependency out from under them.
+    include_str!("fixtures/research.plugin.json"),
+    include_str!("fixtures/dashboards.plugin.json"),
+    include_str!("fixtures/teams.plugin.json"),
+    include_str!("fixtures/clips.plugin.json"),
+    include_str!("fixtures/recipes.plugin.json"),
+    // Wave-2: five more leaf features turned into governance-shell Apps (toggle via
+    // the plugin lifecycle + route gate; impl stays in-crate). All default-on so the
+    // gate is transparent on a fresh install (the routes were always-on before).
+    //
+    // `quests`/`approvals`/`skills` declare NO `requires`. `learning` requires the
+    // `skills` app (it writes synthesized skills) and `healing` requires the
+    // `approvals` app (it delivers proposed fixes into that inbox) — both real,
+    // satisfiable edges (skills/approvals are default-on), so the graph refuses to
+    // disable the dependency out from under them.
+    //
+    // These manifests are registered UNCONDITIONALLY (no cfg). Only `healing`'s HTTP
+    // surface compiles out behind the `healing` cargo feature; its manifest + id must
+    // always be present so the default-on seed never references a missing manifest —
+    // exactly like `research`/clips/recipes (feature-gated module, always-on fixture).
+    include_str!("fixtures/quests.plugin.json"),
+    include_str!("fixtures/approvals.plugin.json"),
+    include_str!("fixtures/skills.plugin.json"),
+    include_str!("fixtures/learning.plugin.json"),
+    include_str!("fixtures/healing.plugin.json"),
+    // Wave-3: two more leaf features turned into governance-shell Apps (toggle via
+    // the plugin lifecycle + route gate; impl stays in-crate). Both default-on so the
+    // gate is transparent on a fresh install (the routes were always-on before).
+    //
+    // Both declare NO `requires`. `monitors` gates ONLY its `/api/monitors/*` route
+    // surface (the interleaved `/api/activity/*`, `/api/events/*`, and
+    // `/api/notifications/*` streams are separate concerns and stay ungated).
+    // `hardware` gates ONLY the PROTECTED `/api/hardware/devices*` device-registry
+    // CRUD; the PUBLIC device channel (`/api/hardware/{ws,pair,display}`) stays ungated
+    // because physical ESP32 devices connect there and gating it would break pairing.
+    include_str!("fixtures/monitors.plugin.json"),
+    include_str!("fixtures/hardware.plugin.json"),
+    // Wave-4: two more leaf features turned into governance-shell Apps (toggle via
+    // the plugin lifecycle + route gate; impl stays in-crate). Both default-on so the
+    // gate is transparent on a fresh install (the routes were always-on before).
+    //
+    // Both declare NO `requires`. `workflows` gates ONLY the PROTECTED workflow
+    // surface (`/workflows/*` DAG CRUD + `/api/workflows/catalog/*` templates); the
+    // PUBLIC per-workflow webhook (`/api/workflows/:id/webhook`) stays on the public
+    // router, ungated, so external systems can POST triggers regardless of the app's
+    // enabled bit. Neither is behind a cargo feature — the workflow executor is used
+    // by the scheduler/durable/healing/approvals and must always compile.
+    //
+    // `agents` gates ONLY the `/api/agents/*` catalog/CRUD surface and is additionally
+    // LOAD-BEARING (see `plugins::builtins::LOAD_BEARING_PLUGINS`): the composer fetches
+    // the agent list on boot, so a disabled Agents app would break chat. The ACP
+    // routing/execution substrate that serves a chat turn is kernel and stays untouched.
+    include_str!("fixtures/workflows.plugin.json"),
+    include_str!("fixtures/agents.plugin.json"),
+    // W0 honest-gating baseline: three data-path governance shells whose
+    // `/api/{voice,images+video+gifs,memory}/*` routes were mounted RAW before this
+    // wave. Each gates its own protected route surface via `require_app_enabled`; the
+    // impl stays in-crate (no cargo feature). All three default-on (see
+    // `plugins::builtins`) so the gate is transparent on a fresh install.
+    //
+    // `voice` gates ONLY the protected voice data path; the PUBLIC realtime voice WS
+    // (`/api/voice/ws`) stays on the public router (browser WS, auth-in-handler).
+    // `media` gates ONLY the generative producers; the shared no-cloud blob store
+    // (`/api/media/:file` + `/api/media/upload`) stays ungated kernel storage (it also
+    // serves TTS audio + chat uploads). `memory` gates ONLY the HTTP CRUD surface; the
+    // in-process chat auto-recall path is kernel. None declares `requires`.
+    include_str!("fixtures/voice.plugin.json"),
+    include_str!("fixtures/media.plugin.json"),
+    include_str!("fixtures/memory.plugin.json"),
+    // W7 frontend extraction: the webhooks page moved to a sandboxed companion app
+    // (`apps-store/webhooks/ui`). Default-on, no `requires` — its `/api/webhooks` +
+    // `/api/webhook-ingress/status` reads stay ungated on the main router (the host
+    // calls them directly, monitors pattern), so this manifest exists only to seed
+    // the companion's UI bundle + `webhooks:crud` grant, not to gate a route surface.
+    include_str!("fixtures/webhooks.plugin.json"),
+    // W7 frontend extraction: the activity-feed page moved to a sandboxed companion
+    // app (`apps-store/activity/ui`). Default-on, no `requires` — its read-only
+    // `/api/activity` stays ungated on the main router (the host calls it directly,
+    // monitors pattern), so this manifest exists only to seed the companion's UI
+    // bundle + `activity:read` grant, not to gate a route surface.
+    include_str!("fixtures/activity.plugin.json"),
+    // W7 frontend extraction: the timeline page moved to a sandboxed companion app
+    // (`apps-store/timeline/ui`). Default-on, no `requires` — Shadow's device-local
+    // `/timeline` + `/journal` + `/frame` live on the Shadow sidecar (:3030), not the
+    // Core router, and the desktop host calls them directly (monitors pattern), so this
+    // manifest exists only to seed the companion's UI bundle + `timeline:read` grant,
+    // not to gate a route surface.
+    include_str!("fixtures/timeline.plugin.json"),
+    // W7 frontend extraction: the SKILL.md authoring editor moved to a sandboxed
+    // companion app (`apps-store/skill-editor/ui`). Default-on, no `requires` — the
+    // `/api/skills` authoring endpoints stay ungated on the Core router (the desktop host
+    // calls them directly, monitors pattern), so this manifest exists only to seed the
+    // companion's UI bundle + `skills:crud` grant, not to gate a route surface.
+    include_str!("fixtures/skill-editor.plugin.json"),
 ];
 
 /// The Canvas app's plugin id (its Space documents are `kind = app:<this>`). Shared
@@ -908,6 +355,122 @@ pub const FINETUNE_PLUGIN_ID: &str = "com.ryu.finetune";
 /// packages/finetune-app build` and copy `dist/index.html` to
 /// `fixtures/finetune.ui.html` to refresh it.
 pub const FINETUNE_UI_HTML: &str = include_str!("fixtures/finetune.ui.html");
+
+/// The Monitors app's prebuilt, self-contained UI bundle (a
+/// `vite-plugin-singlefile` build of `packages/monitors-app`, all JS/CSS inlined).
+/// Seeded as the plugin's `ui_code` on a fresh install so the default-on companion
+/// has a UI without going through `ryu pack`. Rebuild with `bun run --cwd
+/// packages/monitors-app build` and copy `dist/index.html` to
+/// `fixtures/monitors.ui.html` to refresh it.
+pub const MONITORS_UI_HTML: &str = include_str!("fixtures/monitors.ui.html");
+
+/// The Workflows app's plugin id (its sandboxed companion drives Core's DAG
+/// workflow engine + ghost record→replay). Re-exported from `plugins::builtins`
+/// so the seed table and desktop route flow share one definition.
+pub const WORKFLOWS_PLUGIN_ID: &str = crate::plugins::builtins::WORKFLOWS_PLUGIN_ID;
+
+/// The Workflows app's prebuilt, self-contained UI bundle (a
+/// `vite-plugin-singlefile` build of `packages/workflows-app`, React Flow + all
+/// JS/CSS inlined). Seeded as the plugin's `ui_code` on a fresh install so the
+/// default-on companion has a UI without going through `ryu pack`. Rebuild with
+/// `bun run --cwd packages/workflows-app build` and copy `dist/index.html` to
+/// `fixtures/workflows.ui.html` to refresh it.
+pub const WORKFLOWS_UI_HTML: &str = include_str!("fixtures/workflows.ui.html");
+
+/// The Webhooks app's prebuilt, self-contained UI bundle (a `vite-plugin-singlefile`
+/// build of `apps-store/webhooks/ui`, all JS/CSS — incl. the tree-shaken `@ryu/ui`
+/// components — inlined). Seeded as the plugin's `ui_code` on a fresh install so the
+/// default-on companion has a UI without going through `ryu pack`. Rebuild with
+/// `bun run --cwd apps-store/webhooks/ui build` (or `scripts/sync-app-fixtures.sh
+/// webhooks`) and copy `dist/index.html` to `fixtures/webhooks.ui.html` to refresh it.
+pub const WEBHOOKS_UI_HTML: &str = include_str!("fixtures/webhooks.ui.html");
+
+/// The Quests app's prebuilt, self-contained UI bundle (a `vite-plugin-singlefile`
+/// build of `apps-store/quests/ui`, all JS/CSS — incl. the tree-shaken `@ryu/ui`
+/// components — inlined). Seeded as the plugin's `ui_code` on a fresh install so the
+/// default-on companion has a UI without going through `ryu pack`. Rebuild with
+/// `bun run --cwd apps-store/quests/ui build` (or `scripts/sync-app-fixtures.sh
+/// quests`) and copy `dist/index.html` to `fixtures/quests.ui.html` to refresh it.
+pub const QUESTS_UI_HTML: &str = include_str!("fixtures/quests.ui.html");
+
+/// The Activity app's prebuilt, self-contained UI bundle (a `vite-plugin-singlefile`
+/// build of `apps-store/activity/ui`, all JS/CSS — incl. the tree-shaken `@ryu/ui`
+/// components — inlined). Seeded as the plugin's `ui_code` on a fresh install so the
+/// default-on companion has a UI without going through `ryu pack`. Rebuild with
+/// `bun run --cwd apps-store/activity/ui build` (or `scripts/sync-app-fixtures.sh
+/// activity`) and copy `dist/index.html` to `fixtures/activity.ui.html` to refresh it.
+pub const ACTIVITY_UI_HTML: &str = include_str!("fixtures/activity.ui.html");
+
+/// The Timeline app's prebuilt, self-contained UI bundle (a `vite-plugin-singlefile`
+/// build of `apps-store/timeline/ui`, all JS/CSS — incl. the tree-shaken `@ryu/ui`
+/// components — inlined). Seeded as the plugin's `ui_code` on a fresh install so the
+/// default-on companion has a UI without going through `ryu pack`. Rebuild with
+/// `bun run --cwd apps-store/timeline/ui build` (or `scripts/sync-app-fixtures.sh
+/// timeline`) and copy `dist/index.html` to `fixtures/timeline.ui.html` to refresh it.
+pub const TIMELINE_UI_HTML: &str = include_str!("fixtures/timeline.ui.html");
+
+/// The Skill Editor app's prebuilt, self-contained UI bundle (a `vite-plugin-singlefile`
+/// build of `apps-store/skill-editor/ui`, all JS/CSS — incl. the tree-shaken `@ryu/ui`
+/// components — inlined). Seeded as the plugin's `ui_code` on a fresh install so the
+/// default-on companion has a UI without going through `ryu pack`. Rebuild with
+/// `bun run --cwd apps-store/skill-editor/ui build` (or `scripts/sync-app-fixtures.sh
+/// skill-editor`) and copy `dist/index.html` to `fixtures/skill-editor.ui.html` to
+/// refresh it.
+pub const SKILL_EDITOR_UI_HTML: &str =
+    include_str!("fixtures/skill-editor.ui.html");
+
+/// The Mail (Agent Inboxes) app's prebuilt, self-contained UI bundle (a
+/// `vite-plugin-singlefile` build of `apps-store/mail/ui`, all JS/CSS — incl. the
+/// tree-shaken `@ryu/ui` components — inlined). Seeded as the plugin's `ui_code`
+/// onto a DISABLED record so enabling the opt-in `com.ryu.mail` app (from the store)
+/// mounts the sandboxed companion. Rebuild with `bun run --cwd apps-store/mail/ui
+/// build` (or `scripts/sync-app-fixtures.sh mail`) and copy `dist/index.html` to
+/// `fixtures/mail.ui.html` to refresh it.
+pub const MAIL_UI_HTML: &str = include_str!("fixtures/mail.ui.html");
+
+/// The Calendar app's prebuilt, self-contained UI bundle (a
+/// `vite-plugin-singlefile` build of `apps-store/calendar/ui`, all JS/CSS — incl.
+/// the tree-shaken `@ryu/ui` components — inlined). Seeded as the plugin's `ui_code`
+/// (default-on companion) so the `/calendar` route mounts the sandboxed companion.
+/// Rebuild with `bun run --cwd apps-store/calendar/ui build` (or
+/// `scripts/sync-app-fixtures.sh calendar`) and copy `dist/index.html` to
+/// `fixtures/calendar.ui.html` to refresh it.
+pub const CALENDAR_UI_HTML: &str = include_str!("fixtures/calendar.ui.html");
+
+/// The Learning app's prebuilt, self-contained UI bundle (a `vite-plugin-singlefile`
+/// build of `apps-store/learning/ui`, all JS/CSS — incl. the tree-shaken `@ryu/ui`
+/// components — inlined). Seeded as the plugin's `ui_code` (default-on companion) so
+/// the `/learning` route mounts the sandboxed companion. The `com.ryu.learning`
+/// manifest was a wave-2 route-gate governance shell (gating `/api/learn/*` +
+/// `/api/experience/*`); the W7 frontend extraction upgrades it in place to ALSO
+/// carry the companion runnable. Rebuild with `bun run --cwd apps-store/learning/ui
+/// build` (or `scripts/sync-app-fixtures.sh learning`) and copy `dist/index.html` to
+/// `fixtures/learning.ui.html` to refresh it.
+pub const LEARNING_UI_HTML: &str = include_str!("fixtures/learning.ui.html");
+
+/// The Meetings app's prebuilt, self-contained UI bundle (a `vite-plugin-singlefile`
+/// build of `apps-store/meetings/ui`, all JS/CSS — incl. the tree-shaken `@ryu/ui`
+/// components — inlined). Seeded as the plugin's `ui_code` (default-on companion) so
+/// the `/meetings` + `/meetings/:id` routes mount the sandboxed companion (record →
+/// live transcript → AI notes + audio import). The `com.ryu.meetings` manifest was a
+/// wave-2 route-gate governance shell (gating `/api/meetings/*`) that `requires` the
+/// `spaces` app; the W7 frontend extraction upgrades it in place to ALSO carry the
+/// companion runnable. Rebuild with `bun run --cwd apps-store/meetings/ui build` (or
+/// `scripts/sync-app-fixtures.sh meetings`) and copy `dist/index.html` to
+/// `fixtures/meetings.ui.html` to refresh it.
+pub const MEETINGS_UI_HTML: &str = include_str!("fixtures/meetings.ui.html");
+
+/// The Inbox (Approvals) app's prebuilt, self-contained UI bundle (a
+/// `vite-plugin-singlefile` build of `apps-store/approvals/ui`, all JS/CSS — incl. the
+/// tree-shaken `@ryu/ui` components — inlined). Seeded as the plugin's `ui_code`
+/// (default-on companion) so the `/inbox` + `/approvals` routes mount the sandboxed
+/// companion. The `com.ryu.approvals` manifest was a wave-2 gate-only governance shell
+/// (gating `/api/approvals/*`); the W7 frontend extraction upgrades it in place to ALSO
+/// carry the companion runnable — the unified Inbox page (approvals + notifications +
+/// quest check-offs + Shadow suggestions). Rebuild with
+/// `bun run --cwd apps-store/approvals/ui build` (or `scripts/sync-app-fixtures.sh
+/// approvals`) and copy `dist/index.html` to `fixtures/approvals.ui.html` to refresh it.
+pub const APPROVALS_UI_HTML: &str = include_str!("fixtures/approvals.ui.html");
 
 /// Loader that merges built-in manifests with user-installed ones from
 /// `~/.ryu/plugins/*/plugin.json` (the path is overridable via `RYU_PLUGINS_DIR`,
@@ -1014,12 +577,11 @@ impl PluginManifestLoader {
 
     /// Parse ONLY the compiled-in built-in manifests, ignoring `~/.ryu/plugins`.
     ///
-    /// Test-only. [`Self::load`] scans the real user plugins directory, so a test
-    /// that asserts something about "the built-ins" via `load()` would also be
-    /// asserting it about whatever the developer happens to have installed
-    /// locally — a spurious failure waiting to happen. This keeps built-in
-    /// assertions hermetic.
-    #[cfg(test)]
+    /// Parse ONLY the compiled-in built-in manifests, synchronously and with no disk
+    /// scan (unlike [`Self::load`], which also reads the user plugins directory). Two
+    /// callers: hermetic built-in tests (a `load()`-based assertion would also depend
+    /// on whatever the developer has installed locally), and router-build-time
+    /// public-mount registration (which is built-in-only by design and must be sync).
     pub(crate) fn load_builtins() -> Vec<PluginManifest> {
         let mut seen_ids: HashSet<String> = HashSet::new();
         BUILTIN_MANIFESTS
@@ -1174,6 +736,7 @@ impl PluginManifestLoader {
 mod tests {
     use super::schema::validate_runnable;
     use super::*;
+    use crate::runnable::RunnableKind;
 
     const SAMPLE_JSON: &str = include_str!("fixtures/sample.plugin.json");
 
@@ -1182,14 +745,14 @@ mod tests {
     const MULTI_KIND_JSON: &str = include_str!("../../tests/manifest_fixtures/multi_kind.ryu.json");
 
     /// The three companion apps exist as TWO copies of one manifest: the package
-    /// source (`packages/<x>-app/plugin.json`, what the app team edits) and the
+    /// source (`apps-store/<x>/ui/plugin.json`, what the app team edits) and the
     /// fixture Core actually compiles in via `include_str!`
     /// (`src/plugin_manifest/fixtures/<x>.plugin.json`). Editing only the package
     /// copy is a **dead edit** — Core never reads it — and silently diverges the
     /// two. This test is the guard: the pair must stay byte-identical.
     ///
-    /// Read at runtime (not `include_str!`) and skipped when `packages/` is absent,
-    /// so the OSS Core mirror — which ships `apps/core` without `packages/` — still
+    /// Read at runtime (not `include_str!`) and skipped when `apps-store/` is absent,
+    /// so the OSS Core mirror — which ships `apps/core` without `apps-store/` — still
     /// builds and tests green.
     #[test]
     fn companion_fixtures_match_their_package_manifests() {
@@ -1197,12 +760,29 @@ mod tests {
         let repo_root = core.join("..").join("..");
         let mut checked = 0;
 
-        for (pkg, fixture) in [
-            ("canvas-app", "canvas.plugin.json"),
-            ("whiteboard-app", "whiteboard.plugin.json"),
-            ("finetune-app", "finetune.plugin.json"),
+        for (app, fixture) in [
+            ("canvas", "canvas.plugin.json"),
+            ("whiteboard", "whiteboard.plugin.json"),
+            ("finetune", "finetune.plugin.json"),
+            ("workflows", "workflows.plugin.json"),
+            ("monitors", "monitors.plugin.json"),
+            ("webhooks", "webhooks.plugin.json"),
+            ("quests", "quests.plugin.json"),
+            ("activity", "activity.plugin.json"),
+            ("mail", "mail.plugin.json"),
+            ("browser", "browser.plugin.json"),
+            ("calendar", "calendar.plugin.json"),
+            ("learning", "learning.plugin.json"),
+            ("approvals", "approvals.plugin.json"),
+            ("timeline", "timeline.plugin.json"),
+            ("meetings", "meetings.plugin.json"),
+            ("skill-editor", "skill-editor.plugin.json"),
         ] {
-            let pkg_path = repo_root.join("packages").join(pkg).join("plugin.json");
+            let pkg_path = repo_root
+                .join("apps-store")
+                .join(app)
+                .join("ui")
+                .join("plugin.json");
             let Ok(pkg_json) = std::fs::read_to_string(&pkg_path) else {
                 // OSS mirror (no `packages/`) — nothing to compare against.
                 continue;
@@ -1227,9 +807,54 @@ mod tests {
         }
 
         assert!(
-            checked == 0 || checked == 3,
-            "expected all three companion manifests (or none, on the OSS mirror), found {checked}"
+            checked == 0 || checked == 16,
+            "expected all sixteen companion manifests (or none, on the OSS mirror), found {checked}"
         );
+    }
+
+    /// Each companion app's UI is embedded at compile time via `include_str!`
+    /// (the `*_UI_HTML` consts) and seeded as the plugin's `ui_code`. A truncated
+    /// or emptied fixture would still compile but ship a broken companion, so this
+    /// asserts every bundle is present and non-trivially sized. It is deliberately
+    /// **size-only, not byte-identity**: the bundles are `vite`/`esbuild` output,
+    /// which is not guaranteed byte-stable across build hosts, so a byte-identity
+    /// check on a built asset (whiteboard is ~7.7 MB) would be flaky. The refresh
+    /// path is `scripts/sync-app-fixtures.sh`; the `*.plugin.json` manifests (hand
+    /// authored) keep their byte-identity guard in
+    /// `companion_fixtures_match_their_package_manifests`.
+    #[test]
+    fn companion_ui_fixtures_exist_and_are_nontrivial() {
+        // A real inlined single-file app bundle is always far larger than this;
+        // the floor only catches an emptied/truncated fixture.
+        const MIN_BYTES: usize = 10_000;
+
+        for (name, html) in [
+            ("canvas", CANVAS_UI_HTML),
+            ("whiteboard", WHITEBOARD_UI_HTML),
+            ("finetune", FINETUNE_UI_HTML),
+            ("monitors", MONITORS_UI_HTML),
+            ("workflows", WORKFLOWS_UI_HTML),
+            ("webhooks", WEBHOOKS_UI_HTML),
+            ("quests", QUESTS_UI_HTML),
+            ("activity", ACTIVITY_UI_HTML),
+            ("mail", MAIL_UI_HTML),
+            ("calendar", CALENDAR_UI_HTML),
+            ("learning", LEARNING_UI_HTML),
+            ("approvals", APPROVALS_UI_HTML),
+            ("timeline", TIMELINE_UI_HTML),
+            ("meetings", MEETINGS_UI_HTML),
+        ] {
+            assert!(
+                html.len() >= MIN_BYTES,
+                "{name}.ui.html is only {} bytes (< {MIN_BYTES}) — likely truncated or empty; \
+                 rebuild with scripts/sync-app-fixtures.sh",
+                html.len()
+            );
+            assert!(
+                html.contains('<'),
+                "{name}.ui.html does not look like HTML"
+            );
+        }
     }
 
     #[test]

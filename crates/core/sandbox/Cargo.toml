@@ -1,0 +1,36 @@
+[package]
+name = "ryu-sandbox"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Sandbox execution primitive for Ryu: `run(command|wasm, spec) -> output` behind a swappable backend seam. The in-process wasmtime/WASI ephemeral sandbox is the default; command backends (docker, microsandbox, opensandbox) and the remote Daytona REST backend are detect-gated swaps selected by name via `select_backend`. Also owns the long-lived-workspace session path and the per-run metering heartbeat (kill-isolation + Gateway `sandbox/tick` debit). An extracted Core capability crate — in-process by default, consumed as a NON-optional path dependency (Core's sidecar/session/eval-code data paths reach it unconditionally). Host couplings the crate cannot own (the Gateway url/bearer for metering, the ryu-dir for the persisted default-backend selection, the registered org id, and the preferences-backed default run budget) are injected via the narrow global `SandboxHost` seam, so the crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The unified permission grammar (PermissionSet) this crate lowers into
+# SandboxCapabilities. A leaf contract crate (serde/schemars/semver only) so
+# there is no dependency cycle, and it carries ZERO dependency on apps/core.
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.5" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
+reqwest = { version = "0.12", features = ["json"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+# Optional: wasmtime sandbox backend (feature sandbox-wasmtime). Matches the
+# versions Core used before this crate owned the backend; off by default to keep
+# `cargo test`/CI lean (spike 0188), enabled by the shipped dev/release binaries.
+wasmtime = { version = "45", optional = true }
+wasmtime-wasi = { version = "45", features = ["p1", "p2"], optional = true }
+
+[features]
+# The default WASM sandbox backend. Off in `default` on purpose (keep
+# `cargo test`/CI lean); Core forwards its own `sandbox-wasmtime` feature here.
+sandbox-wasmtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }

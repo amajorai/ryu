@@ -64,10 +64,12 @@ pub struct SeedSpec {
 /// really does write Space documents, so its approved grants must match the
 /// `permission_grants` its manifest declares — otherwise the record would claim
 /// less than the app does.
-fn seed_overrides() -> [SeedSpec; 4] {
+fn seed_overrides() -> [SeedSpec; 14] {
     use crate::plugin_manifest::{
-        CANVAS_PLUGIN_ID, CANVAS_UI_HTML, FINETUNE_PLUGIN_ID, FINETUNE_UI_HTML,
-        WHITEBOARD_PLUGIN_ID, WHITEBOARD_UI_HTML,
+        ACTIVITY_UI_HTML, APPROVALS_UI_HTML, CALENDAR_UI_HTML, CANVAS_PLUGIN_ID, CANVAS_UI_HTML,
+        FINETUNE_PLUGIN_ID, FINETUNE_UI_HTML, LEARNING_UI_HTML, MEETINGS_UI_HTML, MONITORS_UI_HTML,
+        QUESTS_UI_HTML, SKILL_EDITOR_UI_HTML, TIMELINE_UI_HTML, WEBHOOKS_UI_HTML,
+        WHITEBOARD_PLUGIN_ID, WHITEBOARD_UI_HTML, WORKFLOWS_UI_HTML,
     };
     [
         SeedSpec {
@@ -91,16 +93,149 @@ fn seed_overrides() -> [SeedSpec; 4] {
         },
         SeedSpec {
             id: FINETUNE_PLUGIN_ID,
-            // Core's fine-tune orchestration + its declared Unsloth training sidecar.
-            grants: &["finetune:runs", "sidecar:process"],
+            // Core's fine-tune orchestration. Its Unsloth training sidecar spawns on the
+            // Core-tier auto-run path (`may_run_sidecar` is unconditional for Core), so it
+            // must NOT declare `sidecar:process` — the Gateway validates + denies that
+            // grant at enable (same fix as mail, commit 9faf67be). Grants mirror the
+            // manifest's `permission_grants` exactly.
+            grants: &["finetune:runs"],
             ui_code: Some(FINETUNE_UI_HTML),
         },
         SeedSpec {
             id: crate::plugins::builtins::MEETINGS_PLUGIN_ID,
-            // It saves finalized notes into the "Meetings" Space. No UI bundle: the
-            // Meetings screens are native desktop pages, not a sandboxed frame.
-            grants: &["spaces:docs"],
-            ui_code: None,
+            // It saves finalized notes into the "Meetings" Space (`spaces:docs`). Its
+            // sandboxed frame ALSO drives Core's `/api/meetings/*` orchestration (list/
+            // transcript + start/finalize/delete/rename + audio import) via the
+            // `meetings:crud` bridge capability (host-direct, monitors pattern). `com.ryu
+            // .meetings` was a wave-2 route-gate governance shell (gating `/api/meetings/*`)
+            // that `requires` the `spaces` app; the W7 frontend extraction upgrades it in
+            // place to ALSO carry the companion runnable + ship a prebuilt UI bundle.
+            // Core-tier, so it must NOT declare `sidecar:process` (the Gateway denies that
+            // grant at enable).
+            grants: &["spaces:docs", "meetings:crud"],
+            ui_code: Some(MEETINGS_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::MONITORS_PLUGIN_ID,
+            // Its sandboxed frame drives Core's `/api/monitors/*` orchestration via
+            // the `monitors:crud` bridge capability. Ships a prebuilt companion UI.
+            grants: &["monitors:crud"],
+            ui_code: Some(MONITORS_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::WORKFLOWS_PLUGIN_ID,
+            // Its sandboxed frame drives Core's DAG workflow engine (CRUD + versions +
+            // run/run-state/resume), the workflow-template catalog, node-config catalog
+            // reads (agents/apps/mcp/skills/recipes/schedules/composio), and ghost
+            // record→replay — via the workflows:crud/runstate/catalogs + ghost:record
+            // bridge capabilities. Ships a prebuilt companion UI. Like the other
+            // Core-tier companions it must NOT declare `sidecar:process` (the Gateway
+            // denies that grant at enable; Core auto-runs any sidecar).
+            grants: &[
+                "workflows:crud",
+                "workflows:runstate",
+                "workflows:catalogs",
+                "ghost:record",
+            ],
+            ui_code: Some(WORKFLOWS_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::WEBHOOKS_PLUGIN_ID,
+            // Its sandboxed frame renders Core's read-only webhook endpoint registry
+            // (`/api/webhooks` + `/api/webhook-ingress/status`) via the `webhooks:crud`
+            // bridge capability (host-direct, monitors pattern). Ships a prebuilt
+            // companion UI. Core-tier, so it must NOT declare `sidecar:process`.
+            grants: &["webhooks:crud"],
+            ui_code: Some(WEBHOOKS_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::QUESTS_PLUGIN_ID,
+            // Its sandboxed frame drives Core's `/api/quests/*` auto-detecting-todo
+            // orchestration (list/create/update/delete + complete/dismiss + suggestion
+            // accept/dismiss + judge) via the `quests:crud` bridge capability (host-direct,
+            // monitors pattern). Ships a prebuilt companion UI. Core-tier, so it must NOT
+            // declare `sidecar:process` (the Gateway denies that grant at enable).
+            grants: &["quests:crud"],
+            ui_code: Some(QUESTS_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::ACTIVITY_PLUGIN_ID,
+            // Its sandboxed frame renders Core's read-only unified activity feed
+            // (`GET /api/activity`) via the `activity:read` bridge capability (host-direct,
+            // monitors pattern). Ships a prebuilt companion UI. Core-tier, so it must NOT
+            // declare `sidecar:process` (the Gateway denies that grant at enable).
+            grants: &["activity:read"],
+            ui_code: Some(ACTIVITY_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::CALENDAR_PLUGIN_ID,
+            // Its sandboxed frame renders the scheduled-runs calendar (agent/workflow
+            // jobs projected onto Month/Week/Day/Agenda) and schedules an agent, via the
+            // `calendar:crud` bridge capability (host-direct, monitors pattern): the host
+            // calls the existing `/heartbeat/jobs` + `/workflows` + `/api/agents` reads +
+            // the `createScheduledAgentWorkflow` composite. Ships a prebuilt companion UI.
+            // Core-tier, so it must NOT declare `sidecar:process` (the Gateway denies that
+            // grant at enable).
+            grants: &["calendar:crud"],
+            ui_code: Some(CALENDAR_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::LEARNING_PLUGIN_ID,
+            // Its sandboxed frame renders the read-only continual-learning surface
+            // (the two opt-in levels + models, the experience buffer, and the read-only
+            // self-healing attempt history) via the `learning:crud` bridge capability
+            // (host-direct, monitors pattern): the host calls the existing
+            // `/api/learn/config` + `/api/experience/list` + `/api/healing/status`
+            // reads. Ships a prebuilt companion UI. `com.ryu.learning` was a wave-2
+            // route-gate governance shell (gating `/api/learn/*` + `/api/experience/*`)
+            // that `requires` the `skills` app; the W7 frontend extraction upgrades it
+            // in place to ALSO carry the companion runnable — the `requires` edge stays
+            // (skills is default-on, so `seed_order` seeds it first). Core-tier, so it
+            // must NOT declare `sidecar:process` (the Gateway denies that grant at
+            // enable).
+            grants: &["learning:crud"],
+            ui_code: Some(LEARNING_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::APPROVALS_PLUGIN_ID,
+            // Its sandboxed frame renders the unified Inbox — pending HITL approvals
+            // (approve/reject), the per-user notification feed (read + the workflow-resume
+            // ack gate), the quest task check-offs, and Shadow's proactive suggestions —
+            // via the `approvals:crud` bridge capability (host-direct, monitors pattern):
+            // the host calls the existing `/api/approvals/*`, `/api/notifications/*`
+            // (host-resolved user id), and Shadow's `/proactive` + `/api/feedback`. The
+            // quest section reuses the `quests:crud` verbs, so the app declares BOTH
+            // grants. Ships a prebuilt companion UI. `com.ryu.approvals` was a wave-2
+            // gate-only governance shell (gating `/api/approvals/*`); the W7 frontend
+            // extraction upgrades it in place to ALSO carry the companion runnable.
+            // Core-tier, so it must NOT declare `sidecar:process` (the Gateway denies that
+            // grant at enable).
+            grants: &["approvals:crud", "quests:crud"],
+            ui_code: Some(APPROVALS_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::TIMELINE_PLUGIN_ID,
+            // Its sandboxed frame renders the CapCut-style activity replay scrubber
+            // (Shadow's captured lanes + keyframe preview + Dayflow work journal) via
+            // the `timeline:read` bridge capability. Host-direct (the monitors pattern),
+            // but device-LOCAL: the host calls Shadow (:3030) WITHOUT a node token (the
+            // `shadow.ts` INVARIANT — captured screen/input is machine-pinned), the same
+            // host-direct-to-Shadow shape the approvals inbox uses for `/proactive`.
+            // Ships a prebuilt companion UI. Core-tier, so it must NOT declare
+            // `sidecar:process` (the Gateway denies that grant at enable).
+            grants: &["timeline:read"],
+            ui_code: Some(TIMELINE_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::SKILL_EDITOR_PLUGIN_ID,
+            // Its sandboxed frame authors a user-owned Agent Skill (`SKILL.md`) — the
+            // front-matter form fields + a markdown body + server-backed version history —
+            // via the `skills:crud` bridge capability (host-direct, monitors pattern): the
+            // host calls the existing `/api/skills` authoring endpoints (the desktop
+            // `skills.ts` client). Ships a prebuilt companion UI. Core-tier, so it must NOT
+            // declare `sidecar:process` (the Gateway denies that grant at enable).
+            grants: &["skills:crud"],
+            ui_code: Some(SKILL_EDITOR_UI_HTML),
         },
     ]
 }
@@ -148,10 +283,20 @@ pub fn seed_order(
     specs: &[SeedSpec],
     manifests: &[PluginManifest],
 ) -> (Vec<String>, Vec<SkippedSeed>) {
-    // The universe for resolution is the default-on set itself (see module docs).
+    // Lower capability edges (`requires.capabilities`) to concrete app-id edges
+    // FIRST, resolving providers against the FULL installed set, so a `requires:[rag]`
+    // consumer's provider is materialized as an ordinary dependency the graph honors.
+    // The universe for resolution stays the default-on set (see module docs) — so a
+    // default-on consumer whose capability provider is NOT default-on becomes an edge
+    // to a plugin absent from the universe, which `resolve_enable_order` reports as a
+    // MissingDependency and the loop below SKIPS (fail-closed) — matching the posture
+    // for an un-installed app dependency, and preserving the enabled-set binding
+    // invariant at seed time.
+    let binding_cfg = crate::plugins::binding::active_config();
+    let lowered = crate::plugins::binding::lower_manifests(manifests, &binding_cfg);
     let universe: Vec<PluginManifest> = specs
         .iter()
-        .filter_map(|s| manifests.iter().find(|m| m.id == s.id))
+        .filter_map(|s| lowered.iter().find(|m| m.id == s.id))
         .cloned()
         .collect();
 
@@ -245,6 +390,78 @@ pub async fn seed_default_on(store: &PluginStore, manifests: &[PluginManifest]) 
             tracing::info!("default-on seed: enabled '{id}'");
         }
     }
+
+    seed_optin_companion_ui(store, manifests).await;
+}
+
+/// One opt-in built-in companion and its prebuilt UI bundle. See
+/// [`seed_optin_companion_ui`] for why these are seeded but NOT enabled.
+struct OptinCompanionUi {
+    id: &'static str,
+    ui_code: &'static str,
+}
+
+/// Seed the `ui_code` of **opt-in** (non-default-on) built-in companions onto a
+/// **disabled** record on a fresh install.
+///
+/// # Why this exists
+///
+/// Every *default-on* companion gets its `ui_code` from [`seed_overrides`] (applied
+/// by the loop above). Mail is the first **opt-in** built-in companion: it must NOT
+/// be default-on — one `com.ryu.mail` manifest owns both the companion runnable AND
+/// the `ryu-mail` sidecar, whose binary is not yet shipped, so a default-on entry
+/// would fail its health check on every fresh install (see
+/// [`crate::plugins::builtins::CORE_DEFAULT_ON`]). But nothing else seeds a built-in
+/// companion's `ui_code`: neither `install_app` nor `enable_app` sources it, and the
+/// `*_UI_HTML` consts are wired only into `seed_overrides`. So without this, enabling
+/// mail from the store would leave `ui_code = None` and the companion would mount as
+/// "no runnable UI".
+///
+/// This seeds the bundle onto a **disabled** record (no `set_enabled`), so the app
+/// stays opt-in — no sidecar spawn on a fresh install — yet its UI is present the
+/// moment the user enables it (`enable_app` only flips the enabled bit + validates
+/// grants; the `ui_code` is already there).
+///
+/// User-respecting: a plugin with ANY existing record is skipped, exactly like
+/// [`seed_default_on`].
+async fn seed_optin_companion_ui(store: &PluginStore, manifests: &[PluginManifest]) {
+    let companions = [OptinCompanionUi {
+        id: crate::plugins::builtins::MAIL_PLUGIN_ID,
+        ui_code: crate::plugin_manifest::MAIL_UI_HTML,
+    }];
+
+    for c in &companions {
+        match store.get(c.id).await {
+            // A record exists (enabled or disabled) — the user's choice wins.
+            Ok(Some(_)) => continue,
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!("opt-in companion seed: lookup '{}' failed: {e}", c.id);
+                continue;
+            }
+        }
+
+        let Some(version) = manifests
+            .iter()
+            .find(|m| m.id == c.id)
+            .map(|m| m.version.clone())
+        else {
+            continue;
+        };
+
+        if let Err(e) = store.insert(c.id, &version).await {
+            tracing::warn!("opt-in companion seed: insert '{}' failed: {e}", c.id);
+            continue;
+        }
+        if let Err(e) = store.set_ui_code(c.id, Some(c.ui_code)).await {
+            tracing::warn!("opt-in companion seed: set_ui_code '{}' failed: {e}", c.id);
+            continue;
+        }
+        // Deliberately NOT enabled — the app stays opt-in (no sidecar spawn on a
+        // fresh install); the seeded `ui_code` makes `enable_app` mount the
+        // companion whenever the user turns it on.
+        tracing::info!("opt-in companion seed: seeded ui_code for '{}' (disabled)", c.id);
+    }
 }
 
 #[cfg(test)]
@@ -265,6 +482,7 @@ mod tests {
                         min_version: None,
                     })
                     .collect(),
+                capabilities: vec![],
                 grants: vec![],
             }),
             ..Default::default()
@@ -277,6 +495,30 @@ mod tests {
             grants: &[],
             ui_code: None,
         }
+    }
+
+    /// Capability edges (`requires.capabilities`) are lowered at seed time, so the
+    /// seed order respects them: with the REAL built-ins, spaces requires the `rag`
+    /// capability and rag requires `engines`, so the order is engines → rag → spaces
+    /// even though those are capability edges, not app deps.
+    #[test]
+    fn seed_order_respects_capability_edges() {
+        let specs = default_on_specs();
+        let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
+        let (order, skipped) = seed_order(&specs, &manifests);
+        let pos = |id: &str| order.iter().position(|x| x == id);
+        let (e, r, s) = (pos("engines"), pos("com.ryu.rag"), pos("com.ryu.spaces"));
+        assert!(
+            e.is_some() && r.is_some() && s.is_some(),
+            "engines/rag/spaces all seeded (order: {order:?})"
+        );
+        assert!(e < r && r < s, "engines → rag → spaces (order: {order:?})");
+        assert!(
+            !skipped
+                .iter()
+                .any(|sk| sk.id == "com.ryu.spaces" || sk.id == "com.ryu.rag"),
+            "no capability-related seed skip (skipped: {skipped:?})"
+        );
     }
 
     /// THE regression this module exists for: the seed list is written by hand and
@@ -385,8 +627,23 @@ mod tests {
                 crate::plugin_manifest::WHITEBOARD_PLUGIN_ID,
                 crate::plugin_manifest::CANVAS_PLUGIN_ID,
                 crate::plugin_manifest::FINETUNE_PLUGIN_ID,
+                crate::plugins::builtins::MEETINGS_PLUGIN_ID,
+                crate::plugins::builtins::QUESTS_PLUGIN_ID,
+                crate::plugins::builtins::APPROVALS_PLUGIN_ID,
+                crate::plugins::builtins::LEARNING_PLUGIN_ID,
+                crate::plugins::builtins::MONITORS_PLUGIN_ID,
+                crate::plugins::builtins::WORKFLOWS_PLUGIN_ID,
+                crate::plugins::builtins::WEBHOOKS_PLUGIN_ID,
+                crate::plugins::builtins::ACTIVITY_PLUGIN_ID,
+                crate::plugins::builtins::CALENDAR_PLUGIN_ID,
+                crate::plugins::builtins::TIMELINE_PLUGIN_ID,
+                crate::plugins::builtins::SKILL_EDITOR_PLUGIN_ID,
             ],
-            "only the three companions ship a prebuilt UI bundle"
+            "only the companions ship a prebuilt UI bundle, in CORE_DEFAULT_ON order \
+             (meetings right after the fine-tuning app — at its wave-1 default-on position, \
+             after spaces — then quests/approvals/learning at their wave-2 positions, \
+             mid-list, then monitors/workflows, then webhooks, activity, calendar, \
+             timeline, and the skill-editor last — the W7 frontend extraction)"
         );
         // Non-companion Core plugins seed with EMPTY grants, exactly as the generic
         // loop did before this module existed.
@@ -425,5 +682,43 @@ mod tests {
         }
         assert!(store.get("engines").await.unwrap().unwrap().enabled);
         assert!(!store.get("durable").await.unwrap().unwrap().enabled);
+    }
+
+    /// The W7 Mail-companion extraction rests on this: mail is the first OPT-IN
+    /// built-in companion, so the default-on seed loop never touches it, yet its
+    /// `ui_code` MUST be present when the user enables it (nothing else — not
+    /// `install_app`, not `enable_app` — seeds a built-in's `ui_code`). This drives
+    /// the REAL `seed_default_on` over the REAL manifest set and asserts the end
+    /// state: mail has a record with `ui_code` set, but stays DISABLED (opt-in, no
+    /// sidecar spawn on fresh install). If this fails, enabling mail mounts a broken
+    /// "no runnable UI" companion.
+    #[tokio::test]
+    async fn the_real_seed_seeds_mail_ui_code_but_leaves_it_disabled() {
+        let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
+        let store = PluginStore::open_in_memory().unwrap();
+
+        seed_default_on(&store, &manifests).await;
+
+        let mail_id = crate::plugins::builtins::MAIL_PLUGIN_ID;
+        let mail = store
+            .get(mail_id)
+            .await
+            .unwrap()
+            .expect("the seed must install a mail record (disabled)");
+        assert!(
+            !mail.enabled,
+            "mail must stay opt-in (DISABLED) — it must not be auto-enabled / its \
+             sidecar auto-spawned on a fresh install"
+        );
+        let ui = store
+            .get_ui_code(mail_id)
+            .await
+            .unwrap()
+            .expect("mail's companion ui_code must be seeded so enable mounts the UI");
+        assert!(
+            ui.len() > 10_000 && ui.contains('<'),
+            "mail ui_code must be the real inlined companion bundle, got {} bytes",
+            ui.len()
+        );
     }
 }

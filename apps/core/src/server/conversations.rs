@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::runnable::RunnableKind;
+use ryu_kernel_contracts::ResourceKey;
 
 /// The SQL twin of `resource_access` (`server/mod.rs`) — the ONE place a tenancy
 /// read-filter is expressed for list/search queries, so the row gate and the list
@@ -123,6 +124,35 @@ impl Tenancy {
             },
             None => Self::Unattributed,
         }
+    }
+
+    /// Derive a `Tenancy` from the shared [`ResourceKey`] composition layer. The
+    /// key's compound `node`/`project`/`session` fields are carried at the layer
+    /// above and never affect this collapse: a `Tenancy` is exactly the key's
+    /// `(owner_user_id, org_id)` pair, so this is byte-identical to
+    /// [`Self::owned_by`] fed the same pair. This is the "constructors accept-or-
+    /// derive a ResourceKey internally" seam — the choke point still calls
+    /// [`Self::parts`], unchanged.
+    ///
+    /// Reserved adoption seam: exercised by the behavior-preserving regression test
+    /// and available to the choke-point adoption wave. No production path is rewired
+    /// this wave (that would churn call sites for zero behavior change), so it is
+    /// `allow(dead_code)` until then.
+    #[allow(dead_code)]
+    pub fn from_resource_key(key: &ResourceKey) -> Self {
+        let (user_id, org_id) = key.to_tenancy_parts();
+        Self::owned_by(user_id, org_id)
+    }
+
+    /// Lift this `Tenancy` into the shared [`ResourceKey`] so a caller can compose
+    /// the fuller address (session/project/node) on top before lowering it back.
+    /// Round-trips through [`Self::parts`], so it never invents attribution.
+    /// Reserved adoption seam (see [`Self::from_resource_key`]); `allow(dead_code)`
+    /// until a production path adopts it.
+    #[allow(dead_code)]
+    pub fn to_resource_key(&self) -> ResourceKey {
+        let (user_id, org_id) = self.parts();
+        ResourceKey::from_tenancy_parts(user_id, org_id)
     }
 }
 
@@ -448,7 +478,7 @@ pub struct Session {
 
 /// SQLite-backed conversation store. Cheap to clone (wraps an `Arc<Mutex<Connection>>`).
 ///
-/// Message bodies are encrypted at rest via [`crate::crypto::FieldCipher`]: the
+/// Message bodies are encrypted at rest via [`ryu_crypto::FieldCipher`]: the
 /// `content` column holds the `enc:v1:` envelope, written on append and decrypted
 /// transparently on read. Rows written before encryption was introduced have no
 /// envelope and are passed through unchanged (lazy migration). Metadata (ids,
@@ -456,12 +486,12 @@ pub struct Session {
 #[derive(Clone)]
 pub struct ConversationStore {
     conn: Arc<Mutex<Connection>>,
-    cipher: crate::crypto::FieldCipher,
+    cipher: ryu_crypto::FieldCipher,
     /// Optional semantic index over message bodies, backing the
     /// `search_conversations` builtin tool. `None` in contexts that don't wire it
     /// (tests, CLI, headless). Indexing on append and lazy backfill on search are
     /// both best-effort: a failure here never affects message CRUD.
-    message_index: Option<super::message_index::MessageIndex>,
+    message_index: Option<ryu_search::MessageIndex>,
     /// Optional full-text (FTS5) index over message bodies — the lexical/keyword
     /// complement to `message_index` (semantic KNN), backing the FTS session-search
     /// recall layer. `None` in contexts that don't wire it (tests, CLI, headless).
@@ -469,7 +499,7 @@ pub struct ConversationStore {
     /// search is network-free. Population is DEFAULT-OFF: it only ever runs when the
     /// FTS recall pref is enabled (search is the sole writer, via lazy backfill), so
     /// the on-disk term index materializes only for users who opt in.
-    message_fts: Option<super::message_fts::MessageFtsIndex>,
+    message_fts: Option<ryu_search::MessageFtsIndex>,
     /// Optional sink for conversation ids that just received their *first* user
     /// message and so are candidates for a background auto-rename. `None` in
     /// contexts without a server loop to consume them (tests, CLI). The server
@@ -484,7 +514,7 @@ pub struct ConversationStore {
     /// instance held by `ServerState` so publishes reach the WS handler's
     /// subscribers (see `main.rs` wiring). Best-effort: publishing to a room with
     /// no members is a harmless no-op.
-    realtime: Option<crate::realtime::RoomRegistry>,
+    realtime: Option<ryu_realtime::RoomRegistry>,
 }
 
 /// A run's lifecycle status changed. Carries the FULL run summary (not just id +
@@ -543,7 +573,7 @@ impl ConversationStore {
         }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
-            cipher: crate::crypto::global_cipher()?,
+            cipher: ryu_crypto::global_cipher()?,
             message_index: None,
             message_fts: None,
             auto_title_tx: None,
@@ -635,7 +665,7 @@ impl ConversationStore {
     /// Wire the semantic message index (backing the `search_conversations` builtin
     /// tool) into the store. Cheap to clone (`Arc` inside). Must be called after
     /// construction to enable indexing-on-append + searchable history.
-    pub fn with_message_index(mut self, index: super::message_index::MessageIndex) -> Self {
+    pub fn with_message_index(mut self, index: ryu_search::MessageIndex) -> Self {
         self.message_index = Some(index);
         self
     }
@@ -645,7 +675,7 @@ impl ConversationStore {
     /// [`with_message_index`]. Population is lazy-on-search and default-OFF, so
     /// wiring the index alone materializes nothing until a search runs under the
     /// enabled FTS recall pref.
-    pub fn with_message_fts_index(mut self, index: super::message_fts::MessageFtsIndex) -> Self {
+    pub fn with_message_fts_index(mut self, index: ryu_search::MessageFtsIndex) -> Self {
         self.message_fts = Some(index);
         self
     }
@@ -660,10 +690,10 @@ impl ConversationStore {
 
     /// Wire the room-keyed realtime registry so [`append_message`] publishes a
     /// live `Events` frame (keyed by conversation id) for every persisted turn.
-    /// Pass a clone of the same [`crate::realtime::RoomRegistry`] held by
+    /// Pass a clone of the same [`ryu_realtime::RoomRegistry`] held by
     /// `ServerState` so the frames reach the WS handler's subscribers. Must be
     /// called after construction.
-    pub fn with_realtime(mut self, realtime: crate::realtime::RoomRegistry) -> Self {
+    pub fn with_realtime(mut self, realtime: ryu_realtime::RoomRegistry) -> Self {
         self.realtime = Some(realtime);
         self
     }
@@ -676,7 +706,7 @@ impl ConversationStore {
         Self::init_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
-            cipher: crate::crypto::FieldCipher::new(&[0x11; 32]),
+            cipher: ryu_crypto::FieldCipher::new(&[0x11; 32]),
             message_index: None,
             message_fts: None,
             auto_title_tx: None,
@@ -1326,12 +1356,21 @@ impl ConversationStore {
         // `content` (the same value `GET /api/conversations/:id` returns after
         // decrypting the sealed column) — never the sealed blob — and reuse `now`
         // (the exact `created_at` written to the row) so the live frame matches the
-        // persisted/GET shape. The gateway wraps this INNER value as
-        // `{"channel":"events","data":<value>}`; do not pre-wrap with "channel".
-        // No-op when realtime is unwired (tests/CLI) or the room has no members.
+        // persisted/GET shape.
+        //
+        // This is the first adopter of the typed named-event contract
+        // (`broadcast_event`, the Rivet-style `broadcast(event, payload)`): the turn
+        // rides the Events channel as a `conversation.message` envelope. It stays
+        // wire-compatible — the WS gateway's `frame_to_message` unwraps the envelope
+        // back to `{"channel":"events","data":<this INNER value>}`, byte-for-byte
+        // what raw `publish_event` produced — so `data` still carries the
+        // self-describing `"type":"message"` shape existing clients key off; do not
+        // pre-wrap with "channel". No-op when realtime is unwired (tests/CLI) or the
+        // room has no members.
         if let Some(realtime) = &self.realtime {
-            realtime.publish_event(
+            realtime.broadcast_event(
                 conversation_id,
+                "conversation.message",
                 serde_json::json!({
                     "type": "message",
                     "conversation_id": conversation_id,
@@ -3197,6 +3236,121 @@ mod tests {
         assert!(src.contains("org_id        = COALESCE(conversations.org_id, excluded.org_id)"));
     }
 
+    /// **ResourceKey regression (task C2, deliverable #1): behavior-preserving.**
+    ///
+    /// The `ResourceKey` composition layer must lower to a `Tenancy` whose `parts()`
+    /// are byte-identical to the pre-ResourceKey construction, for every case the
+    /// choke point can see — including the load-bearing collapse (an unattributed
+    /// key yields `(None, None)`, the row an UNBOUND node writes, so no offline
+    /// lockout regresses). The compound `node`/`project`/`session` address composes
+    /// but never alters the emitted pair.
+    #[test]
+    fn resource_key_lowers_to_identical_tenancy_parts() {
+        // Every (user, org) shape a caller can hand in — the derived Tenancy's
+        // parts must equal the direct `owned_by` construction exactly.
+        for (user, org) in [
+            (Some("u1"), Some("acme")),
+            (Some("u1"), None),
+            (None, None),
+            // org-only in ⇒ collapses to fully unattributed (the pair the SQL has
+            // never seen is never produced).
+            (None, Some("acme")),
+        ] {
+            let via_key = Tenancy::from_resource_key(&ResourceKey::owned(user, org));
+            let direct = Tenancy::owned_by(user, org);
+            assert_eq!(
+                via_key.parts(),
+                direct.parts(),
+                "ResourceKey lowering must match owned_by for ({user:?}, {org:?})"
+            );
+        }
+
+        // The UNBOUND-node row: an unattributed key is byte-identical to
+        // `Tenancy::Unattributed` and writes `(None, None)` — the invariant that
+        // keeps an offline/personal node from ever locking its owner out.
+        let unbound = Tenancy::from_resource_key(&ResourceKey::unattributed());
+        assert_eq!(unbound, Tenancy::Unattributed);
+        assert_eq!(unbound.parts(), (None, None));
+
+        // Compound address composes above the collapse but never changes the pair
+        // the choke point stamps.
+        let compound = ResourceKey::owned(Some("u1"), Some("acme"))
+            .with_session(Some("conv-9"))
+            .with_project(Some("/proj"));
+        assert_eq!(
+            Tenancy::from_resource_key(&compound).parts(),
+            Tenancy::owned_by(Some("u1"), Some("acme")).parts()
+        );
+
+        // Round-trip: Tenancy → ResourceKey → Tenancy is stable.
+        let t = Tenancy::Owned {
+            user_id: "u1".into(),
+            org_id: Some("acme".into()),
+        };
+        assert_eq!(Tenancy::from_resource_key(&t.to_resource_key()), t);
+    }
+
+    /// **Principal resolution with/without a host conversation id (task C2,
+    /// deliverable #2).** Locks the headline behavior the gateway-exec threading
+    /// rests on: an org-bound node resolves `Owned` from a tenanted host
+    /// conversation (the id the Gateway now forwards), fails closed to `Unresolved`
+    /// without one, and — the load-bearing no-lockout invariant — resolves
+    /// `Unrestricted` on an UNBOUND node regardless. `resolve_at` was previously
+    /// untested; this is the first assertion over it.
+    #[tokio::test]
+    async fn tool_principal_resolves_from_host_conversation() {
+        use crate::sidecar::mcp::ToolPrincipal;
+        let store = ConversationStore::open_in_memory().unwrap();
+        store
+            .ensure_conversation(
+                "c1",
+                None,
+                None,
+                Tenancy::Owned {
+                    user_id: "u1".into(),
+                    org_id: Some("acme".into()),
+                },
+            )
+            .await
+            .unwrap();
+
+        // BOUND node + host conversation with an owner ⇒ Owned: the forwarded id
+        // resolves the principal (the gateway-exec headline).
+        assert!(matches!(
+            ToolPrincipal::resolve_at(&store, Some("c1"), Some("acme")).await,
+            ToolPrincipal::Owned { user_id, org_id }
+                if user_id == "u1" && org_id.as_deref() == Some("acme")
+        ));
+
+        // BOUND node, NO host conversation ⇒ fail-closed Unresolved ("without id").
+        assert_eq!(
+            ToolPrincipal::resolve_at(&store, None, Some("acme")).await,
+            ToolPrincipal::Unresolved
+        );
+
+        // BOUND node + host conversation that is itself untenanted ⇒ Unresolved
+        // (no owner to attribute the tool call to; fail closed).
+        store
+            .ensure_conversation("c-null", None, None, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        assert_eq!(
+            ToolPrincipal::resolve_at(&store, Some("c-null"), Some("acme")).await,
+            ToolPrincipal::Unresolved
+        );
+
+        // UNBOUND node ⇒ Unrestricted regardless of the id — the invariant that
+        // keeps a personal/offline node from ever locking its owner out.
+        assert_eq!(
+            ToolPrincipal::resolve_at(&store, Some("c1"), None).await,
+            ToolPrincipal::Unrestricted
+        );
+        assert_eq!(
+            ToolPrincipal::resolve_at(&store, None, None).await,
+            ToolPrincipal::Unrestricted
+        );
+    }
+
     #[tokio::test]
     async fn append_message_publishes_live_event_to_room() {
         // The make-or-break wiring: a store sharing the SAME registry instance a
@@ -3204,7 +3358,7 @@ mod tests {
         // persisted turn, shaped to match the GET read path (plaintext content,
         // role, ids, created_at). This is the only way to catch a "wrong registry
         // instance" regression without a live WS client.
-        let registry = crate::realtime::RoomRegistry::new();
+        let registry = ryu_realtime::RoomRegistry::new();
         let store = ConversationStore::open_in_memory()
             .unwrap()
             .with_realtime(registry.clone());
@@ -3225,9 +3379,13 @@ mod tests {
             .unwrap();
 
         let frame = rx.recv().await.expect("frame delivered");
-        let crate::realtime::Frame::Event(value) = frame else {
-            panic!("expected an Events frame, got {frame:?}");
-        };
+        // The message fan-out now rides the typed-event envelope
+        // (`broadcast_event` → `Frame::Event({__ryu_event, data})`), so a raw
+        // subscriber sees the payload nested under `data`. Decode it the way the
+        // typed contract intends and assert against the payload.
+        let event = ryu_realtime::Event::decode(&frame).expect("a typed Event frame");
+        assert_eq!(event.name, "conversation.message");
+        let value = &event.payload;
         assert_eq!(value["type"], "message");
         assert_eq!(value["conversation_id"], "conv-live");
         assert_eq!(value["message"]["id"], id);
@@ -3267,7 +3425,7 @@ mod tests {
         // append-time spawned indexing hasn't run, the lazy backfill on the
         // first search embeds the stored (decrypted) messages and finds them.
         // Uses the local (network-free) embedder, so no embed sidecar is needed.
-        let index = crate::server::message_index::MessageIndex::open_in_memory().unwrap();
+        let index = crate::search_host::in_memory_message_index().unwrap();
         let store = ConversationStore::open_in_memory()
             .unwrap()
             .with_message_index(index);
@@ -3327,7 +3485,7 @@ mod tests {
         // backfill on the first search indexes the stored (decrypted) messages and
         // finds them — and the returned snippet is the decrypted plaintext, not the
         // sealed blob. Network-free (no embedder).
-        let index = crate::server::message_fts::MessageFtsIndex::open_in_memory().unwrap();
+        let index = ryu_search::MessageFtsIndex::open_in_memory().unwrap();
         let store = ConversationStore::open_in_memory()
             .unwrap()
             .with_message_fts_index(index);
@@ -3368,7 +3526,7 @@ mod tests {
 
     #[tokio::test]
     async fn fts_search_scopes_to_conversation_ids() {
-        let index = crate::server::message_fts::MessageFtsIndex::open_in_memory().unwrap();
+        let index = ryu_search::MessageFtsIndex::open_in_memory().unwrap();
         let store = ConversationStore::open_in_memory()
             .unwrap()
             .with_message_fts_index(index);

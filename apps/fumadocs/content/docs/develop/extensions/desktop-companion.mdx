@@ -22,6 +22,38 @@ it needs a running display. Treat this as the foundation it is: prove your panel
 example plugin, expect to iterate.
 </Callout>
 
+## The three-tier UI model
+
+Plugin UIs in Ryu follow a three-tier model, each with different trust and capability levels:
+
+| Tier | Trust level | What it can do | Example |
+|---|---|---|---|
+| **Widget** (in-chat) | Lowest — sandboxed iframe, null origin | Render data from a tool call; call companion tools via `callTool` through the host | Checklist, chart, data grid |
+| **Companion** (sidebar/overlay) | Medium — sandboxed iframe, capability-gated RPC | Read agent lists, call Core APIs through the gated bridge | Settings panel, extension page |
+| **Full-page app** | Highest — iframe with host bridge | Deep Core integration via the RPC bridge; the host holds the node token | Extension pages, whiteboard |
+
+All three tiers share the same security model: the iframe is null-origin, the host is the single
+trusted proxy, and every RPC method is gated by a declared capability. The difference is the surface
+area each tier exposes.
+
+### Widget tier (in-chat)
+
+Widgets render inline in a chat message. They are produced by a "render" tool and consume the
+tool's arguments and output through `window.openai.toolInput` / `toolOutput`. See
+[Ryu Apps](/docs/develop/extensions/ryu-apps) for the full authoring path.
+
+### Companion tier (sidebar/overlay)
+
+Companions are sidebar panels or overlays that persist across turns. They use the same null-origin
+iframe and RPC bridge as widgets, but they are not tied to a single tool call. A companion can
+maintain state, poll for updates, and call multiple Core APIs.
+
+### Full-page app tier
+
+Full-page apps (also called "extension pages") render in the desktop's main content area. They
+use the same ExtensionHost iframe and RPC bridge, but can present a richer UI since they have the
+full page to work with. The host routes their RPC calls through the same capability-gated bridge.
+
 ## The security model
 
 The host renders your plugin in an `<iframe sandbox="allow-scripts">` **without**
@@ -151,6 +183,23 @@ is real and enforced today; what is still wired is sourcing the grant set from y
 [the plugin.json manifest reference](/docs/develop/extensions/plugin-json-manifest) for how grants
 are declared.
 </Callout>
+
+### Capability catalog
+
+The full set of RPC methods and their required capabilities:
+
+| Method | Capability | Description |
+|---|---|---|
+| `core.listAgents` | `core.listAgents` | List agents on the active node |
+| `core.getAgent` | `core.getAgent` | Get a specific agent's configuration |
+| `core.listConversations` | `core.listConversations` | List conversations |
+| `core.getConversation` | `core.getConversation` | Get a specific conversation |
+| `core.listSpaces` | `core.listSpaces` | List knowledge spaces |
+| `core.searchTools` | `core.searchTools` | Search the unified tool catalog |
+| `core.callTool` | `core.callTool` | Execute a tool through the Gateway |
+| `core.getNodeStatus` | `core.getNodeStatus` | Get node health and sidecar status |
+
+Unknown methods (not in the capability map) are always rejected — there is no default-allow path.
 
 ## Try it
 

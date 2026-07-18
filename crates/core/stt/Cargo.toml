@@ -1,0 +1,35 @@
+[package]
+name = "ryu-stt"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Speech-to-text (STT) modality primitive for Ryu: `transcribe(audio) -> text` with a swappable engine seam (in-process parakeet ONNX by default; whisper.cpp and Gateway-routed cloud Whisper as HTTP proxies). An extracted Core capability crate — in-process by default and consumed as a NON-optional path dependency (the voice/meetings/hardware data paths reach it unconditionally). The parakeet ONNX inference is the genuinely in-process hot path (feature `voice-parakeet`); whisper + gateway engines are thin HTTP proxies. Host couplings the crate cannot own (whisper base-url, Gateway url/bearer, the parakeet model dir) are injected via the narrow `SttHost` trait, so the crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+anyhow = "1"
+base64 = { version = "0.22", features = ["alloc"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["rt"] }
+
+# ── Parakeet v3 STT optional deps (in-process ONNX inference) ──────────────────
+# transcribe-rs is git-only and pulls a heavy native ONNX Runtime; it (plus
+# once_cell for the process-global lazily-loaded model) lives behind the
+# `voice-parakeet` feature so the default build stays free of the native dep.
+# Matched to the same git rev Core used before extraction.
+once_cell = { version = "1", optional = true }
+transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "d97ae65debaa9bacd5d56aa7d308d13df43c97ec", default-features = false, features = ["onnx"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[features]
+# Off by default (keep `cargo test`/CI lean, same posture as Core's pre-extraction
+# feature). When off, `parakeet::transcribe` returns a clear "not built" error and
+# the cross-surface default STT engine falls back to whisper.cpp.
+voice-parakeet = ["dep:transcribe-rs", "dep:once_cell"]

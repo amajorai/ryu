@@ -1,0 +1,31 @@
+[package]
+name = "ryu-vault"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Identity Vault primitive for Ryu: the crypto-sealed per-domain credential store (SQLite `IdentityStore` with the `enc:v1:` envelope via ryu-crypto, never-in-logs `SealedState`/`SecretState` newtypes), the swappable `CredentialSource` capture/rotation seam (`ManualImport` default + per-domain `CredentialSourceRegistry`), and the staleness health-sweep engine. An extracted Core capability crate; in-process by default (function-call hot path, no IPC) and consumed as a NON-optional path dependency. The one kernel coupling — the `~/.ryu` data dir — is inverted as an `IdentityStore::open(dir)` constructor parameter (single construction site), and sealing routes through `ryu_crypto::global_cipher`, so this crate has ZERO dependency on apps/core. Identity GOVERNANCE (the Gateway grant+audit read chokepoint, tool-call consult, elicitation) stays kernel-side in apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+anyhow = "1"
+chrono = "0.4"
+humantime = "2"
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["sync"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+ryu-crypto = { path = "../crypto" }
+
+[features]
+# Exposes the in-memory store + deterministic cipher seeding to downstream test
+# builds (Core's identity-governance tests live in `apps/core` and drive this
+# crate's `IdentityStore`). Never enabled in a production build.
+test-support = []
+
+[dev-dependencies]
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

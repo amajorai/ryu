@@ -1,0 +1,26 @@
+[package]
+name = "ryu-memory"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Long-term memory primitive for Ryu: the SQLite-backed, encryption-at-rest MemoryStore plus the multi-level scope model (user/node/project), category/importance/tags metadata, and scoped recall/CRUD over durable cross-conversation facts. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the chat auto-recall loop reaches it unconditionally). Rows are encrypted with the shared `ryu_crypto` master key. The two kernel couplings — the `~/.ryu` default db path and the bind-time owner backfill's org/account resolution — invert through plain constructor injection (`open(path, node_bound, owner)`), so this crate has ZERO dependency on apps/core; the Core wiring lives in `apps/core/src/memory_host.rs`."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+ryu-crypto = { path = "../crypto" }
+# The shared tenancy composition layer (`ResourceKey`). A pure-data contract
+# crate (NOT apps/core), so the "ZERO apps/core dependency" invariant holds.
+ryu-kernel-contracts = { path = "../kernel-contracts" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

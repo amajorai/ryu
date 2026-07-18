@@ -1,0 +1,36 @@
+[package]
+name = "ryu-research"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Research: the autoresearch experiment-runner capability for Ryu. An extracted Core capability crate owning the `/api/research/*` data-path handlers, the `research__*` MCP tool contract (8 tool schemas + HTTP dispatch), and the sidecar base-URL/health helpers. In-process default; Core consumes it as a NON-optional path dependency because the MCP tool listing (`research::tool_specs`) compiles in every build — the `research` cargo feature gates ONLY the HTTP routes + OpenAPI sub-doc. The autoresearch orchestration itself (git-versioned workspaces, metric parsing, keep/reset ledger) lives in the Python `apps-store/research/sidecar` (:8087); this crate is the thin Rust surface in front of it. The one kernel coupling — lazy-starting the Core-managed sidecar + the on-disk install check — is inverted through the `ResearchHost` trait so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# The crate ships BOTH an in-process library (Core merges `routes()` at
+# `/api/research`) AND a standalone binary (`ryu-research`) Core spawns as an
+# out-of-process sidecar and proxies to via the generic ext-proxy loader — the
+# same in-process/out-of-process duality as `ryu-mail`. The bin reuses the very
+# same `routes()`/`ResearchCtx`, only nesting them under `/api/research` and
+# guarding them with the injected `RYU_EXT_TOKEN` bearer on a loopback listener.
+[[bin]]
+name = "ryu-research"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
+# axum router has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+axum = "0.7"
+serde_json = "1"
+anyhow = "1"
+reqwest = { version = "0.12", features = ["json"] }
+tracing = "0.1"
+utoipa = { version = "5", features = ["axum_extras"] }
+async-trait = "0.1"
+# Bin-only: the standalone sidecar's runtime, log init, and home-dir resolution
+# for the on-disk install check. The library path pulls none of these.
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "5"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

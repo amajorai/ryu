@@ -135,12 +135,12 @@ pub fn read_resource(uri: &str) -> Option<WidgetResource> {
 ///
 /// `conversation_id` is the owning run/session — load-bearing for worktree ops,
 /// which key their diff/apply on the run. `http` talks to the Gateway over
-/// loopback (budget). `quests`/`worktree_diffs` are the optional store handles the
-/// `McpRegistry` carries; when absent the quests app falls back to the process
-/// global engine and the worktree app reports its store unavailable.
+/// loopback (budget). `worktree_diffs` is the optional store handle the
+/// `McpRegistry` carries; when absent the worktree app reports its store
+/// unavailable. (Quests is now out-of-process; its widget reaches the sidecar over
+/// loopback via `quests_client`, so it needs no store handle here.)
 pub struct AppDispatchCtx<'a> {
     pub http: &'a reqwest::Client,
-    pub quests: Option<&'a crate::quests::store::QuestStore>,
     pub worktree_diffs: Option<&'a crate::server::WorktreeDiffStore>,
     pub conversation_id: Option<String>,
     pub agent_id: Option<String>,
@@ -266,7 +266,6 @@ mod tests {
         let http = reqwest::Client::new();
         let ctx = AppDispatchCtx {
             http: &http,
-            quests: None,
             worktree_diffs: None,
             conversation_id: None,
             agent_id: None,

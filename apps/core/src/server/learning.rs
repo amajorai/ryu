@@ -1,9 +1,15 @@
 //! Continual-learning HTTP surface (`/api/learn/*`, `/api/experience/*`).
 //!
-//! Thin handlers over [`crate::learning`]: config read, experience-buffer
-//! inspection, PRM scoring, skill synthesis, and the reward-filtered retrain
-//! cycle. All capture/scoring is gated on the global opt-in inside the learning
-//! layer (default OFF). See `docs/continual-learning-metaclaw-spec.md`.
+//! Thin, Core-owned handlers over the extracted `ryu-learning` engine
+//! ([`ryu_learning`], driven through [`crate::learning::learning_ctx`]): config
+//! read, experience-buffer inspection, PRM scoring, skill synthesis, and the
+//! reward-filtered retrain cycle. All capture/scoring is gated on the global opt-in
+//! inside the engine (default OFF). See `docs/continual-learning-metaclaw-spec.md`.
+//!
+//! These handlers stay IN CORE (rather than the crate's own `api::routes`) because
+//! two checks are kernel-owned: the per-conversation read ACL on
+//! `/api/learn/synthesize` (a client-supplied conversation is distilled — a READ)
+//! and the Learning-App enable gate on the whole surface (`learning_routes`).
 
 use axum::{
     extract::State,
@@ -12,7 +18,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use crate::learning;
+use crate::learning::learning_ctx;
 
 use super::ServerState;
 
@@ -25,7 +31,8 @@ use super::ServerState;
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn config(State(state): State<ServerState>) -> impl IntoResponse {
-    Json(learning::resolve_config(&state).await)
+    let ctx = learning_ctx(&state);
+    Json(ryu_learning::resolve_config(&*ctx.host).await)
 }
 
 /// `GET /api/experience/list` — most-recent captured turns (cap 200).
@@ -39,7 +46,8 @@ pub async fn config(State(state): State<ServerState>) -> impl IntoResponse {
 pub async fn list(State(state): State<ServerState>) -> Response {
     match state.experience.list(200).await {
         Ok(rows) => {
-            let min_reward = learning::resolve_min_reward(&state).await;
+            let ctx = learning_ctx(&state);
+            let min_reward = ryu_learning::resolve_min_reward(&*ctx.host).await;
             let counts = state
                 .experience
                 .counts(min_reward)
@@ -71,7 +79,7 @@ pub async fn list(State(state): State<ServerState>) -> Response {
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn sweep(State(state): State<ServerState>) -> Response {
-    match learning::sweep_into_buffer(&state).await {
+    match ryu_learning::sweep_into_buffer(&learning_ctx(&state)).await {
         Ok(added) => Json(json!({ "captured": added })).into_response(),
         Err(e) => err(e),
     }
@@ -87,7 +95,7 @@ pub async fn sweep(State(state): State<ServerState>) -> Response {
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn score(State(state): State<ServerState>) -> Response {
-    match learning::score_buffer(&state, 256).await {
+    match ryu_learning::score_buffer(&learning_ctx(&state), 256).await {
         Ok(scored) => Json(json!({ "scored": scored })).into_response(),
         Err(e) => err(e),
     }
@@ -116,20 +124,20 @@ pub async fn synthesize(
     // Per-resource ACL: this DISTILLS a client-supplied conversation's content into
     // a skill (and the skill text is then readable by its author), so it is a READ of
     // that conversation by any other name. Gate it like every other by-id
-    // conversation route. No-op on an unbound personal node.
+    // conversation route. No-op on an unbound personal node. This ACL is kernel-owned
+    // (identity), which is why the handler stays in Core rather than the crate.
     if let Err(resp) = super::require_conversation_read_by_id(&state, &caller, cid).await {
         return resp;
     }
     let force = body.get("force").and_then(Value::as_bool).unwrap_or(false);
-    match learning::synthesize_skill(&state, cid, force).await {
+    match ryu_learning::synthesize_skill(&learning_ctx(&state), cid, force).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(e) => err(e),
     }
 }
 
 /// `POST /api/learn/cycle` — sweep + score + assemble the reward-filtered SFT
-/// dataset. Dry run by default; `{ "execute": true }` is reserved for dispatching
-/// the fine-tune (not wired in the scaffold; needs a GPU + the original base).
+/// dataset. Dry run by default; `{ "execute": true }` dispatches the fine-tune.
 #[utoipa::path(
     post,
     path = "/api/learn/cycle",
@@ -143,7 +151,7 @@ pub async fn cycle(State(state): State<ServerState>, Json(body): Json<Value>) ->
         .get("execute")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    match learning::run_cycle(&state, execute).await {
+    match ryu_learning::run_cycle(&learning_ctx(&state), execute).await {
         Ok(plan) => Json(plan).into_response(),
         Err(e) => err(e),
     }
@@ -176,7 +184,7 @@ pub async fn exclude(State(state): State<ServerState>, Json(body): Json<Value>) 
         Ok(n) => n,
         Err(e) => return err(e),
     };
-    let key = format!("{}{cid}", learning::LEARNING_EXCLUDE_PREFIX);
+    let key = format!("{}{cid}", ryu_learning::LEARNING_EXCLUDE_PREFIX);
     if let Err(e) = state.preferences.set(&key, &excluded.to_string()).await {
         return err(e);
     }

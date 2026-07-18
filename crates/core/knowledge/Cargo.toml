@@ -1,0 +1,18 @@
+[package]
+name = "ryu-knowledge"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Open Knowledge Format (OKF) primitive for Ryu: the in-memory model, permissive parser, and serializer for git-shippable knowledge bundles (Concept/Bundle/IndexDoc/LogDoc frontmatter + markdown). An extracted Core capability crate consumed as a NON-optional path dependency — the retrieval ingest, catalog source, and HTTP export handlers reference the OKF types unconditionally in the default build. Its one kernel coupling (the Windows NoWindow console-suppression util used by the git-clone `Bundle::from_git` path) is vendored verbatim as a small std-Command util, so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+anyhow = "1"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_yml = "0.0.12"
+tempfile = "3"
+# `Bundle::from_git` offloads the synchronous `git clone` to `spawn_blocking`.
+tokio = { version = "1", features = ["rt"] }

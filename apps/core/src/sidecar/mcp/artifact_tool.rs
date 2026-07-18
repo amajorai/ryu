@@ -145,7 +145,7 @@ pub async fn dispatch(tool: &str, arguments: Value, spaces: Option<&SpaceStore>)
                     title,
                     &bytes,
                     mime,
-                    &crate::server::spaces::background_tenancy(),
+                    &crate::server::spaces::background_owner(),
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!("saving artifact: {e}"))?;

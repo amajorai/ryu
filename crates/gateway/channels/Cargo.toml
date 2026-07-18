@@ -1,0 +1,22 @@
+[package]
+name = "ryu-gw-channels"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+description = "Ryu Gateway channel-layer engine: the external messaging-surface adapters (Telegram long-poll, Slack Socket Mode, Discord poll, WhatsApp webhook) plus their shared inbound path — allowlist gate, request-body build, reply extraction — over a narrow `ChannelHost` seam. The pipeline call, `RequestContext` construction, control-plane store fetch, and channel registration/spawn wiring stay in apps/gateway (they hold `SharedState` and drive the pipeline; 'engine moves, wiring stays')."
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+async-trait = "0.1"
+anyhow = "1"
+futures-util = "0.3"
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }

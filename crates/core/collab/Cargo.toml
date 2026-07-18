@@ -1,0 +1,17 @@
+[package]
+name = "ryu-collab"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Authoritative CRDT document engine for Ryu: Core's durable server-side replica of every live collaborative Yjs document. Owns the DocRegistry (lazily rehydrated per-doc yrs::Doc behind a single-writer Mutex, with apply/state-vector/diff/snapshot/materialize/flush primitives), the CollabStore (rusqlite append-only doc_updates log + compacted doc_snapshots projection at ~/.ryu/collab.db), the self-framed DocSyncMessage wire protocol, the pure classify_doc_sync write-ACL gate, and the Y.Doc->source projection the non-collaborative RAG/search readers consume. 'Authoritative' = durable owner, not arbiter (yrs converges arbiter-free). An extracted Core capability crate consumed as a NON-optional in-process path dependency (the kernel's ServerState holds a DocRegistry unconditionally; the realtime_ws transport drives it directly, never over IPC). The single ~/.ryu kernel coupling inverts through the narrow CollabHost trait. ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# Versions match apps/core/Cargo.toml so there is no skew when Core links this
+# crate in-process. rusqlite is pinned 0.40.0 workspace-wide (links= collision
+# otherwise). This crate has ZERO dependency on apps/core.
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+serde_json = "1"
+yrs = "0.27"

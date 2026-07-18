@@ -1,4 +1,17 @@
 {
   "title": "Architecture",
-  "pages": ["index", "why-ryu", "core-vs-gateway", "runnable-model", "batteries-included"]
+  "pages": [
+    "index",
+    "why-ryu",
+    "three-products",
+    "core-vs-gateway",
+    "runnable-model",
+    "capability-layers",
+    "batteries-included",
+    "acp-agents",
+    "providers",
+    "platform-decomposition",
+    "decomposition-program",
+    "open-core"
+  ]
 }

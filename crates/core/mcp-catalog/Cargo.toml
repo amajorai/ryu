@@ -1,0 +1,14 @@
+[package]
+name = "ryu-mcp-catalog"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "MCP server catalog primitive for Ryu: browse and install MCP servers from the official Model Context Protocol registry (and sibling Smithery / Ryu-hosted sources). Owns the tolerant `server.json` wire parser, catalog card/detail shaping, the SSRF-safe pagination fetch, and the security-hardened install-plan builder (package-identifier / version / remote-URL validation, no shell-metacharacter or path-traversal smuggling). An extracted Core capability crate with ZERO dependency on apps/core — its one cross-cutting kernel coupling, the SSRF-guarded registry fetch (`server::guarded_get_bytes`), inverts through the narrow `McpCatalogHost` trait, which Core installs at boot."
+repository = "https://github.com/amajorai/ryu"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+url = "2"

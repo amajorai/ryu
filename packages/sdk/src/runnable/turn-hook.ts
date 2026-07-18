@@ -182,6 +182,7 @@ export function definePlugin(options: DefinePluginOptions): PluginManifest {
 			? {
 					requires: {
 						apps: options.requires.apps ?? [],
+						capabilities: options.requires.capabilities ?? [],
 						grants: options.requires.grants ?? [],
 					},
 				}

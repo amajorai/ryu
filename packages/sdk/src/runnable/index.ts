@@ -12,11 +12,42 @@
  * import from `@ryuhq/sdk/runnable` as a single entry point.
  */
 
-export type { AgentOptions } from "./agent.ts";
+export type {
+	AgentCard,
+	AgentManifestOptions,
+	AgentOptions,
+	AgentRunnable,
+	AgentSlots,
+	CapabilitySlot,
+	ChatSlot,
+} from "./agent.ts";
 // biome-ignore lint/performance/noBarrelFile: intentional package entry point for @ryuhq/sdk/runnable
 export { defineAgent } from "./agent.ts";
 export type { AppToolSpec, DefineAppOptions } from "./app.ts";
 export { appToolId, defineApp } from "./app.ts";
+export type {
+	DurableClient,
+	EnginesClient,
+	HttpPrimitiveTransportOptions,
+	ImageClient,
+	MemoryClient,
+	MemoryItem,
+	PrimitiveBinding,
+	PrimitiveTransport,
+	RagChunk,
+	RagClient,
+	RagRerankResult,
+	RealtimeClient,
+	RealtimeSubscription,
+	RyuPrimitives,
+	SttClient,
+	TtsClient,
+} from "./primitives.ts";
+export {
+	createPrimitives,
+	httpPrimitiveTransport,
+	PRIMITIVE_BINDINGS,
+} from "./primitives.ts";
 export type {
 	GatewayClient,
 	Runnable,

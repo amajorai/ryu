@@ -107,9 +107,11 @@ const PATH_TITLES: Record<string, string> = {
 	"/monitors": "Monitors",
 	"/tasks": "Tasks",
 	"/inbox": "Inbox",
+	"/downloads": "Downloads",
 	"/meetings": "Meetings",
 	"/library": "Library",
 	"/store": "Customize",
+	"/setup": "Setup",
 };
 
 function makeTabId(): string {

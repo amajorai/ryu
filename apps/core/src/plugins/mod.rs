@@ -18,6 +18,7 @@
 //! version and refuses a downgrade unless `force = true`.
 
 pub mod app_contrib;
+pub mod binding;
 pub mod builtins;
 pub mod catalog;
 pub mod graph;

@@ -8,41 +8,64 @@ mod catalog;
 mod catalog_source;
 mod claude_config;
 mod codex_config;
-mod collab;
-mod composio_auth;
-mod composio_catalog;
-mod composio_connect;
-mod composio_triggers;
+mod collab_host;
+mod composio_host;
+// Composio integration orchestration lives in the extracted `ryu-composio`
+// crate; these aliases keep the in-tree `crate::composio_*` call sites unchanged.
+// The workflow/agent-engine fan-out (`run_workflow_for_trigger`/`run_agent`)
+// stays in Core as `composio_host` (kernel glue).
+pub(crate) use ryu_composio::auth as composio_auth;
+pub(crate) use ryu_composio::catalog as composio_catalog;
+pub(crate) use ryu_composio::connect as composio_connect;
+pub(crate) use ryu_composio::triggers as composio_triggers;
 mod connections;
 mod crash;
-mod crypto;
-mod dashboard;
+mod crypto_host;
+mod memory_host;
+mod dashboards_client;
 mod data_path;
 mod downloads;
-mod email;
 mod entitlement;
-mod eval_code;
 mod events;
 mod exec_approval;
-mod experience;
 mod fal_auth;
-mod finetune;
 mod hardware;
 mod hf_auth;
 mod identity;
-mod healing;
+mod image_host;
+mod sandbox_host;
+mod healing_client;
 mod identity_verify;
 mod inference;
 mod learning;
-mod mcp_catalog;
-mod meetings;
-mod mesh;
-mod mail;
-mod model_catalog;
-mod model_format;
-mod monitors;
+/// Re-export shim: the MCP server catalog primitive now lives in the
+/// `ryu-mcp-catalog` crate. Consumers reference
+/// `crate::mcp_catalog::{ServerJson, InstallPlan, plan_from_server, …}`
+/// unchanged; the crate's one cross-cutting kernel coupling (the SSRF-guarded
+/// registry fetch) inverts through [`mcp_catalog_host`].
+pub use ryu_mcp_catalog as mcp_catalog;
+mod mcp_catalog_host;
+mod meetings_client;
+mod mesh_host;
+/// Re-export shim: the Hugging Face model catalog + device-fit primitive now
+/// lives in the `ryu-model-catalog` crate. Consumers reference
+/// `crate::model_catalog::{ModelCard, install_from_descriptor, device, …}`
+/// unchanged; the crate's cross-cutting kernel couplings invert through
+/// [`model_catalog_host`].
+pub use ryu_model_catalog as model_catalog;
+mod model_catalog_host;
+/// Re-export shim: the model weight-format primitive (`ModelFormat` + the pure
+/// format→engine capability tables) now lives in the `ryu-model-format` crate.
+/// Consumers reference `crate::model_format::{ModelFormat, engines_for_format, …}`
+/// unchanged.
+pub use ryu_model_format as model_format;
+mod monitors_client;
 mod native_history;
-mod okf;
+mod notify;
+/// Re-export shim: the Open Knowledge Format (OKF) primitive now lives in the
+/// `ryu-knowledge` crate. Consumers reference `crate::okf::{Bundle, Concept, …}`
+/// unchanged.
+pub use ryu_knowledge as okf;
 mod openrouter_auth;
 mod paths;
 mod profile;
@@ -55,29 +78,37 @@ mod policy_alerts;
 mod smtp_auth;
 mod plugins;
 mod predict;
+mod predict_host;
 mod privacy;
-mod quests;
-mod realtime;
-mod recipes;
+mod quests_client;
+mod rag_host;
+mod recipes_client;
+mod recipes_host;
 mod registry;
 mod replicate_auth;
 mod runnable;
 mod sandbox;
 mod scheduler;
+mod search_host;
+mod self_api;
 mod server;
+mod stt_host;
 mod sidecar;
-mod skills;
 mod skills_catalog;
+mod skills_host;
+mod finetune_client;
 mod stats_beacon;
 mod support_access;
 mod system_info;
-mod teams;
+mod teams_client;
 mod telemetry;
 mod tool_exec;
+mod tool_registry_host;
 mod update;
-mod usage;
+mod usage_host;
 mod voice;
 mod webhook_ingress;
+mod webhook_ingress_host;
 mod win_process;
 mod workflow;
 
@@ -106,14 +137,28 @@ use sidecar::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+/// Report an unrecoverable boot failure as a clean one-line message on stderr and
+/// exit non-zero — instead of `panic!`, which dumps a Rust backtrace that reads as a
+/// crash to a user. Used only for the fail-fast boot paths in `main` (opening a data
+/// store, binding the listen socket), where the process genuinely cannot continue but
+/// the cause (port already in use, corrupt/locked data file) is an operator condition,
+/// not a bug. Expands to `!` so it drops into `match`/`unwrap_or_else` arms unchanged.
+macro_rules! boot_fail {
+    ($($arg:tt)*) => {{
+        eprintln!("ryu-core: {}", format_args!($($arg)*));
+        std::process::exit(1);
+    }};
+}
+
 #[tokio::main]
 async fn main() {
     // Emit the OpenAPI spec and exit — keeps stdout clean (before tracing init)
     // so `ryu-core --dump-openapi > core-openapi.json` is well-formed. The spec
     // is static (derived from handler annotations), so no server state is needed.
     if std::env::args().any(|a| a == "--dump-openapi") {
-        use utoipa::OpenApi;
-        let spec = crate::server::openapi::ApiDoc::openapi();
+        // `api_doc()` folds in the feature-gated leaf sub-docs (research/clips/
+        // recipes) so the dumped spec matches what `GET /api/openapi.json` serves.
+        let spec = crate::server::openapi::api_doc();
         match spec.to_pretty_json() {
             Ok(json) => println!("{json}"),
             Err(e) => {
@@ -142,6 +187,63 @@ async fn main() {
     // `release` profile, and any env var the user already set wins. The matching
     // sidecar SPAWN ports are threaded through `profile::port` in `sidecar/**`.
     crate::profile::apply_env_defaults();
+
+    // Install the crypto host BEFORE any store opens (the first `global_cipher()`
+    // caller is `ConversationStore::open_default` further down). This inverts the
+    // extracted `ryu-crypto` primitive's two kernel couplings — profile-scoped
+    // keychain suffix + `~/.ryu` dir — back into Core. Unconditional: crypto is a
+    // non-optional dep (memory/chat encrypt every row in every build).
+    crate::crypto_host::install();
+
+    // Install the collab host so the extracted `ryu-collab` primitive can resolve
+    // the `~/.ryu` data dir for `collab.db`. Unconditional and BEFORE the first
+    // `CollabStore::open_default` below: collab is a non-optional dep (`ServerState`
+    // holds a `DocRegistry` in every build).
+    crate::collab_host::install();
+
+    // Install the mesh host so the extracted `ryu-mesh` primitive can reach the
+    // `tailscale`/`tailscaled` shell-outs (the "what runs" half of the mesh) when
+    // the mesh is enabled. Unconditional: mesh is a non-optional dep (the
+    // fail-closed startup gate reads `is_enabled()`/placeholder-check in every
+    // build); the enabled-side entry points short-circuit before the host is
+    // consulted on the default mesh-off install.
+    crate::mesh_host::install();
+
+    // Install the downloads host BEFORE any artifact fetch can run. This inverts
+    // the extracted `ryu-downloads` primitive's three kernel couplings — the
+    // `~/.ryu` data dir, the version-store checksum-skip, and Hugging Face auth —
+    // back into Core. Unconditional: downloads is a non-optional dep (the sidecar
+    // loader, model catalog, engines, and marketplace install all fetch through it).
+    crate::downloads::install();
+
+    // Install the VAD host so the extracted `ryu-vad` primitive can resolve its one
+    // kernel coupling — the active `~/.ryu` data dir the Silero VAD model lives
+    // under. Unconditional: VAD is a per-frame hot-path primitive the voice session
+    // drives per uplink hop, and `silero_download_spec()` (onboarding) resolves the
+    // model dest through this host.
+    crate::voice::vad::install();
+
+    // Install the model-catalog host so the extracted `ryu-model-catalog`
+    // primitive can resolve its five kernel couplings — the `~/.ryu` data dir, HF
+    // bearer auth, the per-node engine-support gate, the bundled default-model
+    // repos, and the active-model preference. Unconditional: the catalog routes
+    // are mounted in every build. Only reachable over HTTP, so it is never
+    // consulted before this boot-time install.
+    crate::model_catalog_host::install();
+
+    // Install the MCP-catalog host so the extracted `ryu-mcp-catalog` primitive
+    // can reach its one kernel coupling — the SSRF-guarded registry fetch
+    // (`server::guarded_get_bytes`). Unconditional: the MCP catalog routes are
+    // mounted in every build. Only reachable over HTTP, so it is never consulted
+    // before this boot-time install.
+    crate::mcp_catalog_host::install();
+
+    // Install the usage host so the extracted `ryu-usage` primitive can resolve
+    // the Ryu-isolated `CODEX_HOME` (the last `auth.json` candidate the Codex
+    // reader probes). Unconditional: usage is a non-optional dep (the
+    // `GET /api/agents/:id/usage` route is mounted in every build). Poll-driven,
+    // so it is never on a hot path; the reader skips the candidate if unset.
+    crate::usage_host::install();
 
     // OpenTelemetry export seam (#539, P1): build an OPTIONAL OTLP layer that is
     // installed ONLY when the user consented (`diagnostics-export-enabled`) AND a
@@ -174,6 +276,19 @@ async fn main() {
     if let Some(provider) = otel_provider {
         std::mem::forget(provider);
     }
+
+    // Hand the extracted `ryu-tool-exec` sandbox crate Core's single-source
+    // security scrubbers (untrusted-marker strip + child-env scrub) so the PTC
+    // sandbox never runs with drift-prone duplicates. Idempotent; safe before any
+    // request-path sandbox use.
+    tool_exec::install_tool_exec_host_hooks();
+
+    // Hand the extracted `ryu-sandbox` crate Core's host couplings (Gateway
+    // metering url/bearer, ryu-dir for the persisted default backend, the
+    // registered org id, and the preferences-backed default run budget) so the
+    // sandbox metering + backend selection stay single-source with Core.
+    // Idempotent; safe before any request-path sandbox use.
+    sandbox_host::install_sandbox_host();
 
     tracing::info!("Starting ryu-core v{}", env!("CARGO_PKG_VERSION"));
 
@@ -284,8 +399,10 @@ async fn main() {
         Arc::new(StableDiffusionManager::new().with_downloads(download_center.clone())),
         // (The Unsloth fine-tuning sidecar is no longer Core-managed — it is a
         // manifest-declared managed sidecar OWNED by the `com.ryu.finetune` app,
-        // started on plugin-enable + boot-reconcile. Core keeps only the HTTP client
-        // helpers in `sidecar::providers::unsloth` that `server::finetune` calls.)
+        // started on plugin-enable + boot-reconcile. Core keeps NO in-process finetune
+        // code: the `ryu-finetune` sidecar owns the store, the adapter catalog, the
+        // worker HTTP client, and the `/api/finetune/*` surface; Core reaches only its
+        // `host.finetune_*` bridge over loopback via `finetune_client`.)
         // Tools
         Arc::new(SpiderManager::new()),
         // Autoresearch experiment runner (Python stdlib HTTP service). Opt-in;
@@ -380,6 +497,10 @@ async fn main() {
     // (enabled in the same step) first runs. Off unless RYU_HEADROOM_ENABLED=1.
     let headroom = Arc::new(sidecar::headroom::HeadroomManager::new());
 
+    // Mail runs as the `com.ryu.mail` app: the generic sidecar loader spawns the
+    // out-of-process `ryu-mail` binary and proxies `/api/mail/*` to it via the
+    // manifest's `public_mount` (Track C). No hand-coded MailManager here anymore.
+
     // Start HTTP server for setup control
     let catalog = Arc::new(crate::catalog::CatalogManager::new());
     let auth_state = Arc::new(Mutex::new(auth::AuthState::new()));
@@ -388,22 +509,22 @@ async fn main() {
     // as durable rows so they survive a restart and stay selectable.
     let agent_store = match crate::agents::AgentStore::open(&agent_registry) {
         Ok(store) => store,
-        Err(e) => panic!("failed to open agent store: {e:#}"),
+        Err(e) => boot_fail!("failed to open agent store: {e:#}"),
     };
-    // Persisted agent teams (collections of agents + a coordination strategy).
-    let teams = match crate::teams::TeamStore::open() {
-        Ok(store) => store,
-        Err(e) => panic!("failed to open team store: {e:#}"),
-    };
+    // Persisted agent teams (collections of agents + a coordination strategy) now
+    // live OUT-OF-PROCESS in the `ryu-teams` sidecar (single owner of `teams.db`).
+    // Core reaches them over loopback via `TeamsClient`, constructed below once the
+    // manifests are loaded (so the sidecar port resolves from the manifest, not a
+    // hardcoded constant).
     let conversations = match server::conversations::ConversationStore::open_default() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open conversation store: {e:#}"),
+        Err(e) => boot_fail!("failed to open conversation store: {e:#}"),
     };
     // Semantic message index backing the `search_conversations` builtin tool.
     // Opened best-effort: if the vec0 index can't be created, conversations still
     // work (search just returns no index). Wired into the store so append-on-write
     // indexing + lazy-backfill search are available.
-    let conversations = match server::message_index::MessageIndex::open_default() {
+    let conversations = match search_host::open_default_message_index() {
         Ok(index) => conversations.with_message_index(index),
         Err(e) => {
             tracing::warn!("message index unavailable; search_conversations disabled: {e:#}");
@@ -415,20 +536,20 @@ async fn main() {
     // can't be created, conversations still work — the FTS recall source just
     // returns no index. Population is lazy-on-search and default-OFF, so wiring the
     // index here materializes nothing until a user opts into FTS recall.
-    let conversations = match server::message_fts::MessageFtsIndex::open_default() {
+    let conversations = match search_host::open_default_message_fts() {
         Ok(index) => conversations.with_message_fts_index(index),
         Err(e) => {
             tracing::warn!("fts message index unavailable; fts session search disabled: {e:#}");
             conversations
         }
     };
-    let memory = match server::memory::MemoryStore::open_default() {
+    let memory = match memory_host::open_default() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open memory store: {e:#}"),
+        Err(e) => boot_fail!("failed to open memory store: {e:#}"),
     };
-    let spaces = match server::spaces::SpaceStore::open_default() {
+    let spaces = match server::spaces::open_default() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open spaces store: {e:#}"),
+        Err(e) => boot_fail!("failed to open spaces store: {e:#}"),
     };
     // Ensure the default, undeletable "Artifacts" system space exists — where chat
     // artifacts and agent-generated files (pptx/xlsx/csv/pdf/html/png) are filed.
@@ -438,17 +559,11 @@ async fn main() {
     {
         tracing::warn!("failed to ensure Artifacts system space: {e:#}");
     }
-    // Ensure the default, undeletable "Clips" system space exists — where finished
-    // screen recordings/clips are auto-filed (mp4 blob + markdown summary).
-    if let Err(e) = spaces
-        .ensure_system_space(
-            server::clips::CLIPS_SPACE_NAME,
-            Some(server::clips::CLIPS_SPACE_DESC),
-        )
-        .await
-    {
-        tracing::warn!("failed to ensure Clips system space: {e:#}");
-    }
+    // The "Clips" system space seed moved out with the clips capability: clips is now
+    // the out-of-process `com.ryu.clips` sidecar and no longer links into the kernel,
+    // so there is no in-process `CLIPS_SPACE_NAME/DESC` seed here. (Auto-filing a clip
+    // into that Space is a `ClipsHost` coupling the standalone sidecar degrades
+    // cleanly — see `apps-store/clips/backend/src/main.rs`.)
     // Ensure the "Canvas" system space and import any legacy file-store boards into
     // it as `com.ryu.canvas` app documents (the built-in creative canvas was ported
     // to a Ryu App; see `server::canvas_migrate`). Idempotent — migrated files are
@@ -471,21 +586,23 @@ async fn main() {
     {
         tracing::warn!("failed to ensure Whiteboard system space: {e:#}");
     }
-    let retrieval = match server::retrieval::RetrievalStore::open_default() {
+    let retrieval = match rag_host::open_retrieval_store() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open retrieval store: {e:#}"),
+        Err(e) => boot_fail!("failed to open retrieval store: {e:#}"),
     };
     let media = match server::media::MediaStore::open_default() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open media store: {e:#}"),
+        Err(e) => boot_fail!("failed to open media store: {e:#}"),
     };
-    let traces = match server::trace::TraceStore::open_default() {
+    // Default-path choice stays Core-side wiring; the crate takes an explicit
+    // path (`ryu-tracing` has zero dependency on apps/core).
+    let traces = match ryu_tracing::TraceStore::open(crate::paths::ryu_dir().join("traces.db")) {
         Ok(store) => store,
-        Err(e) => panic!("failed to open trace store: {e:#}"),
+        Err(e) => boot_fail!("failed to open trace store: {e:#}"),
     };
     let preferences = match server::preferences::PreferencesStore::open_default() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open preferences store: {e:#}"),
+        Err(e) => boot_fail!("failed to open preferences store: {e:#}"),
     };
     // Local support-access diagnostic channel (#546, P5): the append-only audit
     // log, plus the startup auto-disable sweep. Re-checking the hard expiry HERE
@@ -494,7 +611,7 @@ async fn main() {
     // passed is flipped off in the prefs before any request can use it.
     let support_audit = match support_access::SupportAccessStore::open_default() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open support-access audit store: {e:#}"),
+        Err(e) => boot_fail!("failed to open support-access audit store: {e:#}"),
     };
     match support_access::sweep_expired(&preferences).await {
         Ok(true) => tracing::info!("support-access: expired local grant auto-disabled at startup"),
@@ -506,11 +623,27 @@ async fn main() {
     if let Ok(Some(token)) = preferences.get(hf_auth::HF_TOKEN_PREF_KEY).await {
         hf_auth::set_token(&token);
     }
+    // Load the user's capability→provider binding overrides into the active
+    // BindingConfig so capability resolution (enable/disable/broker) honours them
+    // from boot, not only after the first PUT /api/capabilities/bindings.
+    if let Ok(Some(json)) = preferences
+        .get(plugins::binding::BINDING_OVERRIDES_PREF_KEY)
+        .await
+    {
+        plugins::binding::set_active_config(plugins::binding::config_from_overrides_json(&json));
+    }
     // Load the BYO SMTP transport (non-secret host/port/username/from/starttls)
     // and password into the in-process email sink so self-host alert/inbox email
     // works without an env var or restart. Both are prefs-first, env-fallback.
-    if let Ok(Some(json)) = preferences.get(email::SMTP_TRANSPORT_PREF_KEY).await {
-        email::apply_transport_prefs_json(&json);
+    // Secret custody stays kernel-side: the extracted `ryu-email-send` sink resolves
+    // the password through this injected hook over Core's `smtp_auth` store. Wire it
+    // before any alert can fire.
+    ryu_email_send::set_password_resolver(smtp_auth::password);
+    if let Ok(Some(json)) = preferences
+        .get(ryu_email_send::SMTP_TRANSPORT_PREF_KEY)
+        .await
+    {
+        ryu_email_send::apply_transport_prefs_json(&json);
     }
     if let Ok(Some(password)) = preferences.get(smtp_auth::SMTP_PASSWORD_PREF_KEY).await {
         smtp_auth::set_password(&password);
@@ -643,16 +776,69 @@ async fn main() {
     }
     // Apply the user's saved default embedding model (if any) to the Spaces store,
     // re-indexing in the background when it differs from what the store opened with.
-    spaces.apply_saved_embedding_pref(&preferences).await;
+    server::spaces::apply_saved_embedding_pref(&spaces, &preferences).await;
     // App manifests: wrapped in RwLock so self-build tools can hot-install new
     // apps without restarting Core (U57). The self-build tools write into this
     // store and `GET /api/apps` reads from it; no restart required.
     let app_manifests = Arc::new(tokio::sync::RwLock::new(
         crate::plugin_manifest::PluginManifestLoader::load(),
     ));
+    // Loopback client for the out-of-process `ryu-teams` sidecar (single owner of
+    // `teams.db`). Port resolved from the just-loaded manifests, profile-shifted.
+    let teams = crate::teams_client::TeamsClient::new(crate::teams_client::sidecar_port(
+        &*app_manifests.read().await,
+    ));
+    // Loopback client for the out-of-process `ryu-finetune` sidecar (single owner of
+    // `finetune.db` + the Python `unsloth` worker). Port resolved from the just-loaded
+    // manifests, profile-shifted — same posture as `teams`.
+    let finetune = crate::finetune_client::FinetuneClient::new(
+        crate::finetune_client::sidecar_port(&*app_manifests.read().await),
+    );
+    // Loopback client for the out-of-process `ryu-quests` sidecar (single owner of
+    // `quests.db` + the detection engine). Port resolved from the just-loaded
+    // manifests, profile-shifted — same posture as `finetune`/`teams`. Published as
+    // a process-global so the scheduler (`JobTarget::Quest`) and the MCP quest-board
+    // widget can reach it without `ServerState`.
+    let quests = crate::quests_client::QuestsClient::new(crate::quests_client::sidecar_port(
+        &*app_manifests.read().await,
+    ));
+    crate::quests_client::set_global_client(quests.clone());
+    // Loopback client for the out-of-process `ryu-monitors` sidecar (single owner of
+    // `monitors.db` + the monitor engine). Port resolved from the just-loaded
+    // manifests, profile-shifted — same posture as `quests`. Published as a
+    // process-global so the scheduler (`JobTarget::Monitor`) can reach it without
+    // `ServerState`; the reconcile loop is spawned once `activity`/`ServerState` exist.
+    let monitors = crate::monitors_client::MonitorsClient::new(
+        crate::monitors_client::sidecar_port(&*app_manifests.read().await),
+    );
+    crate::monitors_client::set_global_client(monitors.clone());
+    // Loopback client for the out-of-process `ryu-dashboards` sidecar (single owner
+    // of `dashboards.db` + the refresh loop + the `/api/dashboards/*` surface). Port
+    // resolved from the just-loaded manifests, profile-shifted — same posture as
+    // `monitors`. Published as a process-global so the state-free `dashboard_builder`
+    // MCP runnable can reach it; also backs the kernel hardware device-dashboard
+    // renderer + nudge loop through the `ryu_hardware::DashboardFeed` seam.
+    let dashboards = crate::dashboards_client::DashboardsClient::new(
+        crate::dashboards_client::sidecar_port(&*app_manifests.read().await),
+    );
+    crate::dashboards_client::set_global_client(dashboards.clone());
+    // Loopback client for the out-of-process `ryu-meetings` sidecar (single owner of
+    // `meetings.db` + the engine/audio pipeline + the `/api/meetings/*` surface). Port
+    // resolved from the just-loaded manifests, profile-shifted — same posture as
+    // `dashboards`. Backs the kernel hardware ambient-audio path through the
+    // `ryu_hardware::MeetingIngest` seam; the activity-feed fold is spawned once
+    // `activity`/`ServerState` exist.
+    let meetings = crate::meetings_client::MeetingsClient::new(
+        crate::meetings_client::sidecar_port(&*app_manifests.read().await),
+    );
+    // Resolve the `ryu-healing` sidecar port now, while `app_manifests` is still in
+    // scope (it is moved into `ServerState` below); the healing client is built
+    // later, once `server_state` exists.
+    let healing_sidecar_port =
+        crate::healing_client::sidecar_port(&*app_manifests.read().await);
     let app_store = match crate::plugins::PluginStore::open() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open app store: {e:#}"),
+        Err(e) => boot_fail!("failed to open app store: {e:#}"),
     };
 
     // Seed gateway egress compression from the headroom plugin's persisted state
@@ -746,7 +932,12 @@ async fn main() {
     // `RYU_SKILLS_DIR`), the same location Claude Code and the skills CLI read.
     // A missing directory is not an error — Core runs without skills until the user
     // installs any. Skills are injected into outgoing chat requests by the adapter.
-    let skill_registry = crate::skills::SkillRegistry::load();
+    // Publish the Ryu data folder to the extracted `ryu_skills` crate BEFORE
+    // `SkillRegistry::load()`, whose `ensure_active_set_seeded` + `migrate_legacy_skills`
+    // touch `~/.ryu` — so they resolve against the real (possibly relocated) folder,
+    // not the crate's `$RYU_DIR`/`~/.ryu` fallback.
+    ryu_skills::set_data_dir(crate::paths::ryu_dir());
+    let skill_registry = ryu_skills::SkillRegistry::load();
 
     // Per-run worktree diff cache, shared by the chat path and the off-chat agent
     // runner. Built once here so both `ServerState`, the runner, and the in-process
@@ -764,9 +955,10 @@ async fn main() {
             // Wire the agent store so the `agent_builder` tools can edit agent
             // records in chat (the desktop agent-edit page's builder pane).
             .with_agent_store(agent_store.clone())
-            // Wire the team store so `agent_builder__create_agent_team` can mint a
-            // roster of agents and persist them as a reusable team.
-            .with_team_store(teams.clone())
+            // Wire the teams sidecar client so `agent_builder__create_agent_team`
+            // can mint a roster of agents and persist them as a reusable team over
+            // loopback HTTP (the sidecar owns the store).
+            .with_teams_client(teams.clone())
             // Wire the conversation store so the `search_conversations` built-in
             // tool can run semantic search over past chat messages.
             .with_conversations(conversations.clone())
@@ -788,96 +980,100 @@ async fn main() {
     // store and reuses the MCP registry (for the Spider fetch backend) + a shared
     // HTTP client. Published as a process-global so the state-free scheduler can
     // run a monitor when its `JobTarget::Monitor` job fires.
-    let monitor_store = match crate::monitors::store::MonitorStore::open_default() {
+    // Kernel notification-delivery store (adjudicated NOT-a-capability): the
+    // app-inbox feed, push tokens, policy-alert dedupe, and node-level alert
+    // delivery targets. Stays compiled into Core and keeps serving
+    // notifications_api / policy_alerts / workflow / approvals even once the
+    // monitor engine moves out-of-process. Published as a process-global so the
+    // state-free scheduler + workflow executor + policy-alert deliverer reach it.
+    let notify_store = match crate::notify::NotifyStore::open_default() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open monitors store: {e:#}"),
+        Err(e) => boot_fail!("failed to open notify store: {e:#}"),
     };
-    let monitor_engine = crate::monitors::MonitorEngine::new(
-        monitor_store,
-        Arc::clone(&mcp_registry),
-        reqwest::Client::new(),
-    );
-    crate::monitors::set_global_engine(monitor_engine.clone());
+    crate::notify::set_global_store(notify_store.clone());
 
-    // Self-host Agent Inboxes store (`~/.ryu/mail.db`). Opens its own SQLite DB;
-    // the send path reuses the shared email sink, inbound arrives over HMAC-authed
-    // webhook. Best-effort open: a failure disables inboxes, never blocks startup.
-    let mail_store = match crate::mail::MailStore::open_default() {
-        Ok(store) => store,
-        Err(e) => panic!("failed to open mail store: {e:#}"),
-    };
+    // Website monitors now run OUT-OF-PROCESS: the `ryu-monitors` sidecar owns
+    // `monitors.db` + the engine + the `/api/monitors/*` surface (served via the
+    // manifest `public_mount`). Core reaches it over loopback via the `monitors`
+    // client built above; the scheduler run (`JobTarget::Monitor`) and the backing-job
+    // reconcile are wired through `monitors_client::spawn`, and the sidecar's Spider
+    // fetch + alert fan-out reach BACK into Core via the ext-bearer host callbacks in
+    // `monitors_client`. Core links NO monitor code.
 
-    // Meeting-notes engine (Granola/Notion-AI style). Opens its own SQLite store
-    // and reuses a shared HTTP client for transcription proxy, gateway note-gen,
-    // and driving device-local Shadow capture. Published as a process-global so
-    // off-`ServerState` callers (Shadow control, future scheduled summaries) reach
-    // it. Audio capture itself is a device-bound sensor and lives in Shadow.
-    let meeting_store = match crate::meetings::store::MeetingStore::open_default() {
-        Ok(store) => store,
-        Err(e) => panic!("failed to open meetings store: {e:#}"),
-    };
-    let meeting_engine = crate::meetings::MeetingEngine::new(meeting_store, reqwest::Client::new());
-    crate::meetings::set_global_engine(meeting_engine.clone());
+    // (Mail's store lives in the out-of-process `ryu-mail` sidecar now — Track C.)
+
+    // Meeting notes run OUT-OF-PROCESS: the `ryu-meetings` sidecar owns `meetings.db`,
+    // the engine + audio/diarize pipeline, and the `/api/meetings/*` surface (served to
+    // the desktop through the ext-proxy `public_mount`). Core links NO meeting code; it
+    // reaches the sidecar over loopback via the `meetings` client built above. The
+    // Spaces note-filing coupling moved to the `save-notes` host callback
+    // (`meetings_client::host_save_notes`), so notes still land in the "Meetings" Space
+    // under the background owner.
 
     // Hardware device registry (RHP v1, PROTOCOL.md §6): paired watch/necklace/
     // desk devices + their revocable per-device tokens + presence. Opens its own
     // SQLite store (`~/.ryu/hardware.db`). Read by the `/api/hardware/*` REST
     // surface and the `/api/hardware/ws` realtime handler.
-    let hardware_store = match crate::hardware::store::DeviceStore::open_default() {
-        Ok(store) => store,
-        Err(e) => panic!("failed to open hardware device registry: {e:#}"),
-    };
+    // The registry moved to the extracted `ryu_hardware` crate; the host computes
+    // the db path (`~/.ryu/hardware.db`) and injects it at open (the crate never
+    // reaches Core's `paths` module).
+    let hardware_store =
+        match ryu_hardware::DeviceStore::open(crate::paths::ryu_dir().join("hardware.db")) {
+            Ok(store) => store,
+            Err(e) => boot_fail!("failed to open hardware device registry: {e:#}"),
+        };
 
-    // Quests engine (auto-detecting todo list). Opens its own SQLite store and
-    // reuses the MCP registry (for Shadow context), a shared HTTP client (for the
-    // gateway judge call), and the preferences store (for the detection mode +
-    // judge model). Published as a process-global so the state-free scheduler can
-    // run a quest's detection pass when its `JobTarget::Quest` job fires.
-    let quest_store = match crate::quests::store::QuestStore::open_default() {
-        Ok(store) => store,
-        Err(e) => panic!("failed to open quests store: {e:#}"),
-    };
-    let quest_engine = crate::quests::QuestEngine::new(
-        quest_store,
-        Arc::clone(&mcp_registry),
-        reqwest::Client::new(),
-        preferences.clone(),
-    );
-    crate::quests::set_global_engine(quest_engine.clone());
+    // Quests (auto-detecting todo list) now runs OUT-OF-PROCESS: the `ryu-quests`
+    // sidecar owns `quests.db` + the detection engine. Core reaches it over loopback
+    // via the `quests` client built above; the scheduler judge, the `JobTarget::Quest`
+    // job reconcile, and the activity feed are wired through `quests_client::spawn`.
 
-    // Home dashboards engine (customizable live widget grid). Opens its own SQLite
-    // store and reuses a shared HTTP client for loopback Core self-calls (curated
-    // endpoint widgets), the Gateway (Composio widgets), and external GETs (HTTP
-    // widgets). Published as a process-global and driven by a dashboard-owned
-    // refresh loop that re-resolves each due widget and broadcasts fresh values
-    // over SSE — skipping expensive sources when no client is watching.
-    let dashboard_store = match crate::dashboard::store::DashboardStore::open_default() {
-        Ok(store) => store,
-        Err(e) => panic!("failed to open dashboards store: {e:#}"),
-    };
-    let dashboard_engine =
-        crate::dashboard::DashboardEngine::new(dashboard_store, reqwest::Client::new());
-    crate::dashboard::set_global_engine(dashboard_engine.clone());
-    crate::dashboard::refresh::spawn(dashboard_engine.clone());
+    // Recipes host (ghost-os record→replay), from the extracted `ryu_recipes`
+    // crate. Installed UNCONDITIONALLY — the workflow executor's `Recipe`/
+    // `GhostAction` nodes call `ryu_recipes::run` in every build (kernel), so the
+    // host must be present even in the lean kernel (only the HTTP routes are
+    // feature-gated). The shim carries the two live-ghost couplings the crate can't
+    // own: the shared MCP registry (replay) and the dedicated recording subprocess.
+    ryu_recipes::set_global_host(std::sync::Arc::new(crate::recipes_host::CoreRecipesHost));
+
+    // Install the webhook-ingress host BEFORE any ingress code runs (the ingress
+    // start task below, and the public webhook routes in `server/mod.rs`, both
+    // reach the extracted `ryu-webhook-ingress` engine through this seam). The
+    // shim carries the kernel couplings the crate can't own (composio verify/run,
+    // workflow-secret lookup, mesh Funnel, auth token, data dir).
+    ryu_webhook_ingress::set_global_host(std::sync::Arc::new(
+        crate::webhook_ingress_host::CoreWebhookIngressHost,
+    ));
+
+    // Home dashboards run OUT-OF-PROCESS: the `ryu-dashboards` sidecar owns
+    // `dashboards.db`, the refresh loop, and the `/api/dashboards/*` surface (served
+    // to the desktop through the ext-proxy `public_mount`). Core links NO dashboard
+    // code; it reaches the sidecar over loopback via the `dashboards` client built
+    // above. The `CoreDashboardsHost` (Composio/agent/HTTP widget couplings) moved to
+    // the sidecar's own host impl — Agent/HTTP widgets degrade out-of-process until a
+    // broker-back hop lands (documented in the sidecar).
+    //
     // Live display nudge for hardware: when a device-bound dashboard's data changes,
     // push the RHP `display` re-poll signal to that device's live WS so the desk
     // e-ink reflects edits promptly (TRMNL push-to-refresh; review gap #4). Cost-
-    // guarded — only connected devices are nudged, and per-device debounced.
-    crate::hardware::nudge::spawn(dashboard_engine.clone(), hardware_store.clone());
+    // guarded — only connected devices are nudged, per-device debounced. The nudge
+    // loop now consumes the sidecar's `/events` SSE (as an internal, non-viewer
+    // subscriber) through the `DashboardFeed` seam, reconnecting across a restart.
+    ryu_hardware::nudge::spawn(std::sync::Arc::new(dashboards.clone()), hardware_store.clone());
 
     // Approval inbox (human-in-the-loop). Opens its own SQLite store and reuses a
-    // shared HTTP client (mobile Expo push) + the monitors store's registered
+    // shared HTTP client (mobile Expo push) + the kernel notify store's registered
     // push tokens, so a phone learns about a pending decision while away. Published
     // as a process-global so the state-free scheduler and the workflow executor can
     // raise requests when a `require_approval` job fires or an `Awakeable` gate
     // suspends. A background sweep expires stale pending requests.
     let approval_store = match crate::approvals::store::ApprovalStore::open_default() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open approvals store: {e:#}"),
+        Err(e) => boot_fail!("failed to open approvals store: {e:#}"),
     };
     let approval_engine =
         crate::approvals::ApprovalEngine::new(approval_store, reqwest::Client::new())
-            .with_monitors(monitor_engine.store.clone())
+            .with_push_store(notify_store.clone())
             .with_registry(Arc::clone(&mcp_registry))
             .with_preferences(preferences.clone())
             .with_skills(skill_registry.clone());
@@ -901,24 +1097,35 @@ async fn main() {
     // ⇒ Core; nothing about it is policy. Wired sources: monitors + quests +
     // approvals + meetings (all four expose a broadcast bus); the manual POST
     // endpoint keeps the slice testable regardless.
-    let activity_store = match crate::activity::ActivityStore::open_default() {
-        Ok(store) => store,
-        Err(e) => panic!("failed to open activity store: {e:#}"),
-    };
-    crate::activity::ingest::spawn(
-        activity_store.clone(),
-        &monitor_engine,
-        &quest_engine,
-        &approval_engine,
-        &meeting_engine,
-    );
+    // `open` takes an explicit path — the default-path choice (`~/.ryu/activity.db`)
+    // stays Core-side wiring so the `ryu-activity` crate has zero apps/core dep.
+    let activity_store =
+        match ryu_activity::ActivityStore::open(crate::paths::ryu_dir().join("activity.db")) {
+            Ok(store) => store,
+            Err(e) => boot_fail!("failed to open activity store: {e:#}"),
+        };
+    crate::activity::ingest::spawn(activity_store.clone(), &approval_engine);
+    // Meetings → activity. Meetings is out-of-process (`ryu-meetings` sidecar): Core
+    // folds the sidecar's `/api/meetings/stream` SSE into the activity store (the
+    // dep-free successor to the old in-process `MeetingEvent` subscribe-loop).
+    crate::meetings_client::spawn(meetings.clone(), activity_store.clone());
+    // Quests → activity + `JobTarget::Quest` job lifecycle. Quests is out-of-process
+    // (`ryu-quests` sidecar): Core folds the sidecar's `/api/quests/events` SSE into
+    // the activity store and reconciles the backing scheduler jobs from the quest
+    // list on a background loop.
+    crate::quests_client::spawn(quests.clone(), activity_store.clone());
+    // Monitors → `JobTarget::Monitor` job lifecycle. Monitors is out-of-process
+    // (`ryu-monitors` sidecar): Core reconciles the backing scheduler jobs from the
+    // monitor list on a background loop. Alert fan-out + activity arrive over the
+    // `monitors_client` host-alert callback, not a spawned loop.
+    crate::monitors_client::spawn(monitors.clone());
 
     // Identity Vault (#517): crypto-sealed per-domain agent connections. Opens its
     // own SQLite store under ~/.ryu/identities.db and is published as a
     // process-global so off-`ServerState` callers — the health-check loop and the
     // shared elicitation seam (later units) — reach it without threading it
-    // through. Credential state is sealed via `crypto::global_cipher()`.
-    match crate::identity::IdentityStore::open() {
+    // through. Credential state is sealed via `ryu_crypto::global_cipher()`.
+    match crate::identity::IdentityStore::open(crate::paths::ryu_dir()) {
         Ok(store) => {
             crate::identity::set_global(store.clone());
             // Publish the health-check engine (#524) and ensure its single
@@ -952,14 +1159,20 @@ async fn main() {
     // capability). Published as a process-global so the sandbox bridge reaches it
     // without threading through ServerState. Best-effort: a plugin's `host.storage`
     // call surfaces a clean error if the store could not open.
-    match crate::plugin_storage::PluginStorage::open_default() {
+    match crate::plugin_storage::open_default() {
         Ok(store) => crate::plugin_storage::set_global(store),
         Err(e) => tracing::warn!("plugin storage unavailable: {e:#}"),
     }
     // Composio event-trigger store: registers trigger instances with Composio and
     // fires the bound agent when the webhook arrives. Published as a process-global
     // so the webhook + CRUD handlers reach it without threading through ServerState.
-    match crate::composio_triggers::ComposioTriggerStore::open(reqwest::Client::new()) {
+    // Install Core's ComposioHost (workflow/agent run fan-out) before publishing
+    // the store, so a webhook that arrives during startup can fire.
+    crate::composio_host::install();
+    match crate::composio_triggers::ComposioTriggerStore::open(
+        reqwest::Client::new(),
+        crate::paths::ryu_dir().join("composio-triggers.db"),
+    ) {
         Ok(store) => crate::composio_triggers::set_global(store),
         Err(e) => tracing::warn!("composio triggers store unavailable: {e:#}"),
     }
@@ -999,7 +1212,7 @@ async fn main() {
     // `Events` frame on every persisted turn — and `ServerState` below, which the
     // `/api/realtime/ws` handler subscribes against. Both MUST be the same instance
     // or publishes reach a registry no socket is listening to.
-    let realtime = crate::realtime::RoomRegistry::new();
+    let realtime = ryu_realtime::RoomRegistry::new();
     let conversations = conversations
         .with_auto_title(auto_title_tx)
         .with_realtime(realtime.clone());
@@ -1009,23 +1222,26 @@ async fn main() {
     // Driven by the `kind:"document"` path of `/api/realtime/ws`. Built ONCE here
     // and shared (Clone is Arc-backed) into `ServerState` below so every socket
     // resolves the same in-memory replica per live document.
-    let collab = crate::collab::DocRegistry::new(Arc::new(
-        crate::collab::CollabStore::open_default().expect("opening collab.db"),
+    let collab = ryu_collab::DocRegistry::new(Arc::new(
+        ryu_collab::CollabStore::open_default()
+            .unwrap_or_else(|e| boot_fail!("failed to open collab store: {e:#}")),
     ));
 
-    // Fine-tuning job store (Unsloth integration). Durable record of fine-tune
-    // jobs; the training itself runs in the opt-in `unsloth` sidecar.
-    let finetune_store = match crate::finetune::FinetuneStore::open_default() {
-        Ok(store) => store,
-        Err(e) => panic!("failed to open finetune store: {e:#}"),
-    };
+    // Fine-tuning is now OUT-OF-PROCESS: the `ryu-finetune` sidecar owns `finetune.db`
+    // + the adapter catalog + the Python `unsloth` worker, and serves `/api/finetune/*`
+    // via the manifest `public_mount`. Core reaches its one reverse-coupling (the
+    // `host.finetune_*` plugin-host bridge) over loopback through the `finetune`
+    // client constructed above — no in-process store is opened here.
 
     // Experience buffer (continual-learning loop). Durable record of captured
     // (user, assistant) turns + PRM scores; populated by sweeping conversations
     // at cycle time, consumed by the reward-filtered retrain.
-    let experience_store = match crate::experience::ExperienceStore::open_default() {
+    // The experience buffer now lives in the extracted `ryu-learning` crate; point
+    // it at the SAME `~/.ryu` data dir Core resolves before opening `experience.db`.
+    ryu_learning::init_data_dir(crate::paths::ryu_dir());
+    let experience_store = match ryu_learning::ExperienceStore::open_default() {
         Ok(store) => store,
-        Err(e) => panic!("failed to open experience store: {e:#}"),
+        Err(e) => boot_fail!("failed to open experience store: {e:#}"),
     };
 
     let server_state = server::ServerState {
@@ -1057,14 +1273,12 @@ async fn main() {
         support_audit,
         catalog_sources: Arc::new(crate::catalog_source::CatalogSourceRegistry::new()),
         downloads: download_center.clone(),
-        monitors: monitor_engine,
-        mail: mail_store,
-        meetings: meeting_engine,
-        quests: quest_engine,
-        dashboards: dashboard_engine,
+        meetings,
+        quests,
+        dashboards,
         approvals: approval_engine,
         activity: activity_store,
-        mesh: crate::mesh::MeshHandle::new(),
+        mesh: ryu_mesh::MeshHandle::new(),
         connections: crate::connections::ConnectionRegistry::new(),
         hardware: hardware_store,
         // Room-keyed realtime fan-out registry (Phase 1). Production tunables
@@ -1074,7 +1288,7 @@ async fn main() {
         // Authoritative CRDT document engine (Phase 3). Same instance the
         // `kind:"document"` realtime path applies/persists/rebroadcasts against.
         collab,
-        finetune: finetune_store,
+        finetune,
         experience: experience_store,
         // Captured for the public `/api/realtime/ws` handler's in-handler node
         // token enforcement (the public router has no `auth_token` Extension).
@@ -1088,9 +1302,16 @@ async fn main() {
     // (pre/post tool use, subagent stop, session end, notification) can fire hooks
     // from code that has no `ServerState` in scope. Mirrors plugin_storage::global.
     crate::server::install_global_hook_dispatcher(server_state.clone());
-    // Self-healing loop: watch the run-status bus and diagnose/propose fixes for
-    // failed runs (auto-apply or queue to the approvals inbox, per `healing.*`).
-    crate::healing::HealEngine::new(server_state.clone()).spawn();
+    // Self-healing: the diagnose→propose ENGINE runs out-of-process in the
+    // `ryu-healing` sidecar (`com.ryu.healing`); Core only drives it. Publish the
+    // loopback client (so the scheduler + workflow executor can reach it without
+    // `ServerState`) and spawn the run-status bus loop, which reads a failed run's
+    // context from the kernel conversation store and posts it to the sidecar,
+    // applying the returned verdict (Core owns the approvals write + the re-run).
+    let healing =
+        crate::healing_client::HealingClient::new(healing_sidecar_port, server_state.clone());
+    crate::healing_client::set_global_client(healing.clone());
+    crate::healing_client::spawn(healing, server_state.clone());
     let auth_token = std::env::var("RYU_TOKEN").ok();
 
     // Fire the `onStartup` activation event (#443) now that `ServerState` exists.
@@ -1148,12 +1369,14 @@ async fn main() {
             tracing::info!("ryu-core already running on {bind_addr}, exiting");
             std::process::exit(0);
         }
-        Err(e) => panic!("failed to bind {bind_addr}: {e}"),
+        Err(e) => boot_fail!("failed to bind {bind_addr}: {e}"),
     };
 
     tracing::info!(
         "HTTP server listening on {}",
-        listener.local_addr().unwrap()
+        listener
+            .local_addr()
+            .unwrap_or_else(|e| boot_fail!("failed to read local address of {bind_addr}: {e}"))
     );
 
     // Start the optional headroom compression proxy before the gateway so it is
@@ -1190,6 +1413,9 @@ async fn main() {
             }
         });
     }
+
+    // (The `ryu-mail` sidecar is spawned by the generic plugin-sidecar loader when
+    // the default-on `com.ryu.mail` app is reconciled — no bespoke startup here.)
 
     // Webhook ingress seam (#479, P6a): build the configured ingress backend
     // (default RyuRelay; pref `webhook.ingress.backend`; env override
@@ -1368,17 +1594,26 @@ async fn main() {
     // numbers ride the existing `/api/sidecar/status` poll.
     sidecars.spawn_resource_sampler();
 
+    // Idle-stop (Rivet-style scale-to-zero): if `RYU_SIDECAR_IDLE_SECS` opts any
+    // heavy sidecar in (e.g. `llamacpp-rerank=900,research=1800`), a background
+    // reaper stops it after the configured idle period; the next request wakes it
+    // on demand. A pure no-op when unset — the task isn't even spawned — so the
+    // default holds all lazy-started sidecars resident exactly as before.
+    sidecars.spawn_idle_reaper();
+
     // Serve HTTP API. `into_make_service_with_connect_info` threads the peer
     // `SocketAddr` so `/api/realtime/ws` can distinguish a genuine loopback peer
     // (the local single user) from a remote holder of the shared `RYU_TOKEN` when
     // deciding access to unpersisted rooms. Handlers that don't extract
     // `ConnectInfo` are unaffected — it is a superset of the plain make-service.
-    axum::serve(
+    if let Err(e) = axum::serve(
         listener,
         router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .await
-    .expect("server error");
+    {
+        boot_fail!("HTTP server error: {e}");
+    }
 }
 
 /// Ensure the single Identity Vault health-check scheduled job exists (#524).

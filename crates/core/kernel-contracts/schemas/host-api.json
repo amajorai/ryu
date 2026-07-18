@@ -1,0 +1,971 @@
+{
+  "methods": [
+    {
+      "capability": "core.listAgents",
+      "grant": "core:list_agents",
+      "method": "core.listAgents",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.render",
+      "grant": "ui:render",
+      "method": "ui.registerRoute",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "tool.call",
+      "grant": "tool:call",
+      "method": "tool.call",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.sendMessage",
+      "grant": "ui:send_message",
+      "method": "ui.sendMessage",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "widget.state",
+      "grant": null,
+      "method": "widget.setState",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "widget.state",
+      "grant": null,
+      "method": "widget.getGlobals",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.displayMode",
+      "grant": null,
+      "method": "ui.requestDisplayMode",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.displayMode",
+      "grant": null,
+      "method": "ui.requestModal",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.displayMode",
+      "grant": null,
+      "method": "ui.notifyHeight",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.displayMode",
+      "grant": null,
+      "method": "ui.requestClose",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.displayMode",
+      "grant": null,
+      "method": "ui.openExternal",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.displayMode",
+      "grant": null,
+      "method": "ui.uploadFile",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.displayMode",
+      "grant": null,
+      "method": "ui.selectFiles",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.displayMode",
+      "grant": null,
+      "method": "ui.getFileDownloadUrl",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ui.displayMode",
+      "grant": null,
+      "method": "ui.setOpenInAppUrl",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "model.complete",
+      "grant": "hook:side-model",
+      "method": "model.complete",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "agent.run",
+      "grant": "hook:run-agent",
+      "method": "agent.run",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "storage.kv",
+      "grant": "storage:kv",
+      "method": "storage.get",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "storage.kv",
+      "grant": "storage:kv",
+      "method": "storage.set",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "storage.kv",
+      "grant": "storage:kv",
+      "method": "storage.delete",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "storage.kv",
+      "grant": "storage:kv",
+      "method": "storage.keys",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "agent.run",
+      "grant": "hook:run-agent",
+      "method": "agent.run.stream",
+      "streaming": true,
+      "tsHost": true
+    },
+    {
+      "capability": "agent.run",
+      "grant": "hook:run-agent",
+      "method": "agent.cancel",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "spaces.docs",
+      "grant": "spaces:docs",
+      "method": "spaces.createDoc",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "spaces.docs",
+      "grant": "spaces:docs",
+      "method": "spaces.getDoc",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "spaces.docs",
+      "grant": "spaces:docs",
+      "method": "spaces.updateDoc",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "spaces.docs",
+      "grant": "spaces:docs",
+      "method": "spaces.listDocs",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "spaces.docs",
+      "grant": "spaces:docs",
+      "method": "spaces.deleteDoc",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "media.generate",
+      "grant": "media:generate",
+      "method": "media.image",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "media.generate",
+      "grant": "media:generate",
+      "method": "media.video",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "media.generate",
+      "grant": "media:generate",
+      "method": "media.tts",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "media.transcribe",
+      "grant": "media:transcribe",
+      "method": "media.transcribe",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "core.listAgents",
+      "grant": "core:list_agents",
+      "method": "registry.engineModels",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "core.listAgents",
+      "grant": "core:list_agents",
+      "method": "registry.ttsEngines",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "core.listAgents",
+      "grant": "core:list_agents",
+      "method": "registry.agents",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "core.listAgents",
+      "grant": "core:list_agents",
+      "method": "assets.searchGifs",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "finetune.runs",
+      "grant": "finetune:runs",
+      "method": "finetune.capability",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "finetune.runs",
+      "grant": "finetune:runs",
+      "method": "finetune.start",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "finetune.runs",
+      "grant": "finetune:runs",
+      "method": "finetune.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "finetune.runs",
+      "grant": "finetune:runs",
+      "method": "finetune.get",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "finetune.runs",
+      "grant": "finetune:runs",
+      "method": "finetune.cancel",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "finetune.runs",
+      "grant": "finetune:runs",
+      "method": "finetune.adapters",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "finetune.runs",
+      "grant": "finetune:runs",
+      "method": "finetune.merge",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "finetune.runs",
+      "grant": "finetune:runs",
+      "method": "finetune.stream",
+      "streaming": true,
+      "tsHost": true
+    },
+    {
+      "capability": "monitors.crud",
+      "grant": "monitors:crud",
+      "method": "monitors.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "monitors.crud",
+      "grant": "monitors:crud",
+      "method": "monitors.get",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "monitors.crud",
+      "grant": "monitors:crud",
+      "method": "monitors.create",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "monitors.crud",
+      "grant": "monitors:crud",
+      "method": "monitors.update",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "monitors.crud",
+      "grant": "monitors:crud",
+      "method": "monitors.delete",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "monitors.crud",
+      "grant": "monitors:crud",
+      "method": "monitors.run",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "monitors.crud",
+      "grant": "monitors:crud",
+      "method": "monitors.snapshots",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "monitors.crud",
+      "grant": "monitors:crud",
+      "method": "monitors.alerts",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.get",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.save",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.delete",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.versionsList",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.versionGet",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.versionCreate",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.versionRestore",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.templatesList",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.templateGet",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.templateInstall",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.crud",
+      "grant": "workflows:crud",
+      "method": "workflows.webhook",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.runstate",
+      "grant": "workflows:runstate",
+      "method": "workflows.run",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.runstate",
+      "grant": "workflows:runstate",
+      "method": "workflows.runGet",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.runstate",
+      "grant": "workflows:runstate",
+      "method": "workflows.resume",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.catalogs",
+      "grant": "workflows:catalogs",
+      "method": "workflows.agents",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.catalogs",
+      "grant": "workflows:catalogs",
+      "method": "workflows.apps",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.catalogs",
+      "grant": "workflows:catalogs",
+      "method": "workflows.mcp",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.catalogs",
+      "grant": "workflows:catalogs",
+      "method": "workflows.skills",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.catalogs",
+      "grant": "workflows:catalogs",
+      "method": "workflows.schedules",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.catalogs",
+      "grant": "workflows:catalogs",
+      "method": "workflows.composio",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ghost.record",
+      "grant": "ghost:record",
+      "method": "ghost.recordStart",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ghost.record",
+      "grant": "ghost:record",
+      "method": "ghost.recordStatus",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ghost.record",
+      "grant": "ghost:record",
+      "method": "ghost.recordStop",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "ghost.record",
+      "grant": "ghost:record",
+      "method": "ghost.recipes",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "webhooks.crud",
+      "grant": "webhooks:crud",
+      "method": "webhooks.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "webhooks.crud",
+      "grant": "webhooks:crud",
+      "method": "webhooks.ingressStatus",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "quests.crud",
+      "grant": "quests:crud",
+      "method": "quests.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "quests.crud",
+      "grant": "quests:crud",
+      "method": "quests.create",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "quests.crud",
+      "grant": "quests:crud",
+      "method": "quests.update",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "quests.crud",
+      "grant": "quests:crud",
+      "method": "quests.delete",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "quests.crud",
+      "grant": "quests:crud",
+      "method": "quests.complete",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "quests.crud",
+      "grant": "quests:crud",
+      "method": "quests.dismiss",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "quests.crud",
+      "grant": "quests:crud",
+      "method": "quests.acceptSuggestion",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "quests.crud",
+      "grant": "quests:crud",
+      "method": "quests.dismissSuggestion",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "quests.crud",
+      "grant": "quests:crud",
+      "method": "quests.judge",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "quests.crud",
+      "grant": "quests:crud",
+      "method": "quests.openDetectionSettings",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "activity.read",
+      "grant": "activity:read",
+      "method": "activity.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "activity.read",
+      "grant": "activity:read",
+      "method": "activity.openSession",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "timeline.read",
+      "grant": "timeline:read",
+      "method": "timeline.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "timeline.read",
+      "grant": "timeline:read",
+      "method": "timeline.journal",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "timeline.read",
+      "grant": "timeline:read",
+      "method": "timeline.frame",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "timeline.read",
+      "grant": "timeline:read",
+      "method": "timeline.openReview",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "timeline.read",
+      "grant": "timeline:read",
+      "method": "timeline.openSettings",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "mail.crud",
+      "grant": "mail:crud",
+      "method": "mail.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "mail.crud",
+      "grant": "mail:crud",
+      "method": "mail.messages",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "mail.crud",
+      "grant": "mail:crud",
+      "method": "mail.create",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "mail.crud",
+      "grant": "mail:crud",
+      "method": "mail.delete",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "mail.crud",
+      "grant": "mail:crud",
+      "method": "mail.rotateSecret",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "mail.crud",
+      "grant": "mail:crud",
+      "method": "mail.send",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "mail.crud",
+      "grant": "mail:crud",
+      "method": "mail.inboundUrl",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "calendar.crud",
+      "grant": "calendar:crud",
+      "method": "calendar.jobs",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "calendar.crud",
+      "grant": "calendar:crud",
+      "method": "calendar.workflows",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "calendar.crud",
+      "grant": "calendar:crud",
+      "method": "calendar.agents",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "calendar.crud",
+      "grant": "calendar:crud",
+      "method": "calendar.createAutomation",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "learning.crud",
+      "grant": "learning:crud",
+      "method": "learning.config",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "learning.crud",
+      "grant": "learning:crud",
+      "method": "learning.experience",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "learning.crud",
+      "grant": "learning:crud",
+      "method": "learning.healing",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "approvals.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "approvals.approve",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "approvals.reject",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "notifications.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "notifications.markRead",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "notifications.ack",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "suggestions.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "suggestions.feedback",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "suggestions.openInChat",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "meetings.crud",
+      "grant": "meetings:crud",
+      "method": "meetings.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "meetings.crud",
+      "grant": "meetings:crud",
+      "method": "meetings.transcript",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "meetings.crud",
+      "grant": "meetings:crud",
+      "method": "meetings.start",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "meetings.crud",
+      "grant": "meetings:crud",
+      "method": "meetings.finalize",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "meetings.crud",
+      "grant": "meetings:crud",
+      "method": "meetings.delete",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "meetings.crud",
+      "grant": "meetings:crud",
+      "method": "meetings.rename",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "meetings.crud",
+      "grant": "meetings:crud",
+      "method": "meetings.import",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "meetings.crud",
+      "grant": "meetings:crud",
+      "method": "meetings.open",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "meetings.crud",
+      "grant": "meetings:crud",
+      "method": "meetings.openNotes",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "meetings.crud",
+      "grant": "meetings:crud",
+      "method": "meetings.openList",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "skills.crud",
+      "grant": "skills:crud",
+      "method": "skills.getSource",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "skills.crud",
+      "grant": "skills:crud",
+      "method": "skills.create",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "skills.crud",
+      "grant": "skills:crud",
+      "method": "skills.update",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "skills.crud",
+      "grant": "skills:crud",
+      "method": "skills.listVersions",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "skills.crud",
+      "grant": "skills:crud",
+      "method": "skills.versionSource",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "skills.crud",
+      "grant": "skills:crud",
+      "method": "skills.snapshot",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "skills.crud",
+      "grant": "skills:crud",
+      "method": "skills.restore",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "skills.crud",
+      "grant": "skills:crud",
+      "method": "skills.setTitle",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "view.action",
+      "grant": "views:actions",
+      "method": "view.action",
+      "streaming": false,
+      "tsHost": false
+    }
+  ],
+  "version": "1.0.0"
+}

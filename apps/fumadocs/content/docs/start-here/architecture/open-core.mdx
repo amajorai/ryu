@@ -1,0 +1,73 @@
+---
+title: "Open Core"
+description: "Which parts of Ryu are open-source, which are proprietary, and why the split is drawn where it is."
+---
+
+Ryu uses an **open-core** model: the orchestration and control plane are open-source, while the
+UX and identity layers are proprietary. The split is deliberate — it maximizes trust and
+self-hostability while keeping the product surface closed.
+
+## The licensing boundary
+
+| Component | License | Why |
+|---|---|---|
+| **Ryu Core** (`apps/core`) | Apache-2.0 | The orchestration engine. Users must be able to audit, fork, and self-host the "what runs" layer. |
+| **Ryu Gateway** (`apps/gateway`) | AGPL-3.0 | The control plane. AGPL prevents proprietary forks from reselling the moat layer (firewall, routing, budgets, evals). |
+| **Desktop** (`apps/desktop`) | Proprietary | The flagship UX surface. The product is the app, not the engine. |
+| **Web** (`apps/web`) | Proprietary | Marketing, auth flows, dashboard, and the `/ai` playground. |
+| **Server** (`apps/server`) | Proprietary | Identity (Better Auth), billing (Polar), and Notion-backed content. |
+| **CLI** (`apps/cli`) | Apache-2.0 | Terminal client. Open because it is a developer tool. |
+| **TUI** (`apps/tui`) | Proprietary | Bun-based terminal client (the CLI successor). |
+| **Native** (`apps/native`) | Proprietary | Expo/React Native mobile app. |
+| **Island** (`apps/island`) | Proprietary | Dynamic-island companion overlay. |
+| **Ghost + Shadow** (`apps/ghost`, `apps/shadow`) | Apache-2.0 | Desktop automation and screen capture. Open because they touch the user's screen. |
+| **SDK** (`packages/sdk`) | Apache-2.0 | Developer SDK. Must be open for adoption. |
+| **Client** (`packages/client`) | Apache-2.0 | Embedding library. Must be open for adoption. |
+| **Kernel contracts** (`crates/ryu-kernel-contracts`) | Apache-2.0 | Pure-data manifest types shared between Core and apps. |
+| **Fumadocs** (`apps/fumadocs`) | Apache-2.0 | Documentation site. |
+| **Raycast** (`apps/raycast`) | MIT | Raycast extension. |
+| UI, Auth, DB, API, Email, Settings, Env, Config, Command | Proprietary | Shared closed packages for the UX/identity layer. |
+
+## The principle
+
+The split follows one rule: **if it orchestrates, it is open; if it is the product surface, it is
+closed.** This means:
+
+- **Core** (what runs) is Apache-2.0 — anyone can self-host, audit, and extend it.
+- **Gateway** (what is allowed) is AGPL — it is the moat, and AGPL ensures forks cannot
+  resell it without contributing back.
+- **Desktop/Web/Mobile** (what the user sees) are proprietary — the UX is the product.
+
+## What this means for self-hosting
+
+If you self-host Ryu, you run:
+
+1. **Core** (Apache-2.0) — the orchestration engine on port 7980.
+2. **Gateway** (AGPL-3.0) — the LLM control plane on port 7981.
+3. Any combination of open and proprietary surfaces (desktop, CLI, TUI, mobile, extension).
+
+The Gateway is AGPL, so if you modify and distribute it, you must release your modifications
+under AGPL. If you run it internally without distribution, no copyleft obligation applies.
+
+## What this means for plugin authors
+
+Plugins live in OSS Core. The plugin runtime, the manifest format, the capability broker, and
+the SDK are all Apache-2.0. This means:
+
+- Third-party plugins can be open or proprietary — no copyleft infection from Core.
+- The closed desktop stays extensible through the plugin system (VS Code / Codex model).
+- The SDK is open for adoption without lock-in.
+
+## Pre-publication note
+
+A full third-party dependency license scan has not yet been run. The Apache-2.0 and AGPL-3.0
+assignments above cover the first-party code only. Before any public npm or crate publication,
+a license audit of all transitive dependencies is required.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/start-here/architecture/core-vs-gateway" />
+  <DocCard href="/docs/start-here/architecture/platform-decomposition" />
+  <DocCard href="/docs/develop/sdk" />
+</Cards>

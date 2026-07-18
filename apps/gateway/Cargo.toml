@@ -1,6 +1,6 @@
 [package]
 name = "ryu-gateway"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -38,8 +38,73 @@ hex = "0.4"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 base64 = "0.22"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40.0", features = ["bundled"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+
+# Extracted gateway stage crates (decomposition W6, first extraction). The budget
+# stage is its own package; `ryu-gw-contracts` holds cross-stage value-types
+# (AlertTier) so peer stages never depend on each other. Re-exported by
+# `src/config.rs` and `src/budget.rs` so existing `crate::{config,budget}::…`
+# paths are byte-unchanged.
+ryu-gw-contracts = { path = "../../crates/gateway/contracts" }
+ryu-gw-budget = { path = "../../crates/gateway/budget" }
+# The evals stage (live EvalsRunner + EvalsBackend trait/registry + dataset
+# scorers). Re-exported by `src/config.rs` (EvalsConfig) and `src/evals.rs`.
+ryu-gw-evals = { path = "../../crates/gateway/evals" }
+# The audit stage (SQLite AuditLogger + AuditBackend trait/registry + record/
+# query types). Re-exported by `src/config.rs` (AuditConfig) and `src/audit.rs`.
+ryu-gw-audit = { path = "../../crates/gateway/audit" }
+# The cache stage (exact-match TTL Cache + embedding-similarity SemanticCache,
+# each a swappable trait + registry, plus the shared embed helpers). Re-exported
+# by `src/config.rs` (Cache/SemanticCacheConfig) and `src/{cache,semantic_cache}.rs`.
+ryu-gw-cache = { path = "../../crates/gateway/cache" }
+# The firewall scanning core (pure regex detection engine: curated pattern
+# builders, DetectionKind/FirewallMatch scan types, Unicode-normalization
+# pre-pass, Luhn/credit-card/public-IPv4 validators, plus the command-injection
+# scanner). Re-exported by `src/firewall/mod.rs`; the FirewallScanner /
+# FirewallBackend / FirewallRegistry wiring stays in apps/gateway.
+ryu-gw-firewall = { path = "../../crates/gateway/firewall" }
+# The passthrough wire-format redaction engine (native Anthropic/Responses
+# request-body + streaming-SSE DLP redaction over a narrow `PassthroughFirewall`
+# interface, plus upstream URL/path helpers and the `WireFormat` marker).
+# Re-exported by `src/passthrough/mod.rs`; the reverse-proxy `forward`
+# orchestration + `PassthroughBackend`/`PassthroughRegistry` wiring stay in apps/gateway.
+ryu-gw-passthrough = { path = "../../crates/gateway/passthrough" }
+# The concrete backend providers (OpenAI/Anthropic/local/core/OpenRouter/Modal/
+# GenAI/Replicate/Fal HTTP impls + the `Provider` trait + shared provider HTTP
+# helpers + the per-provider quota sink + the video-job value types). The
+# `ProviderRegistry` + config-driven registration + key custody stay in
+# `src/providers/mod.rs`; the trait returns a crate-local `ProviderError` mapped
+# to `GatewayError` at the pipeline boundary (src/error.rs). Re-exported by
+# `src/providers/mod.rs`, `src/quota.rs`, and `src/jobs.rs` so existing
+# `crate::{providers,quota,jobs}::…` paths are byte-unchanged.
+ryu-gw-providers = { path = "../../crates/gateway/providers" }
+# The marketplace-governance crypto core (pure grant-allowlist matching + ed25519
+# manifest sign/verify over a canonicalized JSON encoding, taking explicit keys /
+# allowlists). Re-exported by `src/governance/mod.rs`; the signing-key custody
+# (env source-of-truth + dev-persisted disk key + process OnceLock) and the
+# default grant allowlist policy stay in apps/gateway (the marketplace trust root).
+ryu-gw-governance = { path = "../../crates/gateway/governance" }
+# The model-routing core (Plane A): pure model->provider resolution over provider
+# *strings* — the route() order (exact->prefix->builtin->default), the built-in
+# prefix table, modality-slot resolution, the cost-tier fallback sort, the eval
+# A/B explore/exploit picker, and the classifier text helpers. The `ModelRouter`/
+# `SmartRouter` structs (config snapshot + `RoutingTables` build), the
+# `RouterRegistry`/`SmartRouterBackend` traits + registration, `RouteDecision` +
+# config value-types, the A/B `AtomicU64` counter, and SmartRouter's async
+# provider/embedding orchestration stay in apps/gateway ('engine moves, wiring
+# stays'). Re-exported by `src/router/mod.rs`.
+ryu-gw-router = { path = "../../crates/gateway/router" }
+
+# The channel-layer engine: the external messaging-surface transport adapters
+# (Telegram long-poll, Slack Socket Mode, Discord poll, WhatsApp webhook) + the
+# shared inbound path (allowlist gate, request-body build, reply extraction) over
+# a narrow `ChannelHost` seam. The `RequestContext` construction + `pipeline::run`
+# call, the control-plane store fetch, and channel registration/spawn stay in
+# apps/gateway (`src/channels_host.rs`) — they hold `SharedState` and drive the
+# pipeline ('engine moves, wiring stays'). `GroupReplyMode` is re-exported by
+# `src/config.rs` so the config-file channel structs keep it as a field type.
+ryu-gw-channels = { path = "../../crates/gateway/channels" }
 
 # WASM policy tier (gateway plugin plane — in-process third-party policy code).
 # Pinned to v45 to match Core's sandbox dep (apps/core/Cargo.toml) so the tree

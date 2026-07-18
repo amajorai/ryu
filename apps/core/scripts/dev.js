@@ -45,6 +45,88 @@ if (process.platform === "win32") {
 	}
 }
 
+// Dev-mode sidecar-app ergonomics: the out-of-process sidecar-app bins (ryu-mail
+// + the wave 2-4 conversions: teams/research/clips/finetune/quests/healing/
+// meetings/recipes/dashboards/monitors) and the browser (electron) app aren't
+// auto-built/downloaded in dev the way ryu-core is, so enabling any of them would
+// fail to spawn. Wire them all up here, best-effort — a failure warns but never
+// blocks Core. Core inherits the RYU_*_BIN overrides via env, which the kind:local
+// sidecar resolver prefers over the bare PATH lookup.
+const binExt = process.platform === "win32" ? ".exe" : "";
+
+// Every converted sidecar bin. Package name == binary name == `ryu-<suffix>`; the
+// override env var Core reads is `RYU_<SUFFIX>_BIN` (uppercased). Keep this list in
+// sync with the [[bin]] crates and the release/fetch wiring.
+const sidecarBins = [
+	"mail",
+	"teams",
+	"research",
+	"clips",
+	"finetune",
+	"quests",
+	"healing",
+	"meetings",
+	"recipes",
+	"dashboards",
+	"monitors",
+];
+
+// Build ALL sidecar bins in a SINGLE cargo invocation so the shared dependency
+// graph compiles once instead of once per crate. The first dev boot after a clean
+// checkout is therefore noticeably slower (all bins compile up front); subsequent
+// boots are incremental. Best-effort: a failed build warns but never blocks Core —
+// individual apps whose binary is missing simply won't spawn.
+const buildArgs = sidecarBins.flatMap((name) => ["-p", `ryu-${name}`]);
+try {
+	execSync(`cargo build ${buildArgs.join(" ")}`, {
+		stdio: "inherit",
+		env: process.env,
+	});
+} catch (err) {
+	console.warn(
+		`[dev] sidecar bin build failed (some apps may be disabled): ${err.message}`
+	);
+}
+
+// Point each RYU_<SUFFIX>_BIN at the freshly built binary in the shared target dir
+// so the matching `com.ryu.<app>` sidecar spawns it. Done per-bin (not gated on the
+// single build succeeding) so a partial build still wires up whatever landed.
+for (const name of sidecarBins) {
+	const bin = path.join(sharedTarget, "debug", `ryu-${name}${binExt}`);
+	const envVar = `RYU_${name.toUpperCase()}_BIN`;
+	if (existsSync(bin)) {
+		process.env[envVar] = bin;
+	} else {
+		console.warn(`[dev] ryu-${name} build produced no binary at ${bin}`);
+	}
+}
+
+// Browser: point RYU_BROWSER_BIN at the dev launcher that runs the electron-vite
+// build. Only wire it if the build output exists — otherwise Core would spawn a
+// launcher that immediately fails. Build it with:
+//   cd apps-store/browser/sidecar && bun run build
+const browserOut = path.resolve(
+	import.meta.dirname,
+	"..",
+	"..",
+	"..",
+	"apps-store",
+	"browser",
+	"sidecar",
+	"out",
+	"main",
+	"index.js"
+);
+if (existsSync(browserOut)) {
+	const launcher =
+		process.platform === "win32" ? "ryu-browser-dev.cmd" : "ryu-browser-dev.sh";
+	process.env.RYU_BROWSER_BIN = path.join(import.meta.dirname, launcher);
+} else {
+	console.warn(
+		"[dev] browser sidecar not built — run `electron-vite build` in apps-store/browser/sidecar first (browser app disabled)"
+	);
+}
+
 // Ship the running-binary defaults that the lean Cargo `default` set omits (so
 // `cargo test`/CI don't pay their compile cost per spike 0188), but the dev and
 // release binaries the user actually runs must have compiled in:

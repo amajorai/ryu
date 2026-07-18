@@ -8,14 +8,14 @@
 //! defines the *identity* surface of that contract (`id`, `name`, `kind`) and
 //! maps it onto the executable types that exist in Core today
 //! ([`crate::agents::AgentRecord`], [`crate::workflow::Workflow`], and
-//! [`crate::skills::SkillRecord`]).
+//! [`ryu_skills::SkillRecord`]).
 //!
 //! Per the Core-vs-Gateway rule this is **Core**: it describes *what runs*. It
 //! never decides what is allowed/measured/paid — that stays in the Gateway.
 //!
 //! `Tool` is represented as a stub [`ToolStub`] — it is the one remaining
 //! placeholder until the MCP/tool-registry units land. `Skill` is now a real,
-//! executable [`crate::skills::SkillRecord`] (M3 / issue #145).
+//! executable [`ryu_skills::SkillRecord`] (M3 / issue #145).
 //!
 //! Self-build tools (`scaffold_runnable`, `write_ryu_json`, `install_app`) that
 //! let an agent author Runnables in chat are in the [`self_build`] submodule
@@ -26,58 +26,12 @@ pub mod dashboard_builder;
 pub mod self_build;
 pub mod workflow_builder;
 
-/// The kind of a [`Runnable`]. The union of every executable thing in Ryu.
-///
-/// # Extending with a new kind
-///
-/// To add a new kind:
-/// 1. Add a variant here (no default/catch-all arm anywhere).
-/// 2. Add a corresponding `*Config` struct in `crate::plugin_manifest::schema`.
-/// 3. Add the variant to `RunnableConfig` in `crate::plugin_manifest::schema`.
-/// 4. Extend `as_str()` with the new arm.
-///
-/// The design intentionally avoids `_` / wildcard arms in every `match` so
-/// the compiler flags every site that must be updated — the "nothing hardcoded"
-/// guarantee is enforced at compile time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RunnableKind {
-    /// A configured agent (system prompt + tools + model/engine binding).
-    Agent,
-    /// A DAG workflow of typed nodes.
-    Workflow,
-    /// A callable tool. Net-new: not yet a standalone Runnable type in Core
-    /// (today only a `NodeKind::Tool` exists inside the workflow graph).
-    Tool,
-    /// An Agent Skill (the Skills standard). Net-new: unrepresented in Core today.
-    Skill,
-    /// An in-desktop overlay or sidebar Companion surface.
-    Companion,
-    /// A channel bot adapter (Telegram, Slack, WhatsApp, Discord, …).
-    Channel,
-    /// A pluggable model/inference engine binding (llama.cpp, Ollama, OpenAI-compat, …).
-    Engine,
-    /// A Gateway policy fragment (firewall rule, PII/DLP filter, budget cap, …).
-    /// Note: policy *enforcement* belongs to the Gateway; this kind lets an App
-    /// declare and bundle a policy that the Gateway activates on install.
-    Policy,
-}
-
-impl RunnableKind {
-    /// A stable lowercase identifier for the kind (handy for APIs and logs).
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            RunnableKind::Agent => "agent",
-            RunnableKind::Workflow => "workflow",
-            RunnableKind::Tool => "tool",
-            RunnableKind::Skill => "skill",
-            RunnableKind::Companion => "companion",
-            RunnableKind::Channel => "channel",
-            RunnableKind::Engine => "engine",
-            RunnableKind::Policy => "policy",
-        }
-    }
-}
+// `RunnableKind` and `RunnableMeta` are the pure-data identity slice of the
+// object model; their single definition now lives in `ryu-kernel-contracts` and
+// is re-exported here so every `crate::runnable::RunnableKind` / `RunnableMeta`
+// call site (and the `Runnable` trait below) keeps compiling unchanged. To add a
+// new kind, edit the enum in the contracts crate's `runnable` module.
+pub use ryu_kernel_contracts::runnable::{RunnableKind, RunnableMeta};
 
 /// The unifying contract over Agent | Workflow | Tool | Skill.
 ///
@@ -104,15 +58,6 @@ pub trait Runnable {
             kind: self.kind(),
         }
     }
-}
-
-/// A kind-agnostic snapshot of a [`Runnable`]'s identity, used when listing or
-/// serializing a mixed set of runnables (agents, workflows, tools, skills).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct RunnableMeta {
-    pub id: String,
-    pub name: String,
-    pub kind: RunnableKind,
 }
 
 impl Runnable for crate::agents::AgentRecord {
@@ -171,16 +116,16 @@ impl Runnable for ToolStub {
 
 // ── Skill (M3 — now real) ─────────────────────────────────────────────────────
 //
-// `SkillStub` has been replaced by the real [`crate::skills::SkillRecord`] type,
+// `SkillStub` has been replaced by the real [`ryu_skills::SkillRecord`] type,
 // which implements [`Runnable`] and is discoverable + executable (M3 / issue #145).
 // The `Runnable` impl lives in `crate::skills` to avoid circular imports.
 //
 // The `SkillStub` type alias is kept here so any existing code that referenced it
-// continues to compile. New code should use `crate::skills::SkillRecord` directly.
+// continues to compile. New code should use `ryu_skills::SkillRecord` directly.
 
 /// Alias kept for backward compatibility; new code should use
-/// [`crate::skills::SkillRecord`] directly.
-pub type SkillStub = crate::skills::SkillRecord;
+/// [`ryu_skills::SkillRecord`] directly.
+pub type SkillStub = ryu_skills::SkillRecord;
 
 // ── RunnableRegistry ──────────────────────────────────────────────────────────
 
@@ -329,10 +274,12 @@ pub fn manifest_should_activate(
 // ── Activation-event runtime (process-global fired set, #443) ─────────────────
 
 /// The process-global set of activation events that have fired so far. A plugin
-/// declaring `onStartup`/`onChat`/`onCommand:<id>`/`onRunnable:<id>` is woken the
-/// first time the matching event lands here; subsequent firings of an
-/// already-fired event are cheap no-ops (the set is monotonic — events only
-/// accumulate over a process lifetime).
+/// declaring `onStartup`/`onChat`/`onCommand:<id>`/`onRoute`/`onCapabilityCall`/
+/// `onRunnable:<id>` is woken the first time the matching event lands here;
+/// subsequent firings of an already-fired event are cheap no-ops (the set is
+/// monotonic — events only accumulate over a process lifetime). `onRoute` /
+/// `onCapabilityCall` fire from the sidecar wake path (`ext_proxy`) the first time a
+/// lazy sidecar is cold-started by a proxy / broker hit.
 ///
 /// This is the live runtime half of the activation contract. The DECLARATION
 /// (manifest `activation_events`) and the gated dispatch
@@ -458,8 +405,8 @@ mod tests {
             id: "t-1".into(),
             name: "Tool".into(),
         };
-        // SkillStub is now an alias for crate::skills::SkillRecord (M3 / #145).
-        let s = crate::skills::SkillRecord {
+        // SkillStub is now an alias for ryu_skills::SkillRecord (M3 / #145).
+        let s = ryu_skills::SkillRecord {
             id: "s-1".into(),
             name: "Skill".into(),
             description: None,

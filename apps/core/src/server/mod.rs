@@ -19,42 +19,50 @@ pub mod approvals_api;
 pub mod auto_title;
 pub mod canvas_migrate;
 pub mod chat_suggestions;
-pub mod clips;
 pub mod conversations;
-pub mod dashboard_api;
 pub mod data_admin;
 pub mod gifs;
-pub mod finetune;
 pub mod git;
-pub mod hardware_api;
+// The device-registry + TRMNL display HTTP surface moved to the extracted
+// `ryu_hardware` crate (`ryu_hardware::api`); the public pairing ingress + the WS
+// link stay Core-side (kernel ingress that forwards to the crate).
+pub mod hardware_public;
 pub mod hardware_ws;
-pub mod healing_api;
+// Healing is now OUT-OF-PROCESS: the `ryu-healing` sidecar (`crates/ryu-healing`
+// `[[bin]]`) owns the diagnose→propose engine, the per-source attempt cap, the
+// `healing.*` prefs, the Gateway diagnosis, and the `/api/healing/*` surface (served
+// via `public_mount`). Core keeps only the welded action side (approvals write +
+// re-run) and drives the sidecar over loopback via `healing_client`; there is no
+// in-process `healing_api` module or `healing_routes` fn.
 pub mod identity_api;
 pub mod learning;
 pub mod media;
-pub mod meetings_api;
-pub mod research;
-pub mod memory;
-pub mod message_fts;
-pub mod message_index;
-pub mod monitors_api;
+/// Re-export of the extracted [`ryu_memory`] crate under the historical
+/// `server::memory` path. The long-term memory store, scope model, and recall now
+/// live in `crates/ryu-memory`; the Core-coupled default constructor lives in
+/// [`crate::memory_host`]. This alias keeps the ~19 `memory::`-qualified call
+/// sites in Core unchanged (re-export shim, zero business logic).
+pub use ryu_memory as memory;
 pub mod notifications_api;
 pub mod openapi;
 pub mod plugin_bridge_api;
-pub mod predict_api;
 pub mod preferences;
-pub mod quests_api;
 pub mod realtime_ws;
-pub mod recipes_api;
-pub mod retrieval;
+/// Re-export shim: `crate::server::retrieval` is the extracted [`ryu_rag`] crate.
+/// Provider/model selection lives in [`crate::rag_host`] (the single resolver);
+/// this alias keeps the many `retrieval::`-qualified reference sites unchanged.
+pub use ryu_rag as retrieval;
 pub mod spaces;
 pub mod sync;
-pub mod trace;
 pub mod usage_api;
 pub mod voice;
 pub mod widgets;
 pub mod voice_ws;
-pub mod worktree;
+
+// The git/worktree engine moved to the `ryu-workspace` crate; alias it so the
+// in-file `worktree::…` references (WorktreeRun's diff/guard, the apply handler)
+// keep working unchanged.
+use ryu_workspace::worktree;
 
 use crate::agents::{AgentStore, AgentTemplate, CreateAgent, UpdateAgent};
 use crate::auth::AuthState;
@@ -65,14 +73,13 @@ use crate::sidecar::adapters::{
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::onboarding::SetupManager;
 use crate::sidecar::{install_state::InstallStatusStore, SidecarManager};
-use crate::skills::{SkillRegistry, SkillSummary};
-use crate::teams::{CreateTeam, UpdateTeam};
+use ryu_skills::SkillRegistry;
 use conversations::{ConversationStore, Session, SessionStatus};
 use memory::MemoryStore;
 use preferences::PreferencesStore;
 use retrieval::{ChunkSource, RetrievalStore};
+use ryu_tracing::TraceStore;
 use spaces::SpaceStore;
-use trace::TraceStore;
 
 /// A completed run's worktree state, kept alive until the user applies or
 /// discards it. Holds both the diff (for display) and the live guard (for
@@ -99,11 +106,13 @@ pub struct ServerState {
     pub auth: Arc<Mutex<AuthState>>,
     pub agents: Arc<AcpAgentRegistry>,
     pub agent_store: AgentStore,
-    /// Persisted agent **teams** (a named, ordered collection of agents + a
-    /// coordination strategy). Backed by `~/.ryu/teams.db`. Addressed as one unit
-    /// via `@team` in chat; orchestration lives in
-    /// [`crate::sidecar::adapters::route_team_chat_stream`].
-    pub teams: crate::teams::TeamStore,
+    /// Loopback client for the out-of-process `ryu-teams` sidecar, which owns
+    /// `~/.ryu/teams.db` and serves `/api/teams/*`. Agent **teams** (a named,
+    /// ordered collection of agents + a coordination strategy) are addressed as one
+    /// unit via `@team` in chat; the `@team` orchestration
+    /// ([`crate::sidecar::adapters::route_team_chat_stream`]) fetches the
+    /// [`ryu_teams::TeamRecord`] through this client instead of opening the DB.
+    pub teams: crate::teams_client::TeamsClient,
     pub conversations: ConversationStore,
     pub memory: MemoryStore,
     pub mcp: Arc<McpRegistry>,
@@ -168,30 +177,30 @@ pub struct ServerState {
     /// progress over SSE, and pause/resume/cancel. `/api/setup/status` is derived
     /// from it. Cheap to clone (wraps an `Arc`).
     pub downloads: crate::downloads::DownloadCenter,
-    /// Website-monitoring engine (price/content/stock/keyword/uptime). Owns the
-    /// monitors store and runs checks; the scheduler fires each monitor on its
-    /// interval via a `JobTarget::Monitor` job.
-    pub monitors: crate::monitors::MonitorEngine,
-    /// Self-host Agent Inboxes store (`~/.ryu/mail.db`): receive/store/send agent
-    /// email on the node (BYO domain, no SES). Managed inboxes stay on the control
-    /// plane; this is the Core-owned variant. Routes at `/api/mail/*`.
-    pub mail: crate::mail::MailStore,
-    /// Meeting-notes engine (Granola/Notion-AI style): records a call, transcribes
-    /// it live (reusing the voice STT path), and generates AI notes via the
-    /// gateway. Owns the meetings store + the live SSE event stream. Audio capture
-    /// is a device-bound sensor and lives in Shadow; Core only ingests chunks.
-    pub meetings: crate::meetings::MeetingEngine,
-    /// Quests engine (auto-detecting todo list): holds the quests store and runs
-    /// each open quest's detection pass — gathering Shadow context and asking a
-    /// judge model whether the task looks done. The scheduler fires each open
-    /// quest on its interval via a `JobTarget::Quest` job. The judge call routes
-    /// through the Gateway; nothing about the model is hardcoded.
-    pub quests: crate::quests::QuestEngine,
-    /// Home dashboards engine: holds the dashboards/widgets store and the live SSE
-    /// stream. The background refresh loop resolves each widget's source on its
-    /// interval and broadcasts fresh values. Decides *what data is pulled and how
-    /// often* ⇒ Core; the model/tool calls a source makes route through the Gateway.
-    pub dashboards: crate::dashboard::DashboardEngine,
+    // Website monitors are OUT-OF-PROCESS (`ryu-monitors` sidecar): Core keeps no
+    // engine field. The `/api/monitors/*` surface is served via the manifest
+    // `public_mount`; the scheduler reaches the sidecar over loopback via
+    // `crate::monitors_client` (`JobTarget::Monitor` run + backing-job reconcile).
+    /// Loopback client for the out-of-process `ryu-meetings` sidecar (`com.ryu.meetings`),
+    /// the single owner of `meetings.db` + the engine/audio pipeline + the
+    /// `/api/meetings/*` surface (served to the desktop through the ext-proxy
+    /// `public_mount`). Core links NO meeting code; this client backs the kernel hardware
+    /// ambient-audio path (`ryu_hardware::MeetingIngest`), the activity-feed fold, and
+    /// the data-admin clear (see [`crate::meetings_client`]).
+    pub meetings: crate::meetings_client::MeetingsClient,
+    /// Loopback client for the out-of-process `ryu-quests` sidecar (`com.ryu.quests`),
+    /// the single owner of `quests.db` + the detection engine. The `/api/quests/*`
+    /// surface is served by the sidecar via the manifest `public_mount`; this client
+    /// backs Core's three reverse-couplings — the scheduler judge, the
+    /// `JobTarget::Quest` job-lifecycle reconcile, and the activity feed (see
+    /// [`crate::quests_client`]).
+    pub quests: crate::quests_client::QuestsClient,
+    /// Loopback client for the out-of-process `ryu-dashboards` sidecar (single owner
+    /// of `dashboards.db` + the refresh loop + the `/api/dashboards/*` surface, served
+    /// to the desktop through the ext-proxy `public_mount`). Core links NO dashboard
+    /// code; this client backs the kernel hardware device-dashboard renderer + nudge
+    /// loop through the `ryu_hardware::DashboardFeed` seam.
+    pub dashboards: crate::dashboards_client::DashboardsClient,
     /// Human-in-the-loop approval inbox: holds the approvals store + decision
     /// engine. Agents/workflows/automations explicitly configured for approval
     /// raise pending requests here (scheduler `require_approval` jobs, workflow
@@ -204,11 +213,11 @@ pub struct ServerState {
     /// Backed by `~/.ryu/activity.db` with a broadcast channel for live SSE. Fed
     /// by background ingest loops (`crate::activity::ingest`) that subscribe to
     /// each producing engine. Records *what happened* ⇒ Core.
-    pub activity: crate::activity::ActivityStore,
+    pub activity: ryu_activity::ActivityStore,
     /// Optional mesh plane (#478): a thin handle over the Tailscale/Headscale
     /// status read path. The daemon itself is an opt-in Sidecar (never in
     /// `startup_order`); this handle backs `GET /api/mesh/status`.
-    pub mesh: crate::mesh::MeshHandle,
+    pub mesh: ryu_mesh::MeshHandle,
     /// In-memory connected-client presence registry (the "who's on this node"
     /// surface). Populated by the `track_connection` middleware on every
     /// authenticated request and read by `GET /api/connections`. This is
@@ -220,33 +229,34 @@ pub struct ServerState {
     /// presence (last-seen + battery). Backed by `~/.ryu/hardware.db`. Read by the
     /// `/api/hardware/*` REST surface and the `/api/hardware/ws` realtime handler;
     /// the WS handler authenticates the device token against it on each connect.
-    pub hardware: crate::hardware::store::DeviceStore,
+    pub hardware: ryu_hardware::DeviceStore,
     /// Room-keyed realtime fan-out registry (Phase 1 of the multi-user epic).
     /// Backs `GET /api/realtime/ws`: chat fan-out, presence/awareness, and
     /// (Phase 3) CRDT doc-sync all flow through per-room broadcast actors keyed
     /// by `conversation_id` / `document_id`. Already `Arc`-backed and `Clone`, so
     /// it is stored directly (not wrapped in another `Arc`). See
-    /// [`crate::realtime`].
-    pub realtime: crate::realtime::RoomRegistry,
+    /// [`ryu_realtime`].
+    pub realtime: ryu_realtime::RoomRegistry,
     /// Authoritative CRDT document engine (Phase 3 of the multi-user epic). Holds a
     /// server-side `yrs` replica per LIVE collaborative document for persistence,
     /// late-joiner state-vector sync, and (dormant) per-quiescence materialization
     /// for the embed/search readers. Driven by the `kind:"document"` path of
     /// `GET /api/realtime/ws`: rehydrate + `SyncStep1` on join, write-ACL-gated
     /// apply + rebroadcast on update, flush-and-drop on last-leave. Cheap to clone
-    /// (an `Arc` bag). See [`crate::collab`].
-    pub collab: crate::collab::DocRegistry,
-    /// Fine-tuning job store (`~/.ryu/finetune.db`) — Core's durable record of
-    /// Unsloth fine-tune jobs. The training runs in the opt-in `unsloth` sidecar;
-    /// this is the system-of-record for the job list (survives restarts). Read by
-    /// the `/api/finetune/*` surface ([`crate::server::finetune`]).
-    pub finetune: crate::finetune::FinetuneStore,
+    /// (an `Arc` bag). See [`ryu_collab`].
+    pub collab: ryu_collab::DocRegistry,
+    /// Loopback client for the out-of-process `ryu-finetune` sidecar (`com.ryu.finetune`),
+    /// the single owner of `finetune.db` + the adapter catalog + the Python `unsloth`
+    /// worker. The `/api/finetune/*` surface is served by the sidecar via the manifest
+    /// `public_mount`; this client backs Core's one remaining reverse-coupling — the
+    /// `host.finetune_*` plugin-host bridge (see [`crate::finetune_client`]).
+    pub finetune: crate::finetune_client::FinetuneClient,
     /// Experience buffer (`~/.ryu/experience.db`) for the MetaClaw-style
     /// continual-learning loop: captured `(user, assistant)` turns + PRM scores,
     /// the dataset source for a reward-filtered LoRA retrain. Populated by
     /// sweeping conversations at cycle time (never on the chat hot path). Read by
     /// the `/api/learn/*` + `/api/experience/*` surface ([`crate::server::learning`]).
-    pub experience: crate::experience::ExperienceStore,
+    pub experience: ryu_learning::ExperienceStore,
     /// The configured node-admittance token (`RYU_TOKEN`), captured so the public
     /// `GET /api/realtime/ws` handler can enforce it in-handler (the public router
     /// has no `auth_token` request Extension, unlike the protected router's
@@ -310,7 +320,10 @@ pub(crate) fn enforce_remote_auth(
                     .to_owned(),
             );
         }
-        if is_insecure_auth_token_placeholder(token) {
+        // The node-admittance placeholder check is anchored in `ryu-mesh` (the
+        // fail-closed shared-mesh-token model consults the same predicate), so both
+        // the peer-bearer resolver and this startup gate agree on one signal.
+        if ryu_mesh::is_insecure_auth_token_placeholder(token) {
             return Err(
                 "refusing to start: RYU_TOKEN is still a known placeholder. Generate a strong \
                  random token before exposing Core beyond loopback."
@@ -319,24 +332,6 @@ pub(crate) fn enforce_remote_auth(
         }
     }
     Ok(auth_token)
-}
-
-pub(crate) fn is_insecure_auth_token_placeholder(token: &str) -> bool {
-    const PLACEHOLDERS: &[&str] = &[
-        "CHANGE_ME",
-        "CHANGEME",
-        "REPLACE_ME",
-        "REPLACEME",
-        "YOUR_TOKEN_HERE",
-        "TOKEN",
-        "SECRET",
-        "PASSWORD",
-    ];
-
-    let trimmed = token.trim();
-    PLACEHOLDERS
-        .iter()
-        .any(|placeholder| trimmed.eq_ignore_ascii_case(placeholder))
 }
 
 async fn require_auth(
@@ -2023,7 +2018,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
     // `--bind=0.0.0.0` flag can no longer bypass the gate (#478 V1).
     let auth_token = match enforce_remote_auth(
         auth_token,
-        crate::mesh::is_enabled(),
+        ryu_mesh::is_enabled(),
         host_is_non_loopback(bind_addr),
     ) {
         Ok(t) => t,
@@ -2116,18 +2111,15 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // Realtime voice mode (desktop/island). Public router, auth-in-handler
         // (browser WS can't set the bearer header) — mirrors the two routes above.
         .route("/api/voice/ws", get(voice_ws::voice_ws))
-        .route("/api/hardware/pair", post(hardware_api::pair_device))
+        .route("/api/hardware/pair", post(hardware_public::pair_device))
         // TRMNL display surface: the device polls these with its OWN per-device
         // Bearer token (which `require_auth`/global-RYU_TOKEN can't gate), so the
         // handlers authenticate the device token against the registry themselves —
-        // the same model as the WS upgrade. Hence: public router.
-        .route(
-            "/api/hardware/display/:device_id",
-            get(hardware_api::display_manifest),
-        )
-        .route(
-            "/api/hardware/display/:device_id/image",
-            get(hardware_api::display_image),
+        // the same model as the WS upgrade. Hence: public router. The handlers live
+        // in the extracted `ryu_hardware::api` crate; nested here (public, ungated).
+        .nest_service(
+            "/api/hardware/display",
+            ryu_hardware::api::display_routes(hardware_ctx(&state)),
         )
         // Inbound Composio webhook: public (external delivery can't send the bearer
         // token) but HMAC-authenticated fail-closed inside the handler.
@@ -2147,8 +2139,33 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // id + the origin server's declared `resource_domains` allowlist, with a
         // fail-closed SSRF guard. It is the img-src analogue of the governed
         // `callTool` lane and the ONLY egress path a widget's passive assets have.
-        .route("/api/widgets/asset", get(widgets::widget_asset))
-        .merge(crate::mail::api::public_routes());
+        .route("/api/widgets/asset", get(widgets::widget_asset));
+    // Agent mail (Self-host Agent Inboxes) is now a fully manifest-driven app:
+    // `com.ryu.mail` declares the `ryu-mail` sidecar + a `/api/mail` `public_mount`,
+    // and the generic ext-proxy loader below serves `/api/mail/*` (public inbound +
+    // protected CRUD) when the app is enabled. The hand-coded `sidecar::mail` proxy
+    // and the in-process `crate::mail` path were both retired here — mail is
+    // sidecar-only. See `docs/platform-decomposition-handoff.md` (Track C).
+
+    // ── Generic app ⇄ HTTP loader (the manifest-declared sidecar-as-app) ─────────
+    // `/api/ext/<plugin_id>/*` reverse-proxies onto an enabled plugin's declared
+    // sidecar, and `/api/host/*` is the sidecar's authenticated callback into Core.
+    // BOTH ride the PUBLIC router: a single catch-all cannot be gated two ways by
+    // router middleware, and the sidecar callback holds only its minted token, not
+    // the node bearer — so the ext sub-router carries its OWN copy of the node-token
+    // Extension and `ext_proxy` enforces per-route auth in-handler (see
+    // `sidecar::ext_proxy`). Registered unconditionally (no feature/env gate): the
+    // proxy is inert unless an enabled plugin declares an `http`/`host_api` sidecar.
+    let public = public
+        .merge(crate::sidecar::ext_proxy::ext_routes(auth_token.clone()))
+        .merge(crate::sidecar::ext_proxy::host_routes())
+        // Public-mount routes for built-ins that own a stable external URL prefix
+        // (e.g. mail's `/api/mail/*`). Built-in-only + build-time because axum routers
+        // are immutable after serve; a runtime third-party app keeps `/api/ext/<id>/*`.
+        .merge(crate::sidecar::ext_proxy::public_mount_routes(
+            &crate::plugin_manifest::PluginManifestLoader::load_builtins(),
+            auth_token.clone(),
+        ));
 
     let protected = Router::new()
         .route("/api/catalog", get(get_catalog))
@@ -2184,16 +2201,11 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             get(catalog_sources_list).post(catalog_sources_add),
         )
         .route("/api/catalog/sources/select", post(catalog_sources_select))
-        // ── Skills catalog (browse + install from skills.sh; logic in Core) ──
-        .route("/api/skills/catalog", get(skills_catalog_list))
-        .route("/api/skills/catalog/detail", get(skills_catalog_detail))
-        .route("/api/skills/catalog/install", post(skills_catalog_install))
-        .route("/api/skills/updates", get(skills_updates))
-        .route(
-            "/api/skills/install-from-source",
-            post(skills_install_from_source),
-        )
-        .route("/api/skills/activate", post(skills_activate))
+        // ── Skills (`/api/skills/*` + `/api/skills/catalog/*`) are merged as their
+        // own gated sub-router (see `skills_routes`) so the Skills App's enabled bit
+        // governs the whole SKILL.md discovery/authoring/catalog surface. Both route
+        // blocks (catalog + CRUD/versions) live in the one fn. ──
+        .merge(skills_routes(&state))
         // ── Composio catalog (browse the user's toolkits/actions/triggers using
         // their configured key; gateway still executes — see composio_catalog) ──
         .route("/api/composio/status", get(composio_status))
@@ -2277,73 +2289,14 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/apps/:id/disable", post(disable_app_handler))
         .route("/api/apps/:id/uninstall", post(uninstall_app_handler))
         .route("/api/apps/:id/update", post(update_app_handler))
-        .route("/api/skills", get(list_skills).post(create_skill_handler))
-        // ── Skill authoring + version history (desktop SKILL.md editor) ──
-        // Registered after the static `/api/skills/{catalog,activate,...}` routes
-        // so matchit resolves those literals before the `:id` param routes.
-        .route("/api/skills/:id/source", get(get_skill_source))
-        .route("/api/skills/:id", put(update_skill_handler))
-        .route(
-            "/api/skills/:id/versions",
-            get(list_skill_versions_handler).post(create_skill_version_handler),
-        )
-        .route(
-            "/api/skills/:id/versions/:version_id",
-            get(get_skill_version_handler),
-        )
-        .route(
-            "/api/skills/:id/versions/:version_id/restore",
-            post(restore_skill_version_handler),
-        )
-        .route("/api/agents", get(list_agents).post(create_agent))
-        .route("/api/agents/catalog", get(list_agent_catalog))
-        .route("/api/agents/catalog/install", post(install_agent_handler))
-        .route(
-            "/api/agents/catalog/uninstall",
-            post(uninstall_agent_handler),
-        )
-        .route("/api/agents/import", post(import_agent))
-        .route(
-            "/api/agents/:id",
-            get(get_agent).put(update_agent).delete(delete_agent),
-        )
-        .route("/api/agents/:id/export", get(export_agent))
-        .route("/api/agents/:id/tools", get(list_tools))
-        .route("/api/agents/:id/migrate-to-ryu", post(migrate_to_ryu))
-        // ── Import a past thread from an agent's own on-disk history store
-        //    (Claude Code / Codex), Zed/VS Code parity. List, then import one
-        //    into a Ryu conversation. ──
-        .route("/api/agents/:id/threads", get(list_agent_threads_handler))
-        .route(
-            "/api/agents/:id/threads/import",
-            post(import_agent_thread_handler),
-        )
-        // ── ACP session config (agent-reported permission modes / models /
-        //    config options like reasoning effort), Zed-style ──
-        .route("/api/agents/:id/acp-config", get(acp_config))
-        .route("/api/agents/:id/authenticate", post(acp_authenticate))
-        .route("/api/agents/:id/logout", post(acp_logout))
-        .route("/api/agents/:id/sessions", get(list_acp_sessions_handler))
-        .route(
-            "/api/agents/:id/sessions/:sid",
-            delete(delete_acp_session_handler),
-        )
-        .route(
-            "/api/agents/:id/sessions/:sid/load",
-            post(load_acp_session_handler),
-        )
-        .route("/api/agents/:id/update-check", get(agent_update_check))
-        .route("/api/agents/:id/update", post(agent_update))
-        // ── Per-agent subscription usage (5h + weekly rate-limit windows read
-        //    from the CLI's own local OAuth token, à la CodexBar/openusage).
-        //    Backs the chat "usage bar"; Claude + Codex in v1. ──
-        .route("/api/agents/:id/usage", get(usage_api::agent_usage))
-        // ── Per-agent capabilities (tools / reasoning / vision), Jan-style.
-        //    GET resolves auto-detection + overrides; PUT persists overrides. ──
-        .route(
-            "/api/agents/:id/capabilities",
-            get(agent_capabilities).put(set_agent_capabilities),
-        )
+        // ── Agents (catalog + CRUD + ACP session management) ────────────────
+        // The ONE mount of the `/api/agents/*` catalog/CRUD/session surface, in its
+        // own gated sub-router (see `agents_routes`) so the Agents App's enabled bit
+        // governs it. The app is LOAD-BEARING (the composer fetches this list on
+        // boot), so it can never actually be disabled — the gate is transparent. The
+        // ACP routing/execution substrate that serves a chat turn (`agent_routing/`,
+        // `sidecar/adapters/acp.rs`, `/api/chat/stream`) is kernel and is NOT here.
+        .merge(agents_routes(&state.app_store))
         // ── Ryu-managed Pi config (isolated model/provider config) ──
         .route("/api/pi-config", get(get_pi_config).put(put_pi_config))
         .route("/api/pi-config/catalog", get(get_pi_config_catalog))
@@ -2356,16 +2309,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/pi-config/providers/:id", delete(delete_pi_provider))
         .route("/api/pi-config/discover-models", post(discover_pi_models))
         // ── Agent teams (collections of agents + a coordination strategy) ──
-        .route("/api/teams", get(list_teams).post(create_team))
-        .route(
-            "/api/teams/:id",
-            get(get_team).patch(update_team).delete(delete_team),
-        )
-        .route("/api/teams/:id/members", post(add_team_member))
-        .route(
-            "/api/teams/:id/members/:agent_id",
-            delete(remove_team_member),
-        )
+        // `/api/teams/*` is now served OUT-OF-PROCESS by the `ryu-teams` sidecar via
+        // the manifest `public_mount` (generic ext-proxy loader) — no in-process
+        // route merge. The `@team` chat orchestration reads the store over loopback
+        // through `state.teams` (a `TeamsClient`). See `com.ryu.teams`.
         .route(
             "/api/mcp/servers",
             get(list_mcp_servers).post(create_mcp_server),
@@ -2456,13 +2403,13 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // text message into an assembled reply, using the Core session/memory path
         // so bot turns share conversation history with the Core conversation store.
         .route("/api/channels/run", post(channel_run))
-        .route("/api/retrieval/index", post(index_retrieval_chunk))
-        .route("/api/retrieval/search", post(search_retrieval))
-        .route("/api/memory", get(list_memory).post(create_memory))
-        .route(
-            "/api/memory/:id",
-            get(get_memory).put(update_memory).delete(delete_memory),
-        )
+        // Retrieval (index/search over memory+space chunks) is the RAG capability's
+        // HTTP surface — gated on the (default-on) RAG app, in its own sub-router so a
+        // single `route_layer` carries the gate. See `retrieval_routes`.
+        .merge(retrieval_routes(&state.app_store))
+        // Long-term memory CRUD, gated on the (default-on) Memory app. See
+        // `memory_routes`. The in-process chat auto-recall path is kernel and untouched.
+        .merge(memory_routes(&state.app_store))
         // ── Danger zone: irreversible bulk "delete all X" (settings) ─────────
         .route("/api/data/counts", get(data_admin::data_counts))
         .route("/api/data/clear", post(data_admin::data_clear))
@@ -2529,18 +2476,12 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── Side questions (`/btw`): answer over the conversation, persisted as
         //    a listable "side chat" keyed to its parent conversation ──────────
         .route("/api/btw", post(btw_handler))
-        .route(
-            "/api/whiteboard/generate",
-            post(whiteboard_generate_handler),
-        )
         .route("/api/btw/:id", axum::routing::delete(delete_btw_handler))
         .route("/api/conversations/:id/btw", get(list_btw_handler))
         // ── Predictive typing: system-wide inline autocomplete brain ──────────
-        .route(
-            "/api/predict/config",
-            get(predict_api::get_config).put(predict_api::put_config),
-        )
-        .route("/api/predict/complete", post(predict_api::complete))
+        // Gated on the (opt-in) Predict app in its own sub-router. See
+        // `predict_routes` — and the OPT-IN adjudication in `plugins::builtins`.
+        .merge(predict_routes(&state))
         .route(
             "/api/conversations/:id/participants/:agent_id",
             axum::routing::delete(remove_participant_handler),
@@ -2632,72 +2573,38 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/models/active",
             get(get_active_model).post(set_active_model),
         )
-        // ── Voice engine data path (STT) — proxies audio to whisper.cpp ──────
-        .route("/api/voice/transcribe", post(voice::transcribe))
-        // ── Voice engine data path (TTS) — OuteTTS (built-in) or ?engine= via
-        //    the universal Ryu TTS sidecar ────────────────────────────────────
-        .route("/api/voice/speak", post(voice::speak))
-        .route("/api/voice/tts-engines", get(voice::tts_engines))
-        // Curated, installable TTS model catalog (voicebox-style) + install via
-        // the Core-managed HF cache. Distinct from the raw HF text-to-speech
-        // browse in the Models tab.
-        .route("/api/voice/tts-models", get(voice::tts_models))
-        .route(
-            "/api/voice/tts-models/install",
-            post(voice::tts_models_install),
-        )
-        // ── Fine-tuning data path (Unsloth) — proxies job control to the
-        //    `unsloth` Python sidecar; gates local training on the node's GPU ──
-        .route("/api/finetune/capability", get(finetune::capability))
-        .route("/api/finetune/start", post(finetune::start))
-        .route("/api/finetune/list", get(finetune::list))
-        .route("/api/finetune/adapters", get(finetune::list_adapters))
-        .route("/api/finetune/merge", post(finetune::merge))
-        .route(
-            "/api/finetune/:id",
-            get(finetune::get).delete(finetune::cancel),
-        )
-        .route("/api/finetune/:id/stream", get(finetune::stream))
+        // ── Voice engine data path (STT/TTS) ─────────────────────────────────
+        // Gated on the (default-on) Voice app in its own sub-router (see
+        // `voice_routes`). The PUBLIC realtime voice WS (`/api/voice/ws`) stays on the
+        // public router, ungated (browser WS, auth-in-handler).
+        .merge(voice_routes(&state.app_store))
+        // ── Fine-tuning `/api/finetune/*` is now served OUT-OF-PROCESS by the
+        //    `ryu-finetune` sidecar via the manifest `public_mount` (generic ext-proxy
+        //    loader) — no in-process route merge. The sidecar owns `finetune.db`, the
+        //    adapter catalog, and the Python `unsloth` worker. See `com.ryu.finetune`.
         // ── Continual-learning loop (experience buffer + PRM + skill synthesis) ──
-        .route("/api/learn/config", get(learning::config))
-        .route("/api/learn/sweep", post(learning::sweep))
-        .route("/api/learn/score", post(learning::score))
-        .route("/api/learn/synthesize", post(learning::synthesize))
-        .route("/api/learn/cycle", post(learning::cycle))
-        .route("/api/learn/exclude", post(learning::exclude))
-        .route("/api/experience/list", get(learning::list))
-        // ── Self-healing loop (diagnose + fix failed runs) ──
-        .route(
-            "/api/healing/config",
-            get(healing_api::config).post(healing_api::set_config),
-        )
-        .route("/api/healing/status", get(healing_api::status))
-        .route(
-            "/api/healing/simulate-failure",
-            post(healing_api::simulate_failure),
-        )
-        // ── Generative-media data path (image/video) — proxies to sd-server ──
-        .route("/api/gifs/search", get(gifs::search))
-        .route("/api/images/generate", post(media::generate_image))
-        .route("/api/video/generate", post(media::generate_video))
-        // Poll a cloud video-generation job (job-based; see media::generate_video)
-        .route("/api/video/jobs/:id", get(media::poll_video_job))
+        // The ONE mount of `/api/learn/*` + `/api/experience/list`, in its own gated
+        // sub-router (see `learning_routes`) so the Learning App's enabled bit
+        // governs it. Learning `requires` the Skills app (it writes skills).
+        .merge(learning_routes(&state.app_store))
+        // ── Self-healing is OUT-OF-PROCESS: the `/api/healing/*` surface is served by
+        // the `ryu-healing` sidecar via `public_mount`; Core drives it over loopback
+        // (`healing_client`) and keeps only the welded action side. No in-process mount.
+        // ── Generative-media producers (image/video/gif) ─────────────────────
+        // Gated on the (default-on) Media app in its own sub-router (see
+        // `media_routes`). The shared no-cloud blob store below (`/api/media/upload` +
+        // `/api/media/:file`) stays UNGATED kernel storage — it also serves TTS audio
+        // output and chat uploads, so gating it would couple Voice/chat to Media.
+        .merge(media_routes(&state.app_store))
         .route(
             "/api/media/upload",
             post(media::upload_media)
                 .layer(axum::extract::DefaultBodyLimit::max(media::MAX_MEDIA_BYTES)),
         )
         .route("/api/media/:file", get(media::serve_media))
-        // ── Autoresearch data path — proxies to the research sidecar (:8087) ──
-        .route("/api/research/status", get(research::research_status))
-        .route(
-            "/api/research/workspace",
-            post(research::research_init_workspace),
-        )
-        .route(
-            "/api/research/workspace/:id/ledger",
-            get(research::research_ledger),
-        )
+        // ── Autoresearch data path (`/api/research/*`) is served out-of-process by
+        // the `ryu-research` sidecar via the manifest `public_mount` — no in-process
+        // route (see `com.ryu.research`).
         // ── Git workspace status (read-only, Unit U009) ─────────────────────
         .route("/api/git/status", get(git::git_status))
         // ── Git branch list + switch (composer branch selector) ─────────────
@@ -2740,47 +2647,18 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // The board is now a Space document owned by the app; there is no bespoke
         // `/api/canvases` file store any more (legacy files are imported at startup
         // by `server::canvas_migrate`). ────────────────────────────────────────
-        // ── Workflow template catalog (curated, installable blueprints) ─────
-        // Static `catalog` segments registered before the `:id` workflow routes.
-        .route("/api/workflows/catalog", get(list_workflow_templates))
-        .route(
-            "/api/workflows/catalog/install",
-            post(install_workflow_template),
-        )
-        .route("/api/workflows/catalog/:id", get(get_workflow_template))
-        // ── Clips (agent-native Loom/Jam → Shadow proxy) ────────────────────
-        // Static collection route before the `:id` routes (convention).
-        .route("/api/clips", get(clips::list_clips))
-        .route("/api/clips/ingest", post(clips::ingest))
-        .route("/api/clips/sources", get(clips::get_sources))
-        .route("/api/clips/recent-activity", get(clips::recent_activity))
-        .route("/api/clips/start", post(clips::start_clip))
-        .route("/api/clips/:id/stop", post(clips::stop_clip))
-        .route("/api/clips/:id/pause", post(clips::pause_clip))
-        .route("/api/clips/:id/resume", post(clips::resume_clip))
-        .route("/api/clips/:id/context", get(clips::get_context))
-        .route("/api/clips/:id/frame", get(clips::get_frame))
-        .route("/api/clips/:id/file", get(clips::get_file))
-        .route("/api/clips/:id/diagnostics", post(clips::post_diagnostics))
-        // ── Workflows (DAG engine) ──────────────────────────────────────────
-        .route("/workflows", get(list_workflows).post(create_workflow))
-        .route("/workflows/:id", get(get_workflow).delete(delete_workflow))
-        // Workflow version history (Prompt-Studio-style, server-backed).
-        .route(
-            "/workflows/:id/versions",
-            get(list_workflow_versions).post(create_workflow_version),
-        )
-        .route(
-            "/workflows/:id/versions/:version_id",
-            get(get_workflow_version),
-        )
-        .route(
-            "/workflows/:id/versions/:version_id/restore",
-            post(restore_workflow_version),
-        )
-        .route("/workflows/:id/run", post(run_workflow))
-        .route("/workflows/runs/:run_id", get(get_workflow_run))
-        .route("/workflows/runs/:run_id/resume", post(resume_workflow_run))
+        // ── Workflows (DAG engine) + template catalog ───────────────────────
+        // The ONE mount of the PROTECTED workflow surface — the DAG CRUD
+        // (`/workflows/*`, no `/api` prefix) plus the template catalog
+        // (`/api/workflows/catalog/*`) — in its own gated sub-router (see
+        // `workflow_routes`) so the Workflows App's enabled bit governs it. The
+        // PUBLIC per-workflow webhook (`/api/workflows/:id/webhook`) is registered on
+        // the PUBLIC router above and stays ungated so external systems can POST
+        // triggers regardless of the app's enabled bit.
+        // ── Clips (agent-native Loom/Jam → Shadow proxy) is served OUT-OF-PROCESS
+        // by the `ryu-clips` sidecar via the manifest `public_mount` — no in-process
+        // route merge. See `com.ryu.clips` in `plugin_manifest`.
+        .merge(workflow_routes(&state.app_store))
         // ── Activity feed (unified cross-module timeline) ───────────────────
         // The SSE `stream` route is registered before the collection route (no
         // `:id` routes exist here, but the convention is preserved).
@@ -2789,57 +2667,36 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/activity",
             get(activity_api::list_activity).post(activity_api::create_activity),
         )
-        // ── Website monitors (price/content/stock/keyword/uptime) ───────────
-        // Static segments (`alerts`, `push-tokens`) are registered before the
-        // `:id` routes so they match first.
-        .route(
-            "/api/monitors/alerts/stream",
-            get(monitors_api::alerts_stream),
-        )
+        // Website monitors (`/api/monitors/*`) are OUT-OF-PROCESS: the `ryu-monitors`
+        // sidecar owns the surface, served + App-gated via the generic ext-proxy
+        // `public_mount` (no in-process mount here). The interleaved `/api/events/*`
+        // multiplex streams are a SEPARATE concern and stay on the protected chain.
         .route(
             "/api/events/notifications/stream",
             get(notifications_stream),
         )
+        // App navigation requests emitted via the `host.navigate` bridge primitive.
+        .route(
+            "/api/events/navigation/stream",
+            get(navigation_stream),
+        )
         // Unified multiplex of every feature event bus over ONE connection so the
         // desktop stays within the browser's 6-per-host HTTP/1.1 budget.
         .route("/api/events/all", get(all_events_stream))
-        .route("/api/monitors/alerts", get(monitors_api::list_all_alerts))
-        .route(
-            "/api/monitors/alerts/:id/ack",
-            post(monitors_api::ack_alert),
-        )
-        .route(
-            "/api/monitors/push-tokens",
-            post(monitors_api::register_push_token),
-        )
-        .route(
-            "/api/monitors/push-tokens/:token",
-            delete(monitors_api::remove_push_token),
-        )
-        .route(
-            "/api/monitors",
-            get(monitors_api::list_monitors).post(monitors_api::create_monitor),
-        )
-        .route(
-            "/api/monitors/:id",
-            get(monitors_api::get_monitor)
-                .put(monitors_api::update_monitor)
-                .delete(monitors_api::delete_monitor),
-        )
-        .route("/api/monitors/:id/run", post(monitors_api::run_monitor))
-        .route(
-            "/api/monitors/:id/snapshots",
-            get(monitors_api::list_snapshots),
-        )
-        .route(
-            "/api/monitors/:id/alerts",
-            get(monitors_api::list_monitor_alerts),
-        )
         // ── App-inbox notifications (user-scoped ping feed) ─────────────────
-        // Static `stream` registered before `:id/*` so it matches first.
+        // Static `stream` + `push-tokens` registered before `:id/*` so they
+        // match first.
         .route(
             "/api/notifications/stream",
             get(notifications_api::notifications_stream),
+        )
+        .route(
+            "/api/notifications/push-tokens",
+            post(notifications_api::register_push_token),
+        )
+        .route(
+            "/api/notifications/push-tokens/:token",
+            delete(notifications_api::remove_push_token),
         )
         .route(
             "/api/notifications",
@@ -2854,106 +2711,33 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             post(notifications_api::ack_notification),
         )
         // ── Approval inbox (human-in-the-loop) ──────────────────────────────
-        // Static `events` / `mode` registered before `:id` so they match first.
-        .route("/api/approvals/events", get(approvals_api::approval_events))
-        .route(
-            "/api/approvals/mode",
-            get(approvals_api::get_mode).put(approvals_api::set_mode),
-        )
-        .route("/api/approvals", get(approvals_api::list_approvals))
-        .route("/api/approvals/:id", get(approvals_api::get_approval))
-        .route(
-            "/api/approvals/:id/approve",
-            post(approvals_api::approve_approval),
-        )
-        .route(
-            "/api/approvals/:id/reject",
-            post(approvals_api::reject_approval),
-        )
-        // ── Quests (auto-detecting todo list) ───────────────────────────────
-        // Static segments (`events`, `detection-config`) registered before the
-        // `:id` routes so they match first.
-        .route("/api/quests/events", get(quests_api::quest_events))
-        .route(
-            "/api/quests/detection-config",
-            get(quests_api::get_detection_config).put(quests_api::set_detection_config),
-        )
-        .route(
-            "/api/quests",
-            get(quests_api::list_quests).post(quests_api::create_quest),
-        )
-        .route(
-            "/api/quests/:id",
-            get(quests_api::get_quest)
-                .put(quests_api::update_quest)
-                .delete(quests_api::delete_quest),
-        )
-        .route("/api/quests/:id/judge", post(quests_api::judge_quest))
-        .route("/api/quests/:id/complete", post(quests_api::complete_quest))
-        .route("/api/quests/:id/dismiss", post(quests_api::dismiss_quest))
-        .route(
-            "/api/quests/:id/suggestion/accept",
-            post(quests_api::accept_suggestion),
-        )
-        .route(
-            "/api/quests/:id/suggestion/dismiss",
-            post(quests_api::dismiss_suggestion),
-        )
+        // The ONE mount of `/api/approvals/*`, in its own gated sub-router (see
+        // `approvals_routes`) so the Approvals App's enabled bit governs it.
+        .merge(approvals_routes(&state.app_store))
+        // ── Quests `/api/quests/*` is now served OUT-OF-PROCESS by the
+        //    `ryu-quests` sidecar via the manifest `public_mount` (generic ext-proxy
+        //    loader) — no in-process route merge. The sidecar owns `quests.db` and
+        //    the detection engine; Core reaches its scheduler/activity couplings over
+        //    loopback via `quests_client`. See `com.ryu.quests`.
         // ── Home dashboards (customizable live widget grid) ─────────────────
-        // Static segments (`events`, `catalog`) before `:id` so they match first.
-        .route(
-            "/api/dashboards/events",
-            get(dashboard_api::dashboard_events),
-        )
-        .route("/api/dashboards/catalog", get(dashboard_api::catalog))
-        .route(
-            "/api/dashboards",
-            get(dashboard_api::list_dashboards).post(dashboard_api::create_dashboard),
-        )
-        .route(
-            "/api/dashboards/:id",
-            get(dashboard_api::get_dashboard)
-                .put(dashboard_api::update_dashboard)
-                .delete(dashboard_api::delete_dashboard),
-        )
-        .route(
-            "/api/dashboards/:id/widgets",
-            get(dashboard_api::list_widgets).post(dashboard_api::create_widget),
-        )
-        .route(
-            "/api/dashboards/:id/widgets/:wid",
-            axum::routing::put(dashboard_api::update_widget).delete(dashboard_api::delete_widget),
-        )
-        .route(
-            "/api/dashboards/:id/widgets/:wid/layout",
-            axum::routing::put(dashboard_api::update_widget_layout),
-        )
-        .route(
-            "/api/dashboards/:id/widgets/:wid/refresh",
-            post(dashboard_api::refresh_widget),
-        )
+        // OUT-OF-PROCESS: `/api/dashboards/*` is served by the `ryu-dashboards`
+        // sidecar via the manifest `public_mount` (generic ext-proxy loader) — no
+        // in-process route merge. The sidecar owns `dashboards.db` + the refresh
+        // loop; Core reaches its hardware-render + builder couplings over loopback
+        // via `dashboards_client`. See `com.ryu.dashboards`.
         // ── Meeting notes (record → live transcript → AI notes) ─────────────
-        // The ONE mount of `/api/meetings/*`. It lives in its own sub-router so it
-        // can carry the App gate (see `meetings_routes`); merged here — INSIDE the
-        // `require_auth` / `track_connection` / `attach_verified_caller` layers
-        // added at the end of this chain — so the gate changes nothing about auth.
-        .merge(meetings_routes(&state.app_store))
+        // OUT-OF-PROCESS: `/api/meetings/*` is served by the `ryu-meetings` sidecar
+        // via the manifest `public_mount` (generic ext-proxy loader) — no in-process
+        // route merge. The sidecar owns `meetings.db` + the engine/audio pipeline;
+        // Core reaches its hardware-ambient + activity + save-notes couplings over
+        // loopback via `meetings_client`. See `com.ryu.meetings`.
         // ── Hardware device registry (management; protected) ────────────────
-        // The realtime `/api/hardware/ws` + nonce-gated `/api/hardware/pair` are
-        // public (registered on the public router above). These management routes
-        // require the node token.
-        .route("/api/hardware/devices", get(hardware_api::list_devices))
-        .route(
-            "/api/hardware/devices/:id",
-            axum::routing::patch(hardware_api::update_device).delete(hardware_api::delete_device),
-        )
-        // Per-device dashboard config (layout/widgets/refresh_rate). Management
-        // routes (the desktop + the `dashboard_builder` chat target these), so they
-        // sit behind `require_auth` with the rest of the protected surface.
-        .route(
-            "/api/hardware/devices/:id/dashboard",
-            get(hardware_api::get_device_dashboard).put(hardware_api::set_device_dashboard),
-        )
+        // The realtime `/api/hardware/ws` + nonce-gated `/api/hardware/pair` +
+        // TRMNL `/api/hardware/display/*` are PUBLIC (registered on the public router
+        // above) and stay ungated so physical devices can connect/pair/poll regardless
+        // of the app's enabled bit. Only these PROTECTED device-registry CRUD routes
+        // are gated on the Hardware App, in their own sub-router (see `hardware_routes`).
+        .merge(hardware_routes(&state))
         // ── Sub-agent delegation (clean context, presets, caps) ─────────────
         .route("/api/delegate/stream", post(delegate_stream))
         // ── Self-update apply (headless binaries; protected) ────────────────
@@ -2966,6 +2750,11 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             "/api/preferences/:key",
             get(get_preference).put(set_preference),
         )
+        // Capability binding overrides (which provider serves a capability when 2+ apps provide it).
+        .route(
+            "/api/capabilities/bindings",
+            get(get_capability_bindings).put(set_capability_bindings),
+        )
         // ── Email transport (BYO SMTP sink config + test send) ──────────────
         .route(
             "/api/email/transport",
@@ -2977,25 +2766,12 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             get(get_alert_delivery).put(put_alert_delivery),
         )
         // ── Self-host Agent Inboxes (receive/store/send agent mail) ──────────
-        .merge(crate::mail::api::protected_routes())
-        // ── Ghost recipes (record / list / show / run / delete) ─────────────
-        // Static `record/*` segments registered before `:name` so they match
-        // first (Axum would otherwise capture `record` as a recipe name).
-        .route("/api/recipes/record/start", post(recipes_api::record_start))
-        .route(
-            "/api/recipes/record/status",
-            get(recipes_api::record_status),
-        )
-        .route("/api/recipes/record/stop", post(recipes_api::record_stop))
-        .route(
-            "/api/recipes",
-            get(recipes_api::list_recipes).post(recipes_api::save_recipe),
-        )
-        .route("/api/recipes/:name/run", post(recipes_api::run_recipe))
-        .route(
-            "/api/recipes/:name",
-            get(recipes_api::get_recipe).delete(recipes_api::delete_recipe),
-        )
+        // Merged below (before the `.layer(...)` stack) so the `mail` feature can
+        // gate it while still inheriting require_auth/attach_verified_caller.
+        // ── Ghost recipes (`/api/recipes/*`) are served OUT-OF-PROCESS by the
+        // `ryu-recipes` sidecar via the manifest `public_mount` (no in-process
+        // merge); the crate's replay/record engine stays compiled as a non-optional
+        // dep for the workflow GhostAction node. See `com.ryu.recipes`.
         // ── Scheduled jobs / heartbeat ──────────────────────────────────────
         .route("/heartbeat/jobs", get(list_jobs).post(create_job))
         .route("/heartbeat/jobs/:id", get(get_job).delete(delete_job))
@@ -3017,7 +2793,35 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/data-path/validate", post(validate_data_path))
         .route("/api/data-path/switch", post(switch_data_path))
         .route("/api/data-path/reset", post(reset_data_path))
-        .route("/api/data-path/export", post(export_data_path))
+        .route("/api/data-path/export", post(export_data_path));
+    // Agent-mail management routes (`/api/mail/*` protected CRUD) are served by the
+    // `com.ryu.mail` app's `ryu-mail` sidecar via the generic `public_mount` loader
+    // (registered on the PUBLIC router, which enforces the same node bearer per-route);
+    // the hand-coded proxy + in-process path were retired (Track C, sidecar-only).
+    // Compile-out-able leaf features (research/clips/recipes). Each is merged here —
+    // after every protected `.route(...)`, before the `.layer(...)` stack — so its
+    // gated sub-router still inherits require_auth/attach_verified_caller, exactly
+    // like the mail rebind above. Behind a cargo feature (in `default`), so a lean
+    // `--no-default-features` kernel drops the module, its routes, and the merge.
+    // Router merge is path-based, so moving them out of the mid-chain is identical.
+    // Research `/api/research/*` is now served OUT-OF-PROCESS by the `ryu-research`
+    // sidecar via the manifest `public_mount` (generic ext-proxy loader) — no
+    // in-process route merge. See `com.ryu.research` in `plugin_manifest`.
+    // Clips `/api/clips/*` is now served OUT-OF-PROCESS by the `ryu-clips` sidecar
+    // via the manifest `public_mount` (generic ext-proxy loader) — no in-process
+    // route merge. See `com.ryu.clips` in `plugin_manifest`.
+    // Recipes `/api/recipes/*` is now served OUT-OF-PROCESS by the `ryu-recipes`
+    // sidecar via the manifest `public_mount` (generic ext-proxy loader) — no
+    // in-process route merge. Its two live-ghost paths (replay + the recording
+    // session) proxy back to Core's `/api/host/recipes/*` (the shared MCP registry +
+    // the recorder subprocess are kernel; see `recipes_client` + `recipes_host`).
+    // The workflow executor's `Recipe`/`GhostAction` nodes still call
+    // `ryu_recipes::run` IN-PROCESS (no HTTP round-trip) against the same host.
+    // See `com.ryu.recipes` in `plugin_manifest`.
+    // Healing `/api/healing/*` is now served OUT-OF-PROCESS by the `ryu-healing`
+    // sidecar via the manifest `public_mount` — no in-process route merge. See
+    // `com.ryu.healing` in `plugin_manifest` and `healing_client`.
+    let protected = protected
         // Verified user identity (Phase 0): the innermost layer, so it runs AFTER
         // require_auth admits the node and just before the handler. It attaches an
         // `Option<VerifiedCaller>` extension (anonymous when no/invalid user JWT),
@@ -3122,57 +2926,471 @@ fn spaces_routes(app_store: &PluginStore) -> Router<ServerState> {
         ))
 }
 
-/// The `/api/meetings/*` surface, gated on the **Meetings App** being enabled.
+// `/api/meetings/*` is served OUT-OF-PROCESS by the `ryu-meetings` sidecar via the
+// manifest `public_mount` (the generic ext-proxy loader owns the App gate + the stable
+// prefix), so there is no in-process `meetings_routes` merge. Core's remaining meeting
+// couplings (hardware ambient ingest + activity fold + save-notes filing) reach the
+// sidecar over loopback via `meetings_client`.
+
+// `/api/dashboards/*` is served OUT-OF-PROCESS by the `ryu-dashboards` sidecar via
+// the manifest `public_mount` (the generic ext-proxy loader owns the App gate + the
+// stable prefix), so there is no in-process `dashboards_routes` merge. Core's
+// remaining dashboard couplings (hardware render + nudge + `dashboard_builder`)
+// reach the sidecar over loopback via `dashboards_client`.
+
+/// The `/api/skills/*` + `/api/skills/catalog/*` surface, gated on the **Skills App**
+/// being enabled.
 ///
-/// The routes are unchanged and still mounted exactly once — they just live in
-/// their own `Router` so a single `route_layer` can wrap all of them at once. This
-/// is the first user of [`require_app_enabled`]; every future feature that becomes
-/// an App follows the same three lines.
+/// A governance-shell leaf: both route blocks (the skills.sh catalog + the SKILL.md
+/// CRUD/version surface) live in this one sub-router so a single `route_layer` gates
+/// them together. Skills declares no `requires`; it is the dependency *target* of
+/// Learning (`requires.apps = [com.ryu.skills]`). Default-on, so the gate is
+/// transparent on a fresh install.
 ///
-/// Meetings is default-on (`plugins::builtins::CORE_DEFAULT_ON`) and its dependency
-/// on Spaces is seeded first, so on any normal install the gate is transparent: it
-/// only bites once a user deliberately disables the App.
+/// Only the HTTP surface is gated — the in-process `state.skills` [`SkillRegistry`]
+/// is injected into every outgoing chat turn by `route_chat_stream`, which is
+/// untouched: gating a route governs what *callers* may reach, not what the crate
+/// does internally. Static literals are registered before the `:id` param routes so
+/// matchit resolves them first.
 ///
-/// Static segments are registered before `:id` so `stream` / `detect` /
-/// `detection-config` match first.
-fn meetings_routes(app_store: &PluginStore) -> Router<ServerState> {
+/// The `/api/skills` CRUD/version/**activate** leaves live in the extracted
+/// [`ryu_skills`] crate (`ryu_skills::routes`, a state-agnostic `Router<ServerState>`
+/// that reads the process-global registry Core published). The `catalog`/`updates`/
+/// `install-from-source` leaves stay here — they are wired to Core-only machinery
+/// (the download center, `catalog_source`, marketplace buyer tokens). Both halves
+/// are `.merge`d and gated by one `route_layer`, so the mounted route set + gate is
+/// byte-identical to the pre-extraction inline router.
+fn skills_routes(state: &ServerState) -> Router<ServerState> {
+    let crate_routes = ryu_skills::routes::<ServerState>(ryu_skills::SkillsCtx::new(
+        state.skills.clone(),
+    ));
     Router::new()
-        .route("/api/meetings/stream", get(meetings_api::meetings_stream))
-        .route("/api/meetings/detect", post(meetings_api::detect))
+        // Skills catalog (browse + install from skills.sh; logic in Core).
+        .route("/api/skills/catalog", get(skills_catalog_list))
+        .route("/api/skills/catalog/detail", get(skills_catalog_detail))
+        .route("/api/skills/catalog/install", post(skills_catalog_install))
+        .route("/api/skills/updates", get(skills_updates))
         .route(
-            "/api/meetings/detection-config",
-            get(meetings_api::get_detection_config).put(meetings_api::put_detection_config),
+            "/api/skills/install-from-source",
+            post(skills_install_from_source),
         )
-        .route("/api/meetings/templates", get(meetings_api::list_templates))
-        .route("/api/meetings/import", post(meetings_api::import_meeting))
+        // Skills CRUD + authoring/version history + activate (desktop SKILL.md
+        // editor) — the extracted crate's router, merged under the same gate.
+        .merge(crate_routes)
+        .route_layer(middleware::from_fn_with_state(
+            AppGate::new(
+                &state.app_store,
+                crate::plugins::builtins::SKILLS_PLUGIN_ID,
+                "Skills",
+            ),
+            require_app_enabled,
+        ))
+}
+
+/// The `/api/agents/*` catalog + CRUD + ACP session-management surface, gated on the
+/// **Agents App** being enabled.
+///
+/// A governance-shell leaf: no `requires`. Default-on AND **load-bearing** (see
+/// [`crate::plugins::builtins::LOAD_BEARING_PLUGINS`]) — the composer fetches the
+/// agent list on boot, so the app can never actually be disabled and the gate is
+/// transparent. Static segments (`catalog`, `import`) are registered before the `:id`
+/// routes so they match first (the original inline order is preserved).
+///
+/// Every route here is a UI-driven catalog/management call — listing/creating/
+/// editing/deleting agents, the ACP session lifecycle (config/auth/logout/sessions/
+/// load), thread import, usage, and capabilities. NONE is on the synchronous chat
+/// hot path: `/api/chat/stream` resolves the agent through the in-process
+/// `AgentStore` and the ACP substrate directly, never by HTTP-looping back through
+/// `/api/agents`. The chat-serving substrate itself (`agent_routing/`,
+/// `sidecar/adapters/acp.rs`) is kernel and is deliberately NOT part of this router.
+/// `/api/pi-config/*` is a separate surface (not under `/api/agents`) and stays on
+/// the ungated protected chain.
+fn agents_routes(app_store: &PluginStore) -> Router<ServerState> {
+    Router::new()
+        .route("/api/agents", get(list_agents).post(create_agent))
+        .route("/api/agents/catalog", get(list_agent_catalog))
+        .route("/api/agents/catalog/install", post(install_agent_handler))
         .route(
-            "/api/meetings",
-            get(meetings_api::list_meetings).post(meetings_api::create_meeting),
+            "/api/agents/catalog/uninstall",
+            post(uninstall_agent_handler),
+        )
+        .route("/api/agents/import", post(import_agent))
+        .route(
+            "/api/agents/:id",
+            get(get_agent).put(update_agent).delete(delete_agent),
+        )
+        .route("/api/agents/:id/export", get(export_agent))
+        .route("/api/agents/:id/tools", get(list_tools))
+        .route("/api/agents/:id/migrate-to-ryu", post(migrate_to_ryu))
+        // ── Import a past thread from an agent's own on-disk history store
+        //    (Claude Code / Codex), Zed/VS Code parity. List, then import one
+        //    into a Ryu conversation. ──
+        .route("/api/agents/:id/threads", get(list_agent_threads_handler))
+        .route(
+            "/api/agents/:id/threads/import",
+            post(import_agent_thread_handler),
+        )
+        // ── ACP session config (agent-reported permission modes / models /
+        //    config options like reasoning effort), Zed-style ──
+        .route("/api/agents/:id/acp-config", get(acp_config))
+        .route("/api/agents/:id/authenticate", post(acp_authenticate))
+        .route("/api/agents/:id/logout", post(acp_logout))
+        .route("/api/agents/:id/sessions", get(list_acp_sessions_handler))
+        .route(
+            "/api/agents/:id/sessions/:sid",
+            delete(delete_acp_session_handler),
         )
         .route(
-            "/api/meetings/:id",
-            get(meetings_api::get_meeting).delete(meetings_api::delete_meeting),
+            "/api/agents/:id/sessions/:sid/load",
+            post(load_acp_session_handler),
         )
+        .route("/api/agents/:id/update-check", get(agent_update_check))
+        .route("/api/agents/:id/update", post(agent_update))
+        // ── Per-agent subscription usage (5h + weekly rate-limit windows read
+        //    from the CLI's own local OAuth token, à la CodexBar/openusage).
+        //    Backs the chat "usage bar"; Claude + Codex in v1. ──
+        .route("/api/agents/:id/usage", get(usage_api::agent_usage))
+        // ── Per-agent capabilities (tools / reasoning / vision), Jan-style.
+        //    GET resolves auto-detection + overrides; PUT persists overrides. ──
         .route(
-            "/api/meetings/:id/title",
-            post(meetings_api::rename_meeting),
+            "/api/agents/:id/capabilities",
+            get(agent_capabilities).put(set_agent_capabilities),
         )
-        .route("/api/meetings/:id/chunk", post(meetings_api::ingest_chunk))
-        .route(
-            "/api/meetings/:id/finalize",
-            post(meetings_api::finalize_meeting),
-        )
-        .route(
-            "/api/meetings/:id/transcript",
-            get(meetings_api::get_transcript),
-        )
-        // `route_layer`, not `layer`: the gate must run only on these matched
-        // routes, never on the fallback (an unknown path stays a plain 404).
         .route_layer(middleware::from_fn_with_state(
             AppGate::new(
                 app_store,
-                crate::plugins::builtins::MEETINGS_PLUGIN_ID,
-                "Meetings",
+                crate::plugins::builtins::AGENTS_PLUGIN_ID,
+                "Agents",
+            ),
+            require_app_enabled,
+        ))
+}
+
+/// The PROTECTED workflow surface, gated on the **Workflows App** being enabled.
+///
+/// A governance-shell leaf: no `requires`. Default-on, so the gate is transparent on
+/// a fresh install. This router holds ONLY the protected routes — the template
+/// catalog (`/api/workflows/catalog/*`) plus the DAG CRUD (`/workflows/*`, no `/api`
+/// prefix). The static `catalog` segments are registered before the `:id` DAG routes
+/// so they match first (the original inline order is preserved).
+///
+/// The PUBLIC per-workflow webhook (`/api/workflows/:id/webhook`) is registered on
+/// the PUBLIC router (it authenticates an HMAC against the trigger's own secret
+/// in-handler, which the global `require_auth` layer cannot gate). It is
+/// intentionally NOT in this sub-router: gating it would break inbound triggers from
+/// external systems, so it stays reachable regardless of the app's enabled bit.
+///
+/// Only the HTTP surface is gated — the in-process workflow executor keeps serving
+/// the scheduler `JobTarget::Workflow` jobs, durable execution, healing, and
+/// approvals, so it is never behind a cargo feature (the impl must always compile).
+fn workflow_routes(app_store: &PluginStore) -> Router<ServerState> {
+    Router::new()
+        // ── Workflow template catalog (curated, installable blueprints) ─────
+        // Static `catalog` segments registered before the `:id` workflow routes.
+        .route("/api/workflows/catalog", get(list_workflow_templates))
+        .route(
+            "/api/workflows/catalog/install",
+            post(install_workflow_template),
+        )
+        .route("/api/workflows/catalog/:id", get(get_workflow_template))
+        // ── Workflows (DAG engine) ──────────────────────────────────────────
+        .route("/workflows", get(list_workflows).post(create_workflow))
+        .route("/workflows/:id", get(get_workflow).delete(delete_workflow))
+        // Workflow version history (Prompt-Studio-style, server-backed).
+        .route(
+            "/workflows/:id/versions",
+            get(list_workflow_versions).post(create_workflow_version),
+        )
+        .route(
+            "/workflows/:id/versions/:version_id",
+            get(get_workflow_version),
+        )
+        .route(
+            "/workflows/:id/versions/:version_id/restore",
+            post(restore_workflow_version),
+        )
+        .route("/workflows/:id/run", post(run_workflow))
+        .route("/workflows/runs/:run_id", get(get_workflow_run))
+        .route("/workflows/runs/:run_id/resume", post(resume_workflow_run))
+        .route_layer(middleware::from_fn_with_state(
+            AppGate::new(
+                app_store,
+                crate::plugins::builtins::WORKFLOWS_PLUGIN_ID,
+                "Workflows",
+            ),
+            require_app_enabled,
+        ))
+}
+
+/// The PROTECTED `/api/hardware/devices*` device-registry CRUD, gated on the
+/// **Hardware App** being enabled.
+///
+/// A governance-shell leaf: no `requires`. Default-on, so the gate is transparent on
+/// a fresh install. This router holds ONLY the protected device-management routes.
+///
+/// The PUBLIC device channel — the realtime `/api/hardware/ws`, the nonce-gated
+/// `/api/hardware/pair`, and the TRMNL `/api/hardware/display/*` polling routes — is
+/// registered on the PUBLIC router (they authenticate a per-device Bearer/nonce
+/// in-handler, which the global `require_auth` layer cannot gate). Those routes are
+/// intentionally NOT in this sub-router: gating them would break device pairing and
+/// the live device link, so they stay reachable regardless of the app's enabled bit.
+///
+/// The device-registry CRUD + the per-device dashboard binding handlers live in the
+/// extracted `ryu_hardware::api` crate. Core builds the crate's `HardwareCtx` from
+/// the in-process registry (`state.hardware`) + the `DashboardFeed` seam backed by
+/// the out-of-process `dashboards_client` (`state.dashboards`),
+/// applies the App gate as a `route_layer`, and nests the resulting state-baked
+/// `Router<()>` at `/api/hardware/devices` (byte-identical to the old direct mount:
+/// the crate's relative `/`, `/:id`, `/:id/dashboard` map onto the same paths).
+fn hardware_routes(state: &ServerState) -> Router<ServerState> {
+    let inner = ryu_hardware::api::devices_routes(hardware_ctx(state)).route_layer(
+        middleware::from_fn_with_state(
+            AppGate::new(
+                &state.app_store,
+                crate::plugins::builtins::HARDWARE_PLUGIN_ID,
+                "Hardware Devices",
+            ),
+            require_app_enabled,
+        ),
+    );
+    Router::new().nest_service("/api/hardware/devices", inner)
+}
+
+/// Build the extracted hardware surface's router state from the in-process registry
+/// + the out-of-process `DashboardFeed` (`dashboards_client`) `ServerState` holds.
+/// Shared by the protected device CRUD (`hardware_routes`) and the public TRMNL
+/// display mount.
+fn hardware_ctx(state: &ServerState) -> ryu_hardware::api::HardwareCtx {
+    ryu_hardware::api::HardwareCtx {
+        hardware: state.hardware.clone(),
+        dashboards: std::sync::Arc::new(state.dashboards.clone()),
+    }
+}
+
+/// The `/api/approvals/*` surface, gated on the **Approvals App** being enabled.
+///
+/// A governance-shell leaf. Approvals declares no `requires` (the workflow dependency
+/// is soft); it is the dependency *target* of Healing (`requires.apps =
+/// [com.ryu.approvals]`). Default-on, so the gate is transparent on a fresh install.
+/// Static `events`/`mode` are registered before `:id` so they match first.
+///
+/// Only the HTTP surface is gated — the in-process `state.approvals`
+/// [`ApprovalEngine`] keeps serving the scheduler `require_approval` jobs, workflow
+/// approval nodes, and the self-healing fix queue.
+fn approvals_routes(app_store: &PluginStore) -> Router<ServerState> {
+    Router::new()
+        .route("/api/approvals/events", get(approvals_api::approval_events))
+        .route(
+            "/api/approvals/mode",
+            get(approvals_api::get_mode).put(approvals_api::set_mode),
+        )
+        .route("/api/approvals", get(approvals_api::list_approvals))
+        .route("/api/approvals/:id", get(approvals_api::get_approval))
+        .route(
+            "/api/approvals/:id/approve",
+            post(approvals_api::approve_approval),
+        )
+        .route(
+            "/api/approvals/:id/reject",
+            post(approvals_api::reject_approval),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            AppGate::new(
+                app_store,
+                crate::plugins::builtins::APPROVALS_PLUGIN_ID,
+                "Approvals",
+            ),
+            require_app_enabled,
+        ))
+}
+
+/// The `/api/learn/*` + `/api/experience/list` surface, gated on the **Learning App**
+/// being enabled.
+///
+/// A governance-shell leaf. Learning `requires` the `skills` app because it writes
+/// synthesized skills, so the graph refuses to disable Skills out from under it.
+/// Default-on, so the gate is transparent on a fresh install.
+///
+/// Only the HTTP surface is gated — the in-process `state.experience`
+/// [`ExperienceStore`] keeps capturing `(user, assistant)` turns from the chat
+/// feedback path and the scheduler keeps running its `JobTarget::LearningCycle` job.
+fn learning_routes(app_store: &PluginStore) -> Router<ServerState> {
+    Router::new()
+        .route("/api/learn/config", get(learning::config))
+        .route("/api/learn/sweep", post(learning::sweep))
+        .route("/api/learn/score", post(learning::score))
+        .route("/api/learn/synthesize", post(learning::synthesize))
+        .route("/api/learn/cycle", post(learning::cycle))
+        .route("/api/learn/exclude", post(learning::exclude))
+        .route("/api/experience/list", get(learning::list))
+        .route_layer(middleware::from_fn_with_state(
+            AppGate::new(
+                app_store,
+                crate::plugins::builtins::LEARNING_PLUGIN_ID,
+                "Learning",
+            ),
+            require_app_enabled,
+        ))
+}
+
+// The `/api/healing/*` surface moved OUT-OF-PROCESS to the `ryu-healing` sidecar
+// (`com.ryu.healing`), served via the manifest `public_mount` (generic ext-proxy
+// loader) and gated on the Self-Healing App there. There is no in-process
+// `healing_routes` fn: the diagnose→propose engine, the attempt cap, the `healing.*`
+// prefs, and the config/status handlers all live in the sidecar; Core keeps only the
+// welded action side (`healing_client::CoreHealingHost`) and drives the sidecar over
+// loopback. The former Core-side `simulate-failure` debug hook is dropped with the
+// module (the real bus path — flip a conversation to `failed` — still fires the heal
+// loop through `healing_client::spawn`).
+
+// The `/api/clips/*` surface moved OUT-OF-PROCESS to the `ryu-clips` sidecar
+// (`com.ryu.clips`), served via the manifest `public_mount` (generic ext-proxy
+// loader). There is no in-process `clips_routes` fn or `CoreClipsHost` shim — the
+// sidecar reads `RYU_SHADOW_URL` itself and degrades the two `ClipsHost` kernel
+// couplings (yt-dlp URL ingest + `Clips`-Space filing) cleanly.
+
+// Recipes `/api/recipes/*` is served OUT-OF-PROCESS by the `ryu-recipes` sidecar
+// (manifest `public_mount`, generic ext-proxy loader — the enabled-gate the old
+// `recipes_routes` AppGate applied now runs in `public_mount_proxy`). There is no
+// in-process route merge and no `recipes` cargo feature. The `ryu-recipes` crate
+// stays a NON-optional dependency: the workflow executor's `Recipe`/`GhostAction`
+// nodes call `ryu_recipes::run`/`extract_mcp_json` in every build, and Core installs
+// the live-ghost `RecipesHost` at boot (`recipes_host::CoreRecipesHost`), reached
+// both by that in-process path and by the sidecar via `/api/host/recipes/*`
+// (`recipes_client`).
+
+/// The `/api/predict/*` surface, gated on the **Predict App** being enabled.
+///
+/// A governance-shell leaf like Meetings/Spaces, but the Predict app is **opt-in**
+/// (NOT in [`crate::plugins::builtins::CORE_DEFAULT_ON`]): enabling it flips the
+/// system-wide predictive-typing brain ON (`main.rs` seeds
+/// `predict::set_enabled(rec.enabled)` at boot), which sends text from arbitrary apps
+/// to a model. The codebase ships it OFF by design, so the gate is fail-closed here —
+/// a disabled/never-installed Predict app returns 503 on the whole `/api/predict/*`
+/// surface, matching the already-off brain. This is correct AND breaks no working
+/// install: the brain is default-off, so any install where predict actually works
+/// already has the record enabled → the gate passes.
+///
+/// The `predict::PREDICT_PLUGIN_ID` const is `"predict"` (its fixture id + any existing
+/// records), reused here so no record is orphaned.
+///
+/// The completion engine + handlers now live in the extracted `ryu_predict` crate.
+/// Core builds the crate's `PredictCtx` from a `CorePredictHost` (the plugin-owned
+/// enabled flag + preferences + agent-bound-model + default-model + Gateway
+/// side-model call, over `ServerState`), applies the App gate as a `route_layer`,
+/// and nests the resulting state-baked `Router<()>` at `/api/predict` (axum
+/// registers the bare prefix, so `/api/predict` itself matches — byte-identical to
+/// the old direct mounts of `/api/predict/{config,complete}`).
+fn predict_routes(state: &ServerState) -> Router<ServerState> {
+    let host = std::sync::Arc::new(crate::predict_host::CorePredictHost::new(state.clone()));
+    let inner = ryu_predict::routes(ryu_predict::PredictCtx::new(host)).route_layer(
+        middleware::from_fn_with_state(
+            AppGate::new(
+                &state.app_store,
+                crate::predict::PREDICT_PLUGIN_ID,
+                "Predict",
+            ),
+            require_app_enabled,
+        ),
+    );
+    Router::new().nest_service("/api/predict", inner)
+}
+
+/// The protected `/api/voice/*` data path, gated on the (default-on) **Voice App**.
+///
+/// Governance-shell leaf: the `voice` module stays in-crate (the chat/island paths
+/// call it in-process). Only the protected STT/TTS routes are gated; the PUBLIC
+/// realtime voice WS (`/api/voice/ws`) stays on the public router, ungated — a browser
+/// WS upgrade authenticates in-handler, so live voice mode connects regardless of the
+/// app's enabled bit. Default-on, so the gate is transparent on a fresh install.
+fn voice_routes(app_store: &PluginStore) -> Router<ServerState> {
+    Router::new()
+        // STT — proxies audio to whisper.cpp.
+        .route("/api/voice/transcribe", post(voice::transcribe))
+        // TTS — OuteTTS (built-in) or `?engine=` via the universal Ryu TTS sidecar.
+        .route("/api/voice/speak", post(voice::speak))
+        .route("/api/voice/tts-engines", get(voice::tts_engines))
+        // Curated, installable TTS model catalog + install via the Core-managed HF
+        // cache. Distinct from the raw HF text-to-speech browse in the Models tab.
+        .route("/api/voice/tts-models", get(voice::tts_models))
+        .route(
+            "/api/voice/tts-models/install",
+            post(voice::tts_models_install),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            AppGate::new(
+                app_store,
+                crate::plugins::builtins::VOICE_PLUGIN_ID,
+                "Voice",
+            ),
+            require_app_enabled,
+        ))
+}
+
+/// The generative-media PRODUCERS, gated on the (default-on) **Media App**.
+///
+/// Governance-shell leaf: the `media`/`gifs` modules stay in-crate. Only the producers
+/// (image/video/gif) are gated; the shared no-cloud blob store (`/api/media/upload` +
+/// `/api/media/:file`) stays UNGATED kernel storage in the main protected chain — it
+/// also serves TTS audio output and chat uploads, so gating it here would couple
+/// Voice/chat to the Media app's enabled bit. Default-on, so the gate is transparent.
+fn media_routes(app_store: &PluginStore) -> Router<ServerState> {
+    Router::new()
+        .route("/api/gifs/search", get(gifs::search))
+        .route("/api/images/generate", post(media::generate_image))
+        .route("/api/video/generate", post(media::generate_video))
+        // Poll a cloud video-generation job (job-based; see media::generate_video).
+        .route("/api/video/jobs/:id", get(media::poll_video_job))
+        .route_layer(middleware::from_fn_with_state(
+            AppGate::new(
+                app_store,
+                crate::plugins::builtins::MEDIA_PLUGIN_ID,
+                "Media Generation",
+            ),
+            require_app_enabled,
+        ))
+}
+
+/// The `/api/memory/*` long-term memory CRUD surface, gated on the (default-on)
+/// **Memory App**.
+///
+/// Governance-shell leaf: the `MemoryStore` stays a `ServerState` field. Only the HTTP
+/// CRUD surface is gated; the in-process chat auto-recall path is kernel and never
+/// HTTP-loops back through `/api/memory`. Default-on, so the gate is transparent on a
+/// fresh install.
+fn memory_routes(app_store: &PluginStore) -> Router<ServerState> {
+    Router::new()
+        .route("/api/memory", get(list_memory).post(create_memory))
+        .route(
+            "/api/memory/:id",
+            get(get_memory).put(update_memory).delete(delete_memory),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            AppGate::new(
+                app_store,
+                crate::plugins::builtins::MEMORY_PLUGIN_ID,
+                "Memory",
+            ),
+            require_app_enabled,
+        ))
+}
+
+/// The `/api/retrieval/*` index+search surface, gated on the (default-on) **RAG App**.
+///
+/// Retrieval is the RAG capability's HTTP surface (it operates on `state.retrieval`),
+/// so it reuses the existing `RAG_PLUGIN_ID` rather than minting a new app. The
+/// per-handler tenancy/permission gates (`retrieval/search` refuses a tokenless caller
+/// on a bound node) are unchanged — this adds only the plugin-enabled precondition.
+/// Default-on, so the gate is transparent on a fresh install.
+fn retrieval_routes(app_store: &PluginStore) -> Router<ServerState> {
+    Router::new()
+        .route("/api/retrieval/index", post(index_retrieval_chunk))
+        .route("/api/retrieval/search", post(search_retrieval))
+        .route_layer(middleware::from_fn_with_state(
+            AppGate::new(
+                app_store,
+                crate::plugins::builtins::RAG_PLUGIN_ID,
+                "RAG",
             ),
             require_app_enabled,
         ))
@@ -3412,6 +3630,108 @@ async fn set_preference(
     }
 }
 
+// -- Capability bindings (the override-mutation API — Track A/B) ------------------
+
+/// `GET /api/capabilities/bindings` — the user's capability→provider overrides
+/// (the tie-breaker when 2+ enabled apps provide the same capability). Empty = the
+/// zero-config auto-pick (single provider, or an explicit Ambiguous refusal).
+#[utoipa::path(
+    get,
+    path = "/api/capabilities/bindings",
+    tag = "Plugins",
+    summary = "Get capability binding overrides",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_capability_bindings(State(state): State<ServerState>) -> axum::response::Response {
+    let json = state
+        .preferences
+        .get(crate::plugins::binding::BINDING_OVERRIDES_PREF_KEY)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "{}".to_owned());
+    let cfg = crate::plugins::binding::config_from_overrides_json(&json);
+    (StatusCode::OK, Json(json!({ "overrides": cfg.overrides }))).into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct SetBindingsBody {
+    /// `capability name → provider app-id`.
+    #[serde(default)]
+    overrides: std::collections::BTreeMap<String, String>,
+}
+
+/// `PUT /api/capabilities/bindings` — replace the override map. Validated against
+/// the CURRENTLY ENABLED set before it is persisted or applied: an override that
+/// would leave an enabled consumer unbound/ambiguous (e.g. naming a non-provider,
+/// or a provider that is not enabled) is refused (409). On success it persists and
+/// applies live via `set_active_config`, so the next capability resolution / enable
+/// / disable uses it; already-lowered runtime edges refresh on the next
+/// enable/disable of the affected plugins.
+#[utoipa::path(
+    put,
+    path = "/api/capabilities/bindings",
+    tag = "Plugins",
+    summary = "Set capability binding overrides",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn set_capability_bindings(
+    State(state): State<ServerState>,
+    Json(body): Json<SetBindingsBody>,
+) -> axum::response::Response {
+    use crate::plugins::binding;
+    let new_cfg = binding::BindingConfig {
+        overrides: body.overrides,
+    };
+
+    // Validate over the ENABLED set: no enabled consumer may become unbound/ambiguous.
+    let records = match state.app_store.list().await {
+        Ok(r) => r,
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    let enabled_ids: std::collections::HashSet<String> = records
+        .iter()
+        .filter(|r| r.enabled)
+        .map(|r| r.id.clone())
+        .collect();
+    let enabled: Vec<crate::plugin_manifest::PluginManifest> = {
+        let manifests = state.app_manifests.read().await;
+        manifests
+            .iter()
+            .filter(|m| enabled_ids.contains(&m.id))
+            .cloned()
+            .collect()
+    };
+    if let Some((plugin, err)) = binding::first_binding_error(&enabled, &new_cfg) {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": err.to_string(),
+                "plugin": plugin,
+                "binding_error": err.code(),
+            })),
+        )
+            .into_response();
+    }
+
+    // Persist + apply live.
+    let json = binding::overrides_to_json(&new_cfg);
+    if let Err(e) = state
+        .preferences
+        .set(binding::BINDING_OVERRIDES_PREF_KEY, &json)
+        .await
+    {
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    }
+    binding::set_active_config(new_cfg.clone());
+    (
+        StatusCode::OK,
+        Json(json!({ "ok": true, "overrides": new_cfg.overrides })),
+    )
+        .into_response()
+}
+
 // -- Email transport (BYO SMTP sink config) --------------------------------------
 
 /// Non-secret transport config exchanged with the desktop SMTP card. The password
@@ -3453,7 +3773,7 @@ fn default_true_bool() -> bool {
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn get_email_transport(State(_state): State<ServerState>) -> axum::response::Response {
-    let prefs = crate::email::current_transport_prefs();
+    let prefs = ryu_email_send::current_transport_prefs();
     let password_set = crate::smtp_auth::password().is_some();
     let body = match prefs {
         Some(t) => json!({
@@ -3491,7 +3811,7 @@ async fn put_email_transport(
     State(state): State<ServerState>,
     Json(body): Json<EmailTransportBody>,
 ) -> axum::response::Response {
-    let transport = crate::email::TransportPrefs {
+    let transport = ryu_email_send::TransportPrefs {
         host: body.host.clone(),
         port: body.port,
         username: body.username.clone(),
@@ -3510,7 +3830,7 @@ async fn put_email_transport(
     };
     if let Err(e) = state
         .preferences
-        .set(crate::email::SMTP_TRANSPORT_PREF_KEY, &json)
+        .set(ryu_email_send::SMTP_TRANSPORT_PREF_KEY, &json)
         .await
     {
         return (
@@ -3519,7 +3839,7 @@ async fn put_email_transport(
         )
             .into_response();
     }
-    crate::email::set_transport(
+    ryu_email_send::set_transport(
         &body.host,
         body.port,
         &body.username,
@@ -3556,7 +3876,7 @@ struct EmailTestBody {
 }
 
 /// `POST /api/email/test` - send a test email over the currently-configured
-/// transport, surfacing any [`crate::email::EmailError`] to the caller.
+/// transport, surfacing any [`ryu_email_send::EmailError`] to the caller.
 #[utoipa::path(
     post,
     path = "/api/email/test",
@@ -3569,14 +3889,14 @@ async fn post_email_test(
     State(_state): State<ServerState>,
     Json(body): Json<EmailTestBody>,
 ) -> axum::response::Response {
-    let Some(cfg) = crate::email::resolve_transport() else {
+    let Some(cfg) = ryu_email_send::resolve_transport() else {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "email transport is not configured" })),
         )
             .into_response();
     };
-    match crate::email::send_email_alert(
+    match ryu_email_send::send_email_alert(
         &cfg,
         body.to.trim(),
         "Ryu test email",
@@ -3602,7 +3922,7 @@ async fn post_email_test(
 #[derive(serde::Deserialize)]
 struct AlertDeliveryBody {
     #[serde(default)]
-    targets: Vec<crate::monitors::notify::NotifyTarget>,
+    targets: Vec<ryu_notify::NotifyTarget>,
     #[serde(default)]
     emails: Vec<String>,
 }
@@ -3617,15 +3937,12 @@ struct AlertDeliveryBody {
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn get_alert_delivery(State(state): State<ServerState>) -> axum::response::Response {
-    let store = match crate::monitors::global_engine() {
-        Some(engine) => engine.store.clone(),
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({ "error": "monitor engine not ready" })),
-            )
-                .into_response()
-        }
+    let Some(store) = crate::notify::global_store() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "notify store not ready" })),
+        )
+            .into_response();
     };
     let _ = &state;
     match store.get_alert_delivery().await {
@@ -3651,15 +3968,12 @@ async fn put_alert_delivery(
     State(state): State<ServerState>,
     Json(body): Json<AlertDeliveryBody>,
 ) -> axum::response::Response {
-    let store = match crate::monitors::global_engine() {
-        Some(engine) => engine.store.clone(),
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({ "error": "monitor engine not ready" })),
-            )
-                .into_response()
-        }
+    let Some(store) = crate::notify::global_store() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "notify store not ready" })),
+        )
+            .into_response();
     };
     let _ = &state;
     let cfg = crate::policy_alerts::AlertDeliveryTargets {
@@ -3828,6 +4142,39 @@ async fn notifications_stream() -> axum::response::sse::Sse<
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+/// `GET /api/events/navigation/stream` — SSE: navigation requests emitted by a
+/// sandboxed app via the `host.navigate` bridge primitive. The connected shell
+/// subscribes and drives its router to the requested target (client consumption is
+/// Track E; this endpoint makes the primitive reachable end-to-end).
+#[utoipa::path(
+    get,
+    path = "/api/events/navigation/stream",
+    tag = "Events",
+    summary = "App navigation-request SSE stream",
+    responses((status = 200, description = "Server-Sent Events stream"))
+)]
+async fn navigation_stream() -> axum::response::sse::Sse<
+    impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    use tokio::sync::broadcast::error::RecvError;
+
+    let rx = crate::events::subscribe_navigation();
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        loop {
+            match rx.recv().await {
+                Ok(ev) => {
+                    let data = serde_json::to_string(&ev).unwrap_or_default();
+                    return Some((Ok(Event::default().data(data)), rx));
+                }
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => return None,
+            }
+        }
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
 /// `GET /api/events/all` — unified SSE that multiplexes EVERY feature event bus
 /// (notifications, quests, monitors, approvals, meetings, dashboards, downloads)
 /// into ONE connection, each event tagged with its channel via the SSE `event:`
@@ -3892,30 +4239,11 @@ async fn all_events_stream(
         .chain(tagged("downloads", downloads_rx)),
     );
 
-    // The dashboards channel additionally registers a live UI VIEWER for the life of
-    // this stream (the refresh loop's cost guard keys off viewer_count, not the raw
-    // broadcast receiver count — so internal listeners like the hardware nudge loop
-    // don't fake a viewer). The guard rides in the unfold state and drops on close.
-    let dashboards_rx = state.dashboards.store.subscribe();
-    let dashboards_guard = state.dashboards.store.viewer_guard();
-    let dashboards: TaggedStream = Box::pin(stream::unfold(
-        (dashboards_rx, dashboards_guard),
-        |(mut rx, guard)| async move {
-            loop {
-                match rx.recv().await {
-                    Ok(ev) => {
-                        let data = serde_json::to_string(&ev).unwrap_or_default();
-                        return Some((
-                            Ok(Event::default().event("dashboards").data(data)),
-                            (rx, guard),
-                        ));
-                    }
-                    Err(RecvError::Lagged(_)) => continue,
-                    Err(RecvError::Closed) => return None,
-                }
-            }
-        },
-    ));
+    // Dashboards is now out-of-process (`ryu-dashboards` sidecar); its widget events
+    // no longer ride Core's in-process broadcast. The desktop reads them off the
+    // sidecar's own `/api/dashboards/events` SSE via `public_mount` (which registers
+    // the live UI viewer the refresh cost-guard keys off), so this unified fan-out no
+    // longer carries a `dashboards` channel — mirroring monitors/quests.
 
     // Notifications need a FILTERED tap (not the generic `tagged`): this unified
     // stream is unauthenticated, so it may only carry BROADCAST notifications.
@@ -3944,15 +4272,20 @@ async fn all_events_stream(
         },
     ));
 
-    let streams: Vec<TaggedStream> = vec![
+    #[allow(unused_mut)]
+    let mut streams: Vec<TaggedStream> = vec![
         notifications,
-        tagged("quests", state.quests.store.subscribe()),
-        tagged("monitors", state.monitors.store.subscribe()),
         tagged("approvals", state.approvals.store.subscribe()),
-        tagged("meetings", state.meetings.store.subscribe()),
-        dashboards,
         downloads,
     ];
+    // Monitors, quests, dashboards, and meetings are now out-of-process
+    // (`ryu-monitors` / `ryu-quests` / `ryu-dashboards` / `ryu-meetings` sidecars);
+    // their events no longer ride Core's in-process broadcast. The activity STORE still
+    // records them — the monitors alert callback + the quests/meetings SSE folds — they
+    // just do not join this live per-engine fan-out (the desktop reads monitor alerts
+    // off the sidecar's own `/api/monitors/alerts/stream`, dashboard events off
+    // `/api/dashboards/events`, and meeting events off `/api/meetings/stream`, via
+    // `public_mount`).
 
     Sse::new(stream::select_all(streams)).keep_alive(KeepAlive::default())
 }
@@ -7284,6 +7617,41 @@ async fn install_app_bundle(
         }
     }
 
+    // Backend self-check (advisory, mirrors the ui_code_sha256 gate above): the
+    // node backend bundle rides INLINE in the manifest (unlike `ui_code`), so
+    // `ryu pack` writes `backend_sha256` over it. If present it must match the
+    // carried `backend_code` — a mismatch means a corrupted/edited local bundle
+    // whose backend would run code the manifest does not describe. The SPAWN-time
+    // fail-closed check (`manifest_sidecar::prepare_node_backend`) still stands;
+    // this simply refuses the corruption at the install door for a clear error.
+    if let Some(declared) = manifest
+        .backend_sha256
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        match manifest.backend_code.as_deref() {
+            Some(code) => {
+                use sha2::{Digest, Sha256};
+                let actual = hex::encode(Sha256::digest(code.as_bytes()));
+                if actual != declared.to_ascii_lowercase() {
+                    return json_error(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        format!(
+                            "bundle backend_code hash mismatch (manifest declares {declared}, code hashes to {actual}); refusing corrupted bundle"
+                        ),
+                    );
+                }
+            }
+            None => {
+                return json_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "bundle manifest declares backend_sha256 but carries no backend_code".to_owned(),
+                );
+            }
+        }
+    }
+
     match persist_installed_plugin(&state, manifest, ui_code).await {
         Ok(body) => Json(body).into_response(),
         Err((status, msg)) => json_error(status, msg),
@@ -7294,6 +7662,12 @@ async fn install_app_bundle(
 /// the install boundary here and the marketplace integrity gate
 /// (`catalog_source::sources`), so a pathological bundle is refused before storage.
 const MAX_UI_CODE_BYTES: usize = 4 * 1024 * 1024;
+
+/// Maximum size of a plugin's inline node-backend bundle (`backend_code`, 4 MiB).
+/// The backend analogue of [`MAX_UI_CODE_BYTES`]; enforced in the shared install
+/// sink ([`persist_installed_plugin`]) so a pathological backend is refused before
+/// storage on every install path (local bundle + marketplace catalog).
+const MAX_BACKEND_CODE_BYTES: usize = 4 * 1024 * 1024;
 
 /// `{ id }` body for [`install_plugin_from_catalog`].
 #[derive(serde::Deserialize)]
@@ -7345,6 +7719,17 @@ async fn persist_installed_plugin(
             return Err((
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "ui_code bundle is too large".to_owned(),
+            ));
+        }
+    }
+    // Same cap for the inline node-backend bundle (rides on the manifest, not the
+    // `ui_code` carriage). Every install path funnels through here, so a
+    // pathological backend is refused before it ever lands on disk.
+    if let Some(code) = &manifest.backend_code {
+        if code.len() > MAX_BACKEND_CODE_BYTES {
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "backend_code bundle is too large".to_owned(),
             ));
         }
     }
@@ -7922,272 +8307,13 @@ fn app_tool_claim_sets(
     (disabled_claimed, enabled_claimed)
 }
 
-// ── Skill handlers (M3 / issue #145) ─────────────────────────────────────────
-
-/// `GET /api/skills` — list all installed skills with their enabled state.
-///
-/// Skills live in the universal `~/.claude/skills/<id>/SKILL.md`. This endpoint lets agents and
-/// UIs discover available skills (AC1). Each entry carries a `kind = "skill"`
-/// field so the listing is heterogeneous-runnable compatible.
-#[utoipa::path(
-    get,
-    path = "/api/skills",
-    tag = "Skills",
-    summary = "List installed skills",
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn list_skills(State(state): State<ServerState>) -> Json<serde_json::Value> {
-    let summaries: Vec<SkillSummary> = state
-        .skills
-        .list_all()
-        .iter()
-        .map(SkillSummary::from)
-        .collect();
-    Json(json!({ "skills": summaries }))
-}
-
-// ── Skill authoring + version history (desktop SKILL.md editor) ──────────────
+// ── Skill CRUD/version/activate handlers moved to `ryu_skills::api` ───────────
 //
-// The catalog installs read-only skills from skills.sh; these let a user create
-// and edit their own SKILL.md in the desktop Plate editor, with server-backed,
-// undoable version history (the same reusable `VersionHistory` UI that pages and
-// workflows use). Skills live in the shared `~/.claude/skills/<id>/SKILL.md`;
-// version snapshots live in Ryu's own `~/.ryu/skill-versions/` (see
-// `skills::store`).
-
-/// `GET /api/skills/:id/source` — the full editable SKILL.md for the editor.
-///
-/// Returns both the decomposed form fields (name/description/allowed_tools/
-/// always_on/body) and the raw `source` string (the diff baseline for version
-/// history).
-#[utoipa::path(
-    get,
-    path = "/api/skills/{id}/source",
-    tag = "Skills",
-    summary = "Read a skill's SKILL.md source",
-    params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn get_skill_source(
-    axum::extract::Path(id): axum::extract::Path<String>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match crate::skills::store::read_skill_source(&id) {
-        Ok(Some(source)) => {
-            let rec = crate::skills::parse_skill_md(&id, &source).ok();
-            let (name, description, allowed_tools, always_on, body) = match rec {
-                Some(r) => (
-                    r.name,
-                    r.description,
-                    r.allowed_tools,
-                    r.always_on,
-                    r.instructions,
-                ),
-                // Unparseable on-disk file: still let the editor open the raw body.
-                None => (id.clone(), None, Vec::new(), false, source.clone()),
-            };
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "id": id,
-                    "name": name,
-                    "description": description,
-                    "allowed_tools": allowed_tools,
-                    "always_on": always_on,
-                    "body": body,
-                    "source": source,
-                })),
-            )
-        }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "skill not found" })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
-/// Map a [`crate::skills::store::CreateError`] to an HTTP response.
-fn skill_write_error(e: crate::skills::store::CreateError) -> (StatusCode, Json<serde_json::Value>) {
-    use crate::skills::store::CreateError;
-    match e {
-        CreateError::Conflict(slug) => (
-            StatusCode::CONFLICT,
-            Json(json!({ "error": format!("a skill named '{slug}' already exists") })),
-        ),
-        CreateError::Invalid(m) => (StatusCode::BAD_REQUEST, Json(json!({ "error": m }))),
-        CreateError::Io(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": err.to_string() })),
-        ),
-    }
-}
-
-/// `POST /api/skills` — create a new user-authored skill from the editor.
-async fn create_skill_handler(
-    State(state): State<ServerState>,
-    Json(draft): Json<crate::skills::store::SkillDraft>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match crate::skills::store::create_skill(&draft) {
-        Ok(res) => {
-            // A skill the user authored is active by default (injects on the
-            // default route), matching the catalog-install paths.
-            crate::skills::set_active(&res.id, true);
-            state.skills.reload();
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "id": res.id,
-                    "path": res.path.to_string_lossy(),
-                    "source": res.source,
-                })),
-            )
-        }
-        Err(e) => skill_write_error(e),
-    }
-}
-
-/// `PUT /api/skills/:id` — update an existing skill's SKILL.md (autosaved from the
-/// editor). Front-matter keys the editor does not manage are preserved.
-#[utoipa::path(
-    put,
-    path = "/api/skills/{id}",
-    tag = "Skills",
-    summary = "Update a skill's source",
-    params(("id" = String, Path)),
-    request_body = serde_json::Value,
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn update_skill_handler(
-    State(state): State<ServerState>,
-    axum::extract::Path(id): axum::extract::Path<String>,
-    Json(draft): Json<crate::skills::store::SkillDraft>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match crate::skills::store::update_skill(&id, &draft) {
-        Ok(res) => {
-            state.skills.reload();
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "id": res.id,
-                    "path": res.path.to_string_lossy(),
-                    "source": res.source,
-                })),
-            )
-        }
-        Err(e) => skill_write_error(e),
-    }
-}
-
-/// `GET /api/skills/:id/versions` — list a skill's saved versions (newest first).
-#[utoipa::path(
-    get,
-    path = "/api/skills/{id}/versions",
-    tag = "Skills",
-    summary = "List a skill's version history",
-    params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn list_skill_versions_handler(
-    axum::extract::Path(id): axum::extract::Path<String>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match crate::skills::store::list_skill_versions(&id) {
-        Ok(versions) => (StatusCode::OK, Json(json!({ "versions": versions }))),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
-#[derive(serde::Deserialize, Default)]
-struct CreateSkillVersionBody {
-    label: Option<String>,
-}
-
-/// `POST /api/skills/:id/versions` — snapshot the skill's current SKILL.md.
-async fn create_skill_version_handler(
-    axum::extract::Path(id): axum::extract::Path<String>,
-    body: Option<Json<CreateSkillVersionBody>>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    let label = body
-        .and_then(|Json(b)| b.label)
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    match crate::skills::store::snapshot_skill(&id, label.as_deref()) {
-        Ok(Some(meta)) => (StatusCode::OK, Json(json!({ "version": meta }))),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "skill not found" })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
-/// `GET /api/skills/:id/versions/:version_id` — fetch one version in full
-/// (including its captured SKILL.md source, used for the diff view).
-#[utoipa::path(
-    get,
-    path = "/api/skills/{id}/versions/{version_id}",
-    tag = "Skills",
-    summary = "Get one version of a skill",
-    params(("id" = String, Path), ("version_id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn get_skill_version_handler(
-    axum::extract::Path((id, version_id)): axum::extract::Path<(String, String)>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match crate::skills::store::load_skill_version(&id, &version_id) {
-        Ok(Some(version)) => (StatusCode::OK, Json(json!({ "version": version }))),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "version not found" })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
-/// `POST /api/skills/:id/versions/:version_id/restore` — restore a version as the
-/// skill's current SKILL.md. The current definition is snapshotted first (as
-/// `"Before restore"`) so the restore is itself undoable.
-#[utoipa::path(
-    post,
-    path = "/api/skills/{id}/versions/{version_id}/restore",
-    tag = "Skills",
-    summary = "Restore a skill to an earlier version",
-    params(("id" = String, Path), ("version_id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn restore_skill_version_handler(
-    State(state): State<ServerState>,
-    axum::extract::Path((id, version_id)): axum::extract::Path<(String, String)>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match crate::skills::store::restore_skill_version(&id, &version_id) {
-        Ok(Some(source)) => {
-            state.skills.reload();
-            (
-                StatusCode::OK,
-                Json(json!({ "success": true, "source": source })),
-            )
-        }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "version not found" })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
+// The `/api/skills` list + `/api/skills/:id` source/update + version-history +
+// `/api/skills/activate` handlers now live in the extracted `ryu-skills` crate
+// (`ryu_skills::api`, merged in `skills_routes`). The `catalog`/`updates`/
+// `install-from-source` handlers stay Core-side (download-center + catalog_source
+// + buyer-token coupled) — see their definitions further below.
 
 // ── App lifecycle handlers (M3 / U033) ───────────────────────────────────────
 
@@ -8222,7 +8348,17 @@ async fn install_app_handler(
     };
 
     match crate::plugins::lifecycle::install_app(&state.app_store, &manifest).await {
-        Ok(record) => Json(json!({ "success": true, "app": record })).into_response(),
+        Ok(record) => {
+            // Live contributions refresh — same lossy `system:plugins` nudge as
+            // the enable handler, so a newly installed plugin's presence reaches
+            // subscribed shells immediately.
+            state.realtime.broadcast_event(
+                "system:plugins",
+                "plugin.contributions.changed",
+                json!({"type": "contributions_changed"}),
+            );
+            Json(json!({ "success": true, "app": record })).into_response()
+        }
         Err(e) => {
             let msg = e.to_string();
             // Conflict: already installed.
@@ -8331,6 +8467,22 @@ async fn enable_app_handler(
             )
                 .into_response();
         }
+        // A required capability could not be bound to a provider (none installed,
+        // ambiguous with no override, or version floor unmet). Nothing was enabled.
+        // 409 like a dependency conflict; the typed code lets the desktop offer the
+        // right fix (install a provider / choose one).
+        Err(EnableError::Binding { plugin, source }) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "success": false,
+                    "error": source.to_string(),
+                    "plugin": plugin,
+                    "binding_error": source.code(),
+                })),
+            )
+                .into_response();
+        }
         Err(EnableError::Other(e)) => {
             return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
         }
@@ -8369,6 +8521,21 @@ async fn enable_app_handler(
             enabled_dependencies.push(record.id.clone());
         }
     }
+
+    // Live contributions refresh: tell every desktop shell subscribed to the
+    // `system:plugins` room that the enabled-plugin set changed, so it can
+    // invalidate its cached `GET /api/plugins/contributions` read immediately
+    // instead of waiting out the poll window. Typed named-event contract
+    // (`ryu_realtime::RoomRegistry::broadcast_event`): no-op if the room is not
+    // live, lossy by design — fine for cache invalidation (remote/missed clients
+    // fall back to the poll). The payload carries a self-describing `type`
+    // because the wire envelope drops the event NAME before reaching clients
+    // (`frame_to_message` in `server/realtime_ws.rs`).
+    state.realtime.broadcast_event(
+        "system:plugins",
+        "plugin.contributions.changed",
+        json!({"type": "contributions_changed"}),
+    );
 
     let mut body = json!({
         "success": true,
@@ -8902,6 +9069,7 @@ async fn plugin_contributions(
     let mut settings_tabs = Vec::new();
     let mut slash_commands = Vec::new();
     let mut turn_hooks = Vec::new();
+    let mut views = Vec::new();
 
     // Surface filter (`targets`): a plugin that doesn't target the calling host
     // contributes nothing to it. Absent/unknown `x-ryu-surface` = no filter, and
@@ -8931,6 +9099,14 @@ async fn plugin_contributions(
         composer_controls.extend(c.composer_controls.iter().cloned().map(tag));
         settings_tabs.extend(c.settings_tabs.iter().cloned().map(tag));
         slash_commands.extend(c.slash_commands.iter().cloned().map(tag));
+        // Declarative views (the Raycast tier): serialize each typed contribution to
+        // a Value and tag it with its owning plugin, exactly like the sibling families.
+        views.extend(
+            c.views
+                .iter()
+                .filter_map(|v| serde_json::to_value(v).ok())
+                .map(tag),
+        );
         turn_hooks.extend(
             c.turn_hooks
                 .iter()
@@ -9001,6 +9177,7 @@ async fn plugin_contributions(
         "settings_tabs": settings_tabs,
         "slash_commands": slash_commands,
         "turn_hooks": turn_hooks,
+        "views": views,
         "channels": channels,
         "companions": companions,
     }))
@@ -9338,7 +9515,7 @@ async fn apply_policy(
             }
             "predict" => {
                 // System-wide predictive typing (the `/api/predict/*` brain used by
-                // the `apps/predict` overlay and any predict client) — a Core-local
+                // the `apps-store/predict` overlay and any predict client) — a Core-local
                 // feature, no gateway respawn. Enabling this plugin IS the on/off
                 // switch (there is no separate settings toggle); disabling makes
                 // `complete()` refuse every request, so the feature is fully inert.
@@ -9523,6 +9700,29 @@ async fn apply_sidecars(
                     spec.clone(),
                     state.downloads.clone(),
                 ));
+            // Per-app idle-stop timeout (scale-to-zero) declared on the spec, applied
+            // BEFORE start so the reaper knows the window as soon as the sidecar is up.
+            if let Some(secs) = spec.idle_stop_secs {
+                let name = crate::sidecar::manifest_sidecar::namespaced_name(
+                    &manifest.id,
+                    &spec.name,
+                );
+                manager.set_idle_override(&name, secs);
+            }
+            // Lazy sidecars are REGISTER-ONLY here (claim port + appear in status as
+            // stopped); the first proxy/broker hit wakes the process on demand. Eager
+            // sidecars start now, as before. The grant gate above still ran, so wake
+            // never re-runs the tier/grant check — no bypass.
+            if spec.lazy {
+                if let Err(e) = manager.register(sidecar) {
+                    tracing::warn!(
+                        "plugin '{}': lazy manifest sidecar '{}' failed to register: {e}",
+                        manifest.id,
+                        spec.name
+                    );
+                }
+                continue;
+            }
             let plugin_id = manifest.id.clone();
             let spec_name = spec.name.clone();
             tokio::spawn(async move {
@@ -9620,11 +9820,21 @@ async fn set_app_grants_handler(
     )
     .await
     {
-        Ok(record) => Json(json!({
-            "success": true,
-            "approved_grants": record.approved_grants,
-        }))
-        .into_response(),
+        Ok(record) => {
+            // Grants gate which contributions are live — nudge subscribed shells
+            // to refetch. Lossy no-op if the room has no members (see the enable
+            // handler's broadcast for the full rationale).
+            state.realtime.broadcast_event(
+                "system:plugins",
+                "plugin.contributions.changed",
+                json!({"type": "contributions_changed"}),
+            );
+            Json(json!({
+                "success": true,
+                "approved_grants": record.approved_grants,
+            }))
+            .into_response()
+        }
         Err(EnableError::GrantsDenied { plugin, denied }) => (
             StatusCode::FORBIDDEN,
             Json(json!({
@@ -9654,6 +9864,18 @@ async fn set_app_grants_handler(
                 "success": false,
                 "error": e.to_string(),
                 "dependency_error": e,
+            })),
+        )
+            .into_response(),
+        // Also unreachable here (a grants edit never resolves capability bindings)
+        // but handled explicitly, for the same fail-loud reason as the Dependency arm.
+        Err(EnableError::Binding { plugin, source }) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "success": false,
+                "error": source.to_string(),
+                "plugin": plugin,
+                "binding_error": source.code(),
             })),
         )
             .into_response(),
@@ -9706,6 +9928,14 @@ async fn disable_app_handler(
                 }
                 disabled_ids.push(record.id.clone());
             }
+            // Live contributions refresh — same lossy `system:plugins` nudge as
+            // the enable handler, so a disabled plugin's contributions disappear
+            // from subscribed shells immediately.
+            state.realtime.broadcast_event(
+                "system:plugins",
+                "plugin.contributions.changed",
+                json!({"type": "contributions_changed"}),
+            );
             let mut body = json!({
                 "success": true,
                 "app": outcome.target(),
@@ -9883,6 +10113,14 @@ async fn uninstall_app_handler(
                     "uninstall: skipping on-disk teardown for a plugin with an invalid id"
                 );
             }
+            // Live contributions refresh — same lossy `system:plugins` nudge as
+            // the enable/disable handlers, so an uninstalled plugin disappears
+            // from subscribed shells immediately.
+            state.realtime.broadcast_event(
+                "system:plugins",
+                "plugin.contributions.changed",
+                json!({"type": "contributions_changed"}),
+            );
             let disabled_ids: Vec<String> =
                 outcome.disabled.iter().map(|r| r.id.clone()).collect();
             let mut body = json!({
@@ -10159,6 +10397,14 @@ async fn update_app_handler(
     match update_app(&state.app_store, &manifest, ui_code.as_deref(), body.force).await {
         Ok(updated) => {
             reload_manifests_inner(&state).await;
+            // Live contributions refresh — same lossy `system:plugins` nudge as
+            // the enable/disable handlers, so an updated plugin's new contributions
+            // reach subscribed shells immediately.
+            state.realtime.broadcast_event(
+                "system:plugins",
+                "plugin.contributions.changed",
+                json!({"type": "contributions_changed"}),
+            );
             Json(json!({
                 "success": true,
                 "app": updated,
@@ -11167,188 +11413,6 @@ async fn set_pi_model_enabled(
     }
 }
 
-// ── Agent teams CRUD ──────────────────────────────────────────────────────────
-
-#[utoipa::path(
-    get,
-    path = "/api/teams",
-    tag = "Teams",
-    summary = "List agent teams",
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn list_teams(State(state): State<ServerState>) -> (StatusCode, Json<serde_json::Value>) {
-    match state.teams.list().await {
-        Ok(teams) => (StatusCode::OK, Json(json!({ "teams": teams }))),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/teams",
-    tag = "Teams",
-    summary = "Create a team",
-    request_body = serde_json::Value,
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn create_team(
-    State(state): State<ServerState>,
-    Json(input): Json<CreateTeam>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    if input.name.trim().is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "team name is required" })),
-        );
-    }
-    match state.teams.create(input).await {
-        Ok(team) => (StatusCode::CREATED, Json(json!({ "team": team }))),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/teams/{id}",
-    tag = "Teams",
-    summary = "Get a team by id",
-    params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn get_team(
-    State(state): State<ServerState>,
-    axum::extract::Path(id): axum::extract::Path<String>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match state.teams.get(&id).await {
-        Ok(Some(team)) => (StatusCode::OK, Json(json!({ "team": team }))),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("team '{id}' not found") })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
-#[utoipa::path(
-    patch,
-    path = "/api/teams/{id}",
-    tag = "Teams",
-    summary = "Update a team",
-    params(("id" = String, Path)),
-    request_body = serde_json::Value,
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn update_team(
-    State(state): State<ServerState>,
-    axum::extract::Path(id): axum::extract::Path<String>,
-    Json(patch): Json<UpdateTeam>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match state.teams.update(&id, patch).await {
-        Ok(Some(team)) => (StatusCode::OK, Json(json!({ "team": team }))),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("team '{id}' not found") })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
-#[utoipa::path(
-    delete,
-    path = "/api/teams/{id}",
-    tag = "Teams",
-    summary = "Delete a team",
-    params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn delete_team(
-    State(state): State<ServerState>,
-    axum::extract::Path(id): axum::extract::Path<String>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match state.teams.delete(&id).await {
-        Ok(true) => (StatusCode::OK, Json(json!({ "success": true }))),
-        Ok(false) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("team '{id}' not found") })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
-/// Body for `POST /api/teams/:id/members` — add one agent to the team. Used by
-/// the desktop's drag-an-agent-into-a-team gesture.
-#[derive(serde::Deserialize)]
-struct AddTeamMemberRequest {
-    agent_id: String,
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/teams/{id}/members",
-    tag = "Teams",
-    summary = "Add a member agent to a team",
-    params(("id" = String, Path)),
-    request_body = serde_json::Value,
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn add_team_member(
-    State(state): State<ServerState>,
-    axum::extract::Path(id): axum::extract::Path<String>,
-    Json(body): Json<AddTeamMemberRequest>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match state.teams.add_member(&id, &body.agent_id).await {
-        Ok(Some(team)) => (StatusCode::OK, Json(json!({ "team": team }))),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("team '{id}' not found") })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
-#[utoipa::path(
-    delete,
-    path = "/api/teams/{id}/members/{agent_id}",
-    tag = "Teams",
-    summary = "Remove a member from a team",
-    params(("id" = String, Path), ("agent_id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn remove_team_member(
-    State(state): State<ServerState>,
-    axum::extract::Path((id, agent_id)): axum::extract::Path<(String, String)>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match state.teams.remove_member(&id, &agent_id).await {
-        Ok(Some(team)) => (StatusCode::OK, Json(json!({ "team": team }))),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("team '{id}' not found") })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
-    }
-}
-
 /// The stable well-known id for the lean Ryu agent (Pi + Gateway). Using a
 /// constant rather than a hard-coded string literal ensures the id is consistent
 /// across create, find, and update paths in this module.
@@ -12337,10 +12401,10 @@ async fn resolve_fts_recall_enabled(state: &ServerState) -> bool {
 async fn apply_skills_disclosure(state: &ServerState) {
     if let Ok(Some(v)) = state
         .preferences
-        .get(crate::skills::SKILLS_DISCLOSURE_PREF)
+        .get(ryu_skills::SKILLS_DISCLOSURE_PREF)
         .await
     {
-        crate::skills::set_progressive_disclosure(crate::skills::disclosure_value_is_progressive(
+        ryu_skills::set_progressive_disclosure(ryu_skills::disclosure_value_is_progressive(
             &v,
         ));
     }
@@ -12716,160 +12780,6 @@ async fn btw_handler(
             format!("side-question model unavailable: {e}"),
         ),
     }
-}
-
-// ── Whiteboard AI generation (`/api/whiteboard/generate`) ─────────────────────
-//
-// One-shot, gateway-routed diagram generation for the Spaces whiteboard editor.
-// The model returns EITHER a Mermaid definition or an Excalidraw element
-// skeleton; the desktop converts whichever it gets into canvas elements
-// client-side (the Mermaid→Excalidraw and skeleton→element converters are
-// browser-only libraries). Core stays the governed model-call site (the moat) and
-// draws nothing itself. Stateless: persists nothing. Mirrors `/btw`'s
-// single-`call_side_model` shape.
-
-/// Resolve the model for whiteboard generation: pref `whiteboard-model` → env
-/// `RYU_WHITEBOARD_MODEL`/`RYU_DEFAULT_LLM_MODEL` → the built-in default. Nothing
-/// hardcoded — swappable like every other model slot.
-async fn resolve_whiteboard_model(state: &ServerState) -> String {
-    if let Ok(Some(pref)) = state.preferences.get("whiteboard-model").await {
-        let trimmed = pref.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_string();
-        }
-    }
-    for var in ["RYU_WHITEBOARD_MODEL", "RYU_DEFAULT_LLM_MODEL"] {
-        if let Ok(val) = std::env::var(var) {
-            if !val.is_empty() {
-                return val;
-            }
-        }
-    }
-    crate::registry::DEFAULT_LLM_MODEL.to_string()
-}
-
-/// `POST /api/whiteboard/generate` request body. `existing_count` is a hint about
-/// how full the board already is (used only to word the prompt).
-#[derive(serde::Deserialize)]
-struct WhiteboardGenBody {
-    prompt: String,
-    #[serde(default)]
-    existing_count: Option<u32>,
-}
-
-/// Strip a Markdown code fence (```json … ```) wrapping the model's reply, so a
-/// model that fences its JSON still parses. Returns the inner text, else the input.
-fn strip_code_fence(text: &str) -> &str {
-    let t = text.trim();
-    let Some(rest) = t.strip_prefix("```") else {
-        return t;
-    };
-    // Drop the optional language tag on the fence's first line, then the closer.
-    let rest = rest.splitn(2, '\n').nth(1).unwrap_or("");
-    rest.trim().strip_suffix("```").unwrap_or(rest).trim()
-}
-
-/// The Mermaid diagram keywords a bare (unwrapped) reply may start with — used to
-/// salvage a definition the model returned without the JSON envelope.
-const MERMAID_KEYWORDS: [&str; 10] = [
-    "graph",
-    "flowchart",
-    "sequencediagram",
-    "classdiagram",
-    "erdiagram",
-    "mindmap",
-    "gantt",
-    "statediagram",
-    "journey",
-    "gitgraph",
-];
-
-/// `POST /api/whiteboard/generate` — produce a diagram for the whiteboard editor.
-/// Returns `{ format: "mermaid"|"skeleton", mermaid?, skeleton?, model }`. The
-/// client converts the payload into Excalidraw elements.
-#[utoipa::path(
-    post,
-    path = "/api/whiteboard/generate",
-    tag = "Core",
-    summary = "Generate a whiteboard diagram from a prompt",
-    request_body = serde_json::Value,
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn whiteboard_generate_handler(
-    State(state): State<ServerState>,
-    Json(body): Json<WhiteboardGenBody>,
-) -> axum::response::Response {
-    let prompt = body.prompt.trim();
-    if prompt.is_empty() {
-        return json_error(StatusCode::BAD_REQUEST, "a prompt is required".to_string());
-    }
-
-    let model = resolve_whiteboard_model(&state).await;
-    let effort = resolve_side_effort(&state, "whiteboard-effort", "RYU_WHITEBOARD_EFFORT").await;
-
-    let system = "You turn a user's request into a diagram for an Excalidraw whiteboard. \
-        Reply with ONLY a single JSON object and nothing else — no prose, no code fences. \
-        Choose ONE of two shapes: \
-        (1) For flowcharts, sequence/ER/class diagrams, mind maps, org charts, or any \
-        connected-node diagram, return {\"format\":\"mermaid\",\"mermaid\":\"<a valid Mermaid definition>\"}. \
-        (2) For freeform layouts (loose boxes, labels, arrows placed by position), return \
-        {\"format\":\"skeleton\",\"skeleton\":[ ... ]} where each item is an Excalidraw element \
-        skeleton, e.g. {\"type\":\"rectangle\",\"x\":100,\"y\":100,\"width\":180,\"height\":70,\"id\":\"a\",\"label\":{\"text\":\"Box\"}} \
-        and arrows {\"type\":\"arrow\",\"x\":0,\"y\":0,\"start\":{\"id\":\"a\"},\"end\":{\"id\":\"b\"}}. \
-        Prefer Mermaid for anything diagram-shaped. Keep it focused and readable.";
-    let user = format!(
-        "Request: {prompt}\n\nThe board currently has {} element(s). Generate the requested diagram.",
-        body.existing_count.unwrap_or(0)
-    );
-
-    let text = match call_side_model(&state, &model, &effort, system, user.as_str()).await {
-        Ok(t) => t,
-        Err(e) => {
-            return json_error(
-                StatusCode::BAD_GATEWAY,
-                format!("whiteboard model unavailable: {e}"),
-            );
-        }
-    };
-
-    let cleaned = strip_code_fence(&text);
-    let parsed: serde_json::Value = match serde_json::from_str(cleaned) {
-        Ok(v) => v,
-        Err(_) => {
-            // Salvage a bare Mermaid definition returned without the JSON envelope.
-            let lc = cleaned.trim_start().to_ascii_lowercase();
-            if MERMAID_KEYWORDS.iter().any(|k| lc.starts_with(k)) {
-                return Json(json!({ "format": "mermaid", "mermaid": cleaned, "model": model }))
-                    .into_response();
-            }
-            return json_error(
-                StatusCode::BAD_GATEWAY,
-                "the model did not return a usable diagram".to_string(),
-            );
-        }
-    };
-
-    let format = parsed.get("format").and_then(|f| f.as_str()).unwrap_or("");
-    let has_mermaid = parsed.get("mermaid").and_then(|m| m.as_str()).is_some();
-    let has_skeleton = parsed
-        .get("skeleton")
-        .map(serde_json::Value::is_array)
-        .unwrap_or(false);
-    let resolved_format = if format == "mermaid" || (format.is_empty() && has_mermaid) {
-        "mermaid"
-    } else if format == "skeleton" || (format.is_empty() && has_skeleton) {
-        "skeleton"
-    } else {
-        format
-    };
-
-    Json(json!({
-        "format": resolved_format,
-        "mermaid": parsed.get("mermaid"),
-        "skeleton": parsed.get("skeleton"),
-        "model": model,
-    }))
-    .into_response()
 }
 
 /// `GET /api/conversations/:id/btw` — list persisted `/btw` side chats for a
@@ -14484,6 +14394,15 @@ struct CallToolBody {
     /// owner) and scopes per-user audit. Absent → env/`"default"` fallback.
     #[serde(default)]
     user_id: Option<String>,
+    /// The **server-derived** host conversation this tool call runs on behalf of,
+    /// forwarded by the Gateway exec plane (`POST /v1/exec/tool`). Lowered to a
+    /// [`crate::sidecar::mcp::ToolPrincipal`] so a gateway-exec'd tool resolves
+    /// `Owned` on an org-bound node instead of the fail-closed `Unresolved`.
+    /// Distinct from `user_id`, which is client-supplied and MUST NEVER be an
+    /// authorization principal. Absent ⇒ fail-closed default (unbound nodes are
+    /// unaffected: they resolve `Unrestricted` regardless).
+    #[serde(default)]
+    host_conversation_id: Option<String>,
 }
 
 /// `POST /api/mcp/tools/call` — invoke a registered MCP tool. This is the path
@@ -14548,15 +14467,15 @@ async fn call_mcp_tool(
             body.user_id.as_deref(),
             &identity_profile_ids,
             None,
-            // No SERVER-DERIVED host conversation reaches this callback (the
-            // openai-compat tool loop dispatches through the Gateway's
-            // `POST /v1/exec/tool`, which does not yet forward it — that is an
-            // apps/gateway change). So on an ORG-BOUND node the conversation-reading
-            // tools resolve to `ToolPrincipal::Unresolved` and refuse. That is a
-            // deliberate, honest fail-closed: openai-compat agents lose `threads__*`
-            // / `search_conversations__*` on bound nodes until the Gateway forwards
-            // the conversation id. Unbound (personal) nodes are unaffected.
-            None,
+            // The SERVER-DERIVED host conversation the openai-compat tool loop runs
+            // on behalf of, forwarded by the Gateway exec plane (`POST /v1/exec/tool`
+            // → `host_conversation_id`). It is lowered to a `ToolPrincipal` at
+            // dispatch: present + org-bound ⇒ `Owned` (the conversation-reading tools
+            // `threads__*` / `search_conversations__*` resolve the owner instead of
+            // refusing); absent ⇒ fail-closed `Unresolved` on a bound node (e.g. a
+            // direct/legacy caller). Unbound (personal) nodes resolve `Unrestricted`
+            // regardless. This is NEVER `user_id` (client-supplied, spoofable).
+            body.host_conversation_id.as_deref(),
         )
         .await
     {
@@ -14572,9 +14491,10 @@ async fn call_mcp_tool(
 // ── Unified tool catalog: search + describe (#474) ───────────────────────────
 
 /// `GET /api/tools/search?q=&kind=&limit=&agent=` — search the unified tool
-/// catalog (MCP + built-ins + Composio + plugin tools). `kind` ∈
-/// `mcp|builtin|composio|app|any` (default `any`). `agent` narrows results to
-/// the agent's allowlist. Returns `{ "object":"list", "data":[ToolDescriptor] }`.
+/// catalog (MCP + built-ins + Composio + plugin tools + Core self-API). `kind` ∈
+/// `mcp|builtin|composio|app|core-api|any` (default `any`). `agent` narrows
+/// results to the agent's allowlist. Returns
+/// `{ "object":"list", "data":[ToolDescriptor] }`.
 #[utoipa::path(
     get,
     path = "/api/tools/search",
@@ -14582,7 +14502,7 @@ async fn call_mcp_tool(
     summary = "Search the unified tool catalog",
     params(
         ("q" = Option<String>, Query, description = "Natural-language capability query"),
-        ("kind" = Option<String>, Query, description = "mcp|builtin|composio|app|any"),
+        ("kind" = Option<String>, Query, description = "mcp|builtin|composio|app|core-api|any"),
         ("limit" = Option<usize>, Query, description = "Max results (default 8)"),
         ("agent" = Option<String>, Query, description = "Narrow to this agent's allowlist"),
     ),
@@ -14733,9 +14653,10 @@ async fn tools_exec(
         .flatten()
         .map(|rec| rec.identity_profile_ids)
         .unwrap_or_default();
+    let caller: std::sync::Arc<dyn crate::tool_exec::ToolCaller> = state.mcp.clone();
     let invoker = std::sync::Arc::new(
         crate::tool_exec::SandboxToolInvoker::registry_with_identity(
-            state.mcp.clone(),
+            caller,
             agent_id.clone(),
             allowlist,
             body.conversation_id,
@@ -14837,7 +14758,7 @@ async fn mesh_status(State(state): State<ServerState>) -> Json<serde_json::Value
 )]
 async fn mesh_peers(State(state): State<ServerState>) -> Json<serde_json::Value> {
     let status = state.mesh.status().await;
-    let resp = crate::mesh::build_peers_response(&status, state.node_token.as_deref());
+    let resp = ryu_mesh::build_peers_response(&status, state.node_token.as_deref());
     Json(serde_json::to_value(resp).unwrap_or_default())
 }
 
@@ -15117,7 +15038,7 @@ async fn create_space(
         .create_space(
             body.name.trim(),
             body.description.as_deref(),
-            &caller_tenancy(&caller),
+            &spaces::owner_of(&caller_tenancy(&caller)),
         )
         .await
     {
@@ -15244,7 +15165,12 @@ async fn ingest_document(
     }
     match state
         .spaces
-        .ingest_document(&id, body.title.trim(), &body.content, &caller_tenancy(&caller))
+        .ingest_document(
+            &id,
+            body.title.trim(),
+            &body.content,
+            &spaces::owner_of(&caller_tenancy(&caller)),
+        )
         .await
     {
         Ok(document_id) => Json(json!({ "document_id": document_id })).into_response(),
@@ -15359,7 +15285,7 @@ async fn create_page(
     } else {
         body.title.trim()
     };
-    let tenancy = caller_tenancy(&caller);
+    let tenancy = spaces::owner_of(&caller_tenancy(&caller));
     let result = match body.parent_id.as_deref() {
         Some(parent) => state.spaces.create_child_page(&id, title, parent, &tenancy).await,
         None => state.spaces.create_page(&id, title, &tenancy).await,
@@ -15402,7 +15328,7 @@ async fn create_database(
     };
     match state
         .spaces
-        .create_database(&id, title, &caller_tenancy(&caller))
+        .create_database(&id, title, &spaces::owner_of(&caller_tenancy(&caller)))
         .await
     {
         Ok(document_id) => Json(json!({ "id": document_id })).into_response(),
@@ -15442,7 +15368,7 @@ async fn create_whiteboard(
     };
     match state
         .spaces
-        .create_whiteboard(&id, title, &caller_tenancy(&caller))
+        .create_whiteboard(&id, title, &spaces::owner_of(&caller_tenancy(&caller)))
         .await
     {
         Ok(document_id) => Json(json!({ "id": document_id })).into_response(),
@@ -15529,7 +15455,7 @@ async fn create_file(
     }
     match state
         .spaces
-        .create_file(&id, title, &bytes, mime, &caller_tenancy(&caller))
+        .create_file(&id, title, &bytes, mime, &spaces::owner_of(&caller_tenancy(&caller)))
         .await
     {
         Ok(document_id) => Json(json!({
@@ -15577,7 +15503,7 @@ async fn get_file_blob(
     // Per-resource ACL: a file document's BYTES are its content — gate on the row,
     // not just on the coarse `space.read` permission.
     if let Err(resp) = require_resource_read(
-        state.spaces.get_access_meta(&doc_id).await,
+        spaces::doc_access_meta(&state.spaces, &doc_id).await,
         caller.as_ref(),
         "file not found",
     ) {
@@ -15700,7 +15626,7 @@ async fn get_document(
     // all; this says they may read THIS one. Without it, any org member holding
     // `space.read` could read another member's PRIVATE document.
     if let Err(resp) = require_resource_read(
-        state.spaces.get_access_meta(&doc_id).await,
+        spaces::doc_access_meta(&state.spaces, &doc_id).await,
         caller.as_ref(),
         "document not found",
     ) {
@@ -15747,7 +15673,7 @@ async fn update_document(
     // Per-resource ACL: a write needs `Access::Write` on THIS document, so an org
     // Viewer (read-only) and a non-owner on a private doc are both refused.
     if let Err(resp) = require_resource_write(
-        state.spaces.get_access_meta(&doc_id).await,
+        spaces::doc_access_meta(&state.spaces, &doc_id).await,
         caller.as_ref(),
         "document not found",
     ) {
@@ -15796,7 +15722,7 @@ async fn delete_document(
     }
     // Per-resource ACL: deleting is a write on THIS document.
     if let Err(resp) = require_resource_write(
-        state.spaces.get_access_meta(&doc_id).await,
+        spaces::doc_access_meta(&state.spaces, &doc_id).await,
         caller.as_ref(),
         "document not found",
     ) {
@@ -15826,7 +15752,7 @@ async fn list_document_versions(
     // A version list is document content (titles + timestamps of past states), so
     // it is gated exactly like reading the document.
     if let Err(resp) = require_resource_read(
-        state.spaces.get_access_meta(&doc_id).await,
+        spaces::doc_access_meta(&state.spaces, &doc_id).await,
         caller.as_ref(),
         "document not found",
     ) {
@@ -15863,7 +15789,7 @@ async fn create_document_version(
 ) -> axum::response::Response {
     // Snapshotting appends a row to the document's history — a write.
     if let Err(resp) = require_resource_write(
-        state.spaces.get_access_meta(&doc_id).await,
+        spaces::doc_access_meta(&state.spaces, &doc_id).await,
         caller.as_ref(),
         "document not found",
     ) {
@@ -15913,7 +15839,7 @@ async fn get_document_version(
     // A version carries the document's FULL source at snapshot time, so it is
     // gated exactly like reading the document.
     if let Err(resp) = require_resource_read(
-        state.spaces.get_access_meta(&doc_id).await,
+        spaces::doc_access_meta(&state.spaces, &doc_id).await,
         caller.as_ref(),
         "document not found",
     ) {
@@ -15954,7 +15880,7 @@ async fn restore_document_version(
 ) -> axum::response::Response {
     // Restoring overwrites the document's current content — a write.
     if let Err(resp) = require_resource_write(
-        state.spaces.get_access_meta(&doc_id).await,
+        spaces::doc_access_meta(&state.spaces, &doc_id).await,
         caller.as_ref(),
         "document not found",
     ) {
@@ -16011,7 +15937,7 @@ async fn get_document_backlinks(
     // Backlinks carry titles + context snippets of the linking documents, so this
     // is document content — gated like a read of the document itself.
     if let Err(resp) = require_resource_read(
-        state.spaces.get_access_meta(&doc_id).await,
+        spaces::doc_access_meta(&state.spaces, &doc_id).await,
         caller.as_ref(),
         "document not found",
     ) {
@@ -16041,7 +15967,7 @@ async fn get_document_links(
     // Outgoing links are extracted from the document's body — reading them is
     // reading (part of) the document.
     if let Err(resp) = require_resource_read(
-        state.spaces.get_access_meta(&doc_id).await,
+        spaces::doc_access_meta(&state.spaces, &doc_id).await,
         caller.as_ref(),
         "document not found",
     ) {
@@ -16142,7 +16068,10 @@ async fn set_embedding_model(
     {
         return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
     }
-    state.spaces.set_embedder(pref.into_embedder()).await;
+    state
+        .spaces
+        .set_embedder(spaces::embedder_for_pref(&pref))
+        .await;
     let store = state.spaces.clone();
     tokio::spawn(async move {
         let _ = store.reindex_all().await;
@@ -18559,38 +18488,8 @@ async fn skills_install_from_source(
     }
 }
 
-#[derive(serde::Deserialize)]
-struct SkillActivateBody {
-    /// Skill id (the directory name / slug).
-    id: String,
-    /// `true` to inject this skill on the default chat route, `false` to stop.
-    active: bool,
-}
-
-/// `POST /api/skills/activate { id, active }` — toggle whether a skill's
-/// instructions inject on the openai_compat default route. Installed-but-inactive
-/// is the default for skills discovered in the shared dir (so dozens of them don't
-/// flood a local model's context); this lets the user opt one in or out. Reloads
-/// the registry so the change takes effect immediately.
-#[utoipa::path(
-    post,
-    path = "/api/skills/activate",
-    tag = "Skills",
-    summary = "Toggle a skill active (injection gate)",
-    request_body = serde_json::Value,
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-async fn skills_activate(
-    State(state): State<ServerState>,
-    Json(body): Json<SkillActivateBody>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    crate::skills::set_active(&body.id, body.active);
-    state.skills.reload();
-    (
-        StatusCode::OK,
-        Json(json!({ "success": true, "id": body.id, "active": body.active })),
-    )
-}
+// `POST /api/skills/activate` moved to `ryu_skills::api::skills_activate` (merged in
+// `skills_routes`); its request body + handler + `#[utoipa::path]` live in the crate.
 
 #[utoipa::path(
     post,
@@ -18974,7 +18873,46 @@ async fn sidecar_status(State(state): State<ServerState>) -> Json<serde_json::Va
     // Serialize `SidecarStatus` directly so the per-engine resource fields
     // (pid/memory_bytes/cpu_percent) ride along; absent fields are skipped by
     // serde, so adopt-mode/serverless engines stay `{name, running}`.
-    Json(json!({ "sidecars": state.manager.statuses() }))
+    //
+    // ADDITIVE fields (existing readers ignore unknown keys):
+    // - `native_permissions`: the C1 seam — each native (unsandboxed) manifest
+    //   sidecar's DECLARED permission set plus `enforced:false`, so a reader can
+    //   see the recorded-but-not-OS-enforced posture that only the Deno-PTC /
+    //   wasmtime / Docker lanes actually enforce.
+    // - `node_runtime`: which JS runtime a `SidecarProcess::Node` backend would
+    //   resolve on PATH (`"bun"` preferred, else `"node"`, else `null`), so a
+    //   status reader knows whether node-backed plugins can spawn at all.
+    Json(json!({
+        "sidecars": state.manager.statuses(),
+        "native_permissions": state.manager.native_sidecar_permissions(),
+        "node_runtime": resolved_node_runtime_kind(),
+    }))
+}
+
+/// The JavaScript runtime a node-backend sidecar would use, resolved off `PATH`
+/// exactly as `manifest_sidecar::resolve_node_runtime(None)` does (prefer `bun`,
+/// then `node`). Returns `None` when neither is installed. Duplicated here (a bare
+/// two-entry PATH probe) rather than reaching into `manifest_sidecar` so this stays
+/// inside the status-handler change set. Purely informational — the spawn path
+/// does its own authoritative resolution.
+fn resolved_node_runtime_kind() -> Option<&'static str> {
+    let Some(path) = std::env::var_os("PATH") else {
+        return None;
+    };
+    for candidate in ["bun", "node"] {
+        for dir in std::env::split_paths(&path) {
+            if dir.join(candidate).is_file() {
+                return Some(candidate);
+            }
+            #[cfg(windows)]
+            for ext in ["exe", "cmd", "bat"] {
+                if dir.join(format!("{candidate}.{ext}")).is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Max redacted trace spans included in a support diagnostic bundle. Bounds the
@@ -19045,7 +18983,7 @@ async fn support_access_diagnostics(
     // over the tailnet plus this enabled-gate is the enforceable proxy for
     // "mesh-only" (peer-IP verification is out of scope under the single-tenant
     // / connections posture; noted as a follow-up).
-    if !crate::mesh::is_enabled() {
+    if !ryu_mesh::is_enabled() {
         let _ = state
             .support_audit
             .append(&actor, "access_refused", Some("mesh disabled"))
@@ -19808,6 +19746,11 @@ struct GatewayConfigPatch {
 }
 
 /// Subset of the gateway's `FirewallConfig` exposed for Core writes.
+///
+/// Scalar fields are declared first and the array-of-tables (`custom_patterns`)
+/// last so the serialized `[firewall]` table always emits values before tables —
+/// avoiding the toml crate's `ValueAfterTable` error when the merged config is
+/// re-serialized (`write_gateway_toml`).
 #[derive(serde::Deserialize, serde::Serialize)]
 struct GatewayFirewallPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -19821,6 +19764,34 @@ struct GatewayFirewallPatch {
     policy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     log_detections: Option<bool>,
+    /// Redact PII patterns when `policy = sanitize` (DLP card). Dropped before
+    /// this was added, so the desktop DLP toggles never persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    redact_pii: Option<bool>,
+    /// Redact secret patterns (API keys, tokens, PEM keys) when
+    /// `policy = sanitize` (DLP card).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    redact_secrets: Option<bool>,
+    /// User-defined firewall patterns authored in the desktop custom-pattern
+    /// editor (node scope). `None` leaves the persisted set untouched; `Some([])`
+    /// clears it (full replacement, matching the editor's read-modify-write). The
+    /// gateway reads these from `[firewall].custom_patterns` and merges them onto
+    /// the curated built-in sets when the scanner is (re)built. Declared last so
+    /// this array-of-tables serializes after every scalar (see the type doc).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    custom_patterns: Option<Vec<GatewayCustomPatternPatch>>,
+}
+
+/// A single user-defined firewall pattern accepted by Core's config write.
+/// Mirrors `apps/gateway/src/config.rs::CustomPattern`. `kind` is passed through
+/// verbatim as a snake_case string ("pii" | "secret" | "prompt_injection" | …);
+/// an empty `kind` is omitted so the gateway applies its own default (`pii`).
+#[derive(serde::Deserialize, serde::Serialize)]
+struct GatewayCustomPatternPatch {
+    name: String,
+    regex: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    kind: String,
 }
 
 /// Subset of the gateway's `RoutingConfig` exposed for Core writes.
@@ -20012,6 +19983,89 @@ fn write_gateway_toml(patch: &GatewayConfigPatch) -> anyhow::Result<toml::Value>
     std::fs::rename(&tmp_path, &path)?;
 
     Ok(root)
+}
+
+#[cfg(test)]
+mod gateway_config_write_tests {
+    use super::*;
+
+    /// A firewall write must persist desktop-authored `custom_patterns` +
+    /// `redact_pii`, preserve a pre-existing nested `[firewall.inspector]` table
+    /// (the shape the gateway itself writes) without tripping toml's
+    /// `ValueAfterTable`, and treat an empty array as a full clear. Single test
+    /// so the process-global `GATEWAY_CONFIG` env var is never mutated
+    /// concurrently by a sibling test.
+    #[test]
+    fn firewall_custom_patterns_round_trip_through_config_write() {
+        let dir = std::env::temp_dir().join(format!(
+            "ryu-gw-cfg-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg_path = dir.join("gateway.toml");
+
+        // Seed an existing config whose [firewall] mixes scalars with a nested
+        // table — the case that trips toml if a scalar is appended after a table.
+        std::fs::write(
+            &cfg_path,
+            "[firewall]\nenabled = true\npolicy = \"warn_and_continue\"\n\n[firewall.inspector]\nenabled = false\n",
+        )
+        .unwrap();
+        std::env::set_var("GATEWAY_CONFIG", &cfg_path);
+
+        // Phase 1: add custom patterns + flip redact_pii.
+        let patch: GatewayConfigPatch = serde_json::from_value(serde_json::json!({
+            "firewall": {
+                "enabled": true,
+                "policy": "sanitize",
+                "redact_pii": false,
+                "custom_patterns": [
+                    { "name": "internal_id", "regex": "ID-\\d+", "kind": "pii" }
+                ]
+            }
+        }))
+        .unwrap();
+        let res = write_gateway_toml(&patch);
+        assert!(res.is_ok(), "phase-1 write failed: {:?}", res.err());
+
+        let parsed: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        let fw = parsed.get("firewall").and_then(|v| v.as_table()).unwrap();
+        assert_eq!(fw.get("redact_pii").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(fw.get("policy").and_then(|v| v.as_str()), Some("sanitize"));
+        // Pre-existing inspector table survived the merge + re-serialize.
+        assert!(fw.get("inspector").and_then(|v| v.as_table()).is_some());
+        let pats = fw.get("custom_patterns").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(pats.len(), 1);
+        let p0 = pats[0].as_table().unwrap();
+        assert_eq!(p0.get("name").and_then(|v| v.as_str()), Some("internal_id"));
+        assert_eq!(p0.get("kind").and_then(|v| v.as_str()), Some("pii"));
+
+        // Phase 2: an empty array clears the persisted set (None would keep it,
+        // Some([]) replaces — matches the editor's read-modify-write semantics).
+        let clear: GatewayConfigPatch = serde_json::from_value(serde_json::json!({
+            "firewall": { "enabled": true, "custom_patterns": [] }
+        }))
+        .unwrap();
+        let res2 = write_gateway_toml(&clear);
+        assert!(res2.is_ok(), "phase-2 write failed: {:?}", res2.err());
+        let parsed2: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+        let cleared = parsed2
+            .get("firewall")
+            .and_then(|v| v.as_table())
+            .and_then(|t| t.get("custom_patterns"))
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert!(cleared.is_empty(), "empty array should clear the set");
+
+        std::env::remove_var("GATEWAY_CONFIG");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// Write `data` to `path` with owner-only permissions (0o600 on Unix).
@@ -20654,16 +20708,16 @@ async fn gateway_run_evals(
     // NEVER forward them to the gateway (which would reject/ignore them). Also
     // snapshot the request dataset so each case's payload can be enriched with
     // `expected` + `vars` (the gateway's response case carries neither).
-    let code_specs: Vec<crate::eval_code::CodeEvaluatorSpec> = body
+    let code_specs: Vec<ryu_eval_code::CodeEvaluatorSpec> = body
         .get("code_evaluators")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
-    let case_inputs: Vec<crate::eval_code::CaseInput> = body
+    let case_inputs: Vec<ryu_eval_code::CaseInput> = body
         .get("dataset")
         .and_then(serde_json::Value::as_array)
         .map(|arr| {
             arr.iter()
-                .map(crate::eval_code::CaseInput::from_case)
+                .map(ryu_eval_code::CaseInput::from_case)
                 .collect()
         })
         .unwrap_or_default();
@@ -20716,7 +20770,7 @@ async fn gateway_run_evals(
                 && !code_specs.is_empty()
                 && response_body.get("cases").is_some()
             {
-                crate::eval_code::merge_code_evaluators(
+                ryu_eval_code::merge_code_evaluators(
                     &mut response_body,
                     &case_inputs,
                     &code_specs,

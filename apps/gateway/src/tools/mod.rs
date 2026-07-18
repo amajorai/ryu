@@ -220,7 +220,11 @@ pub async fn run_tool_loop(
                     billable_tool_calls = billable_tool_calls.saturating_add(1);
                 }
                 match catalog
-                    .call_tool(name, input, ctx.agent_id.as_deref(), ctx.user_id.as_deref())
+                    // The chat-completion tool loop carries no server-derived host
+                    // conversation (ctx has only agent_id/user_id), so the principal
+                    // stays fail-closed on a bound node — unchanged. The exec plane
+                    // (`/v1/exec/tool`) is where the host conversation is threaded.
+                    .call_tool(name, input, ctx.agent_id.as_deref(), ctx.user_id.as_deref(), None)
                     .await
                 {
                     Ok(out) => {
@@ -449,8 +453,13 @@ mod tests {
             &'a self,
             _model: &'a str,
             body: &'a Value,
-        ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, GatewayError>> + Send + 'a>>
-        {
+        ) -> Pin<
+            Box<
+                dyn std::future::Future<Output = Result<Value, ryu_gw_providers::ProviderError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
             let idx = self.calls.fetch_add(1, Ordering::SeqCst);
             self.seen_bodies.lock().unwrap().push(body.clone());
             let resp = self
@@ -467,12 +476,15 @@ mod tests {
             _body: &'a Value,
         ) -> Pin<
             Box<
-                dyn std::future::Future<Output = Result<axum::body::Body, GatewayError>>
-                    + Send
+                dyn std::future::Future<
+                        Output = Result<axum::body::Body, ryu_gw_providers::ProviderError>,
+                    > + Send
                     + 'a,
             >,
         > {
-            Box::pin(async move { Err(GatewayError::ProviderError("no stream".into())) })
+            Box::pin(async move {
+                Err(ryu_gw_providers::ProviderError::Provider("no stream".into()))
+            })
         }
     }
 
@@ -508,6 +520,7 @@ mod tests {
             _arguments: Value,
             _agent_id: Option<&str>,
             _user_id: Option<&str>,
+            _host_conversation_id: Option<&str>,
         ) -> Result<Value, String> {
             self.executed.lock().unwrap().push(tool_id.to_string());
             Ok(json!({ "ran": tool_id }))

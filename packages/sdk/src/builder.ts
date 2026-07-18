@@ -12,6 +12,7 @@
 
 import type {
 	AppDependency,
+	CapabilityReq,
 	CompanionSurface,
 	PluginManifest,
 	RunnableMeta,
@@ -151,6 +152,7 @@ export class PluginBuilder {
 	private readonly _grants: string[] = [];
 	private _companion: CompanionSurface | undefined = undefined;
 	private readonly _dependencies: AppDependency[] = [];
+	private readonly _requiredCapabilities: CapabilityReq[] = [];
 	private readonly _requiredGrants: string[] = [];
 	private readonly _targets: Surface[] = [];
 
@@ -217,6 +219,20 @@ export class PluginBuilder {
 	}
 
 	/**
+	 * Declare an abstract **capability** edge (`requires.capabilities`) the broker
+	 * resolves to a bound provider at enable time — e.g. `requiresCapability("rag")`.
+	 * Distinct from a specific-plugin dependency: a capability edge lets the
+	 * binding registry choose the provider. `minVersion` is a MINIMUM (`"1.2.0"`
+	 * = `">=1.2.0"`).
+	 */
+	requiresCapability(capability: string, minVersion?: string): this {
+		this._requiredCapabilities.push(
+			minVersion ? { capability, min_version: minVersion } : { capability }
+		);
+		return this;
+	}
+
+	/**
 	 * Restrict this plugin to a host surface (`"desktop"`, `"island"`, …).
 	 * Declaring NO target is the default and means **every** surface.
 	 */
@@ -234,7 +250,9 @@ export class PluginBuilder {
 		// with no dependencies serialises with no `requires` key — matching Core's
 		// `Option<Requires>` + `skip_serializing_if`.
 		const hasRequires =
-			this._dependencies.length > 0 || this._requiredGrants.length > 0;
+			this._dependencies.length > 0 ||
+			this._requiredCapabilities.length > 0 ||
+			this._requiredGrants.length > 0;
 
 		const raw = {
 			id: this._id,
@@ -248,6 +266,7 @@ export class PluginBuilder {
 				? {
 						requires: {
 							apps: this._dependencies,
+							capabilities: this._requiredCapabilities,
 							grants: this._requiredGrants,
 						},
 					}
@@ -304,6 +323,7 @@ export class AppBuilder {
 	private readonly _activationEvents: string[] = [];
 	private readonly _tools: AppToolSpec[] = [];
 	private readonly _dependencies: AppDependency[] = [];
+	private readonly _requiredCapabilities: CapabilityReq[] = [];
 	private readonly _requiredGrants: string[] = [];
 	private readonly _targets: Surface[] = [];
 
@@ -390,6 +410,20 @@ export class AppBuilder {
 		return this;
 	}
 
+	/**
+	 * Declare an abstract **capability** edge (`requires.capabilities`) the broker
+	 * resolves to a bound provider at enable time — e.g. `requiresCapability("rag")`.
+	 * Distinct from a specific-plugin dependency: a capability edge lets the
+	 * binding registry choose the provider. `minVersion` is a MINIMUM (`"1.2.0"`
+	 * = `">=1.2.0"`).
+	 */
+	requiresCapability(capability: string, minVersion?: string): this {
+		this._requiredCapabilities.push(
+			minVersion ? { capability, min_version: minVersion } : { capability }
+		);
+		return this;
+	}
+
 	/** Restrict this app to a host surface. No target = every surface. */
 	target(surface: Surface): this {
 		this._targets.push(surface);
@@ -402,7 +436,9 @@ export class AppBuilder {
 	 */
 	build(): PluginManifest {
 		const hasRequires =
-			this._dependencies.length > 0 || this._requiredGrants.length > 0;
+			this._dependencies.length > 0 ||
+			this._requiredCapabilities.length > 0 ||
+			this._requiredGrants.length > 0;
 
 		const options: DefineAppOptions = {
 			id: this._id,
@@ -422,6 +458,7 @@ export class AppBuilder {
 				? {
 						requires: {
 							apps: this._dependencies,
+							capabilities: this._requiredCapabilities,
 							grants: this._requiredGrants,
 						},
 					}

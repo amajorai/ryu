@@ -15,6 +15,36 @@ This guide uses the **headroom** context-compression engine
 ships a real MCP server, so you register an *existing* server rather than writing one. To build
 your own server instead, jump to [Build your own](#build-your-own).
 
+## How MCP servers connect to Ryu
+
+```mermaid
+flowchart LR
+  subgraph "Your MCP Server"
+    A[stdio JSON-RPC] --> B[tools/list]
+    A --> C[tools/call]
+  end
+
+  subgraph "Core MCP Registry"
+    D[POST /api/mcp/servers] --> E[~/.ryu/mcp.json]
+    E --> F[MCP Bridge]
+  end
+
+  subgraph "Chat Path"
+    G[Agent session] --> H[Tool search]
+    H --> F
+    F --> C
+    C --> F
+    F --> I[Result back to agent]
+  end
+
+  D -.->|register| E
+  F -.->|dispatch| A
+```
+
+When an agent emits a tool call for a registered MCP tool, Core's MCP bridge dispatches it through
+the registry, routes it to the server process over stdio, and feeds the result back into the chat
+loop.
+
 ## Step 1 - Install the engine (serena-free)
 
 Headroom's MCP **serve** path needs only the `[mcp]` extra. serena is **not** a dependency of

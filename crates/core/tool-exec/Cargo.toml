@@ -1,0 +1,32 @@
+[package]
+name = "ryu-tool-exec"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "The programmatic-tool-calling (PTC) code-execution sandbox primitive for Ryu (#476): the Deno-subprocess backend (deny-by-default permissions, real process isolation, killable), the gated secure-exec V8-isolate backend, the bounded parked-execution store for Composio connect/resume, the `CodeExecutor` swappable-backend enum, the `SandboxToolInvoker`/`SandboxBridge` sandbox-to-host bridge, and the Contract-4 tool/eval schema defs. An extracted Core capability crate: in-process by default, consumed as a NON-optional path dependency (Core's PTC path — `run_sandboxed`/`resume_parked`/`is_available` — links it in every build). The MCP tool-call coupling injects via the narrow `ToolCaller` trait and the security scrubbers (untrusted-marker stripping, child-env scrub) via `HostHooks`, so the crate has ZERO dependency on apps/core: the Gateway budget/scan/audit governance bracket, the agent-allowlist resolution, and the governed `http` plugin-tool egress stay Core-side (`apps/core/src/tool_exec/mod.rs`)."
+repository = "https://github.com/amajorai/ryu"
+
+# `tool-exec-deno` is the default backend (Deno on PATH — no crate dep). The
+# secure-exec backend is off-by-default (Linux + bun). With NO feature the crate
+# still compiles: the types + `CodeExecutor::Unavailable` are always present, so
+# a lean Core build (and gate #3) links a sandbox-less but valid tool-exec.
+[features]
+default = ["tool-exec-deno"]
+tool-exec-deno = []
+tool-exec-securexec = []
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core links this crate in-process. This crate has ZERO dependency on apps/core.
+[dependencies]
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The unified permission grammar (PermissionSet) this backend lowers to Deno
+# `--allow-*` flags. A leaf contract crate (serde/schemars/semver only) so there
+# is no dependency cycle, and it carries ZERO dependency on apps/core.
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.5" }
+tokio = { version = "1", features = ["io-util", "process", "time", "rt", "macros", "sync"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

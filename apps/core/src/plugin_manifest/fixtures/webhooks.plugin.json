@@ -1,0 +1,26 @@
+{
+	"id": "com.ryu.webhooks",
+	"name": "Webhooks",
+	"version": "1.0.0",
+	"description": "Inbound webhook endpoint registry: resolved public URLs, secret presence, last-delivery times, and the ingress backend status.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "webhooks-companion",
+			"name": "Webhooks",
+			"kind": "companion",
+			"config": {
+				"label": "Webhooks",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"permission_grants": ["webhooks:crud"],
+	"companion": {
+		"label": "Webhooks",
+		"icon": "webhook"
+	}
+}

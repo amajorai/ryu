@@ -1,0 +1,30 @@
+[package]
+name = "ryu-mail"
+version = "0.0.5"
+edition = "2021"
+description = "Standalone out-of-process mail sidecar for Ryu: self-host Agent Inboxes (receive/store/send) that Core proxies to on loopback. The tracer for apps-as-microservices."
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+
+[[bin]]
+name = "ryu-mail"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml so there is no version skew when
+# Core proxies to this sidecar. This crate has ZERO dependency on apps/core (that
+# would be circular and defeat the process-boundary point of the tracer).
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+dirs = "5"
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+lettre = { version = "0.11", default-features = false, features = ["tokio1-native-tls", "smtp-transport", "builder"] }
+mail-parser = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

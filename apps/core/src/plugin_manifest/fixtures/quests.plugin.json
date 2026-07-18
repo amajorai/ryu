@@ -1,0 +1,89 @@
+{
+	"id": "com.ryu.quests",
+	"name": "Quests",
+	"version": "1.0.0",
+	"description": "Quests: auto-detecting todos surfaced from your chats and activity, tracked as a lightweight quest board with progress and completion.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [
+		{
+			"id": "quests-companion",
+			"name": "Quests",
+			"kind": "companion",
+			"config": {
+				"label": "Quests",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"sidecars": [
+		{
+			"name": "ryu-quests",
+			"process": {
+				"kind": "local",
+				"command": "ryu-quests",
+				"command_env": "RYU_QUESTS_BIN",
+				"port_env": "RYU_QUESTS_PORT"
+			},
+			"port": 7991,
+			"health_path": "/health",
+			"http": {
+				"mount": "/api/quests",
+				"public_mount": "/api/quests",
+				"routes": [
+					{ "path": "/events" },
+					{ "path": "/detection-config" },
+					{ "path": "/" },
+					{ "path": "/:id" },
+					{ "path": "/:id/judge" },
+					{ "path": "/:id/complete" },
+					{ "path": "/:id/dismiss" },
+					{ "path": "/:id/reopen" },
+					{ "path": "/:id/suggestion/accept" },
+					{ "path": "/:id/suggestion/dismiss" }
+				]
+			}
+		}
+	],
+	"permission_grants": ["quests:crud"],
+	"companion": {
+		"label": "Quests",
+		"icon": "target"
+	},
+	"contributes": {
+		"views": [
+			{
+				"id": "quest-board",
+				"title": "Quest Board",
+				"view": "list-detail",
+				"spec": {
+					"view": "list-detail",
+					"items": [],
+					"emptyText": "No quests yet.",
+					"source": {
+						"http": { "method": "GET", "path": "/api/quests" },
+						"items": "quests",
+						"map": {
+							"subtitle": "detail",
+							"accessory": "status"
+						}
+					},
+					"itemActions": [
+						{
+							"id": "complete",
+							"label": "Complete",
+							"style": "primary",
+							"confirm": "Mark this quest as complete?",
+							"http": {
+								"method": "POST",
+								"path": "/api/quests/{{item.id}}/complete"
+							}
+						}
+					]
+				}
+			}
+		]
+	}
+}

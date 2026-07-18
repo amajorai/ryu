@@ -23,7 +23,7 @@ use tracing::{debug, warn};
 
 use crate::config::{InspectorConfig, InspectorMode};
 use crate::providers::ProviderRegistry;
-use crate::router::ModelRouter;
+use crate::router::RouterBackend;
 
 /// Cap the text sent to the inspector so a huge paste stays cheap and bounded.
 const MAX_INSPECT_CHARS: usize = 4000;
@@ -74,7 +74,7 @@ impl InspectorClient {
         text: &str,
         cfg: &InspectorConfig,
         providers: &ProviderRegistry,
-        router: &ModelRouter,
+        router: &dyn RouterBackend,
     ) -> InspectorVerdict {
         if !cfg.enabled {
             return InspectorVerdict::allow();
@@ -118,7 +118,7 @@ impl InspectorClient {
         model: &str,
         timeout_ms: u64,
         providers: &ProviderRegistry,
-        router: &ModelRouter,
+        router: &dyn RouterBackend,
     ) -> InspectorVerdict {
         if text.trim().is_empty() || rubric.trim().is_empty() {
             return InspectorVerdict::allow();
@@ -139,10 +139,10 @@ async fn run_inspection(
     model: &str,
     timeout_ms: u64,
     providers: &ProviderRegistry,
-    router: &ModelRouter,
+    router: &dyn RouterBackend,
 ) -> InspectorVerdict {
     let decision = router.route(model);
-    let Some(provider) = providers.get(&decision.provider) else {
+    let Some(provider) = providers.get(decision.provider.as_str()) else {
         warn!(
             provider = decision.provider.as_str(),
             model = %decision.model,
@@ -281,6 +281,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::router::ModelRouter;
     use crate::{config::ProvidersConfig, quota::ProviderQuotas};
 
     /// An empty provider registry — `get` returns `None` for every kind, which

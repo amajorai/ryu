@@ -1,5 +1,17 @@
 # <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; Ryu CLI
 
+> [!WARNING]
+> **Deprecated — maintenance mode.** The Ryu CLI has been superseded by the
+> **[Ryu TUI](../tui/README.md)** (`apps/tui`, run `ryu-tui`), a Bun + OpenTUI
+> client that has reached **full feature parity** with this CLI (and is ahead on
+> chat, split-pane workspace, and store-wide search). New features land in the
+> TUI, not here. This CLI stays building and keeps its existing commands —
+> including the headless, script-shaped ones (`okf export`, gateway
+> config-as-code `apply`/`diff`/`config`, `open`, `node`, `update`) that the
+> interactive TUI intentionally does not reproduce — but it is no longer the
+> recommended terminal client. Every startup prints a deprecation banner. Prefer
+> `ryu-tui` for new work.
+
 > A terminal UI for chatting with Ryu and managing the local stack. Part of [Ryu](../../README.md).
 
 [![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)

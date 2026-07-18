@@ -27,7 +27,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
-use crate::server::retrieval::Embedder;
+use ryu_rag::Embedder;
 
 /// Sentinel agent id selecting Plane B agent-auto routing. When a chat request's
 /// agent id equals this, Core resolves a concrete agent per-turn.
@@ -301,23 +301,16 @@ fn build_embedder(config: &AgentAutoConfig) -> Embedder {
     let model = config.embedding_model.trim();
     let base_url = registry.embed_base_url.trim();
     if !model.is_empty() && !base_url.is_empty() {
-        let api_key = std::env::var("RYU_EMBED_API_KEY")
-            .ok()
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .filter(|s| !s.is_empty());
         let model = if model.eq_ignore_ascii_case("default") {
             DEFAULT_EMBED_MODEL.to_owned()
         } else {
             model.to_owned()
         };
-        Embedder::Remote {
-            base_url: base_url.to_owned(),
-            model,
-            dims: registry.embedder.dims,
-            api_key,
-        }
+        // Funnel through the single RAG resolver so an embed-provider swap reaches
+        // agent auto-routing too.
+        crate::rag_host::embedder_from_config(base_url, &model, registry.embedder.dims)
     } else {
-        Embedder::from_registry(&registry)
+        crate::rag_host::embedder_from_registry(&registry)
     }
 }
 

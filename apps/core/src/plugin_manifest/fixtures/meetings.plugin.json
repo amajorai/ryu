@@ -6,7 +6,48 @@
 	"engines": {
 		"ryu": ">=0.0.1"
 	},
-	"runnables": [],
+	"runnables": [
+		{
+			"id": "meetings-companion",
+			"name": "Meetings",
+			"kind": "companion",
+			"config": {
+				"label": "Meetings",
+				"ui_entry": "./dist/index.html",
+				"ui_format": "html"
+			}
+		}
+	],
+	"sidecars": [
+		{
+			"name": "ryu-meetings",
+			"process": {
+				"kind": "local",
+				"command": "ryu-meetings",
+				"command_env": "RYU_MEETINGS_BIN",
+				"port_env": "RYU_MEETINGS_PORT"
+			},
+			"port": 7998,
+			"health_path": "/health",
+			"http": {
+				"mount": "/api/meetings",
+				"public_mount": "/api/meetings",
+				"routes": [
+					{ "path": "/stream" },
+					{ "path": "/detect" },
+					{ "path": "/detection-config" },
+					{ "path": "/templates" },
+					{ "path": "/import" },
+					{ "path": "/" },
+					{ "path": "/:id" },
+					{ "path": "/:id/title" },
+					{ "path": "/:id/chunk" },
+					{ "path": "/:id/finalize" },
+					{ "path": "/:id/transcript" }
+				]
+			}
+		}
+	],
 	"requires": {
 		"apps": [
 			{
@@ -16,5 +57,9 @@
 		],
 		"grants": ["spaces:docs"]
 	},
-	"permission_grants": ["spaces:docs"]
+	"permission_grants": ["spaces:docs", "meetings:crud"],
+	"companion": {
+		"label": "Meetings",
+		"icon": "mic-01"
+	}
 }

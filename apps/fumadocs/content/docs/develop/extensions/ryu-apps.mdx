@@ -92,6 +92,65 @@ Then pack: `ryu pack` bundles your `uiEntry` output into the manifest's `ui_code
 is the manifest - and refuses a bundle whose code does not match the declared hash
 (`apps/core/src/server/mod.rs`).
 
+## The widget wire contract
+
+The widget communicates with Core through a well-defined wire contract. Understanding this contract
+is essential for building widgets that render correctly and call tools safely.
+
+### Data flow
+
+```mermaid
+sequenceDiagram
+  participant Agent
+  participant Core
+  participant Widget as Widget (iframe)
+  participant Gateway
+
+  Agent->>Core: Call render tool
+  Core->>Core: Validate arguments, execute tool
+  Core->>Widget: Serve widget HTML as ui:// MCP resource
+  Core->>Widget: Echo validated args as structuredContent
+  Widget->>Widget: Read toolInput / toolOutput
+  Widget->>Core: callTool(companion, args)
+  Core->>Gateway: POST /v1/exec/tool (allowlist + budget + audit)
+  Gateway-->>Core: Governed result
+  Core-->>Widget: Result back to widget
+```
+
+### The `window.openai` bridge
+
+The widget runs in a null-origin sandboxed iframe and communicates through the
+`window.openai` surface (aliased from Ryu's native `window.ryu` bridge):
+
+| Property | Type | Description |
+|---|---|---|
+| `window.openai.toolInput` | `Record<string, unknown>` | The validated arguments the agent passed to the render tool |
+| `window.openai.toolOutput` | `unknown` | The tool's return value (the data to render) |
+| `window.openai.callTool(name, args)` | `Promise<unknown>` | Call a companion tool declared in the same app |
+
+### Companion tool calls
+
+When the widget calls `callTool`, the call follows this path:
+
+1. The frame sends an RPC message to the host (the trusted webview).
+2. The host verifies the call targets a tool declared as `accessible: true` in the same app.
+3. The host forwards the call to Core's provenance gate (`apps/core/src/server/widgets.rs`).
+4. Core routes the call through the Gateway's `POST /v1/exec/tool` for allowlist check, budget,
+   scan, and audit.
+5. The result flows back through the same path to the widget.
+
+Widget-initiated calls are **never** trusted from the frame. The full governance path is documented
+in [Ryu Apps](/docs/desktop/user-guide/apps#provenance-and-gateway-gating).
+
+### Rendering constraints
+
+| Constraint | Why |
+|---|---|
+| Self-contained HTML (no external fetch) | CSP iframe with `default-src 'none'` |
+| Null-origin sandbox | `<iframe sandbox="allow-scripts">` without `allow-same-origin` |
+| No `window.__TAURI__` | Tauri IPC only in the app's own webview, not sandboxed frames |
+| No direct Core access | All calls go through the host RPC bridge |
+
 ## 4. Install and enable
 
 Install the packed bundle and enable it, the same lifecycle as any plugin
@@ -133,6 +192,6 @@ documented in [Ryu Apps](/docs/desktop/user-guide/apps#provenance-and-gateway-ga
 <Cards>
   <DocCard href="/docs/desktop/user-guide/apps" />
   <DocCard href="/docs/develop/extensions/plugin-json-manifest" />
-  <DocCard href="/docs/develop/extensions/plugin-runtime" />
+  <DocCard href="/docs/develop/extensions/hooks-lifecycle" />
   <DocCard href="/docs/develop/extensions/typescript-sdk" />
 </Cards>

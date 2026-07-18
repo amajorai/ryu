@@ -92,6 +92,21 @@ Locked to nothing.**
 **Core**. If it decides *what is allowed, shared, measured, or paid for*, it is **Gateway**. Core
 never enforces policy inline — it routes every model call through the Gateway.
 
+### Decomposition
+
+Core and the Gateway were decomposed from a monolith into a virtual Cargo workspace of **~75
+crates**: 52 primitive + app-backend capability crates (43 `crates/ryu-*` capabilities — crypto,
+vault, downloads, engines, RAG, memory, search, durable, voice, image, sandbox… + 9 app backends),
+11 gateway-stage crates (`crates/ryu-gw-*`), plus the ghost/shadow automation crates. Alongside
+them live 21 self-contained apps under `apps-store/*` (16 with UI companions). `apps/core` shrank
+from ~195k to ~143k LoC (−27%); ~88k LoC now lives in swappable crates.
+
+Every layer is a swappable default, never a lock — chat model, embedder, reranker, TTS/STT,
+image-gen, engine, RAG strategy, durable engine, sandbox. This repository is the **open-core
+subset**: `apps/core`, `apps/gateway`, the CLI/TUI clients, and the public capability + SDK crates
+listed below. The desktop, web, mobile, and identity/billing surfaces are proprietary and are not
+part of this mirror.
+
 ## Quick start (self-host)
 
 ### Install (prebuilt binaries)
@@ -182,44 +197,51 @@ in one click — [![Deploy docs to Vercel](https://vercel.com/button)](https://v
 - **Modalities:** chat, image-gen, TTS, STT — all first-class, all swappable.
 - **Standards:** Agent Skills + MCP + ACP, all first-class.
 
-## Repository layout & licensing
+## Repository layout
 
-Ryu is an **open-core** monorepo: the orchestration engine is open-source and self-hostable;
-the UX and identity surfaces are closed. Each unit carries its own `LICENSE` and `README.md`.
+This mirror ships the **open-core** subset — the orchestration engine, the Gateway, the terminal
+clients, and the public capability + SDK crates. Each unit carries its own `LICENSE` and
+`README.md`. The closed desktop/web/mobile and identity/billing surfaces (© 2026 A Major Pte. Ltd.)
+live in the private monorepo and are not part of this repository.
 
-### Open source — self-hostable
-
-Apache-2.0 (Gateway: AGPL-3.0; Raycast: MIT).
+### Apps — Apache-2.0 (Gateway: AGPL-3.0)
 
 | Unit | What it is |
 |---|---|
 | [`apps/core`](./apps/core) | Orchestration engine, the real local backend (Rust/Axum, :7980) |
 | [`apps/gateway`](./apps/gateway) | The LLM control layer: routing, firewall, cache, evals, audit (Rust, :7981) |
 | [`apps/cli`](./apps/cli) | Terminal client for Core (Rust/ratatui) |
-| [`apps/ghost`](./apps/ghost) | Desktop-automation MCP server: screen perception + input control (Rust) |
-| [`apps/shadow`](./apps/shadow) | Screen/audio capture + semantic memory (Rust, :3030) |
+| [`apps/tui`](./apps/tui) | Bun/OpenTUI terminal client — pure HTTP/SSE to a running Core node |
 | [`apps/fumadocs`](./apps/fumadocs) | Documentation site + interactive OpenAPI (Next/Fumadocs) |
-| [`apps/raycast`](./apps/raycast) | Raycast extension, fenced out of the workspace (TS) |
-| [`packages/sdk`](./packages/sdk) · [`create-ryu-app`](./packages/create-ryu-app) | Ryu's dev SDK + project scaffolder |
-| [`packages/client`](./packages/client) | Typed TypeScript client for the Core HTTP API |
-| [`crates/ryu-sdk{,-ffi,-napi,-uniffi}`](./crates) | SDK kernel + C-ABI/Node-API/UniFFI bindings |
-| [`crates/ghost-{core,eyes,hands}`](./crates) · [`shadow-core`](./crates/shadow-core) | Automation + capture crates |
+| [`apps/mcp`](./apps/mcp) | MCP server exposing a running Core node to any MCP host (TS) |
+| [`apps/skills`](./apps/skills) | SKILL.md agent skills that teach coding agents to set up and drive Ryu |
+| [`apps/plugins`](./apps/plugins) | Claude Code / Codex plugin definitions for Ryu |
+| [`apps-store/voice/sidecar`](./apps-store/voice/sidecar) | Python TTS sidecar (`ryu_tts`), Core-managed |
+| [`apps-store/finetune/sidecar`](./apps-store/finetune/sidecar) | Python LoRA/QLoRA fine-tuning sidecar (`ryu_unsloth`) |
 
-### Proprietary — the UX/identity layer
-
-© 2026 A Major Pte. Ltd.
+### Capability & SDK crates — Apache-2.0
 
 | Unit | What it is |
 |---|---|
-| [`apps/desktop`](./apps/desktop) | The flagship app (Tauri v2 + React) |
-| [`apps/web`](./apps/web) | Marketing, dashboard, billing, docs (Next.js, :3001) |
-| [`apps/server`](./apps/server) | Identity / content / billing plane (Hono/TS, :3000) |
-| [`apps/native`](./apps/native) | Mobile app, iOS + Android (Expo/RN) |
-| [`apps/island`](./apps/island) | Companion overlay + command bar (Electron) |
-| [`apps/storyboard`](./apps/storyboard) | Internal screen + design-system explorer (Next.js, :3002) |
-| [`apps/extension`](./apps/extension) | Browser extension (WXT/TS) |
-| [`packages/ui`](./packages/ui) · [`command`](./packages/command) | Shared design system + command palette |
-| [`packages/{auth,db,api,email,settings,env,config}`](./packages) | Identity / persistence / config plane |
+| [`crates/ryu-kernel-contracts`](./crates/ryu-kernel-contracts) | Pure-data `plugin.json` manifest model shared by Core + SDK |
+| [`crates/ryu-crypto`](./crates/ryu-crypto) | Encryption-at-rest `FieldCipher` + swappable master-key custody |
+| [`crates/ryu-vault`](./crates/ryu-vault) | Identity Vault — crypto-sealed per-domain credential store |
+| [`crates/ryu-downloads`](./crates/ryu-downloads) | `DownloadCenter` — resumable, checksum-verified artifact fetch |
+| [`crates/ryu-webhook-ingress`](./crates/ryu-webhook-ingress) | Public-reachability seam for inbound third-party webhooks |
+| [`crates/ryu-usage`](./crates/ryu-usage) | Per-agent subscription usage/rate-limit metering |
+| [`crates/ryu-sdk{,-ffi,-napi,-uniffi}`](./crates) | SDK kernel + C-ABI/Node-API/UniFFI language bindings |
+| [`crates/ghost-{core,permissions}`](./crates) | Desktop-automation primitives + OS-permission checks |
+
+### TypeScript packages — Apache-2.0
+
+| Unit | What it is |
+|---|---|
+| [`packages/sdk`](./packages/sdk) · [`create-ryu-app`](./packages/create-ryu-app) | Ryu's dev SDK (typed Runnable builders) + project scaffolder |
+| [`packages/client`](./packages/client) | `@ryuhq/client` — typed client for embedding a Core agent in any app |
+| [`packages/core-client`](./packages/core-client) | `@ryuhq/core-client` — platform-agnostic Core node client (tui/native) |
+| [`packages/protocol`](./packages/protocol) | `@ryuhq/protocol` — surface-agnostic wire-format contracts |
+| [`packages/ryu-apps`](./packages/ryu-apps) | `@ryu/apps` — built-in widget-app workspace, embedded into Core |
+| [`packages/config`](./packages/config) · [`env`](./packages/env) | Shared TypeScript config + env schemas |
 
 ## Footprint
 
@@ -256,8 +278,9 @@ _Idle RSS and CPU are sampled only for the Gateway (a stateless proxy with a cle
 Contributions to the OSS units are welcome — see each unit's README for build instructions.
 Report security issues privately to security@ryuhq.com.
 
-Open-source units are Apache-2.0, AGPL-3.0 (Gateway), or MIT (Raycast). Proprietary units are
-© 2026 A Major Pte. Ltd. Each subdirectory carries its own `LICENSE` file.
+Open-source units are Apache-2.0, except the Gateway (AGPL-3.0). The closed UX/identity surfaces
+are © 2026 A Major Pte. Ltd. and live in the private monorepo. Each subdirectory carries its own
+`LICENSE` file.
 
 ---
 

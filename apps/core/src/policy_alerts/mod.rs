@@ -15,9 +15,15 @@
 
 use serde::Deserialize;
 
-use crate::monitors::notify::{self, NotifyTarget};
-use crate::monitors::store::MonitorStore;
-use crate::monitors::Alert;
+use ryu_notify::NotifyTarget;
+
+use crate::notify::{self, FanoutAlert, NotifyStore};
+
+/// Re-export of the node-level alert delivery targets, which live in the shared
+/// `ryu_notify` crate (persisted in the Core notify store's `alert_delivery`
+/// table). Kept here so existing `crate::policy_alerts::AlertDeliveryTargets`
+/// references (the desktop alert-delivery card handlers) resolve unchanged.
+pub use ryu_notify::AlertDeliveryTargets;
 
 /// The response header the Gateway stamps the policy verdict onto. Must match the
 /// gateway writer byte-for-byte (`apps/gateway/src/policy_alert.rs`).
@@ -106,26 +112,32 @@ impl PolicyAlert {
         }
     }
 
-    /// Build the in-memory monitors [`Alert`] this policy alert fans out as. This
-    /// alert is NEVER persisted to the monitors table — it is a transient carrier
-    /// for the notify fan-out only.
-    fn to_alert(&self) -> Alert {
-        Alert {
-            id: 0,
-            monitor_id: format!("policy:{}", self.source),
-            monitor_name: self.title(),
-            created_at: chrono::Utc::now().to_rfc3339(),
-            title: self.title(),
-            message: self.message(),
-            kind: format!(
-                "policy_{}",
-                if self.source.is_empty() {
-                    "alert"
-                } else {
-                    self.source.as_str()
-                }
-            ),
-            acknowledged: false,
+    /// Build the transient [`FanoutAlert`] this policy alert fans out as. Nothing
+    /// is persisted — it is a carrier for the notify fan-out only.
+    fn to_fanout(&self) -> FanoutAlert {
+        let kind = format!(
+            "policy_{}",
+            if self.source.is_empty() {
+                "alert"
+            } else {
+                self.source.as_str()
+            }
+        );
+        let title = self.title();
+        let message = self.message();
+        let hook_event = serde_json::json!({
+            "monitor_id": format!("policy:{}", self.source),
+            "monitor_name": title,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+            "title": title,
+            "message": message,
+            "kind": kind,
+        });
+        FanoutAlert {
+            title,
+            message,
+            data: serde_json::json!({ "kind": kind }),
+            hook_event,
         }
     }
 }
@@ -156,13 +168,13 @@ pub fn dispatch_from_headers(headers: &reqwest::header::HeaderMap) {
     let Some(alert) = from_header(raw) else {
         return;
     };
-    // Dedupe/delivery need the monitors store (dedupe table + delivery targets).
-    // Resolve it from the process-global engine set unconditionally at startup.
-    let Some(engine) = crate::monitors::global_engine() else {
-        tracing::warn!("policy_alerts: monitor engine not ready; dropping alert");
+    // Dedupe/delivery need the kernel notify store (dedupe table + delivery
+    // targets + the tiered fan-out that wires in BYO SMTP email + notification
+    // hooks). Resolve it from the process-global set at startup.
+    let Some(store) = crate::notify::global_store() else {
+        tracing::warn!("policy_alerts: notify store not ready; dropping alert");
         return;
     };
-    let store = engine.store.clone();
     tokio::spawn(async move {
         let http = reqwest::Client::new();
         dispatch(alert, http, store).await;
@@ -171,7 +183,10 @@ pub fn dispatch_from_headers(headers: &reqwest::header::HeaderMap) {
 
 /// Deliver a decoded policy alert: dedupe, mirror to SSE, then fan out per tier.
 /// Best-effort: sink failures are logged, never propagated.
-pub async fn dispatch(alert: PolicyAlert, http: reqwest::Client, store: MonitorStore) {
+///
+/// Fan-out goes through the kernel [`notify::notify_all`], which wires in both the
+/// BYO SMTP email send and the `notification` plugin-hook dispatch in every tier.
+pub async fn dispatch(alert: PolicyAlert, http: reqwest::Client, store: NotifyStore) {
     // Atomic dedupe claim (Core-side F1): the same stamp is re-read on every
     // tool-loop iteration, so without an atomic claim a single turn double-delivers.
     if !alert.dedupe_key.is_empty() {
@@ -190,7 +205,7 @@ pub async fn dispatch(alert: PolicyAlert, http: reqwest::Client, store: MonitorS
         }
     }
 
-    let carrier = alert.to_alert();
+    let carrier = alert.to_fanout();
 
     // Always mirror to SSE for the live desktop (the in-app feed + OS toast).
     let level = match alert.enforcement.as_str() {
@@ -219,32 +234,19 @@ pub async fn dispatch(alert: PolicyAlert, http: reqwest::Client, store: MonitorS
         AlertTier::Silent | AlertTier::Warn => {}
         // Fanout: webhook / Telegram / Expo push (no email).
         AlertTier::Fanout => {
-            notify::notify_all(&http, &store, &targets.targets, &carrier, None).await;
+            notify::notify_all(&http, &store, &targets.targets, &carrier).await;
         }
         // Email (the top tier): deliver to the node's configured alert recipients
-        // over the shared BYO SMTP transport, resolved once here.
+        // over the shared BYO SMTP transport (resolved by the kernel notify layer).
         AlertTier::Email => {
             let email_targets: Vec<NotifyTarget> = targets
                 .emails
                 .iter()
                 .map(|to| NotifyTarget::Email { to: to.clone() })
                 .collect();
-            let cfg = crate::email::resolve_transport();
-            notify::notify_all(&http, &store, &email_targets, &carrier, cfg.as_ref()).await;
+            notify::notify_all(&http, &store, &email_targets, &carrier).await;
         }
     }
-}
-
-/// Node-level alert delivery targets (self-host). Read by [`dispatch`]; written by
-/// the desktop alert-delivery card via the store accessor. Emails are the
-/// email-tier recipients; `targets` are the fan-out (webhook / Telegram / Expo)
-/// channels.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct AlertDeliveryTargets {
-    #[serde(default)]
-    pub targets: Vec<NotifyTarget>,
-    #[serde(default)]
-    pub emails: Vec<String>,
 }
 
 #[cfg(test)]

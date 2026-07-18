@@ -120,25 +120,56 @@ It is a read-only computation over static seed data (`EvaluatorRegistry`, seeded
 
 ### The catalog
 
-30 built-in evaluators across 8 categories (`builtin_catalog`).
+30 built-in evaluators across 8 categories (`builtin_catalog`). Each entry carries a `capabilities`
+object with two booleans — `inline` and `offline` — derived from the entry's own config so they
+can never disagree. This is a first-class **gate**: an evaluator that is offline-only is never
+offered as an inline guardrail.
 
-| Category | Count | Examples |
+| Category | Count | Evaluators | Inline? | Offline? |
+|---|---|---|---|---|
+| **Security** | 3 | `pii_leakage`, `code_injection`, `prompt_injection` | Yes (enforced) | Yes |
+| **Safety** | 2 | `toxicity`, `bias_fairness` | Yes (enforced, LLM judge) | Yes |
+| **Quality** | 7 | `hallucination`, `assertions`, `code_checker`, `exact_match`, `correctness`, `conciseness`, `answer_relevance` | No | Yes |
+| **Conversation** | 6 | `perceived_error`, `support_intent`, `tone`, `knowledge_retention`, `user_satisfaction`, `task_completion` | No | Yes |
+| **Trajectory** | 3 | `plan_adherence`, `trajectory_accuracy`, `tool_selection` | No | Yes |
+| **Image** | 2 | `explicit_content`, `sensitive_imagery` | Yes (Block / Warn) | Yes |
+| **Voice** | 5 | `audio_quality`, `user_interrupts`, `transcription_accuracy`, `vocal_affect`, `language` | No | Yes |
+| **Custom** | 2 | `llm_as_a_judge`, `code_evaluator` | Configurable | Configurable |
+
+Key flags per entry:
+
+- **`enforced`** — whether the evaluator is wired to execution. The five Security + Safety text
+  detectors (`pii_leakage`, `code_injection`, `prompt_injection`, `toxicity`, `bias_fairness`)
+  report `enforced: true`. Every other entry reports `false` so the UI can distinguish catalogued
+  from wired.
+- **`higherIsBetter`** — score polarity. Negative-signal judges (toxicity, bias, hallucination)
+  score a BAD signal, so a high score is worse and this flag is `false`.
+
+### Inline vs offline
+
+The two execution modes serve different purposes:
+
+| Mode | When it runs | What it needs | Action |
+|---|---|---|---|
+| **Inline** | On every scored request, before the response reaches the client | Only the request/response text | `FirewallPolicy` action: Block, Sanitize, or Warn |
+| **Offline** | On demand (dataset runs, batch scoring) | A reference answer, conversation history, or trajectory | Score only; no inline action |
+
+Inline evaluators are bound to the firewall scope through `FirewallConfig.evaluators` and cascade
+node → org → agent with the same union-plus-lock semantics as the firewall dials. The five
+enforced inline detectors run on the chat pipeline for both input and output. Image evaluators are
+catalogued but not yet enforced on the image path.
+
+### Custom evaluators
+
+Two blank-slate evaluators let you create your own:
+
+| Evaluator | What it does | Configuration |
 |---|---|---|
-| Custom (create from scratch) | 2 | `llm_as_a_judge`, `code_evaluator` (blank rubric / code templates) |
-| Security | 3 | `pii_leakage`, `code_injection`, `prompt_injection` |
-| Safety | 2 | `toxicity`, `bias_fairness` |
-| Quality | 7 | `hallucination`, `correctness`, `answer_relevance`, `exact_match` |
-| Conversation | 6 | `tone`, `task_completion`, `user_satisfaction` |
-| Trajectory | 3 | `plan_adherence`, `trajectory_accuracy`, `tool_selection` |
-| Image | 2 | `explicit_content`, `sensitive_imagery` |
-| Voice | 5 | `audio_quality`, `transcription_accuracy`, `vocal_affect` |
+| `llm_as_a_judge` | Sends the response to a configurable judge model with a custom rubric | `judge_model`, `rubric` |
+| `code_evaluator` | Runs JS/Python code against the response in a sandboxed environment | `language`, `code`, `entry_point` |
 
-Each entry carries a `capabilities` object with two booleans, `inline` and `offline`, derived from the entry's own config so they can never disagree with it. This is a first-class **gate**: an evaluator that is offline-only (every Quality, Conversation, Trajectory, and Voice entry, because it needs a reference, history, or trajectory) is never offered as an inline guardrail. An entry is inline-capable only when it defines an inline action, and offline-capable only when it defines an offline config.
-
-Two more flags keep the catalog honest:
-
-- `enforced` - whether the evaluator is actually wired to execution. Five text detectors (`pii_leakage`, `code_injection`, `prompt_injection`, `toxicity`, `bias_fairness`) report `enforced: true`; every other entry reports `false` so the UI can distinguish catalogued from wired.
-- `higherIsBetter` - score polarity. Negative-signal judges (toxicity, bias, hallucination, and similar) score a BAD signal, so a high score is worse and this flag is `false`.
+Custom evaluators follow the same `inline`/`offline` capability pattern. A code evaluator that
+needs filesystem or network access is offline-only; one that just parses JSON can be inline.
 
 ### Binding an evaluator
 

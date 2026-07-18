@@ -1,0 +1,39 @@
+[package]
+name = "ryu-quests"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Quests: the auto-detecting todo list for Ryu — an extracted Core capability crate (engine + SQLite store + HTTP surface). In-process default; Core consumes it as a path dependency behind the `quests` feature. Cross-cutting deps (preferences, Shadow MCP, the Gateway judge call, the scheduler backing job) are inverted through the `QuestsHost` trait so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# The out-of-process sidecar binary. Core spawns it (`kind: local`, sibling on
+# PATH / `RYU_QUESTS_BIN`), health-checks it, and proxies `/api/quests/*` to it on
+# loopback — exactly like `ryu-mail` / `ryu-teams`. The same crate still compiles
+# INTO Core as a lib path-dependency (in-process default); this bin is just the
+# process shell around the crate's `routes()` + `QuestEngine`.
+[[bin]]
+name = "ryu-quests"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
+# axum router has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+reqwest = { version = "0.12", features = ["json"] }
+futures-util = "0.3"
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+humantime = "2"
+async-trait = "0.1"
+# Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-mail` /
+# `ryu-teams`. Core already pulls all of these, so there is no new dependency in
+# the in-process build.
+dirs = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

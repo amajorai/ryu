@@ -16,6 +16,23 @@ modern browsers.
   resolves as `workspace:*`.
 </Callout>
 
+## Architecture
+
+```mermaid
+flowchart LR
+  A[Your App] --> B["@ryuhq/client"]
+  B -->|HTTP + SSE| C[Core :7980]
+  C --> D[Agent routing]
+  C --> E[Chat streaming]
+  C --> F[Spaces / RAG]
+  C --> G[Sessions]
+
+  B -->|zero deps| H[native fetch]
+```
+
+`@ryuhq/client` is a thin typed wrapper over `fetch`. It calls Core's HTTP API directly with no
+runtime dependencies — works in Node 18+, Bun, Deno, and browsers.
+
 ## Install
 
 ```bash

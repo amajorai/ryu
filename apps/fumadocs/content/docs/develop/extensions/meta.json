@@ -2,15 +2,21 @@
   "title": "Build an Extension",
   "pages": [
     "index",
-    "mcp-server",
-    "typescript-sdk",
+    "---Plugins & Hooks---",
     "plugin-json-manifest",
+    "hooks-lifecycle",
     "plugin-runtime",
+    "mcp-server",
+    "---Skills & Apps---",
     "agent-skills",
     "ryu-apps",
+    "---Desktop & Bots---",
     "desktop-companion",
     "channel-bot",
+    "---Workflows & Distribution---",
     "author-workflows",
-    "marketplace"
+    "marketplace",
+    "---SDK---",
+    "typescript-sdk"
   ]
 }

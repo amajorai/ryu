@@ -167,12 +167,19 @@ pub trait CoreCatalog: Send + Sync {
 
     /// `POST /api/mcp/tools/call` — execute one tool. Maps Core's
     /// `{ok,output}` / `{ok,error}` to a `Result<output, error>`.
+    ///
+    /// `host_conversation_id` is the **server-derived** host conversation this
+    /// exec runs on behalf of (threaded from the exec request body). Core lowers it
+    /// to a `ToolPrincipal` so a gateway-exec'd tool resolves `Owned` instead of the
+    /// fail-closed `Unresolved` on an org-bound node. It is NOT `user_id` (which is
+    /// client-supplied and spoofable). `None` preserves the fail-closed default.
     async fn call_tool(
         &self,
         tool_id: &str,
         arguments: Value,
         agent_id: Option<&str>,
         user_id: Option<&str>,
+        host_conversation_id: Option<&str>,
     ) -> Result<Value, String>;
 
     /// Forward a PTC `execute`/`resume` to Core (Contract 4, P4). `path` is the
@@ -277,12 +284,16 @@ impl CoreCatalog for ToolSearchClient {
         arguments: Value,
         agent_id: Option<&str>,
         user_id: Option<&str>,
+        host_conversation_id: Option<&str>,
     ) -> Result<Value, String> {
         let body = json!({
             "tool": tool_id,
             "arguments": arguments,
             "agent_id": agent_id,
             "user_id": user_id,
+            // Server-derived host conversation → Core's `ToolPrincipal`. Omitted-as-
+            // null preserves the fail-closed default on a bound node.
+            "host_conversation_id": host_conversation_id,
         });
         let resp = self
             .with_auth(self.http.post(self.url("/api/mcp/tools/call")).json(&body))

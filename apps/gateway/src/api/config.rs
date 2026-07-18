@@ -13,7 +13,8 @@ use std::collections::HashMap;
 use crate::{
     config::{
         ApiKeyConfig, AuthConfig, BudgetConfig, FirewallConfig, FirewallOverlay, GatewayConfig,
-        ProviderKind, ProvidersConfig, RoutingConfig, SmartRoutingConfig, ToolProfile, ToolsConfig,
+        ProviderId, ProvidersConfig, RoutingConfig, SmartRoutingConfig, StageBackendsConfig,
+        ToolProfile, ToolsConfig,
     },
     error::GatewayError,
     pipeline::{authenticate, AuthInputs},
@@ -78,15 +79,15 @@ struct ApiKeyView {
     team_id: Option<String>,
 }
 
-/// Public view of RoutingConfig (no secrets; ProviderKind serializes as lowercase string).
+/// Public view of RoutingConfig (no secrets; ProviderId serializes as a bare string).
 #[derive(Serialize)]
 struct RoutingView {
-    default_provider: ProviderKind,
+    default_provider: ProviderId,
     model_map: std::collections::HashMap<String, ModelMappingView>,
-    fallback_chain: Vec<ProviderKind>,
+    fallback_chain: Vec<ProviderId>,
     /// Cost-tier ordering (#2). Not a secret; returned so the desktop tier editor
     /// can read-modify-write the full routing object.
-    provider_tiers: std::collections::HashMap<ProviderKind, u8>,
+    provider_tiers: std::collections::HashMap<ProviderId, u8>,
     /// Classifier-driven routing (custom routing instructions). Carries no
     /// secrets, so it is returned verbatim for the UI to read + edit.
     smart_routing: SmartRoutingConfig,
@@ -94,7 +95,7 @@ struct RoutingView {
 
 #[derive(Serialize)]
 struct ModelMappingView {
-    provider: ProviderKind,
+    provider: ProviderId,
     #[serde(skip_serializing_if = "Option::is_none")]
     provider_model: Option<String>,
 }
@@ -197,23 +198,38 @@ fn redact_auth(a: &AuthConfig) -> AuthView {
 /// `require_auth` alone (a *base*-auth flag, not an admin gate) must not be the
 /// only thing standing between a remote caller and this surface.
 /// Whether an admin request may pass WITHOUT the master key. Pure decision so the
-/// mesh-neutralization (#478, B-9) and the fleet-neutralization (managed-cloud
-/// WS2) are unit-testable. The only no-master-key path is a loopback peer in
-/// no-auth mode — and that loopback trust is neutralized when EITHER the mesh is
-/// on OR fleet mode is on, because in both cases an inbound peer can appear as
-/// `127.0.0.1` without being the local operator: under userspace mesh networking
-/// tailnet peers are loopback, and behind a co-located fleet LB/reverse-proxy
-/// external callers are loopback. Either would otherwise fail the gate OPEN.
-fn admin_loopback_allowed(
+/// mesh-neutralization (#478, B-9), the fleet-neutralization (managed-cloud
+/// WS2), and the provisioned-master-key gate (P2 #2) are unit-testable. The only
+/// no-master-key path is a loopback peer in no-auth mode — and that loopback
+/// trust is neutralized when ANY of the following holds:
+///   - the mesh is on OR fleet mode is on, because in both cases an inbound peer
+///     can appear as `127.0.0.1` without being the local operator (userspace
+///     mesh tailnet peers are loopback; behind a co-located fleet LB/reverse-proxy
+///     external callers are loopback) — either would otherwise fail the gate OPEN;
+///   - a master key IS provisioned (`master_key_present`). Provisioning a master
+///     key via `GATEWAY_MASTER_KEY` also forces `require_auth = true`
+///     (`config.rs` env load), so that path is already covered by `require_auth`;
+///     this term additionally closes the file-config residual where
+///     `gateway.toml [auth] master_key` is set with `require_auth = false` — an
+///     operator who bothered to provision an admin key should not have these
+///     control-plane reads (config = provider info, audit = full request
+///     metadata) served keyless just because base auth is off.
+pub(crate) fn admin_loopback_allowed(
     peer_is_loopback: bool,
     require_auth: bool,
     mesh_on: bool,
     fleet_on: bool,
+    master_key_present: bool,
 ) -> bool {
-    !require_auth && peer_is_loopback && !mesh_on && !fleet_on
+    !require_auth && peer_is_loopback && !mesh_on && !fleet_on && !master_key_present
 }
 
-fn require_local_admin(
+/// Authorize an admin (config/audit/budget-spend) request. The master key always
+/// passes; otherwise it is allowed only from a loopback peer under the
+/// zero-config dev posture (no base auth, no mesh/fleet, and no master key
+/// provisioned) — see [`admin_loopback_allowed`]. Shared by the config, audit,
+/// and budget-spend handlers so the gate has one definition and cannot drift.
+pub(crate) fn require_local_admin(
     state: &SharedState,
     peer: &SocketAddr,
     is_master_key: bool,
@@ -222,12 +238,14 @@ fn require_local_admin(
     if is_master_key {
         return Ok(());
     }
-    let require_auth = state.with_auth(|a| a.require_auth);
+    let (require_auth, master_key_present) =
+        state.with_auth(|a| (a.require_auth, a.master_key.is_some()));
     if !admin_loopback_allowed(
         peer.ip().is_loopback(),
         require_auth,
         crate::tools::mesh_enabled(),
         state.config.fleet,
+        master_key_present,
     ) {
         return Err(GatewayError::Unauthorized(format!(
             "{action} requires the master key."
@@ -369,6 +387,15 @@ pub struct ConfigPatch {
     /// the existing set is preserved.
     #[serde(default)]
     pub custom_evaluators: Option<Vec<crate::evaluators::Evaluator>>,
+    /// Per-stage active-backend selection (W6a). Names which registered backend is
+    /// active for each inverted stage. Every requested id is validated against the
+    /// live registry's `available()` set BEFORE persist (fail-closed: an unknown id
+    /// is rejected with `BadRequest` listing the registered ids), so a saved config
+    /// can never brick the next boot. `budget` — the one registry with a `&self`
+    /// `set_active` — is swapped live; the rest are startup snapshots (like
+    /// `routing`/`tools`), so their new selection takes effect on the next restart.
+    #[serde(default)]
+    pub backends: Option<StageBackendsConfig>,
 }
 
 /// Whether a [`ConfigPatch`] carries no updatable field at all. Extracted as a
@@ -377,6 +404,7 @@ pub struct ConfigPatch {
 /// unit-testable without building a request. Each argument is one
 /// `patch.<field>.is_some()`.
 #[allow(clippy::fn_params_excessive_bools, clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn patch_is_empty(
     firewall: bool,
     budgets: bool,
@@ -386,6 +414,7 @@ fn patch_is_empty(
     org_overlays: bool,
     agent_overlays: bool,
     custom_evaluators: bool,
+    backends: bool,
 ) -> bool {
     !(firewall
         || budgets
@@ -394,7 +423,55 @@ fn patch_is_empty(
         || tools
         || org_overlays
         || agent_overlays
-        || custom_evaluators)
+        || custom_evaluators
+        || backends)
+}
+
+/// Validate a per-stage backend selection against the live registries before it
+/// is persisted or applied (W6a). Every requested id must be registered in that
+/// stage's registry (`available()`), else the patch is refused with a `BadRequest`
+/// listing the registered ids — otherwise a persisted unknown id would refuse the
+/// NEXT boot (`AppState::new` fails closed). A disabled stage (empty `available`,
+/// only semantic_cache today) accepts only the default `"builtin"` no-op.
+fn validate_stage_backends(
+    state: &SharedState,
+    sel: &StageBackendsConfig,
+) -> Result<(), GatewayError> {
+    let checks: [(&str, &str, Vec<String>); 7] = [
+        ("budget", sel.budget.as_str(), state.budget.available()),
+        ("cache", sel.cache.as_str(), state.cache.available()),
+        (
+            "semantic_cache",
+            sel.semantic_cache.as_str(),
+            state.semantic_cache.available(),
+        ),
+        ("audit", sel.audit.as_str(), state.audit.available()),
+        ("evals", sel.evals.as_str(), state.evals.available()),
+        (
+            "circuit_breaker",
+            sel.circuit_breaker.as_str(),
+            state.circuit_breaker.available(),
+        ),
+        (
+            "rate_limit",
+            sel.rate_limit.as_str(),
+            state.rate_limiter.available(),
+        ),
+    ];
+    for (stage, requested, available) in checks {
+        let known = if available.is_empty() {
+            requested == crate::config::default_stage_backend()
+        } else {
+            available.iter().any(|id| id == requested)
+        };
+        if !known {
+            return Err(GatewayError::BadRequest(format!(
+                "backends.{stage}: unknown backend '{requested}'; registered backends: [{}]",
+                available.join(", ")
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Normalize every overlay in a full-replacement map (FIX 2): each entry has its
@@ -459,12 +536,20 @@ pub async fn put_config(
         patch.firewall_org_overlays.is_some(),
         patch.firewall_agent_overlays.is_some(),
         patch.custom_evaluators.is_some(),
+        patch.backends.is_some(),
     ) {
         return Err(GatewayError::BadRequest(
             "Patch body must include at least one of: firewall, budgets, auth, routing, tools, \
-             firewall_org_overlays, firewall_agent_overlays, custom_evaluators"
+             firewall_org_overlays, firewall_agent_overlays, custom_evaluators, backends"
                 .to_string(),
         ));
+    }
+
+    // Validate any incoming per-stage backend selection against the live
+    // registries BEFORE persisting: an unknown id here would refuse the NEXT boot
+    // (AppState::new fails closed), so reject it now with the registered ids.
+    if let Some(backends) = &patch.backends {
+        validate_stage_backends(&state, backends)?;
     }
 
     // Validate any incoming custom evaluators before persisting (non-empty ids, no
@@ -505,7 +590,8 @@ pub async fn put_config(
         || patch.auth.is_some()
         || patch.routing.is_some()
         || patch.tools.is_some()
-        || patch.custom_evaluators.is_some();
+        || patch.custom_evaluators.is_some()
+        || patch.backends.is_some();
     let has_overlay_field = org_next.is_some() || agent_next.is_some();
     // Persist when a config-backed field changed (always — `save()` errors if no
     // path, as before), OR when overlays changed AND a writable config path exists
@@ -533,6 +619,12 @@ pub async fn put_config(
         }
         if let Some(tools) = &patch.tools {
             updated_config.tools = tools.clone();
+        }
+        // Per-stage backend selection (W6a): persisted so a restart's
+        // `AppState::new` reapplies it. Already validated against the live
+        // registries above, so the persisted ids can never brick the next boot.
+        if let Some(backends) = &patch.backends {
+            updated_config.backends = backends.clone();
         }
         // Custom evaluators (full replacement). Snapshot-only, like routing/tools:
         // persisted here, read from the startup config on the request path, so it
@@ -585,6 +677,14 @@ pub async fn put_config(
     if let Some(routing) = patch.routing {
         state.update_smart_router(routing.smart_routing);
     }
+    // Per-stage backend selection (W6a): budget is the one registry with a `&self`
+    // `set_active`, so its selection swaps live (validated above → cannot fail).
+    // The other stages' registries take `&mut self` and are startup snapshots, so
+    // their persisted selection takes effect on the next restart — the same
+    // restart-only discipline as `routing.model_map` / `tools` / `custom_evaluators`.
+    if let Some(backends) = &patch.backends {
+        state.budget.set_active(&backends.budget);
+    }
 
     // Apply the standalone overlay-store replacements (§6) live, using the
     // normalized maps. Each resolver write invalidates the scanner cache, so the
@@ -617,15 +717,16 @@ mod tests {
     #[test]
     fn loopback_no_auth_no_mesh_is_allowed() {
         // The classic local-dev case: loopback peer, no base auth, mesh off,
-        // fleet off.
-        assert!(admin_loopback_allowed(true, false, false, false));
+        // fleet off, and no master key provisioned. This is the zero-config
+        // Core-proxy path and MUST stay open.
+        assert!(admin_loopback_allowed(true, false, false, false, false));
     }
 
     #[test]
     fn mesh_neutralizes_loopback_trust() {
         // #478 B-9: under mesh a tailnet peer appears as 127.0.0.1, so loopback
         // trust must be neutralized — admin requires the master key.
-        assert!(!admin_loopback_allowed(true, false, true, false));
+        assert!(!admin_loopback_allowed(true, false, true, false, false));
     }
 
     #[test]
@@ -633,18 +734,26 @@ mod tests {
         // WS2: behind a co-located fleet LB an external caller appears as
         // 127.0.0.1, so fleet mode drops loopback trust — admin requires the
         // master key even for a loopback peer.
-        assert!(!admin_loopback_allowed(true, false, false, true));
+        assert!(!admin_loopback_allowed(true, false, false, true, false));
+    }
+
+    #[test]
+    fn provisioned_master_key_neutralizes_loopback_trust() {
+        // P2 #2: a master key set in gateway.toml with require_auth=false must
+        // still gate these control-plane reads — loopback trust is neutralized
+        // once an admin key exists, so config/audit require it.
+        assert!(!admin_loopback_allowed(true, false, false, false, true));
     }
 
     #[test]
     fn remote_peer_never_loopback_allowed() {
-        assert!(!admin_loopback_allowed(false, false, false, false));
-        assert!(!admin_loopback_allowed(false, false, true, false));
+        assert!(!admin_loopback_allowed(false, false, false, false, false));
+        assert!(!admin_loopback_allowed(false, false, true, false, false));
     }
 
     #[test]
     fn require_auth_forces_master_key() {
-        assert!(!admin_loopback_allowed(true, true, false, false));
+        assert!(!admin_loopback_allowed(true, true, false, false, false));
     }
 
     // ── §6 gateway-local firewall overlay stores (org/agent scopes) ───────────
@@ -737,24 +846,82 @@ mod tests {
     fn patch_is_empty_true_only_when_every_field_absent() {
         // The all-none case is the only rejection.
         assert!(patch_is_empty(
-            false, false, false, false, false, false, false, false
+            false, false, false, false, false, false, false, false, false
         ));
         // Regression guard for the loosened check: an OVERLAY-ONLY patch (the
         // standalone-desktop authoring case) must NOT be rejected as empty.
         assert!(!patch_is_empty(
-            false, false, false, false, false, true, false, false
+            false, false, false, false, false, true, false, false, false
         ));
         assert!(!patch_is_empty(
-            false, false, false, false, false, false, true, false
+            false, false, false, false, false, false, true, false, false
         ));
         // A custom-evaluators-only patch is also non-empty.
         assert!(!patch_is_empty(
-            false, false, false, false, false, false, false, true
+            false, false, false, false, false, false, false, true, false
+        ));
+        // A backends-only patch (per-stage backend selection) is non-empty.
+        assert!(!patch_is_empty(
+            false, false, false, false, false, false, false, false, true
         ));
         // A classic config-field patch is still non-empty.
         assert!(!patch_is_empty(
-            true, false, false, false, false, false, false, false
+            true, false, false, false, false, false, false, false, false
         ));
+    }
+
+    /// The PUT path validates every requested stage backend against the live
+    /// registries: the default (all-`"builtin"`) selection is accepted; a
+    /// registered non-builtin (here a stub registered into the budget registry) is
+    /// accepted; an unknown id is refused with a `BadRequest` that names the stage.
+    #[test]
+    fn put_config_validates_stage_backends() {
+        use super::validate_stage_backends;
+        use crate::budget::{BudgetBackend, BudgetDecision};
+        use crate::config::{BudgetConfig, StageBackendsConfig};
+        use crate::error::GatewayError;
+        use std::sync::Arc;
+
+        struct StubBudget(BudgetConfig);
+        impl BudgetBackend for StubBudget {
+            fn config(&self) -> &BudgetConfig {
+                &self.0
+            }
+            fn evaluate(&self, _u: Option<&str>, _a: Option<&str>) -> Option<BudgetDecision> {
+                None
+            }
+            fn evaluate_session(&self, _s: Option<&str>) -> Option<BudgetDecision> {
+                None
+            }
+            fn record(&self, _u: Option<&str>, _a: Option<&str>, _t: u64) {}
+            fn record_session(&self, _s: Option<&str>, _t: u64) {}
+        }
+
+        let state = Arc::new(test_state());
+
+        // Default (all "builtin") selection validates cleanly.
+        assert!(validate_stage_backends(&state, &StageBackendsConfig::default()).is_ok());
+
+        // An unknown id for any stage is refused, naming the stage.
+        let mut bad = StageBackendsConfig::default();
+        bad.cache = "ghost".to_string();
+        match validate_stage_backends(&state, &bad) {
+            Err(GatewayError::BadRequest(msg)) => {
+                assert!(msg.contains("backends.cache") && msg.contains("ghost"), "{msg}");
+            }
+            other => panic!("expected BadRequest, got {other:?}"),
+        }
+
+        // A registered non-builtin backend validates — and the live budget registry
+        // then swaps to it (the &self hot-swap the PUT handler performs).
+        state
+            .budget
+            .register("stub", Arc::new(StubBudget(BudgetConfig::default())));
+        let mut good = StageBackendsConfig::default();
+        good.budget = "stub".to_string();
+        assert!(validate_stage_backends(&state, &good).is_ok());
+        assert!(state.budget.set_active("stub"));
+        assert_eq!(state.budget.active_id().as_str(), "stub");
     }
 
     #[test]

@@ -165,11 +165,11 @@ pub async fn fail_run(run_id: &str, error: &str) -> Result<(), String> {
         let run_id = run_id.to_string();
         let error = error.to_string();
         tokio::spawn(async move {
-            if let Some(engine) = crate::healing::global_engine() {
-                engine
+            if let Some(client) = crate::healing_client::global_client() {
+                client
                     .report_failure(
                         &run_id,
-                        crate::healing::HealSource::Workflow,
+                        ryu_healing::HealSource::Workflow,
                         format!("Workflow run {run_id} failed."),
                         error,
                     )
@@ -1347,7 +1347,7 @@ async fn run_skill(
     run_id: &str,
     node_id: &str,
 ) -> Result<String, String> {
-    let record = crate::skills::SkillRegistry::load()
+    let record = ryu_skills::SkillRegistry::load()
         .list_all()
         .into_iter()
         .find(|s| s.id == skill_id)
@@ -1595,7 +1595,7 @@ async fn run_recipe(recipe: &str, params: &serde_json::Value) -> Result<String, 
     // Replay routes through the live ghost engine (input synthesis + AX). The
     // params object's string leaves were already template-resolved by the caller,
     // so `{{input}}`/`{{nodes.*}}` slots are filled before substitution.
-    let result = crate::recipes::run(recipe, params.clone())
+    let result = ryu_recipes::run(recipe, params.clone())
         .await
         .map_err(|e| format!("recipe node: '{recipe}' failed: {e}"))?;
     Ok(result.to_string())
@@ -1764,7 +1764,7 @@ async fn run_ghost_action(
         .await
         .map_err(|e| format!("ghost action node: '{action}' failed: {e}"))?;
     // Unwrap ghost's `{ content: [{ text }], isError? }` envelope; surface errors.
-    crate::recipes::extract_mcp_json(&result)
+    ryu_recipes::extract_mcp_json(&result)
         .map(|v| v.to_string())
         .map_err(|e| format!("ghost action node: '{action}' failed: {e}"))
 }

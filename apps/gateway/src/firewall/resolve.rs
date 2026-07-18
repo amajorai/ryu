@@ -554,7 +554,7 @@ mod tests {
         let r = FirewallResolver::new(base());
         let cfg = r.resolve(None, None, None);
         assert!(cfg.enabled);
-        assert_eq!(cfg.policy, FirewallPolicy::WarnAndContinue);
+        assert_eq!(cfg.policy, FirewallPolicy::Sanitize);
         assert!(cfg.custom_patterns.is_empty());
         assert!(cfg.locked_fields.is_empty());
     }

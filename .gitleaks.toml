@@ -10,4 +10,10 @@ regexes = [
 ]
 paths = [
   '''apps/gateway/src/audit/mod.rs''',
+  # Vendored single-file plugin-UI fixtures: minified/bundled third-party web apps
+  # (e.g. the Excalidraw-style whiteboard) shipped verbatim as Core manifest fixtures.
+  # They embed public client identifiers (a Firebase web apiKey — a project id, not a
+  # credential) and trip generic-api-key on minified JS tokens. No real Ryu secret lives
+  # here; scanning a vendored bundle is out of scope for this repo's secret hygiene.
+  '''apps/core/src/plugin_manifest/fixtures/.*\.ui\.html''',
 ]

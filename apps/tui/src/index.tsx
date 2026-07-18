@@ -11,6 +11,7 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { setSurfaceProvider } from "@ryuhq/core-client/client";
 import { App } from "./App.tsx";
+import { isInteractive, runCli } from "./cli/dispatch.ts";
 import { ensureCoreRunning } from "./core/bootstrap.ts";
 import { buildTarget } from "./core/target.ts";
 
@@ -22,16 +23,31 @@ import { buildTarget } from "./core/target.ts";
 // setBuyerTokenProvider precedent — the shared client never hardcodes a surface.
 setSurfaceProvider(() => "cli");
 
-const main = async (): Promise<void> => {
+// Boot the interactive TUI: bring a local node online if none is answering (no-op
+// if Core is already up or the target is remote), then mount the shell. This is the
+// bare `ryu` / `ryu tui` path — unchanged from before the CLI dispatcher.
+const bootInteractive = async (): Promise<void> => {
 	const target = buildTarget();
-	// Bring a local node online if none is answering (no-op if Core is already up or
-	// the target is remote). Lets `ryu-tui` alone start everything, like the desktop.
 	await ensureCoreRunning(target);
 	const renderer = await createCliRenderer({ exitOnCtrlC: false });
 	createRoot(renderer).render(<App target={target} />);
 };
 
-main().catch((err) => {
-	process.stderr.write(`ryu-tui failed to start: ${String(err)}\n`);
-	process.exitCode = 1;
-});
+// argv dispatch (the gh/docker shape). A recognized subcommand runs non-interactively
+// and exits with a code; no subcommand (or `tui`) opens the interactive shell. Unlike
+// the interactive path, one-shot commands do NOT auto-spawn a local Core — they talk
+// to whatever node is configured and fail with a clear error if it is unreachable.
+const argv = process.argv.slice(2);
+if (isInteractive(argv)) {
+	bootInteractive().catch((err) => {
+		process.stderr.write(`ryu failed to start: ${String(err)}\n`);
+		process.exitCode = 1;
+	});
+} else {
+	runCli(argv)
+		.then((code) => process.exit(code))
+		.catch((err) => {
+			process.stderr.write(`ryu: ${String(err)}\n`);
+			process.exit(1);
+		});
+}

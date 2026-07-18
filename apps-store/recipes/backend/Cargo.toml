@@ -1,0 +1,39 @@
+[package]
+name = "ryu-recipes"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Recipes: ghost-os parity for Ryu's workflow system — parameterized, replayable native-desktop automations (record once with a frontier model, replay forever with a small one). An extracted Core capability crate owning the on-disk store surface (over ghost-core's RecipeStore), the replay/record engine, and the `/api/recipes/*` HTTP surface. In-process default; Core consumes it as a NON-optional path dependency because the workflow executor's GhostAction/Recipe nodes need `run`/`extract_mcp_json` unconditionally — the `recipes` cargo feature only gates the HTTP routes. The live-ghost couplings (the shared MCP registry for replay, and the dedicated recording subprocess / McpSession lifecycle) are inverted through the `RecipesHost` trait so this crate has ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# The out-of-process sidecar binary. Core spawns it (`kind: local`, sibling on
+# PATH / `RYU_RECIPES_BIN`), health-checks it, and proxies `/api/recipes/*` to it
+# on loopback — exactly like `ryu-teams` / `ryu-finetune`. The same crate still
+# compiles INTO Core as a NON-optional lib path-dependency (the workflow
+# executor's Recipe/GhostAction nodes reach `run`/`extract_mcp_json` in every
+# build); this bin is just the process shell around the crate's `routes()`.
+[[bin]]
+name = "ryu-recipes"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
+# axum router has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+ghost-core = { path = "../../../crates/ghost/core" }
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+async-trait = "0.1"
+# Sidecar-binary-only deps (structured logging + the loopback callback client),
+# mirroring `ryu-monitors`/`ryu-teams`. Core already pulls these transitively, so
+# the in-process build gains no new dep.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The sidecar's `CoreCallback` host POSTs replay/record back to Core's
+# `/api/host/recipes/*` endpoints (ext-bearer authed) — the live ghost engine
+# stays kernel-side in Core.
+reqwest = { version = "0.12", features = ["json"] }

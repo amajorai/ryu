@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::task::JoinHandle;
 
@@ -10,6 +10,66 @@ use crate::sidecar::{onboarding::SetupManager, HealthStatus, Sidecar, SidecarSta
 
 const HEALTH_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_REQUIRED_RETRIES: u32 = 3;
+/// How often the idle reaper (`spawn_idle_reaper`) checks whether an
+/// idle-configured sidecar is due to be scaled to zero. Coarse on purpose: a
+/// stopped-a-few-seconds-late sidecar costs nothing, and a slow tick keeps the
+/// task's wakeups negligible.
+const IDLE_REAP_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The name of the env var seeding [`SidecarManager::idle_config`]: a
+/// comma-separated `name=seconds` list (e.g. `llamacpp-rerank=900,research=1800`).
+/// Unset/empty ⇒ idle-stop is OFF for every sidecar (behaviour unchanged). This is
+/// the Rivet-style scale-to-zero seam — opt-in, per-sidecar, default-off.
+const IDLE_ENV: &str = "RYU_SIDECAR_IDLE_SECS";
+
+/// Per-sidecar activity bookkeeping the idle reaper reads: when a request last
+/// touched the sidecar and how many are in-flight right now. Updated on the proxy
+/// path via [`SidecarManager::touch_activity`] / [`SidecarManager::enter_request`].
+#[derive(Debug)]
+struct ActivityState {
+    /// When a request last hit this sidecar (or when it was last woken). The idle
+    /// clock is `now - last_activity`.
+    last_activity: Instant,
+    /// Requests currently in flight against this sidecar. Non-zero pins the
+    /// sidecar alive so the reaper can never stop it mid-request (the conservative
+    /// guard for held-open streams that can outlive the idle timeout).
+    in_flight: u32,
+}
+
+impl Default for ActivityState {
+    fn default() -> Self {
+        Self {
+            last_activity: Instant::now(),
+            in_flight: 0,
+        }
+    }
+}
+
+/// Parse the [`IDLE_ENV`] value — a comma-separated `name=seconds` list — into the
+/// per-sidecar idle-stop map. Blank/unparseable/zero entries are skipped (off for
+/// that sidecar) rather than treated as instant-stop, so a typo can never make a
+/// sidecar vanish the moment it starts. An empty result means the feature is off.
+fn parse_idle_config(raw: &str) -> HashMap<String, Duration> {
+    let mut out = HashMap::new();
+    for entry in raw.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let Some((name, secs)) = entry.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        let Ok(secs) = secs.trim().parse::<u64>() else {
+            continue;
+        };
+        if name.is_empty() || secs == 0 {
+            continue;
+        }
+        out.insert(name.to_string(), Duration::from_secs(secs));
+    }
+    out
+}
 /// How often the resource sampler refreshes per-engine memory/CPU. CPU% is a
 /// delta since the previous refresh of each PID, so the cadence is also the CPU
 /// averaging window.
@@ -67,6 +127,39 @@ pub struct SidecarManager {
     /// so the numbers ride the existing `/api/sidecar/status` poll. Keyed by
     /// sidecar name; absent until the first sample lands.
     resources: Mutex<HashMap<String, ResourceSample>>,
+    /// Per-sidecar idle-stop timeout — the Rivet-style scale-to-zero config. Empty
+    /// by default (feature OFF: nothing is ever idle-stopped and the reaper task is
+    /// not even spawned); seeded from [`IDLE_ENV`] at construction. Keyed by the
+    /// same names as the two sidecar maps (built-in bare name, or manifest
+    /// `<plugin>/<name>` key). A configured sidecar that has served no request for
+    /// its timeout (and has none in flight) is stopped by [`Self::spawn_idle_reaper`];
+    /// the next request wakes it on demand via the existing lazy-start path.
+    idle_config: HashMap<String, Duration>,
+    /// Per-sidecar last-activity + in-flight bookkeeping the idle reaper reads.
+    /// Populated lazily (on the first `touch_activity`/`enter_request`/`wake`), so a
+    /// sidecar with no recorded activity is never a reaper target — the entry's
+    /// existence is proof the idle path is actually wired for it.
+    activity: Mutex<HashMap<String, ActivityState>>,
+    /// Per-name idle-stop overrides declared at runtime (a manifest sidecar's
+    /// `idle_stop_secs`, applied on enable via [`Self::set_idle_override`]). Merged
+    /// OVER the construction-time [`Self::idle_config`] env seed, so a per-app
+    /// declaration extends idle-stop beyond the operator env without a restart. Keyed
+    /// by the same names as the sidecar maps (manifest `<plugin>/<name>`).
+    idle_overrides: Mutex<HashMap<String, Duration>>,
+    /// Per-name **start serialization** locks (async). Every process start of a
+    /// dynamic sidecar — the eager [`Self::register_and_start`] and the on-demand
+    /// [`Self::wake_sidecar`] — takes the name's lock across its `is_running` check +
+    /// `start`, so two concurrent first requests (or an enable racing a first proxy
+    /// hit) can never double-start the same child. The outer `Mutex` only guards the
+    /// map (get-or-insert the per-name `Arc`); it is never held across an `.await`.
+    start_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Names registered **register-only** for lazy (spawn-on-first-use) activation:
+    /// they appear in [`Self::dynamic`] and `statuses` but their process is not
+    /// started until a proxy/broker hit wakes them. Read by `statuses` so a
+    /// scaled-to-zero lazy sidecar reads as "will wake on demand" rather than
+    /// "crashed", and by [`Self::is_wake_eligible`] so the proxy only wakes sidecars
+    /// that opted into on-demand start.
+    lazy_registered: RwLock<HashSet<String>>,
 }
 
 impl SidecarManager {
@@ -91,12 +184,24 @@ impl SidecarManager {
             setup,
             active_engine: tokio::sync::Mutex::new(active),
             resources: Mutex::new(HashMap::new()),
+            idle_config: parse_idle_config(&std::env::var(IDLE_ENV).unwrap_or_default()),
+            activity: Mutex::new(HashMap::new()),
+            idle_overrides: Mutex::new(HashMap::new()),
+            start_locks: Mutex::new(HashMap::new()),
+            lazy_registered: RwLock::new(HashSet::new()),
         })
     }
 
     /// Create an empty manager with no sidecars for use in unit tests.
     #[cfg(test)]
     pub fn new_noop() -> Arc<Self> {
+        Self::new_noop_with_idle(HashMap::new())
+    }
+
+    /// Like [`Self::new_noop`] but with an explicit idle-stop config, so tests can
+    /// exercise the reaper's decision logic without touching process env.
+    #[cfg(test)]
+    pub fn new_noop_with_idle(idle_config: HashMap<String, Duration>) -> Arc<Self> {
         Arc::new(Self {
             sidecars: HashMap::new(),
             dynamic: RwLock::new(HashMap::new()),
@@ -106,6 +211,11 @@ impl SidecarManager {
             setup: Arc::new(crate::sidecar::onboarding::SetupManager::new()),
             active_engine: tokio::sync::Mutex::new(None),
             resources: Mutex::new(HashMap::new()),
+            idle_config,
+            activity: Mutex::new(HashMap::new()),
+            idle_overrides: Mutex::new(HashMap::new()),
+            start_locks: Mutex::new(HashMap::new()),
+            lazy_registered: RwLock::new(HashSet::new()),
         })
     }
 
@@ -333,32 +443,100 @@ impl SidecarManager {
         sidecar: Arc<dyn Sidecar>,
     ) -> anyhow::Result<()> {
         let name = sidecar.name().to_string();
-        // Idempotency: already registered and running → no-op (its port claim, if
-        // any, is already held from the first start).
+        // Register (claim port + insert). Idempotent: already-running → no-op.
+        if self.register_inner(&sidecar, false)? {
+            return Ok(());
+        }
+        // Start + monitor, serialized by the per-name start lock so a concurrent
+        // enable / first-proxy-wake of the same name cannot double-start the child.
+        self.start_dynamic_locked(&name).await
+    }
+
+    /// **Register-only** (the lazy / spawn-on-first-use half): claim the port and
+    /// insert the sidecar into the runtime registry so it appears in
+    /// `/api/sidecar/status`, but do NOT start its process or spawn a health monitor.
+    /// The first proxy/broker hit wakes it on demand ([`Self::wake_sidecar`]). Marks
+    /// the name lazy so `statuses` reports scale-to-zero as "will wake" rather than
+    /// "crashed", and so the proxy only wakes opted-in sidecars. The grant gate STILL
+    /// runs at the (enable-time) call site — wake never re-runs construction, so
+    /// there is no gate bypass. Idempotent: a re-register of a running sidecar is a
+    /// no-op; of a stopped-but-registered one re-affirms the lazy mark.
+    pub fn register(self: &Arc<Self>, sidecar: Arc<dyn Sidecar>) -> anyhow::Result<()> {
+        self.register_inner(&sidecar, true)?;
+        Ok(())
+    }
+
+    /// Shared register step for [`register_and_start`] (eager) and [`register`]
+    /// (lazy). Claims the port, inserts into `dynamic`, and records/clears the lazy
+    /// mark. Returns `Ok(true)` when the sidecar was already registered AND running
+    /// (the caller short-circuits — nothing to start). Never starts the process.
+    fn register_inner(&self, sidecar: &Arc<dyn Sidecar>, lazy: bool) -> anyhow::Result<bool> {
+        let name = sidecar.name().to_string();
+        // Idempotency: already registered and running → no-op (port claim already held).
         if let Some(existing) = self.dynamic.read().unwrap().get(&name) {
             if existing.is_running() {
-                return Ok(());
+                return Ok(true);
             }
         }
-        // Port registry: claim the declared port BEFORE starting, so a collision
-        // with a built-in (already bound) or another plugin fails fast with a clear
-        // error instead of a confusing bind failure inside the child.
+        // Port registry: claim the declared port BEFORE inserting, so a collision
+        // with a built-in (already bound) or another plugin fails fast. Idempotent
+        // for the same owner, so a re-register keeps the claim.
         if let Some(port) = sidecar.port() {
             self.claim_port(port, &name)?;
         }
-        // Insert (replacing any dead prior instance), then start + monitor.
         self.dynamic
             .write()
             .unwrap()
-            .insert(name.clone(), Arc::clone(&sidecar));
-        if let Err(e) = sidecar.start().await {
-            // Start failed: release the port claim so a later retry / different
-            // plugin can use it. Leave it registered so `statuses` shows it as
-            // not-running rather than vanishing; the caller logs the error.
-            self.release_port(&name);
-            return Err(e);
+            .insert(name.clone(), Arc::clone(sidecar));
+        {
+            let mut set = self.lazy_registered.write().unwrap();
+            if lazy {
+                set.insert(name);
+            } else {
+                set.remove(&name);
+            }
         }
-        self.spawn_health_monitor(&name);
+        Ok(false)
+    }
+
+    /// Get-or-create the per-name async start lock. The map `Mutex` is held only for
+    /// the get-or-insert and is never held across an `.await`; callers hold the
+    /// returned per-name lock across `start().await`.
+    fn start_lock_for(&self, name: &str) -> Arc<tokio::sync::Mutex<()>> {
+        Arc::clone(
+            self.start_locks
+                .lock()
+                .unwrap()
+                .entry(name.to_string())
+                .or_default(),
+        )
+    }
+
+    /// Resolve a sidecar Arc from whichever map owns it (built-in `sidecars` or the
+    /// runtime `dynamic` registry), cloning it out so no lock guard is held by the
+    /// caller. The single lookup helper the wake / reaper / health paths share.
+    fn resolve_sidecar(&self, name: &str) -> Option<Arc<dyn Sidecar>> {
+        self.sidecars
+            .get(name)
+            .map(Arc::clone)
+            .or_else(|| self.dynamic.read().unwrap().get(name).map(Arc::clone))
+    }
+
+    /// Start an already-registered dynamic sidecar under its per-name start lock,
+    /// then spawn its health monitor. A no-op (Ok) if it is already running or gone
+    /// from the registry. Shared by the eager [`register_and_start`] path.
+    async fn start_dynamic_locked(self: &Arc<Self>, name: &str) -> anyhow::Result<()> {
+        let lock = self.start_lock_for(name);
+        let _guard = lock.lock().await;
+        let Some(sidecar) = self.dynamic.read().unwrap().get(name).map(Arc::clone) else {
+            return Ok(());
+        };
+        if sidecar.is_running() {
+            return Ok(());
+        }
+        sidecar.start().await?;
+        self.spawn_health_monitor(name);
+        self.touch_activity(name);
         Ok(())
     }
 
@@ -412,6 +590,12 @@ impl SidecarManager {
         let sidecar = self.dynamic.write().unwrap().remove(name);
         // Release the port claim so the port frees for a re-enable or another plugin.
         self.release_port(name);
+        // Drop the idle/lazy/start-lock bookkeeping so a re-enable starts clean and
+        // a stale idle clock can't fire against a name that no longer exists.
+        self.lazy_registered.write().unwrap().remove(name);
+        self.idle_overrides.lock().unwrap().remove(name);
+        self.start_locks.lock().unwrap().remove(name);
+        self.activity.lock().unwrap().remove(name);
         if let Some(sc) = sidecar {
             sc.stop().await?;
         }
@@ -445,6 +629,11 @@ impl SidecarManager {
         let sidecar = Arc::clone(sidecar);
         sidecar.start().await?;
         self.spawn_health_monitor(name);
+        // Every lazy-start call site is also a request touchpoint: recording
+        // activity here means the fire-and-forget `start_sidecar` spawns that wake
+        // an idle-stopped built-in (rerank per search, research per data request)
+        // reset its idle clock with zero extra wiring at the call site.
+        self.touch_activity(name);
         Ok(())
     }
 
@@ -478,7 +667,27 @@ impl SidecarManager {
         sidecar.uninstall(delete_data).await
     }
 
+    /// The declared runtime **permission posture** of every native manifest
+    /// sidecar (unified permission grammar). Additive companion to [`Self::statuses`]:
+    /// where `statuses` reports liveness/resources, this reports what each native
+    /// (unsandboxed) sidecar *declared* it needs and that the declaration is
+    /// recorded-but-not-OS-enforced this wave (see `ManifestSidecar`). Sourced from
+    /// the process-global record `ManifestSidecar::start` writes.
+    ///
+    /// Followup (files outside this change's set): fold `declared`/`enforced` onto
+    /// [`SidecarStatus`] (`sidecar/mod.rs`) + the `/api/sidecar/status` handler
+    /// (`server/mod.rs`) so a single poll carries both. This method is the seam.
+    pub fn native_sidecar_permissions(
+        &self,
+    ) -> Vec<crate::sidecar::manifest_sidecar::NativeSidecarPermissions> {
+        crate::sidecar::manifest_sidecar::native_sidecar_permission_reports()
+    }
+
     pub fn statuses(&self) -> Vec<SidecarStatus> {
+        // Snapshot the lazy set first (its own lock, taken before the others so it
+        // never nests inside dynamic/resources) so a scaled-to-zero lazy sidecar can
+        // be reported as "will wake on demand" rather than misread as crashed.
+        let lazy = self.lazy_registered.read().unwrap().clone();
         // Snapshot the dynamic (manifest) sidecars FIRST, before taking `resources`,
         // to keep the single lock order (dynamic → resources) the resource sampler
         // also follows — avoiding an AB-BA deadlock the compiler cannot catch.
@@ -495,6 +704,7 @@ impl SidecarManager {
             SidecarStatus {
                 name: name.to_string(),
                 running: sidecar.is_running(),
+                lazy: lazy.contains(name),
                 pid: sidecar.pid(),
                 memory_bytes: sample.map(|s| s.memory_bytes),
                 cpu_percent: sample.map(|s| s.cpu_percent),
@@ -558,6 +768,258 @@ impl SidecarManager {
         });
     }
 
+    // ── Idle-stop (Rivet-style scale-to-zero) ─────────────────────────────────
+
+    /// Record that a request just hit `name` — refreshes its idle clock so the
+    /// reaper won't scale it to zero. Cheap (one mutex + `Instant::now`); safe to
+    /// call for any sidecar (an entry for a non-idle-configured sidecar is inert).
+    /// Called on the proxy path of the idle-eligible sidecars.
+    pub fn touch_activity(&self, name: &str) {
+        self.activity
+            .lock()
+            .unwrap()
+            .entry(name.to_string())
+            .or_default()
+            .last_activity = Instant::now();
+    }
+
+    /// Begin an in-flight request against `name`, returning a guard that pins the
+    /// sidecar alive (in-flight > 0) for the request's whole duration and refreshes
+    /// its idle clock on drop. Use for Core-side requests that can outlive the idle
+    /// timeout (held-open streams); short request/response calls only need
+    /// [`Self::touch_activity`].
+    pub fn enter_request(self: &Arc<Self>, name: &str) -> ActivityGuard {
+        {
+            let mut activity = self.activity.lock().unwrap();
+            let st = activity.entry(name.to_string()).or_default();
+            st.in_flight += 1;
+            st.last_activity = Instant::now();
+        }
+        ActivityGuard {
+            manager: Arc::clone(self),
+            name: name.to_string(),
+        }
+    }
+
+    /// Wake a sidecar on demand — the scale-from-zero half of idle-stop. If it
+    /// exists (built-in or manifest) and isn't running, start its process and
+    /// re-spawn its health monitor (which the reaper cancels on stop). Seeds/refreshes
+    /// the activity entry so the idle clock restarts. Idempotent when already
+    /// running (a plain touch). Built-in idle-eligible sidecars already wake via
+    /// their per-request `start_sidecar` calls; this is for manifest sidecars whose
+    /// wake path is not `start_sidecar`.
+    pub async fn wake_sidecar(self: &Arc<Self>, name: &str) -> anyhow::Result<bool> {
+        let sidecar = self
+            .resolve_sidecar(name)
+            .ok_or_else(|| anyhow::anyhow!("unknown sidecar: {name}"))?;
+        self.touch_activity(name);
+        if sidecar.is_running() {
+            return Ok(false);
+        }
+        // Serialize concurrent wakes of the SAME name so two racing first requests
+        // (or an enable racing a first proxy hit) start the child exactly once. The
+        // is_running re-check under the lock is what closes the previous race where
+        // `wake` read is_running then started outside any lock.
+        let lock = self.start_lock_for(name);
+        let _guard = lock.lock().await;
+        if sidecar.is_running() {
+            return Ok(false); // a racing waker already started it.
+        }
+        sidecar.start().await?;
+        self.spawn_health_monitor(name);
+        self.touch_activity(name);
+        Ok(true)
+    }
+
+    /// Wake `name` on demand and (if it had to be started) block until it reports
+    /// healthy — the proxy/broker warm-up gate. The WHOLE operation (start + health
+    /// poll) is bounded by `timeout` so a first `start()` that includes a binary
+    /// download can never stall the caller past its budget; a timeout is surfaced as
+    /// an error the proxy turns into a 503 "warming" (a resumable `.part` download
+    /// means a later request warms it). Returns `Ok(true)` when it cold-started the
+    /// process (the "first hit" moment the caller fires an activation event on),
+    /// `Ok(false)` when it was already warm (no health wait needed).
+    pub async fn wake_and_await_healthy(
+        self: &Arc<Self>,
+        name: &str,
+        timeout: Duration,
+    ) -> anyhow::Result<bool> {
+        let this = Arc::clone(self);
+        let name_owned = name.to_string();
+        tokio::time::timeout(timeout, async move {
+            let woke = this.wake_sidecar(&name_owned).await?;
+            if woke {
+                this.await_healthy(&name_owned).await?;
+            }
+            Ok::<bool, anyhow::Error>(woke)
+        })
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("sidecar '{name}' did not warm within {}s", timeout.as_secs())
+        })?
+    }
+
+    /// Poll a sidecar's health check until it is [`HealthStatus::Healthy`], sleeping
+    /// briefly between attempts. Unbounded on its own — always called inside the
+    /// `wake_and_await_healthy` timeout that bounds it.
+    async fn await_healthy(&self, name: &str) -> anyhow::Result<()> {
+        let sidecar = self
+            .resolve_sidecar(name)
+            .ok_or_else(|| anyhow::anyhow!("unknown sidecar: {name}"))?;
+        loop {
+            if matches!(sidecar.health_check().await, HealthStatus::Healthy) {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+
+    /// Whether `name` opted into on-demand start — it was registered lazy, or it
+    /// carries an idle-stop timeout (env-seeded or per-app override) and so can be
+    /// scaled to zero and must re-wake. The proxy consults this so it only warms
+    /// sidecars that asked for it (a plain eager sidecar mid-download is untouched).
+    pub fn is_wake_eligible(&self, name: &str) -> bool {
+        self.lazy_registered.read().unwrap().contains(name)
+            || self.idle_config.contains_key(name)
+            || self.idle_overrides.lock().unwrap().contains_key(name)
+    }
+
+    /// Record a per-name idle-stop timeout declared at runtime (a manifest sidecar's
+    /// `idle_stop_secs`, applied on enable) — extends idle-stop beyond the
+    /// construction-time [`IDLE_ENV`] seed without a restart. A zero is ignored (the
+    /// validator already rejects sub-30s, but guard anyway so a stray 0 can't make a
+    /// sidecar vanish the instant it wakes).
+    pub fn set_idle_override(&self, name: &str, secs: u64) {
+        if secs == 0 {
+            return;
+        }
+        self.idle_overrides
+            .lock()
+            .unwrap()
+            .insert(name.to_string(), Duration::from_secs(secs));
+    }
+
+    /// Names of idle-configured sidecars whose idle clock has expired AND that have
+    /// no request in flight. Pure decision over the `activity` map (no sidecar-map
+    /// locks, no I/O) so the reaper's policy is unit-testable and there is no
+    /// nested-lock ordering to reason about. Only sidecars with a recorded activity
+    /// entry are eligible — the entry's existence is proof the idle path is wired,
+    /// so a configured-but-never-touched sidecar is never stopped out from under an
+    /// unwired caller.
+    fn idle_stop_due(&self, now: Instant) -> Vec<String> {
+        // Snapshot the per-name overrides FIRST, before locking `activity`, so the
+        // two locks are only ever acquired in the order overrides → activity (no
+        // AB-BA). `idle_config` is immutable post-construction, so it needs no lock.
+        let overrides = self.idle_overrides.lock().unwrap().clone();
+        if self.idle_config.is_empty() && overrides.is_empty() {
+            return Vec::new();
+        }
+        let activity = self.activity.lock().unwrap();
+        activity
+            .iter()
+            .filter_map(|(name, st)| {
+                let timeout = overrides
+                    .get(name)
+                    .or_else(|| self.idle_config.get(name))
+                    .copied()?;
+                if st.in_flight == 0 && now.saturating_duration_since(st.last_activity) >= timeout {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Spawn the background idle reaper: every [`IDLE_REAP_INTERVAL`] it stops each
+    /// idle-configured sidecar whose idle clock has expired (scale-to-zero). A no-op
+    /// when [`Self::idle_config`] is empty — the task is not even spawned, so the
+    /// default-off path adds nothing. The reaper stops the PROCESS only (via
+    /// `Sidecar::stop`) and, for a manifest sidecar, leaves it REGISTERED in
+    /// `dynamic` so the app⇄sidecar bridge survives and the next request can wake
+    /// it. It cancels the sidecar's health monitor first so it doesn't spam
+    /// "unhealthy" against a deliberately-stopped process; wake re-spawns it.
+    pub fn spawn_idle_reaper(self: &Arc<Self>) {
+        // The reaper is ALWAYS spawned (not gated on the env seed) because per-name
+        // idle overrides — a manifest sidecar's `idle_stop_secs` — land *after*
+        // construction, on plugin-enable. The per-tick decision ([`idle_stop_due`])
+        // is a no-op while both the env seed and the overrides are empty, so the
+        // default-off cost is one empty 30s tick.
+        if !self.idle_config.is_empty() {
+            tracing::info!(
+                "sidecar idle-stop enabled for: {:?}",
+                self.idle_config.keys().collect::<Vec<_>>()
+            );
+        }
+        let manager = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(IDLE_REAP_INTERVAL);
+            ticker.tick().await; // skip the immediate first tick
+            loop {
+                ticker.tick().await;
+                for name in manager.idle_stop_due(Instant::now()) {
+                    // Resolve the Arc from whichever map owns it (same pattern as
+                    // the health monitor). Snapshot it out before any await so no
+                    // lock guard is held across `.stop()`.
+                    let sidecar = manager.sidecars.get(&name).map(Arc::clone).or_else(|| {
+                        manager.dynamic.read().unwrap().get(&name).map(Arc::clone)
+                    });
+                    let Some(sidecar) = sidecar else {
+                        continue;
+                    };
+                    if !sidecar.is_running() {
+                        continue;
+                    }
+                    // Re-check under the activity lock right before stopping to
+                    // shrink the wake/stop race: a request that landed since
+                    // `idle_stop_due` ran (bumping in-flight or last_activity) must
+                    // spare the sidecar.
+                    if !manager.still_idle(&name, Instant::now()) {
+                        continue;
+                    }
+                    if let Some(handle) = manager.health_monitors.lock().unwrap().remove(&name) {
+                        handle.abort();
+                    }
+                    match sidecar.stop().await {
+                        Ok(()) => {
+                            tracing::info!("idle-stopped sidecar '{name}' (scale-to-zero)");
+                        }
+                        Err(e) => tracing::warn!("idle-stop of '{name}' failed: {e}"),
+                    }
+                    // Drop the activity entry so the next wake starts a fresh idle
+                    // clock (and a stale timestamp can't immediately re-fire).
+                    manager.activity.lock().unwrap().remove(&name);
+                }
+            }
+        });
+    }
+
+    /// Whether `name` is still idle (no in-flight request and idle clock still
+    /// expired) at `now`, re-read under the activity lock. Used by the reaper to
+    /// confirm nothing woke the sidecar between the decision and the stop.
+    fn still_idle(&self, name: &str, now: Instant) -> bool {
+        // Resolve the timeout (override wins over env seed) and DROP the overrides
+        // lock before touching `activity` — same overrides → activity order as
+        // `idle_stop_due`, never nested the other way.
+        let timeout = {
+            let overrides = self.idle_overrides.lock().unwrap();
+            overrides
+                .get(name)
+                .or_else(|| self.idle_config.get(name))
+                .copied()
+        };
+        let Some(timeout) = timeout else {
+            return false;
+        };
+        self.activity
+            .lock()
+            .unwrap()
+            .get(name)
+            .is_some_and(|st| {
+                st.in_flight == 0 && now.saturating_duration_since(st.last_activity) >= timeout
+            })
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     async fn start_with_retries(&self, sidecar: &Arc<dyn Sidecar>) -> anyhow::Result<()> {
@@ -614,6 +1076,26 @@ impl SidecarManager {
             }
         });
         self.health_monitors.lock().unwrap().insert(name, handle);
+    }
+}
+
+/// RAII guard from [`SidecarManager::enter_request`]. While it is alive the
+/// sidecar's in-flight count is non-zero, so the idle reaper can never scale it to
+/// zero mid-request; on drop it decrements the count and refreshes the idle clock.
+/// Drop is sync (a mutex, no `.await`), so it is safe to hold across a streaming
+/// response's whole lifetime.
+pub struct ActivityGuard {
+    manager: Arc<SidecarManager>,
+    name: String,
+}
+
+impl Drop for ActivityGuard {
+    fn drop(&mut self) {
+        let mut activity = self.manager.activity.lock().unwrap();
+        if let Some(st) = activity.get_mut(&self.name) {
+            st.in_flight = st.in_flight.saturating_sub(1);
+            st.last_activity = Instant::now();
+        }
     }
 }
 
@@ -787,5 +1269,226 @@ mod tests {
             "unexpected error: {err}"
         );
         assert!(!sc.is_running());
+    }
+
+    // ── Idle-stop (scale-to-zero) ─────────────────────────────────────────────
+
+    /// The `name=seconds` config parser: valid pairs land; blanks, zero, missing
+    /// value, unparseable seconds, and empty names are all skipped (never
+    /// instant-stop). An empty/garbage string ⇒ feature off (empty map).
+    #[test]
+    fn parse_idle_config_keeps_valid_skips_junk() {
+        let cfg =
+            parse_idle_config("llamacpp-rerank=900, research=1800 ,bad,zero=0,x=abc,=5, ");
+        assert_eq!(cfg.len(), 2, "only the two valid entries survive: {cfg:?}");
+        assert_eq!(cfg["llamacpp-rerank"], Duration::from_secs(900));
+        assert_eq!(cfg["research"], Duration::from_secs(1800));
+        assert!(parse_idle_config("").is_empty(), "empty ⇒ feature off");
+        assert!(parse_idle_config("   ").is_empty());
+    }
+
+    /// Default-off: with no idle config nothing is ever a reaper target, even for a
+    /// sidecar whose activity clock is ancient. This is the invariant that keeps
+    /// behaviour unchanged unless the operator opts in.
+    #[test]
+    fn idle_stop_default_off_is_noop() {
+        let mgr = SidecarManager::new_noop(); // empty idle_config
+        mgr.activity.lock().unwrap().insert(
+            "anything".to_string(),
+            ActivityState {
+                last_activity: Instant::now() - Duration::from_secs(9999),
+                in_flight: 0,
+            },
+        );
+        assert!(mgr.idle_stop_due(Instant::now()).is_empty());
+    }
+
+    /// The reaper's decision: not due when never touched, not due when fresh, due
+    /// when the idle clock expires, and pinned alive whenever a request is in
+    /// flight (the never-stop-mid-request guarantee).
+    #[test]
+    fn idle_stop_due_respects_clock_and_in_flight() {
+        let mut cfg = HashMap::new();
+        cfg.insert("rerank".to_string(), Duration::from_secs(60));
+        let mgr = SidecarManager::new_noop_with_idle(cfg);
+
+        // Never touched → no activity entry → not eligible.
+        assert!(mgr.idle_stop_due(Instant::now()).is_empty());
+
+        // Fresh touch → not due.
+        mgr.touch_activity("rerank");
+        assert!(mgr.idle_stop_due(Instant::now()).is_empty());
+
+        // Force-expire the idle clock → due.
+        mgr.activity
+            .lock()
+            .unwrap()
+            .get_mut("rerank")
+            .unwrap()
+            .last_activity = Instant::now() - Duration::from_secs(120);
+        assert_eq!(mgr.idle_stop_due(Instant::now()), vec!["rerank".to_string()]);
+
+        // An in-flight request pins it alive even with an expired clock.
+        let guard = mgr.enter_request("rerank");
+        mgr.activity
+            .lock()
+            .unwrap()
+            .get_mut("rerank")
+            .unwrap()
+            .last_activity = Instant::now() - Duration::from_secs(120);
+        assert!(
+            mgr.idle_stop_due(Instant::now()).is_empty(),
+            "an in-flight request must never be idle-stopped"
+        );
+
+        // Dropping the guard clears in-flight and refreshes the clock → not due.
+        drop(guard);
+        assert!(mgr.idle_stop_due(Instant::now()).is_empty());
+    }
+
+    /// Wake-on-demand restarts a stopped (but still-registered) manifest sidecar —
+    /// the scale-from-zero half — and seeds its activity clock. Idempotent when the
+    /// sidecar is already running (a plain touch, no second start).
+    #[tokio::test]
+    async fn wake_sidecar_restarts_stopped_and_is_idempotent() {
+        let mut cfg = HashMap::new();
+        cfg.insert("com.acme.tool/engine".to_string(), Duration::from_secs(60));
+        let mgr = SidecarManager::new_noop_with_idle(cfg);
+        let sc = FakeSidecar::new("com.acme.tool/engine");
+        mgr.register_and_start(sc.clone()).await.unwrap();
+        assert!(sc.is_running());
+        assert_eq!(sc.start_calls.load(Ordering::SeqCst), 1);
+
+        // Simulate an idle-stop: process stopped, still registered in `dynamic`.
+        sc.stop().await.unwrap();
+        assert!(!sc.is_running());
+
+        // Wake restarts the process (returns true = it cold-started) and seeds the
+        // activity clock.
+        assert!(
+            mgr.wake_sidecar("com.acme.tool/engine").await.unwrap(),
+            "wake of a stopped sidecar reports it cold-started"
+        );
+        assert!(sc.is_running());
+        assert_eq!(sc.start_calls.load(Ordering::SeqCst), 2);
+        assert!(mgr
+            .activity
+            .lock()
+            .unwrap()
+            .contains_key("com.acme.tool/engine"));
+
+        // Already running → no extra start, just a touch (returns false).
+        assert!(
+            !mgr.wake_sidecar("com.acme.tool/engine").await.unwrap(),
+            "wake of a running sidecar reports it was already warm"
+        );
+        assert_eq!(sc.start_calls.load(Ordering::SeqCst), 2);
+
+        // Unknown sidecar → error, not a panic.
+        assert!(mgr.wake_sidecar("nope").await.is_err());
+    }
+
+    /// register (register-only) claims the port + surfaces the sidecar in `statuses`
+    /// as NOT running and flagged lazy, without starting the process; a subsequent
+    /// wake starts it exactly once. This is the lazy-activation split.
+    #[tokio::test]
+    async fn register_only_then_wake_starts_once() {
+        let mgr = SidecarManager::new_noop();
+        let sc = FakeSidecar::new("com.acme.tool/engine");
+
+        // Register-only: no start.
+        mgr.register(sc.clone()).unwrap();
+        assert!(!sc.is_running(), "register must not start the process");
+        assert_eq!(sc.start_calls.load(Ordering::SeqCst), 0);
+
+        // It appears in status as stopped + lazy (scale-to-zero, not crashed).
+        let entry = mgr
+            .statuses()
+            .into_iter()
+            .find(|s| s.name == "com.acme.tool/engine")
+            .expect("lazy sidecar appears in statuses");
+        assert!(!entry.running);
+        assert!(entry.lazy, "register-only sidecar is flagged lazy");
+
+        // It is wake-eligible purely by being lazy-registered.
+        assert!(mgr.is_wake_eligible("com.acme.tool/engine"));
+
+        // First wake starts it exactly once; a second wake is a no-op.
+        assert!(mgr.wake_sidecar("com.acme.tool/engine").await.unwrap());
+        assert!(sc.is_running());
+        assert_eq!(sc.start_calls.load(Ordering::SeqCst), 1);
+        assert!(!mgr.wake_sidecar("com.acme.tool/engine").await.unwrap());
+        assert_eq!(sc.start_calls.load(Ordering::SeqCst), 1);
+
+        // Still flagged lazy while running (so a later reap reads correctly).
+        let entry = mgr
+            .statuses()
+            .into_iter()
+            .find(|s| s.name == "com.acme.tool/engine")
+            .unwrap();
+        assert!(entry.running && entry.lazy);
+    }
+
+    /// Two tasks racing `wake_sidecar` on the same stopped sidecar must start it
+    /// EXACTLY once — the per-name start lock closes the is_running/start race.
+    #[tokio::test]
+    async fn concurrent_wake_starts_exactly_once() {
+        let mgr = SidecarManager::new_noop();
+        let sc = FakeSidecar::new("com.acme.tool/engine");
+        mgr.register(sc.clone()).unwrap();
+
+        // Fire many concurrent wakes; exactly one should observe !is_running and start.
+        let mut handles = Vec::new();
+        for _ in 0..16 {
+            let mgr = Arc::clone(&mgr);
+            handles.push(tokio::spawn(async move {
+                mgr.wake_sidecar("com.acme.tool/engine").await.unwrap()
+            }));
+        }
+        let mut cold_starts = 0;
+        for h in handles {
+            if h.await.unwrap() {
+                cold_starts += 1;
+            }
+        }
+        assert_eq!(cold_starts, 1, "exactly one waker cold-started the sidecar");
+        assert_eq!(
+            sc.start_calls.load(Ordering::SeqCst),
+            1,
+            "the child process was started exactly once"
+        );
+    }
+
+    /// A per-name idle override (a manifest sidecar's `idle_stop_secs`, applied at
+    /// enable) drives the reaper even when the env seed is empty — the reaper is no
+    /// longer gated on construction-time config.
+    #[test]
+    fn idle_override_makes_a_sidecar_reapable_without_env_seed() {
+        let mgr = SidecarManager::new_noop(); // empty env idle_config
+        // No override yet + no env config ⇒ nothing is ever due.
+        mgr.touch_activity("com.acme.tool/engine");
+        mgr.activity
+            .lock()
+            .unwrap()
+            .get_mut("com.acme.tool/engine")
+            .unwrap()
+            .last_activity = Instant::now() - Duration::from_secs(120);
+        assert!(
+            mgr.idle_stop_due(Instant::now()).is_empty(),
+            "no idle config anywhere ⇒ not reapable"
+        );
+
+        // Apply a 60s override; now the expired sidecar is due.
+        mgr.set_idle_override("com.acme.tool/engine", 60);
+        assert!(mgr.is_wake_eligible("com.acme.tool/engine"));
+        assert_eq!(
+            mgr.idle_stop_due(Instant::now()),
+            vec!["com.acme.tool/engine".to_string()]
+        );
+
+        // A zero override is ignored (never instant-stop).
+        let mgr2 = SidecarManager::new_noop();
+        mgr2.set_idle_override("x", 0);
+        assert!(!mgr2.is_wake_eligible("x"));
     }
 }

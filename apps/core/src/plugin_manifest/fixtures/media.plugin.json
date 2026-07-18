@@ -1,0 +1,11 @@
+{
+	"id": "com.ryu.media",
+	"name": "Media Generation",
+	"version": "1.0.0",
+	"description": "Generative-media producers: image generation (sd.cpp / cloud), video generation, and GIF search. Governance shell over the in-crate media module. The shared no-cloud blob store (/api/media/:file serve, /api/media/upload) stays kernel storage — it also serves TTS audio + chat uploads.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"permission_grants": []
+}

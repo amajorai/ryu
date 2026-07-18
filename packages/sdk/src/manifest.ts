@@ -297,6 +297,27 @@ export const AppDependencySchema = z.object({
 export type AppDependency = z.infer<typeof AppDependencySchema>;
 
 /**
+ * A single **capability** edge — the layered, provider-agnostic dependency
+ * (`requires: [{ capability: "rag" }]`) the capability broker resolves to a
+ * concrete provider app at bind time. Mirrors `CapabilityReq` in
+ * `crates/ryu-kernel-contracts/src/manifest.rs` (the canonical contract):
+ * `{ capability, min_version? }`. Distinct from an `apps` edge (which names a
+ * specific plugin id); a `capabilities` edge names an abstract capability and
+ * lets the binding registry pick — or the user override — which enabled provider
+ * serves it. This is the field the composable `defineAgent` slots lower to.
+ */
+export const CapabilityReqSchema = z.object({
+	/** Capability name (e.g. `"rag"`, `"memory"`, `"tts"`). Matched against a
+	 *  provider's `provides[].capability`. */
+	capability: z.string().min(1, "capability name is required"),
+	/** Optional MINIMUM capability version the bound provider must satisfy
+	 *  (`"1.2.0"` = `">=1.2.0"`). Absent = any version. */
+	min_version: z.string().min(1).optional(),
+});
+
+export type CapabilityReq = z.infer<typeof CapabilityReqSchema>;
+
+/**
  * The `requires` block — this plugin's dependencies. Mirrors `Requires` in
  * `apps/core/src/plugin_manifest/mod.rs`.
  *
@@ -310,6 +331,15 @@ export type AppDependency = z.infer<typeof AppDependencySchema>;
 export const RequiresSchema = z.object({
 	/** Other plugins that must be installed + enabled before this one enables. */
 	apps: z.array(AppDependencySchema).default([]),
+	/**
+	 * Abstract capability edges the broker resolves to a bound provider at
+	 * enable time. Mirrors `Requires::capabilities` in
+	 * `crates/ryu-kernel-contracts` — an `apps` edge names a specific plugin; a
+	 * `capabilities` edge names a capability and lets the binding registry choose
+	 * the provider. Each is lowered to an app-id graph edge once bound, so the
+	 * enable/disable/cycle machinery is shared. Empty for the common case.
+	 */
+	capabilities: z.array(CapabilityReqSchema).default([]),
 	/**
 	 * Permission grants implied by the dependencies. Declaration only — the
 	 * Gateway remains the sole authority on what a grant *allows*, and Core's

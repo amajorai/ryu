@@ -1,0 +1,11 @@
+{
+	"id": "com.ryu.skills",
+	"name": "Skills",
+	"version": "1.0.0",
+	"description": "Agent Skills: discover, install, and manage SKILL.md skills across ~/.claude/skills and ~/.agents/skills, injected into agents and searchable via the skills catalog.",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"permission_grants": []
+}

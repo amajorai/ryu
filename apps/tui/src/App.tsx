@@ -20,11 +20,12 @@
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import type { ApiTarget } from "@ryuhq/core-client/client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ThemeProvider } from "@/components/ui/theme-provider.tsx";
 import { ChatIntentProvider } from "./core/ChatIntentContext.tsx";
 import { CoreProvider, useCore } from "./core/CoreContext.tsx";
 import { InputFocusProvider } from "./core/InputFocusContext.tsx";
+import { fetchUpdateCheck } from "./core/update.ts";
 import {
 	healthCheck,
 	loadNodes,
@@ -77,7 +78,7 @@ const CLOSED_NODE_PICKER: NodePickerState = {
 
 function WorkspaceShell() {
 	const renderer = useRenderer();
-	const { url, setTarget } = useCore();
+	const { target, url, setTarget } = useCore();
 	const { notify } = useToast();
 	const { openId: overlayOpenId } = useOverlay();
 	const {
@@ -94,6 +95,27 @@ function WorkspaceShell() {
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [nodePicker, setNodePicker] =
 		useState<NodePickerState>(CLOSED_NODE_PICKER);
+
+	// Launch update notice, the port of apps/cli's on-launch fetch_update_check.
+	// Runs on mount and on every node switch (target changes), flashing a toast
+	// when the node reports a newer Ryu release. Errors resolve to null in the
+	// reader, so this never blocks the shell.
+	useEffect(() => {
+		let cancelled = false;
+		fetchUpdateCheck(target)
+			.then((notice) => {
+				if (!cancelled && notice?.available) {
+					notify(
+						`▲ Ryu ${notice.latest} is available (you have ${notice.current})`,
+						"info"
+					);
+				}
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, [target, notify]);
 
 	const quit = () => renderer.destroy();
 

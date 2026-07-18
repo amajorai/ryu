@@ -38,7 +38,7 @@
 
 mod bridge;
 
-pub use bridge::PluginHookBridge;
+pub use bridge::{dispatch_path_for, PluginHookBridge};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
