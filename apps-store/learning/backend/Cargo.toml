@@ -1,0 +1,51 @@
+[package]
+name = "ryu-learning"
+version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Continual-learning loop (MetaClaw-style) + experience buffer for Ryu: the reward-filtered SFT/skill-synthesis engine (sweep conversations -> PRM-score -> distill skills / assemble a fine-tune dataset) and its durable experience store (SQLite `experience.db`), plus the `/api/learn/*` + `/api/experience/list` surface. An extracted Core capability crate — in-process default, consumed by Core as a path dependency. Every Core-owned callback (conversation-store sweep, Gateway PRM/synth side-model, skill-synthesis approvals inbox, skills-registry reload, fine-tune dispatch, preference store) is inverted through the `LearningHost` trait, so this crate has ZERO dependency on apps/core. The lone kernel coupling (the `~/.ryu` data directory) is inverted through `init_data_dir`."
+repository = "https://github.com/amajorai/ryu"
+
+# DORMANT process-shell binary — NOT wired. The crate compiles INTO Core as a lib
+# path-dependency (the in-process default); this bin is just the process shell around
+# the crate's `routes()`, kept to prove the crate is process-shell-able.
+#
+# ADJUDICATION (Outcome B, 2026-07-18): learning STAYS IN-PROCESS — Core does NOT
+# spawn/health-check this sidecar (no `RYU_LEARNING_BIN`, no port 8002 in apps/core)
+# and keeps SERVING `/api/learn/*` itself. The loop is welded to six live Core
+# subsystems (conversation store, RAG memory/retrieval, approvals inbox, skills
+# registry, preference store, Gateway side-model) via ~40 `LearningHost` callbacks,
+# and the sweep iterates the WHOLE conversation corpus per run. Out-of-process each
+# callback would need a broker-back HTTP surface + a bulk corpus pull for a job that
+# fires ~once/day — disproportionate cost for zero gain over the crate extraction.
+# So this bin's `LearningHost` intentionally degrades to a documented `Err` on every
+# welded callback. Full rationale: `apps/core/src/learning/mod.rs` module doc.
+[[bin]]
+name = "ryu-learning"
+path = "src/main.rs"
+
+# Versions match apps/core/Cargo.toml so the in-process merge into Core's axum
+# router has no version skew. This crate has ZERO dependency on apps/core.
+[dependencies]
+tokio = { version = "1", features = ["sync", "fs", "rt", "rt-multi-thread", "macros", "net"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+axum = "0.7"
+reqwest = { version = "0.12", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+utoipa = { version = "5", features = ["axum_extras", "chrono"] }
+async-trait = "0.1"
+# The skill-synthesis path writes + validates `SKILL.md` files through the shared
+# skills crate (already a Core dependency; no new dependency in the merged build).
+ryu-skills = { path = "../../../crates/core/skills" }
+# Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-finetune`
+# and `ryu-mail`. Core already pulls all of these, so there is no new dependency
+# in the in-process build.
+dirs = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
