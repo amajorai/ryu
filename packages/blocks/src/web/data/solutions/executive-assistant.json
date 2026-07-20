@@ -1,0 +1,81 @@
+{
+  "slug": "executive-assistant",
+  "name": "Executive Assistant",
+  "navLabel": "Executive Assistant",
+  "category": "People & Operations",
+  "icon": "CalendarClock",
+  "tagline": "Triage the inbox, manage the calendar, and prep the day from a command bar that's a keystroke away.",
+  "heroEyebrow": "Ryu for Executive Assistant",
+  "heroTitle": "The whole day, handled from one keystroke.",
+  "heroSubtitle": "Summon a command bar anywhere to triage email, juggle the calendar, draft replies, and prep the next meeting. Agents connect to the inbox and calendar to actually do the work, and the Gateway keeps the executive's private data redacted and on the record.",
+  "visualKey": "CommandBarVisual",
+  "intro": "An executive assistant lives in the gaps between tools: inbox, calendar, travel, a dozen quick asks a day. Switching apps is the tax. Ryu puts a command bar a hotkey away on the desktop, connected to the inbox and calendar, so you triage, draft, and schedule in place without breaking flow, and sensitive details stay governed.",
+  "highlights": [
+    {
+      "title": "A keystroke away",
+      "description": "Summon the command bar from any app to ask, draft, or act, then dismiss it and keep moving."
+    },
+    {
+      "title": "Inbox and calendar connected",
+      "description": "Agents reach the email and calendar to triage, reply, and book, not just suggest what to do."
+    },
+    {
+      "title": "Private details protected",
+      "description": "The Gateway redacts personal and confidential data on egress, and can run local for the most sensitive asks."
+    },
+    {
+      "title": "Runs everywhere",
+      "description": "Use it from the desktop, the command bar, the browser extension, or your phone, with the same agents."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Inbox triage",
+      "description": "Sort the morning inbox by urgency, surface what needs the executive, and draft replies to the routine ones."
+    },
+    {
+      "title": "Calendar management",
+      "description": "Find slots, resolve conflicts, hold time, and reschedule across attendees with the invites drafted for you."
+    },
+    {
+      "title": "Meeting prep",
+      "description": "Before each meeting, pull the attendee background, recent threads, and the agenda into a one-page brief."
+    },
+    {
+      "title": "Travel coordination",
+      "description": "Lay out an itinerary, compare options, and assemble the confirmations and timings into a single plan."
+    },
+    {
+      "title": "Follow-ups and tasks",
+      "description": "Turn meeting notes into action items, owners, and follow-up emails, queued for a quick send."
+    },
+    {
+      "title": "Drafting on behalf",
+      "description": "Write emails, intros, and short notes in the executive's voice, grounded on past correspondence."
+    }
+  ],
+  "examplePrompts": [
+    "Triage my exec's inbox: flag what needs them, and draft replies to anything routine.",
+    "Find a 30-minute slot this week for the three of us and draft the invite.",
+    "Prep a one-page brief for the 2pm with Acme: who's attending, recent threads, and the agenda.",
+    "Lay out a two-day trip to Tokyo next month with flight options and a hotel near the office.",
+    "Turn these meeting notes into action items with owners and draft the follow-up emails."
+  ],
+  "faq": [
+    {
+      "q": "Can it actually manage the inbox and calendar, or just advise?",
+      "a": "Both. With Connections, agents authenticate into the email and calendar to triage, draft, and book directly. You can require a final confirm before anything sends, so the executive stays in control."
+    },
+    {
+      "q": "How do I use it without switching apps all day?",
+      "a": "Ryu's command bar opens with a global hotkey over whatever you're in, so you ask, draft, and act in place. It also runs on the desktop, browser extension, and mobile with the same agents."
+    },
+    {
+      "q": "Is the executive's private information safe?",
+      "a": "Yes. The Gateway redacts personal and confidential details on egress and logs every call. For the most sensitive work you can run a local model so nothing leaves the device."
+    }
+  ],
+  "ctaTitle": "Run the day without leaving your keyboard.",
+  "ctaSubtitle": "Triage, schedule, prep, and draft from one command bar, connected to the inbox and calendar.",
+  "ctaNote": "Always a hotkey away · Inbox and calendar · Private by default"
+}

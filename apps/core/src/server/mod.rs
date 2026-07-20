@@ -2366,6 +2366,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/mcp/catalog", get(mcp_catalog_list))
         .route("/api/mcp/catalog/detail", get(mcp_catalog_detail))
         .route("/api/mcp/catalog/install", post(mcp_catalog_install))
+        // Import a REST API's OpenAPI/Swagger spec as gateway-governed `http` tools.
+        .route("/api/tools/import/openapi", post(import_openapi_tools))
+        // Import a GraphQL endpoint as a single gateway-governed `http` tool.
+        .route("/api/tools/import/graphql", post(import_graphql_tool))
 .route("/api/mcp/updates", get(mcp_updates))
         // ── Knowledge catalog (browse + install OKF bundles via the okf module) ──
         .route("/api/knowledge/catalog", get(knowledge_catalog_list))
@@ -2643,6 +2647,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/gateway/evals/run", post(gateway_run_evals))
         // ── Gateway audit proxy (M4 / #177) ─────────────────────────────────
         .route("/api/gateway/audit", get(gateway_audit))
+        // ── Gateway budget-spend proxy (M2 control-layer UX) ─────────────────
+        .route("/api/gateway/budget/spend", get(gateway_budget_spend))
         // ── Canvas: ported to the `com.ryu.canvas` Ryu App (Path-B companion).
         // The board is now a Space document owned by the app; there is no bespoke
         // `/api/canvases` file store any more (legacy files are imported at startup
@@ -2864,7 +2870,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
 /// exactly the surfaces the user just turned off — and never a background path.
 ///
 /// `/api/graph` (the cross-space link graph) and `/api/embedding/*` keep their own
-/// prefixes and stay ungated; they are global, not per-Space.
+/// prefixes and are not under this per-Space AppGate; they are global, not
+/// per-Space. `/api/graph` is nonetheless tenancy-filtered per caller (SPACE_READ +
+/// `caller_doc_filter`), so on a bound node it never leaks a private document's
+/// title or link topology cross-tenant.
 ///
 /// Spaces is default-on (`plugins::builtins::CORE_DEFAULT_ON`) and is seeded before
 /// its dependents, so on any normal install the gate is transparent.
@@ -7023,6 +7032,28 @@ fn plugin_manifest_to_entry(m: &crate::plugin_manifest::PluginManifest) -> serde
     // present because they derive from grants/runnables). Never invents data.
     if let Some(obj) = entry.as_object_mut() {
         merge_plugin_contract_fields(obj, m);
+        // Snake_case card/hero presentation keys (the browse card + hero read snake).
+        if let Some(icon) = &m.icon_url {
+            obj.insert("icon_url".to_owned(), json!(icon));
+        }
+        if let Some(bg) = &m.icon_background {
+            obj.insert("icon_background".to_owned(), json!(bg));
+        }
+        if let Some(accent) = &m.accent_color {
+            obj.insert("accent_color".to_owned(), json!(accent));
+        }
+        if let Some(banner) = &m.banner {
+            obj.insert("banner".to_owned(), banner.clone());
+        }
+        if let Some(dev) = m.developer() {
+            obj.insert("developer".to_owned(), json!(dev));
+        }
+        if let Some(tagline) = &m.tagline {
+            obj.insert("tagline".to_owned(), json!(tagline));
+        }
+        if let Some(category) = &m.category {
+            obj.insert("category".to_owned(), json!(category));
+        }
     }
     entry
 }
@@ -7042,6 +7073,15 @@ fn merge_plugin_contract_fields(
     }
     if let Some(icon) = &m.icon_url {
         obj.insert("iconUrl".to_owned(), json!(icon));
+    }
+    if let Some(bg) = &m.icon_background {
+        obj.insert("iconBackground".to_owned(), json!(bg));
+    }
+    if let Some(accent) = &m.accent_color {
+        obj.insert("accentColor".to_owned(), json!(accent));
+    }
+    if let Some(banner) = &m.banner {
+        obj.insert("banner".to_owned(), banner.clone());
     }
     if !m.screenshots.is_empty() {
         obj.insert("screenshots".to_owned(), json!(m.screenshots));
@@ -7087,6 +7127,12 @@ fn merge_plugin_contract_fields(
     }
     if !m.targets.is_empty() {
         obj.insert("targets".to_owned(), json!(m.targets));
+    }
+    // Logical bundle children — separate plugins this app ships that install/
+    // uninstall together with it (an "Includes these apps" grouping). Emitted only
+    // when non-empty; NOT dependency edges, so this is a display hint, not a graph.
+    if !m.bundles.is_empty() {
+        obj.insert("bundles".to_owned(), json!(m.bundles));
     }
     // capabilities: declared, else derived from permission_grants.
     obj.insert("capabilities".to_owned(), json!(m.resolved_capabilities()));
@@ -7179,6 +7225,14 @@ fn plugin_marketplace_item_to_entry(
             .filter(|a| !a.is_empty())
         {
             obj.insert("targets".to_owned(), json!(targets));
+        }
+        for key in ["icon_background", "accent_color", "developer", "tagline"] {
+            if let Some(v) = it.get(key).and_then(|v| v.as_str()) {
+                obj.insert(key.to_owned(), json!(v));
+            }
+        }
+        if let Some(banner) = it.get("banner").filter(|v| v.is_object()) {
+            obj.insert("banner".to_owned(), banner.clone());
         }
     }
     Some(entry)
@@ -7928,6 +7982,15 @@ async fn install_plugin_from_catalog(
                 queue.push_back(dep.id.clone());
             }
         }
+        // Logical bundle children: separate plugins this app ships that install
+        // TOGETHER with it. NOT dependency edges — they never enter the resolver
+        // below — but they (and, since the BFS also walks THEIR `dependencies()`,
+        // their own requires) must be fetched so they can be installed alongside.
+        for bundle_id in &manifest.bundles {
+            if !visited.contains(bundle_id) {
+                queue.push_back(bundle_id.clone());
+            }
+        }
     }
 
     // ── Phase 2: PLAN — topological order, cycles/versions/missing deps ───────
@@ -7952,6 +8015,20 @@ async fn install_plugin_from_catalog(
                 .into_response();
         }
     };
+
+    // Extend the requires-`order` with the target's logical bundle children (and
+    // their own fetched manifests) that the resolver did not include. Bundle ids
+    // never reach `resolve_enable_order`, so the topological order above is
+    // unchanged; these are appended as extra DISABLED installs (order irrelevant).
+    // An already-installed bundle child/shared dep is in `installed`, so it is
+    // filtered out here and never re-installed (no duplicate-install 409).
+    let installed_ids: std::collections::HashSet<&str> =
+        installed.iter().map(|m| m.id.as_str()).collect();
+    let order = crate::plugins::catalog::extend_install_list_with_bundles(
+        order,
+        &fetched,
+        &installed_ids,
+    );
 
     // ── Phase 3: INSTALL the closure in order, rolling back on any failure ────
     let outcome = crate::plugins::catalog::install_closure(
@@ -10084,6 +10161,29 @@ async fn uninstall_app_handler(
             if let Some(manifest) = all_manifests.iter().find(|m| m.id == outcome.removed) {
                 sync_mcp_entry_for_record(&state, manifest, McpEntryMutation::Remove).await;
             }
+            // Logical-bundle children uninstalled alongside the target get the SAME
+            // full teardown: deactivate the in-memory manifest, drop the MCP entry,
+            // and remove the on-disk dir. Their store rows are already gone; the
+            // single `reload_manifests_inner` below picks up every removed dir.
+            for child_id in &outcome.bundled_removed {
+                if let Some(manifest) = all_manifests.iter().find(|m| m.id == *child_id) {
+                    policy_outcome =
+                        policy_outcome.merge(deactivate_plugin(&state, manifest).await);
+                    sync_mcp_entry_for_record(&state, manifest, McpEntryMutation::Remove).await;
+                }
+                if crate::plugin_manifest::validate_plugin_id(child_id).is_ok() {
+                    let child_dir = crate::plugin_manifest::PluginManifestLoader::plugins_dir()
+                        .join(child_id);
+                    if child_dir.exists() {
+                        if let Err(e) = tokio::fs::remove_dir_all(&child_dir).await {
+                            tracing::warn!(
+                                plugin = %child_id,
+                                "uninstall: failed to remove bundled child directory: {e}"
+                            );
+                        }
+                    }
+                }
+            }
             // Complete the on-disk teardown for the removed target. `uninstall_app`
             // dropped only the lifecycle row; the disk-backed Community plugins that
             // are the ONLY things this path reaches (built-ins are refused earlier)
@@ -10130,6 +10230,11 @@ async fn uninstall_app_handler(
                 // `?cascade=true`, its dependents). Cascaded dependents stay
                 // installed-but-disabled; only the target's record is removed.
                 "disabled": disabled_ids,
+                // Logical-bundle children uninstalled together with the target, and
+                // those left installed because another bundle owns them or a live
+                // dependent still needs them.
+                "bundled_removed": outcome.bundled_removed,
+                "bundled_skipped": outcome.bundled_skipped,
             });
             attach_gateway_policy_notice(&mut body, policy_outcome);
             Json(body).into_response()
@@ -14017,6 +14122,468 @@ async fn mcp_catalog_install(
     }
 }
 
+#[derive(serde::Deserialize)]
+struct ImportOpenApiBody {
+    /// Direct OpenAPI/Swagger spec URL. Takes precedence when present.
+    #[serde(default)]
+    spec_url: Option<String>,
+    /// API host (e.g. an integrations.sh `openapi` entry's domain) to resolve a
+    /// spec URL via the apis.guru registry when `spec_url` is absent.
+    #[serde(default)]
+    domain: Option<String>,
+    /// integrations.sh entry id (e.g. `openapi/1password-com-events-events`).
+    /// Resolved against apis.guru by normalized-key prefix — lets the desktop pass
+    /// just the entry id (which carries no domain field) with no extra lookup.
+    #[serde(default)]
+    id: Option<String>,
+    /// Optional disambiguation hint (id or display name) used to pick the right
+    /// service when a domain hosts several apis.guru specs.
+    #[serde(default)]
+    hint: Option<String>,
+}
+
+/// Fetch + parse the apis.guru registry (`list.json`). Shared by both resolvers.
+async fn apis_guru_registry() -> Option<serde_json::Map<String, serde_json::Value>> {
+    let bytes = guarded_get_bytes("https://api.apis.guru/v2/list.json")
+        .await
+        .ok()?;
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|v| v.as_object().cloned())
+}
+
+/// The preferred (else first) version's `swaggerUrl` for an apis.guru API entry.
+fn apis_guru_swagger_url(entry: &serde_json::Value) -> Option<String> {
+    let versions = entry.get("versions")?.as_object()?;
+    let version_key = entry
+        .get("preferred")
+        .and_then(serde_json::Value::as_str)
+        .filter(|p| versions.contains_key(*p))
+        .map(str::to_owned)
+        .or_else(|| versions.keys().next().cloned())?;
+    versions
+        .get(&version_key)?
+        .get("swaggerUrl")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+/// Lowercase, non-alphanumerics → single `-`, trimmed (so an apis.guru key like
+/// `1password.com:events` and an integrations.sh slug `1password-com-events` compare).
+fn normalize_key(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut prev_dash = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    out.trim_matches('-').to_owned()
+}
+
+/// Resolve an apis.guru spec URL for a host. Keys are `domain` or `domain:service`;
+/// `hint` picks the service when a host has several.
+async fn resolve_apis_guru_spec_url(domain: &str, hint: Option<&str>) -> Option<String> {
+    let obj = apis_guru_registry().await?;
+    let prefix = format!("{domain}:");
+    let candidates: Vec<&String> = obj
+        .keys()
+        .filter(|k| k.as_str() == domain || k.starts_with(&prefix))
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    let chosen = hint
+        .map(str::to_ascii_lowercase)
+        .and_then(|h| {
+            candidates
+                .iter()
+                .find(|k| {
+                    k.split(':')
+                        .nth(1)
+                        .is_some_and(|svc| h.contains(&svc.to_ascii_lowercase()))
+                })
+                .copied()
+        })
+        .or_else(|| candidates.iter().find(|k| k.as_str() == domain).copied())
+        .or_else(|| candidates.first().copied())?;
+    apis_guru_swagger_url(obj.get(chosen)?)
+}
+
+/// Resolve an apis.guru spec URL from an integrations.sh `openapi/<slug>` id: the
+/// longest apis.guru key whose normalized form is a prefix of the normalized slug.
+async fn resolve_apis_guru_by_id(id: &str) -> Option<String> {
+    let slug = id.strip_prefix("openapi/").unwrap_or(id);
+    let want = normalize_key(slug);
+    if want.is_empty() {
+        return None;
+    }
+    let obj = apis_guru_registry().await?;
+    let mut best: Option<(&String, usize)> = None;
+    for key in obj.keys() {
+        let nk = normalize_key(key);
+        if !nk.is_empty() && want.starts_with(&nk) {
+            let len = nk.len();
+            if best.map_or(true, |(_, best_len)| len > best_len) {
+                best = Some((key, len));
+            }
+        }
+    }
+    apis_guru_swagger_url(obj.get(best?.0)?)
+}
+
+/// Slugify a host into a plugin-id-safe token (`api.example.com` → `api-example-com`).
+fn slugify_domain(domain: &str) -> String {
+    let mut out = String::with_capacity(domain.len());
+    let mut prev_dash = false;
+    for ch in domain.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    out.trim_matches('-').to_owned()
+}
+
+/// Synthesize the plugin governance record for an imported REST API: one `http`
+/// tool runnable per operation + a single egress grant scoped to the API host.
+/// Slugs are de-duplicated so no two runnables collide on the `app__<slug>` id.
+fn build_openapi_plugin_manifest(
+    plugin_id: &str,
+    api: &crate::openapi_import::ImportedApi,
+) -> crate::plugin_manifest::PluginManifest {
+    use crate::plugin_manifest::schema::RunnableEntry;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let runnables = api
+        .tools
+        .iter()
+        .map(|t| {
+            let mut slug = t.slug.clone();
+            let mut n = 2;
+            while !seen.insert(slug.clone()) {
+                slug = format!("{}_{n}", t.slug);
+                n += 1;
+            }
+            RunnableEntry {
+                id: format!("tool-{slug}"),
+                name: t.name.clone(),
+                kind: crate::runnable::RunnableKind::Tool,
+                config: Some(json!({
+                    "slug": slug,
+                    "backend": "http",
+                    "url": t.url,
+                    "method": t.method,
+                    "header_params": t.header_params,
+                    "description": t.description,
+                    "input_schema": t.input_schema,
+                })),
+            }
+        })
+        .collect();
+    crate::plugin_manifest::PluginManifest {
+        id: plugin_id.to_owned(),
+        name: api.title.clone(),
+        version: "0.0.0".to_owned(),
+        runnables,
+        permission_grants: vec![format!(
+            "{}{}",
+            crate::tool_exec::GRANT_HTTP_EGRESS_PREFIX,
+            api.domain
+        )],
+        description: Some(format!("REST API tools imported from {}", api.domain)),
+        category: Some("api".to_owned()),
+        ..Default::default()
+    }
+}
+
+/// `POST /api/tools/import/openapi` — turn a REST API's OpenAPI/Swagger spec into
+/// a set of gateway-governed `http` tools. Resolves the spec (direct `spec_url` or
+/// via apis.guru from `domain`), SSRF-guarded-fetches + parses it, and installs a
+/// **disabled** plugin record whose runnables are one `http` tool per operation —
+/// mirroring the MCP catalog install (the user enables it to activate the tools).
+async fn import_openapi_tools(
+    State(state): State<ServerState>,
+    Json(body): Json<ImportOpenApiBody>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let bad = |status: StatusCode, msg: String| (status, Json(json!({ "success": false, "error": msg })));
+
+    let spec_url = if let Some(u) = body
+        .spec_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+    {
+        u.to_owned()
+    } else if let Some(domain) = body
+        .domain
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
+        match resolve_apis_guru_spec_url(domain, body.hint.as_deref()).await {
+            Some(u) => u,
+            None => {
+                return bad(
+                    StatusCode::BAD_GATEWAY,
+                    format!("could not resolve an OpenAPI spec for '{domain}'"),
+                )
+            }
+        }
+    } else if let Some(id) = body.id.as_deref().map(str::trim).filter(|i| !i.is_empty()) {
+        match resolve_apis_guru_by_id(id).await {
+            Some(u) => u,
+            None => {
+                return bad(
+                    StatusCode::BAD_GATEWAY,
+                    format!("could not resolve an OpenAPI spec for '{id}'"),
+                )
+            }
+        }
+    } else {
+        return bad(
+            StatusCode::BAD_REQUEST,
+            "provide `spec_url`, `domain`, or `id`".to_owned(),
+        );
+    };
+
+    let bytes = match guarded_get_bytes(&spec_url).await {
+        Ok(b) => b,
+        Err(e) => return bad(StatusCode::BAD_GATEWAY, format!("fetching spec: {e}")),
+    };
+    let spec = match crate::openapi_import::parse_spec(&bytes) {
+        Ok(s) => s,
+        Err(e) => return bad(StatusCode::UNPROCESSABLE_ENTITY, e),
+    };
+    let api = match crate::openapi_import::spec_to_api(&spec, crate::openapi_import::DEFAULT_OP_CAP) {
+        Ok(a) => a,
+        Err(e) => return bad(StatusCode::UNPROCESSABLE_ENTITY, e),
+    };
+
+    let plugin_id = format!("apiimport-{}", slugify_domain(&api.domain));
+    if crate::plugin_manifest::validate_plugin_id(&plugin_id).is_err() {
+        return bad(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("could not derive a valid plugin id from '{}'", api.domain),
+        );
+    }
+
+    let tools = api.tools.len();
+    let manifest = build_openapi_plugin_manifest(&plugin_id, &api);
+    match persist_installed_plugin(&state, manifest, None).await {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "plugin_id": plugin_id,
+                "title": api.title,
+                "domain": api.domain,
+                "tools": tools,
+                "total_operations": api.total_operations,
+                "dropped": api.dropped,
+                // Installed disabled (mirrors MCP): enable it to activate the tools.
+                "enabled": false,
+            })),
+        ),
+        Err((StatusCode::CONFLICT, _)) => (
+            StatusCode::CONFLICT,
+            Json(json!({ "success": false, "error": format!("'{plugin_id}' is already installed") })),
+        ),
+        Err((status, msg)) => bad(status, msg),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ImportGraphqlBody {
+    /// The GraphQL endpoint URL (integrations.sh `graphql` entries carry it).
+    url: String,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// Synthesize the plugin record for a GraphQL endpoint: a single `http` POST tool
+/// whose `{query, variables}` args become the JSON body (the GraphQL request shape).
+fn build_graphql_plugin_manifest(
+    plugin_id: &str,
+    name: &str,
+    endpoint_url: &str,
+    domain: &str,
+) -> crate::plugin_manifest::PluginManifest {
+    use crate::plugin_manifest::schema::RunnableEntry;
+    let runnable = RunnableEntry {
+        id: "tool-graphql".to_owned(),
+        name: format!("{name} GraphQL"),
+        kind: crate::runnable::RunnableKind::Tool,
+        config: Some(json!({
+            "slug": format!("{}_graphql", slugify_domain(domain)),
+            "backend": "http",
+            "url": endpoint_url,
+            "method": "POST",
+            "header_params": [],
+            "description": format!("Run a GraphQL query or mutation against {domain}"),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "GraphQL query or mutation document" },
+                    "variables": { "type": "object", "description": "Query variables" }
+                },
+                "required": ["query"]
+            },
+        })),
+    };
+    crate::plugin_manifest::PluginManifest {
+        id: plugin_id.to_owned(),
+        name: name.to_owned(),
+        version: "0.0.0".to_owned(),
+        runnables: vec![runnable],
+        permission_grants: vec![format!(
+            "{}{}",
+            crate::tool_exec::GRANT_HTTP_EGRESS_PREFIX,
+            domain
+        )],
+        description: Some(format!("GraphQL tool for {domain}")),
+        category: Some("api".to_owned()),
+        ..Default::default()
+    }
+}
+
+/// `POST /api/tools/import/graphql { url, name? }` — install a GraphQL endpoint as
+/// a single gateway-governed `http` tool. Disabled on install (mirrors the others).
+async fn import_graphql_tool(
+    State(state): State<ServerState>,
+    Json(body): Json<ImportGraphqlBody>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let bad = |status: StatusCode, msg: String| (status, Json(json!({ "success": false, "error": msg })));
+    let url = body.url.trim();
+    if url.is_empty() {
+        return bad(StatusCode::BAD_REQUEST, "`url` must not be empty".to_owned());
+    }
+    let Some(domain) = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
+        .filter(|h| !h.is_empty())
+    else {
+        return bad(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("could not parse a host from '{url}'"),
+        );
+    };
+    let name = body
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .unwrap_or(&domain)
+        .to_owned();
+    let plugin_id = format!("graphql-{}", slugify_domain(&domain));
+    if crate::plugin_manifest::validate_plugin_id(&plugin_id).is_err() {
+        return bad(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("could not derive a valid plugin id from '{domain}'"),
+        );
+    }
+    let manifest = build_graphql_plugin_manifest(&plugin_id, &name, url, &domain);
+    match persist_installed_plugin(&state, manifest, None).await {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "plugin_id": plugin_id,
+                "domain": domain,
+                "tools": 1,
+                "enabled": false,
+            })),
+        ),
+        Err((StatusCode::CONFLICT, _)) => (
+            StatusCode::CONFLICT,
+            Json(json!({ "success": false, "error": format!("'{plugin_id}' is already installed") })),
+        ),
+        Err((status, msg)) => bad(status, msg),
+    }
+}
+
+#[cfg(test)]
+mod api_import_tests {
+    use super::*;
+    use crate::openapi_import::{ImportedApi, ImportedTool};
+
+    fn tool(slug: &str, method: &str) -> ImportedTool {
+        ImportedTool {
+            slug: slug.to_owned(),
+            name: slug.to_owned(),
+            description: None,
+            method: method.to_owned(),
+            url: format!("https://api.x.example/{slug}"),
+            header_params: vec!["X-API-Key".to_owned()],
+            input_schema: json!({ "type": "object" }),
+        }
+    }
+
+    #[test]
+    fn openapi_manifest_dedups_slugs_and_scopes_grant() {
+        let api = ImportedApi {
+            title: "X".to_owned(),
+            domain: "api.x.example".to_owned(),
+            base_url: "https://api.x.example".to_owned(),
+            tools: vec![tool("get_a", "GET"), tool("get_a", "POST")],
+            total_operations: 2,
+            dropped: 0,
+        };
+        let manifest = build_openapi_plugin_manifest("apiimport-api-x-example", &api);
+        assert_eq!(manifest.runnables.len(), 2);
+        let slugs: Vec<String> = manifest
+            .runnables
+            .iter()
+            .map(|r| r.config.as_ref().unwrap()["slug"].as_str().unwrap().to_owned())
+            .collect();
+        assert!(slugs.contains(&"get_a".to_owned()));
+        assert!(slugs.contains(&"get_a_2".to_owned()), "collision not de-duped: {slugs:?}");
+        assert!(manifest
+            .permission_grants
+            .contains(&"tool:http-egress:api.x.example".to_owned()));
+        let cfg = manifest.runnables[0].config.as_ref().unwrap();
+        assert_eq!(cfg["backend"], "http");
+        assert_eq!(cfg["header_params"][0], "X-API-Key");
+    }
+
+    #[test]
+    fn graphql_manifest_is_single_post_tool() {
+        let manifest = build_graphql_plugin_manifest(
+            "graphql-api-x-example",
+            "X",
+            "https://api.x.example/graphql",
+            "api.x.example",
+        );
+        assert_eq!(manifest.runnables.len(), 1);
+        let cfg = manifest.runnables[0].config.as_ref().unwrap();
+        assert_eq!(cfg["method"], "POST");
+        assert_eq!(cfg["url"], "https://api.x.example/graphql");
+        assert!(manifest
+            .permission_grants
+            .contains(&"tool:http-egress:api.x.example".to_owned()));
+    }
+
+    #[test]
+    fn normalize_key_bridges_apis_guru_key_and_integrations_slug() {
+        let key = normalize_key("1password.com:events");
+        assert_eq!(key, "1password-com-events");
+        // The integrations.sh slug's normalized form starts with the apis.guru key.
+        assert!(normalize_key("1password-com-events-events").starts_with(&key));
+    }
+
+    #[test]
+    fn slugify_domain_is_plugin_id_safe() {
+        assert_eq!(slugify_domain("api.x.example"), "api-x-example");
+        assert_eq!(slugify_domain("A.B_C"), "a-b-c");
+    }
+}
+
 /// Create the plugin lifecycle record + on-disk manifest for a freshly-installed
 /// MCP server, so the ONE plugin model governs it (requires / targets / grants /
 /// AppGate / disable / uninstall) rather than a parallel registry.
@@ -15095,6 +15662,17 @@ async fn delete_space(
             "insufficient permissions: space.delete".to_owned(),
         );
     }
+    // Per-resource ACL: deleting is a write on THIS space (and cascades to every
+    // document in it). Without it, any org member holding `space.delete` could
+    // delete another member's PRIVATE space. A system space (NULL owner) fails
+    // closed on a bound node — it is a node singleton, not user-deletable here.
+    if let Err(resp) = require_resource_write(
+        spaces::space_access_meta(&state.spaces, &id).await,
+        caller.as_ref(),
+        "space not found",
+    ) {
+        return resp;
+    }
     match state.spaces.delete_space(&id).await {
         Ok(removed) => Json(json!({ "success": true, "removed": removed })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -15990,9 +16568,27 @@ async fn get_document_links(
 )]
 async fn get_space_graph(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
-    match state.spaces.space_graph(&id).await {
+    // Org/team RBAC (coarse): reading the graph requires `space.read`.
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.read".to_owned(),
+        );
+    }
+    // Per-resource ACL (fine): the graph carries document titles + link topology, so
+    // filter nodes/edges to what the caller may read (a member never sees another
+    // member's private page title or link structure on a bound node).
+    match state
+        .spaces
+        .space_graph(&id, caller_doc_filter(&caller))
+        .await
+    {
         Ok(graph) => Json(graph).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -16006,8 +16602,23 @@ async fn get_space_graph(
     summary = "Global document-link graph",
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-async fn get_global_graph(State(state): State<ServerState>) -> axum::response::Response {
-    match state.spaces.global_graph().await {
+async fn get_global_graph(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+) -> axum::response::Response {
+    // Org/team RBAC (coarse): reading the graph requires `space.read`.
+    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.read".to_owned(),
+        );
+    }
+    // Per-resource ACL (fine): the cross-space graph carries document titles + link
+    // topology across every space, so filter to what the caller may read.
+    match state.spaces.global_graph(caller_doc_filter(&caller)).await {
         Ok(graph) => Json(graph).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -20876,6 +21487,117 @@ async fn gateway_audit(
                 Json(
                     json!({ "reachable": true, "entries": body.get("entries").cloned().unwrap_or(json!([])), "count": body.get("count").cloned().unwrap_or(json!(0)) }),
                 ),
+            )
+        }
+    }
+}
+
+// ── Gateway budget-spend proxy (M2 control-layer UX) ────────────────────────
+//
+// The gateway tracks live per-user / per-agent / per-session token spend in
+// memory but gates the read surface (`GET /v1/budget/spend`) behind
+// `require_local_admin`, which the desktop cannot satisfy directly (it never
+// holds the master key). Core proxies it with its own gateway token so the
+// desktop budget panel can render live spend-vs-limit. Returns
+// `{ "reachable": false }` (200) when the gateway is down, matching the audit
+// proxy's fail-soft read-only contract. The gateway owns the counters; Core
+// only relays.
+
+#[derive(serde::Deserialize, Debug)]
+struct BudgetSpendQueryParams {
+    user_id: Option<String>,
+    agent_id: Option<String>,
+    session_id: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/gateway/budget/spend",
+    tag = "Gateway",
+    summary = "Query live gateway budget spend (proxied)",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn gateway_budget_spend(
+    State(state): State<ServerState>,
+    axum::extract::Query(params): axum::extract::Query<BudgetSpendQueryParams>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    use crate::sidecar::gateway::{gateway_token, gateway_url};
+
+    let base = gateway_url();
+    let base = base.trim_end_matches('/');
+    let token = gateway_token();
+
+    let mut query_parts: Vec<String> = Vec::new();
+    if let Some(uid) = &params.user_id {
+        query_parts.push(format!("user_id={}", urlencoding_simple(uid)));
+    }
+    if let Some(aid) = &params.agent_id {
+        query_parts.push(format!("agent_id={}", urlencoding_simple(aid)));
+    }
+    if let Some(sid) = &params.session_id {
+        query_parts.push(format!("session_id={}", urlencoding_simple(sid)));
+    }
+    let qs = if query_parts.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", query_parts.join("&"))
+    };
+
+    let url = format!("{base}/v1/budget/spend{qs}");
+
+    let mut req = state
+        .client
+        .get(&url)
+        .timeout(std::time::Duration::from_millis(3000));
+    if let Some(t) = token.as_deref() {
+        req = req.bearer_auth(t);
+    }
+
+    match req.send().await {
+        Err(e) => (
+            StatusCode::OK,
+            Json(json!({
+                "reachable": false,
+                "error": e.to_string(),
+                "users": {},
+                "agents": {},
+                "sessions": {},
+                "limits": {},
+            })),
+        ),
+        Ok(resp) => {
+            if !resp.status().is_success() {
+                let status_u16 = resp.status().as_u16();
+                let body = resp
+                    .json::<serde_json::Value>()
+                    .await
+                    .unwrap_or_else(|_| json!({}));
+                return (
+                    StatusCode::OK,
+                    Json(json!({
+                        "reachable": false,
+                        "status": status_u16,
+                        "error": body,
+                        "users": {},
+                        "agents": {},
+                        "sessions": {},
+                        "limits": {},
+                    })),
+                );
+            }
+            let body = resp
+                .json::<serde_json::Value>()
+                .await
+                .unwrap_or_else(|_| json!({}));
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "reachable": true,
+                    "users": body.get("users").cloned().unwrap_or(json!({})),
+                    "agents": body.get("agents").cloned().unwrap_or(json!({})),
+                    "sessions": body.get("sessions").cloned().unwrap_or(json!({})),
+                    "limits": body.get("limits").cloned().unwrap_or(json!({})),
+                })),
             )
         }
     }

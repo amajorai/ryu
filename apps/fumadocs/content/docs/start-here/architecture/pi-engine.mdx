@@ -1,0 +1,269 @@
+---
+title: "Pi Engine Internals"
+description: "How Pi runs inside Ryu — managed binary, isolated config, models.json pinning, context window management, compaction, and truncation."
+tags: ["pi", "engine", "context-window", "compaction", "truncation", "models.json", "settings.json"]
+---
+
+Pi is the coding agent from Earendilworks that Ryu uses as its default engine. This page covers how
+Pi works inside Ryu's managed environment — the config layer, model routing, context management, and
+what happens when the context overflows.
+
+## The managed binary
+
+Ryu ships its own Pi binary, completely separate from any Pi you have on your PATH:
+
+| Location | Purpose |
+|---|---|
+| `~/.ryu/pi/node_modules/.bin/pi` | The managed Pi binary (installed via `bun add`) |
+| `~/.ryu/pi/node_modules/.bin/pi-acp` | The ACP bridge (spawns Pi as a subprocess speaking ACP) |
+| `~/.pi/agent` | User's own Pi config (never touched by Ryu) |
+| `~/.ryu/pi-agent` | Ryu's isolated Pi config directory |
+
+The managed binary is installed during onboarding via `ensure_ryu_managed_pi()`. Core downloads and
+version-checks it, keeping it separate from any user-installed Pi.
+
+## The config directory
+
+Ryu's Pi config lives at `~/.ryu/pi-agent` (override with `RYU_PI_AGENT_DIR`). The env var
+`PI_CODING_AGENT_DIR` is injected into the Pi subprocess to enforce this isolation.
+
+Pi reads three files (per [pi.dev/docs](https://pi.dev/docs)):
+
+### settings.json
+
+```json
+{
+  "defaultProvider": "openai",
+  "defaultModel": "gemma-4-E2B-it-Q4_K_M",
+  "defaultThinkingLevel": "medium",
+  "x-ryu-routing": "gateway",
+  "x-ryu-provider-routing": { "openai": "gateway" },
+  "x-ryu-active-provider": "gateway",
+  "skills": ["!**"],
+  "extensions": ["<path>/ryu-mcp.ts"]
+}
+```
+
+| Field | Purpose |
+|---|---|
+| `defaultProvider` | The active provider id (`"openai"` because the Gateway is pinned as the `openai` provider) |
+| `defaultModel` | The model to use (local Gemma 4 or `openrouter/auto` for managed) |
+| `defaultThinkingLevel` | Reasoning effort (`none`, `low`, `medium`, `high`) |
+| `x-ryu-routing` | Ryu-namespaced: `"gateway"` or `"direct"` — whether the active provider routes through the Gateway |
+| `x-ryu-provider-routing` | Per-provider routing map: `{ "openai": "gateway", "anthropic": "direct" }` |
+| `x-ryu-active-provider` | Logical active provider id (`"managed-openrouter"`, `"gateway"`, etc.) |
+| `skills` | `["!**"]` disables Pi's own skill auto-discovery; Core injects its own allowlist-gated skills |
+| `extensions` | The `ryu-mcp.ts` bridge extension giving Pi access to Core's tools |
+
+Pi ignores unknown keys, so the `x-ryu-*` fields survive round-trips.
+
+### models.json
+
+The critical file that pins Pi's providers. Ryu writes this to ensure model calls route through
+the Gateway:
+
+```json
+{
+  "providers": [
+    {
+      "id": "openai",
+      "baseUrl": "http://127.0.0.1:7981/v1",
+      "api": "openai-completions",
+      "apiKey": "<gateway_token>",
+      "models": [
+        {
+          "id": "gemma-4-E2B-it-Q4_K_M",
+          "contextWindow": 128000,
+          "maxTokens": 8192,
+          "supportsImages": false
+        }
+      ]
+    }
+  ]
+}
+```
+
+The `api: "openai-completions"` is essential — the Gateway speaks `chat/completions`, not Pi's
+native `responses` format. The `baseUrl` points at the local Gateway (`:7981/v1`), and the
+`apiKey` is the Gateway token (not a provider key).
+
+For the managed subscription, the default model is `openrouter/auto` — the Gateway maps this onto
+the OpenRouter provider at zero extra fee.
+
+### auth.json
+
+Per-provider API keys and OAuth subscription tokens:
+
+```json
+{
+  "openai": { "type": "api_key", "key": "sk-..." },
+  "anthropic": { "type": "oauth", "access": "...", "refresh": "...", "expires_at": "..." }
+}
+```
+
+OAuth tokens are proactively refreshed by `refresh_pi_oauth_logins()` before each turn to prevent
+mid-conversation auth failures.
+
+## Context window management
+
+This is the most important section for understanding how Pi handles long conversations.
+
+### The problem
+
+Local models run with small context windows (often 4k–8k). Without app-side bounding, Ryu sends
+the full thread and relies on llama.cpp's engine context-shift. That shift is a blunt instrument:
+
+- Ryu never emits `--keep` / `n_keep`, so llama.cpp defaults `n_keep` to 0
+- On overflow, the engine can evict the **system prompt** (the leading instructions, long-term
+  memory, skills) along with the oldest turns
+- There is no guarantee the system block is preserved
+
+Ryu's context-management layer exists to fix this: it guarantees the system block is always kept,
+and provides an option to summarize dropped turns instead of silently losing them.
+
+### Token accounting
+
+Ryu uses a conservative character heuristic — no tokenizer:
+
+```
+tokens = ceil(characters / 3.5)
+```
+
+This matches Jan AI's approach. Per-message overhead of 4 tokens is added for the role/formatting
+wrapper. Base64 image payloads are **not** counted — a flat per-image cost of 768 tokens is used
+instead, so a vision chat does not look like 100k tokens. A 512-token reserve is held for
+downstream skill injection.
+
+### Two modes
+
+#### Trim mode (default when enabled)
+
+A token-budgeted sliding window that keeps the newest turns that fit the input budget. Always
+preserves:
+
+- Every `system` message (moved to the front)
+- At least the last user turn
+- System tokens + downstream skill injection are accounted for in the budget
+
+```
+Input budget = max_tokens - reserve_output - system_tokens - skills_reserve(512)
+```
+
+Older turns that exceed the budget are dropped.
+
+#### Compact mode
+
+Instead of dropping older turns, sends them to a side model for a concise summary via the
+Gateway (`gateway_summarize()`). The summary is injected as a leading system block:
+
+```
+[Earlier conversation summary]
+- User asked about X
+- Decided to use Y approach
+- Created file Z with W changes
+- ...
+```
+
+Results are cached by a hash of the dropped-message set, so an unchanged tail is not
+re-summarized. Adds one blocking summarization round-trip per over-budget turn.
+
+The summarizer uses this system prompt:
+
+> "You are a conversation summarizer. Produce a concise summary that preserves key facts,
+> decisions, code snippets, and action items. Use bullet points. Keep the summary under 500 words."
+
+### Two code paths
+
+| Path | Used by | What it does |
+|---|---|---|
+| **ACP path** (`budgeted_short_term()`) | The Ryu agent (Pi via ACP) | Replaces the fixed last-10 cap. Fetches up to 400 recent turns, windows them to the input budget, optionally summarizes. |
+| **OpenAI-compat path** (`apply_openai()`) | Direct OpenAI-compatible agents | Trims the full outbound message list. |
+
+### How to enable
+
+Context management is **opt-in / off by default**. Two preferences control it:
+
+| Preference | Values | Default |
+|---|---|---|
+| `context.max-tokens` | `""` / `0` / `off` = disabled; `auto` = model's `ctx_size`; positive integer = explicit budget | `""` (disabled) |
+| `context.auto-compact` | `true` / `false` | `false` |
+
+```bash
+# Auto-size to the loaded model's context window
+curl -X PUT http://localhost:7980/api/preferences \
+  -H 'Content-Type: application/json' \
+  -d '{ "key": "context.max-tokens", "value": "auto" }'
+
+# Enable compaction (summarize instead of drop)
+curl -X PUT http://localhost:7980/api/preferences \
+  -H 'Content-Type: application/json' \
+  -d '{ "key": "context.auto-compact", "value": "true" }'
+```
+
+### Short-term context for ACP
+
+The Ryu agent's short-term context is assembled by `assemble_short_term_context()` — a plain-text
+"Conversation so far:" block from the last N messages (default 10), formatted as `role: content`
+lines. When context management is enabled, `budgeted_short_term()` replaces this with the
+token-budgeted version that can fetch up to 400 recent turns.
+
+## The ryu-mcp.ts extension
+
+Pi has no in-process MCP bridge. The `ryu-mcp.ts` extension (loaded from
+`apps/core/assets/pi-extensions/ryu-mcp.ts`) bridges this gap:
+
+```typescript
+// Registers two tools that proxy to Core's HTTP API:
+// - ryu_list_tools: GET /api/tools/search
+// - ryu_call_tool:  POST /api/tools/exec/<tool_id>
+```
+
+This gives Pi access to:
+
+- Core's full tool registry (MCP servers, built-in tools, app tools)
+- Widget-bearing tools (Apps-SDK / MCP apps that render inline widgets)
+- The self-API (Core endpoints as agent tools)
+
+The bridge also handles widget emission: when a tool returns structured content in
+`details.ryuWidget`, Core's ACP handler rebuilds it into widget events for the desktop.
+
+## Provider routing
+
+The Ryu agent supports per-provider routing. Each configured provider can independently route
+through the Gateway or bypass it:
+
+```json
+{
+  "x-ryu-routing": "gateway",
+  "x-ryu-provider-routing": {
+    "openai": "gateway",
+    "anthropic": "direct",
+    "local": "gateway"
+  }
+}
+```
+
+The desktop UI shows this as a per-provider toggle. The `x-ryu-routing` key records the *active*
+provider's mode for backward compatibility.
+
+## Error handling
+
+| Scenario | What happens |
+|---|---|
+| Managed binary not installed | Core falls back to `npx -y pi-acp` (slower first start) |
+| Gateway unreachable | Pi fails to connect; error surfaced to user |
+| Config directory missing | Core creates it on demand |
+| OAuth token expired | `refresh_pi_oauth_logins()` refreshes before the turn |
+| Context overflow (no management) | llama.cpp context-shift drops tokens (may lose system prompt) |
+| Context overflow (trim mode) | Older turns dropped, system prompt preserved |
+| Context overflow (compact mode) | Older turns summarized, summary injected as leading block |
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/start-here/architecture/ryu-agent" />
+  <DocCard href="/docs/start-here/architecture/acp-agents" />
+  <DocCard href="/docs/desktop/engines/chat-engines" />
+  <DocCard href="/docs/core/conversations-sessions" />
+  <DocCard href="/docs/start-here/architecture/batteries-included" />
+</Cards>

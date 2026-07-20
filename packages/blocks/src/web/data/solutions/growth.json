@@ -1,0 +1,81 @@
+{
+  "slug": "growth",
+  "name": "Growth",
+  "navLabel": "Growth",
+  "category": "Sales & Marketing",
+  "icon": "Rocket",
+  "tagline": "Run experiments end to end with workflows that test, measure, and iterate on a schedule.",
+  "heroEyebrow": "Ryu for Growth",
+  "heroTitle": "Ship more experiments, wait less for results.",
+  "heroSubtitle": "Chain the whole growth loop into a workflow: generate variants, launch them, pull the numbers, and write the readout, on a schedule or a trigger. Agents connect to your analytics and channels so an experiment runs itself while you decide what to scale.",
+  "visualKey": "WorkflowsVisual",
+  "intro": "Growth is throughput: more experiments, faster cycles, cleaner readouts. The bottleneck is rarely ideas, it's the manual glue between generating variants, launching them, and pulling results. Ryu turns that loop into a workflow that runs the repetitive parts automatically, so your team spends time on the calls that matter.",
+  "highlights": [
+    {
+      "title": "The loop as a workflow",
+      "description": "Chain generate, launch, measure, and recap into one pipeline that runs on a schedule or a trigger."
+    },
+    {
+      "title": "Connected to your funnel",
+      "description": "Agents reach your analytics, ad tools, and email platform to pull metrics and push changes directly."
+    },
+    {
+      "title": "Variants at volume",
+      "description": "Spin up dozens of copy, subject-line, and creative variations grounded in what's already worked for you."
+    },
+    {
+      "title": "Cost-aware routing",
+      "description": "The Gateway routes bulk generation to a cheap or local model and sets budgets so testing stays affordable."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Experiment design",
+      "description": "Turn a hypothesis into a structured test: variants, success metric, sample size, and a stop rule, ready to launch."
+    },
+    {
+      "title": "Variant generation",
+      "description": "Generate landing-page copy, ad creative angles, and subject lines at volume, grounded in your top performers."
+    },
+    {
+      "title": "Funnel analysis",
+      "description": "Pull conversion data across the funnel, find the biggest drop-off, and propose the next experiment to run there."
+    },
+    {
+      "title": "Automated readouts",
+      "description": "On a schedule, gather a running test's results and write a readout with significance and a recommendation."
+    },
+    {
+      "title": "Lifecycle and onboarding emails",
+      "description": "Draft and test a full onboarding or re-engagement sequence, then queue it into your email platform."
+    },
+    {
+      "title": "Cohort and retention digging",
+      "description": "Slice users into cohorts, compare retention curves, and summarize what separates the ones that stick."
+    }
+  ],
+  "examplePrompts": [
+    "Design an A/B test for our signup page hero, with variants, the metric, and a stop rule.",
+    "Generate 20 ad headline variations based on our 5 best performers and group them by angle.",
+    "Find the biggest drop-off in our activation funnel and propose three experiments to fix it.",
+    "Every Monday, pull last week's running tests and write a readout with significance and a recommendation.",
+    "Compare 30-day retention across users who used feature X in week one versus those who didn't."
+  ],
+  "faq": [
+    {
+      "q": "Can a whole experiment run without me babysitting it?",
+      "a": "Yes. Build the loop as a workflow with schedules and triggers, so it generates variants, launches them through connected tools, pulls results, and drafts the readout. You step in to decide what to scale."
+    },
+    {
+      "q": "Won't generating this many variants get expensive?",
+      "a": "The Gateway routes bulk generation to a cheap or fully local model and the high-stakes piece to a frontier one, with budgets per workflow. You control the spend and see every call."
+    },
+    {
+      "q": "Can it act on our analytics and ad tools directly?",
+      "a": "With Connections, agents authenticate into your analytics, ad platforms, and email tools to pull metrics and push changes. You can keep a sign-off step before anything goes live."
+    }
+  ],
+  "ctaTitle": "Turn your growth loop into a pipeline.",
+  "ctaSubtitle": "Generate, launch, measure, and read out, automatically, so you can run more bets at once.",
+  "ctaNote": "Workflow-driven · Funnel-connected · Cost-aware"
+}

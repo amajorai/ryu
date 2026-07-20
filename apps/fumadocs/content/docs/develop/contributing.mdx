@@ -47,12 +47,13 @@ flowchart LR
 |---|---|---|
 | `apps/core` | Rust / Axum | Apache-2.0 |
 | `apps/gateway` | Rust | AGPL-3.0 |
-| `apps/cli` | Rust / ratatui | Apache-2.0 |
-| `apps/ghost` + `crates/ghost-*` | Rust | Apache-2.0 |
-| `apps/shadow` + `crates/shadow-*` | Rust | Apache-2.0 |
+| `apps/cli` | Rust / ratatui | Apache-2.0 (DEPRECATED — use `apps/tui`) |
+| `apps/ghost` + `crates/ghost/*` | Rust | Apache-2.0 |
+| `apps/shadow` + `crates/ghost/shadow` | Rust | Apache-2.0 |
 | `packages/sdk` | TypeScript | Apache-2.0 |
 | `packages/create-ryu-app` | TypeScript | Apache-2.0 |
-| `crates/ryu-sdk` + `-ffi` + `-napi` | Rust | Apache-2.0 |
+| `crates/sdk/core` + `ffi` + `napi` | Rust | Apache-2.0 |
+| `crates/ghost/*` + `crates/ghost/shadow` | Rust | Apache-2.0 |
 
 ### Proprietary units
 
@@ -231,12 +232,12 @@ Key paths:
 
 ## Working on the SDK
 
-The TypeScript SDK (`packages/sdk/`) and Rust SDK (`crates/ryu-sdk/`) share the Runnable contract.
+The TypeScript SDK (`packages/sdk/`) and Rust SDK (`crates/sdk/core`) share the Runnable contract.
 See [SDK Reference](/docs/develop/sdk) for the API surface.
 
 ```bash
 # Build the native addon (required for model client)
-cd crates/ryu-sdk-napi && npm run build
+cd crates/sdk/napi && npm run build
 
 # Run SDK tests
 cd packages/sdk && bun test

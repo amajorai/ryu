@@ -1,0 +1,19 @@
+{
+  "title": "Integrate",
+  "root": true,
+  "icon": "Puzzle",
+  "pages": [
+    "index",
+    "---Surface---",
+    "openai-compat",
+    "acp-integration",
+    "mcp-integration",
+    "---Build On---",
+    "byo-agent",
+    "gateway-extensibility",
+    "capability-broker",
+    "---Platform---",
+    "channel-integration",
+    "companion-integration"
+  ]
+}

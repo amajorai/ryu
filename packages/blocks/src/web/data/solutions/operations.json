@@ -1,0 +1,81 @@
+{
+  "slug": "operations",
+  "name": "Operations",
+  "navLabel": "Operations",
+  "category": "People & Operations",
+  "icon": "Settings",
+  "tagline": "Automate the repetitive process work with workflows that run on schedules and triggers across your tools.",
+  "heroEyebrow": "Ryu for Operations",
+  "heroTitle": "Turn manual processes into pipelines that run themselves.",
+  "heroSubtitle": "Map a recurring process once into a workflow, then let it run on a schedule or fire on a trigger, moving data between your tools, drafting the docs, and flagging the exceptions for a human. The Gateway keeps every step governed, logged, and on budget.",
+  "visualKey": "WorkflowsVisual",
+  "intro": "Operations is the connective tissue of the company: the handoffs, reconciliations, and reports that keep things moving but eat hours of copy-paste. Ryu turns those processes into workflows that chain agents and tools together, run on their own, and surface only the exceptions, so your team manages the edge cases instead of the routine.",
+  "highlights": [
+    {
+      "title": "Processes as workflows",
+      "description": "Chain agents and tools into a pipeline that runs the same steps every time, on a schedule or a trigger."
+    },
+    {
+      "title": "Moves data across tools",
+      "description": "Agents connect to your stack to read, transform, and write data between systems without manual copy-paste."
+    },
+    {
+      "title": "Exceptions, not everything",
+      "description": "Workflows handle the routine and pause for a human only when something falls outside the rules."
+    },
+    {
+      "title": "Governed and on budget",
+      "description": "The Gateway logs every call, sets spend limits, and keeps an audit trail of what each process did."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Recurring report generation",
+      "description": "Pull data from your tools on a schedule, assemble the weekly or monthly report, and post it where the team looks."
+    },
+    {
+      "title": "Data entry and reconciliation",
+      "description": "Move records between systems, match line items, and flag the mismatches that need a person to resolve."
+    },
+    {
+      "title": "Vendor and invoice processing",
+      "description": "Read incoming invoices, extract the fields, check them against the order, and route exceptions for approval."
+    },
+    {
+      "title": "Onboarding and offboarding runbooks",
+      "description": "Run the standard provisioning and access steps as a workflow, with a checklist and sign-off where required."
+    },
+    {
+      "title": "SOP drafting and upkeep",
+      "description": "Turn how a process actually runs into a written standard operating procedure your team can follow."
+    },
+    {
+      "title": "Inbox and ticket routing",
+      "description": "Classify incoming ops requests, route them to the right queue, and draft the acknowledgement."
+    }
+  ],
+  "examplePrompts": [
+    "Every Friday at 9am, pull our key metrics from these tools and post the weekly ops report to Slack.",
+    "Reconcile this month's transactions against our records and flag every mismatch for review.",
+    "Read these incoming invoices, extract the amounts and POs, and route anything over budget for approval.",
+    "Build an offboarding runbook that revokes access across our tools with a sign-off step.",
+    "Write a standard operating procedure for our new-vendor intake based on how we actually do it."
+  ],
+  "faq": [
+    {
+      "q": "How much of a process can actually be automated?",
+      "a": "Build it as a workflow and the routine steps run on a schedule or trigger, moving data across connected tools. Anything outside the rules pauses for a human, so you automate the bulk and review the exceptions."
+    },
+    {
+      "q": "Can it work across all our different tools?",
+      "a": "Yes. With Connections powered by Composio, agents authenticate into hundreds of apps to read and write data, and MCP exposes 250+ tools, so a workflow can span your whole stack."
+    },
+    {
+      "q": "How do we keep these running processes governed?",
+      "a": "The Gateway sits in front of every call, logging it in an audit trail, enforcing budgets, and redacting sensitive data. You always have a record of what each automated process touched and did."
+    }
+  ],
+  "ctaTitle": "Stop running the process by hand.",
+  "ctaSubtitle": "Map it once into a workflow, then let it run on a schedule while your team handles the exceptions.",
+  "ctaNote": "Workflow-driven · Cross-tool · Fully audited"
+}

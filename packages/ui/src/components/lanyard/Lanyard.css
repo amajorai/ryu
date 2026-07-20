@@ -1,0 +1,14 @@
+.lanyard-wrapper {
+	position: relative;
+	z-index: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	/* Defaults to full viewport (the React Bits standalone usage), but a parent
+     can size it by setting --lanyard-height (e.g. style={{ '--lanyard-height':
+     '420px' }}) so the canvas fits inside a panel instead of the whole page. */
+	height: var(--lanyard-height, 100vh);
+	transform: scale(1);
+	transform-origin: center;
+}

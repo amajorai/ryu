@@ -379,6 +379,21 @@ pub fn underlying_cli_probe(registry_id: &str) -> Option<(&'static str, &'static
 }
 
 /// Default gateway-bypass for a registry agent (most ACP subprocesses self-route).
+///
+/// A registry ACP agent's *chat* egress is governable only when BOTH (a) its CLI
+/// honours a base-URL env var Core injects at spawn AND (b) the Gateway speaks
+/// that wire format (OpenAI `/v1`, or the Anthropic / OpenAI-Responses
+/// passthroughs). Only `codex-acp` and `pi-acp` satisfy both here — they honour
+/// `OPENAI_BASE_URL` and are wrapped by their dedicated cmd builders — so every
+/// other registry agent bypasses the Gateway for chat and carries `true`:
+///   - `gemini` reads `GOOGLE_GEMINI_BASE_URL` / `CODE_ASSIST_ENDPOINT` (Google
+///     format), which the Gateway has no ingress for — governing it needs a new
+///     Gateway passthrough, not Core injection.
+///   - the self-fetching long tail (`cline`/`goose`/`opencode`/`qwen-code`/…)
+///     makes its own provider calls; only `qwen-code` is known to read
+///     `OPENAI_BASE_URL`, and only under its `openai` auth type, so it is
+///     coverable solely via the fully-configured BYO `acp-exec:` path — not here.
+/// See `docs/routing-planes.md` (the per-agent chat-egress coverage matrix).
 pub fn registry_gateway_bypass(registry_id: &str) -> bool {
     !matches!(registry_id, "codex-acp" | "pi-acp")
 }

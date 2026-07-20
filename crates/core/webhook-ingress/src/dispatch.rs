@@ -297,6 +297,9 @@ mod tests {
         fn composio_is_configured(&self) -> bool {
             true
         }
+        fn has_webhook_trigger(&self) -> bool {
+            false
+        }
         fn verify_webhook_signature(&self, _raw_body: &[u8], signature: Option<&str>) -> bool {
             signature == Some("good")
         }

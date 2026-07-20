@@ -25,6 +25,7 @@
 //! received event is *what runs* → Core. The fan-out/auth/HMAC policy lives in
 //! `apps/server` (packages/api), the control plane.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
@@ -32,6 +33,25 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::host::{host, host_opt};
+
+/// Process-global "the relay subscription is live" guard. Claimed once (via
+/// `compare_exchange`) before register so the boot start and any later on-save
+/// re-start converge on a single outbound subscription — never a double-register
+/// or a second SSE loop. Reset to `false` if register fails, so a later save can
+/// retry (the node was not actually started).
+static RELAY_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the RyuRelay outbound subscription should open, given the two
+/// explicit-use signals. Pure so the gate is unit-testable without network.
+///
+/// P6b privacy posture: the relay routes third-party webhook payloads through
+/// Ryu infra, so it stays **opt-in by use** — it opens when the user actually
+/// uses Composio (a key is configured) OR has created a workflow `Webhook`
+/// trigger (which is unreachable on a laptop until Core registers with the
+/// relay). It is never "always on when logged in".
+pub fn relay_gate_open(composio_configured: bool, has_webhook_trigger: bool) -> bool {
+    composio_configured || has_webhook_trigger
+}
 
 /// Default relay server base (the `apps/server` control plane). Overridable via
 /// `RYU_BACKEND_URL` so nothing is hardcoded (CLAUDE.md §1).
@@ -279,23 +299,44 @@ async fn register(
 /// logs a clear "not active" and never spawns a network task without auth — also
 /// keeps `cargo test` network-free since it never calls this).
 pub async fn start() -> Result<()> {
-    // Opt-in by use: RyuRelay is the default ingress, but only actually open the
-    // outbound subscription (which routes third-party webhook payloads through
-    // Ryu infra) when the user actually uses Composio — i.e. a Composio key is
-    // configured. This keeps the data flow effectively opt-in rather than
-    // default-on for every install (security MED, P6b).
+    // Opt-in by use (P6b): open the outbound subscription only when the user
+    // actually uses Composio (a key is configured) OR has a workflow `Webhook`
+    // trigger (unreachable on a laptop until Core registers with the relay). The
+    // gate stays explicit-use, never default-on for every install (security MED).
     let host = host()?;
-    if !host.composio_is_configured() {
-        bail!("ryu-relay ingress: no Composio key configured — relay not started (opt-in by use)");
+    if !relay_gate_open(host.composio_is_configured(), host.has_webhook_trigger()) {
+        bail!(
+            "ryu-relay ingress: no Composio key and no workflow webhook trigger — \
+             relay not started (opt-in by use)"
+        );
     }
     let token = host
         .auth_token()
         .ok_or_else(|| anyhow!("ryu-relay ingress: not logged in (no ~/.ryu/auth.json token)"))?;
+
+    // Claim the single-subscription slot before any network work. If it is
+    // already claimed (boot start, or a prior on-save start), this call is a
+    // no-op — the live subscription already serves every workflow webhook.
+    if RELAY_STARTED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Ok(());
+    }
+
     let base = relay_base();
     let node = node_name();
     let client = reqwest::Client::new();
 
-    let (relay_token, public_url) = register(&client, &base, &token, &node).await?;
+    let (relay_token, public_url) = match register(&client, &base, &token, &node).await {
+        Ok(pair) => pair,
+        Err(e) => {
+            // Register failed → the node is not started; release the slot so a
+            // later save (or retry) can attempt the subscription again.
+            RELAY_STARTED.store(false, Ordering::SeqCst);
+            return Err(e);
+        }
+    };
     persist_relay_token(&relay_token, &node);
     super::set_public_url(Some(public_url));
 
@@ -303,6 +344,16 @@ pub async fn start() -> Result<()> {
         subscribe_loop(client, base, token, node).await;
     });
     Ok(())
+}
+
+/// Idempotently ensure the RyuRelay subscription is live (register + SSE loop).
+///
+/// Called from the workflow save path when a saved workflow declares a `Webhook`
+/// trigger, so `relay_inbound_url()` resolves and the subscription opens **without
+/// a Core restart** for a trigger created after boot. A no-op when the
+/// subscription is already live (the [`RELAY_STARTED`] guard inside [`start`]).
+pub async fn ensure_relay_started() -> Result<()> {
+    start().await
 }
 
 /// The resilient outbound SSE-client loop: connect, stream frames, dispatch
@@ -557,6 +608,18 @@ mod tests {
         );
         // A recent id is still deduped.
         assert!(!seen.insert("overflow"));
+    }
+
+    #[test]
+    fn relay_gate_opens_for_webhook_trigger_only() {
+        // Composio-less node with a workflow webhook trigger: the gate opens (the
+        // fix for a laptop webhook that was previously unreachable under RyuRelay).
+        assert!(relay_gate_open(false, true));
+        // Composio-only still opens (the legacy path).
+        assert!(relay_gate_open(true, false));
+        assert!(relay_gate_open(true, true));
+        // Neither signal → stays closed (opt-in by use, never default-on).
+        assert!(!relay_gate_open(false, false));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 name = "ryu-gw-evals"
 version = "0.0.5"
 edition = "2021"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
 description = "Ryu Gateway evals stage: per-request sampling + provider-score EMA (the live EvalsRunner) as a swappable EvalsBackend trait + registry with an in-memory built-in, plus the pure dataset scorers (score_case, aggregate_scores, assertions, judge helpers). A self-contained extracted gateway stage crate."
 

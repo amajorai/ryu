@@ -277,6 +277,96 @@ async fn http_ssrf_guard(url: &str, granted_host: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A scalar tool-arg rendered for a URL (path segment or query value). Objects
+/// and arrays have no unambiguous URL rendering, so they stay in the JSON body.
+fn scalar_to_string(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+/// The `{name}` path-parameter placeholders in a URL template, in order. A plain
+/// scan (no regex dep); names containing `/` are ignored so a stray brace in a
+/// path can't swallow a segment.
+fn url_placeholders(url: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = url;
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        if let Some(close) = after.find('}') {
+            let name = &after[..close];
+            if !name.is_empty() && !name.contains('/') {
+                out.push(name.to_string());
+            }
+            rest = &after[close + 1..];
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+/// Lower REST-shaped tool args onto a request: fill every `{name}` placeholder in
+/// the URL from (and consume) a matching arg, then send the rest as query params
+/// for body-less methods (GET/HEAD) or as the JSON body otherwise. Non-object
+/// args keep the legacy behavior (the whole value is the body). Returns an error
+/// if a required path placeholder has no matching arg. This is what lets a single
+/// `http` tool express a real REST operation (`GET /repos/{owner}/{repo}/issues`)
+/// instead of only a fixed-URL POST.
+type RestRequest = (String, Vec<(String, String)>, Value, Vec<(String, String)>);
+
+fn build_rest_request(
+    url: &str,
+    args: &Value,
+    bodyless: bool,
+    header_params: &[String],
+) -> Result<RestRequest, String> {
+    let Some(obj) = args.as_object() else {
+        // Scalar/array args: no partitioning. Legacy fixed-URL behavior.
+        return Ok((url.to_string(), Vec::new(), args.clone(), Vec::new()));
+    };
+    let mut remaining = obj.clone();
+    // 0. Headers first: pull the declared header args out before path/query/body
+    //    partitioning (auth token + OpenAPI `in: header` params).
+    let mut headers: Vec<(String, String)> = Vec::new();
+    for name in header_params {
+        if let Some(rendered) = remaining.remove(name).as_ref().and_then(scalar_to_string) {
+            headers.push((name.clone(), rendered));
+        }
+    }
+    let mut final_url = url.to_string();
+    let mut missing: Vec<String> = Vec::new();
+    for name in url_placeholders(url) {
+        match remaining.remove(&name).as_ref().and_then(scalar_to_string) {
+            Some(value) => {
+                let encoded = urlencoding::encode(&value);
+                final_url = final_url.replace(&format!("{{{name}}}"), &encoded);
+            }
+            None => missing.push(name),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(format!(
+            "http tool: missing path parameter(s): {}",
+            missing.join(", ")
+        ));
+    }
+    if bodyless {
+        let mut pairs = Vec::new();
+        for (key, value) in &remaining {
+            if let Some(rendered) = scalar_to_string(value) {
+                pairs.push((key.clone(), rendered));
+            }
+        }
+        Ok((final_url, pairs, Value::Null, headers))
+    } else {
+        Ok((final_url, Vec::new(), Value::Object(remaining), headers))
+    }
+}
+
 /// Proxy a plugin `http` tool call to `url`, Gateway-governed and egress-grant-gated.
 ///
 /// Order matters. The **egress-grant check runs first** (deterministic — no
@@ -293,13 +383,24 @@ pub async fn run_http_tool(
     url: &str,
     method: &str,
     args: Value,
+    header_params: &[String],
     grants: &std::collections::HashSet<String>,
     agent_id: &str,
     session_id: Option<&str>,
 ) -> Result<Value, String> {
+    // 0. Lower the REST args onto the request BEFORE any guard, so the egress /
+    //    SSRF checks below run on the FINAL host (path params can appear before
+    //    the host in a templated base, and query/body partitioning is settled here).
+    let method_upper = method.to_ascii_uppercase();
+    let m = reqwest::Method::from_bytes(method_upper.as_bytes())
+        .map_err(|_| format!("http tool: invalid method '{method}'"))?;
+    let bodyless = matches!(m, reqwest::Method::GET | reqwest::Method::HEAD);
+    let (final_url, query_pairs, body, headers) =
+        build_rest_request(url, &args, bodyless, header_params)?;
+
     // 1. Egress-grant check FIRST (deterministic refusal, before any I/O).
-    let domain = http_egress_domain(url)
-        .ok_or_else(|| format!("http tool: could not parse a host from url '{url}'"))?;
+    let domain = http_egress_domain(&final_url)
+        .ok_or_else(|| format!("http tool: could not parse a host from url '{final_url}'"))?;
     let needed = format!("{GRANT_HTTP_EGRESS_PREFIX}{domain}");
     let wildcard = format!("{GRANT_HTTP_EGRESS_PREFIX}*");
     if !(grants.contains(&needed) || grants.contains(&wildcard)) {
@@ -311,7 +412,7 @@ pub async fn run_http_tool(
     // 1b. SSRF guard: the granted domain must not be — or resolve to — an internal
     //     address, unless it was explicitly granted as one. Blocks the metadata /
     //     loopback / LAN sinks a public-domain grant could otherwise reach via DNS.
-    http_ssrf_guard(url, &domain).await?;
+    http_ssrf_guard(&final_url, &domain).await?;
 
     // 2. Gateway governance: fail-closed budget + opt-in firewall/DLP scan.
     use crate::sidecar::gateway::{
@@ -321,7 +422,10 @@ pub async fn run_http_tool(
     if let ExecBudgetOutcome::Deny(reason) = check_exec_budget(backend, "tool_http").await {
         return Err(format!("gateway denied http egress: {reason}"));
     }
-    let scan_content = format!("{method} {url}\n{args}");
+    // Scan the method + final URL + body. Header VALUES (auth tokens injected by
+    // the identity vault) are deliberately excluded so a secret never lands in the
+    // firewall/DLP scan or audit trail.
+    let scan_content = format!("{method_upper} {final_url}\n{body}");
     match check_exec_scan(backend, &scan_content, session_id, Some(agent_id)).await {
         ExecScanOutcome::Allow => {}
         ExecScanOutcome::Deny(reason) | ExecScanOutcome::ApprovalRequired(reason) => {
@@ -341,8 +445,6 @@ pub async fn run_http_tool(
     // 3. Perform the request. Body is the tool args as JSON for methods that carry
     //    one; GET/HEAD send none. Response is `{ status, body }` (JSON if parseable).
     let started = std::time::Instant::now();
-    let m = reqwest::Method::from_bytes(method.as_bytes())
-        .map_err(|_| format!("http tool: invalid method '{method}'"))?;
     // Redirects DISABLED: a 3xx is returned to the caller as-is. Following it would
     // re-issue the request to the `Location` host WITHOUT re-running the egress-grant
     // + SSRF checks above — the classic allowlist bypass (granted public domain →
@@ -352,10 +454,18 @@ pub async fn run_http_tool(
         .build()
         .map_err(|e| format!("http tool: client build failed: {e}"))?;
     let mut req = client
-        .request(m.clone(), url)
+        .request(m.clone(), &final_url)
         .timeout(std::time::Duration::from_secs(30));
-    if !matches!(m, reqwest::Method::GET | reqwest::Method::HEAD) {
-        req = req.json(&args);
+    for (name, value) in &headers {
+        // Invalid header name/value surfaces as a request error at `.send()`.
+        req = req.header(name, value);
+    }
+    if bodyless {
+        if !query_pairs.is_empty() {
+            req = req.query(&query_pairs);
+        }
+    } else {
+        req = req.json(&body);
     }
     let (result, exit_code, audit_err) = match req.send().await {
         Ok(resp) => {

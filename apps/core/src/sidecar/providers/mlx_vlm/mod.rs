@@ -19,7 +19,7 @@ use anyhow::Context;
 
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 use crate::win_process::NoWindow;
-use process::DEFAULT_PORT;
+use process::default_port;
 
 /// Default model MLX-VLM serves when none is configured. Like mlx-lm/vLLM/SGLang,
 /// the server binds to a specific model, so activation needs *a* model to start.
@@ -41,7 +41,7 @@ impl MlxVlmManager {
     pub fn new() -> Self {
         Self {
             model: None,
-            port: DEFAULT_PORT,
+            port: default_port(),
             running: Arc::new(AtomicBool::new(false)),
             process: Arc::new(Mutex::new(None)),
             client: reqwest::Client::builder()

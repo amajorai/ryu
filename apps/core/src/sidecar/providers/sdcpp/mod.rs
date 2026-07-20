@@ -28,15 +28,27 @@ use anyhow::Context;
 
 use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
 
-/// Loopback port the sd-server media engine binds to. Distinct from llama.cpp
-/// (8080), the embeddings server (8081), and whisper (8090) so they coexist.
-pub const SD_PORT: u16 = 8083;
-const SD_ADDR: &str = "127.0.0.1:8083";
+/// Canonical (release) loopback port the sd-server media engine binds to.
+/// Distinct from llama.cpp (8080), the embeddings server (8081), and whisper
+/// (8090) so they coexist. The concrete port is profile-aware — see [`sd_port`].
+pub const SD_PORT_BASE: u16 = 8083;
+
+/// Profile-aware media-engine port (release 8083, dev 9083, …). Both the spawn
+/// side (`--listen-port`) and every client (`sd_base_url`) resolve the SAME port
+/// through here, so a dev stack never adopts the release stack's sd-server.
+pub fn sd_port() -> u16 {
+    crate::profile::port(SD_PORT_BASE)
+}
+
+/// Loopback `host:port` the media engine binds to (profile-aware).
+fn sd_addr() -> String {
+    format!("127.0.0.1:{}", sd_port())
+}
 
 /// Base URL the media engine serves on once resident. The data paths post to
 /// `{base}/v1/images/generations` (image) and `{base}/sdcpp/v1/vid_gen` (video).
 pub fn sd_base_url() -> String {
-    format!("http://{SD_ADDR}")
+    format!("http://{}", sd_addr())
 }
 
 /// Resolve the diffusion model path in priority order:
@@ -144,7 +156,10 @@ impl Sidecar for StableDiffusionManager {
             // process that would fail to bind the port.
             if Self::server_reachable(&client).await {
                 adopted_external.store(true, Ordering::Relaxed);
-                tracing::info!("sd-server already running on {SD_ADDR} — adopting existing server");
+                tracing::info!(
+                    "sd-server already running on {} — adopting existing server",
+                    sd_addr()
+                );
                 return Ok(());
             }
             adopted_external.store(false, Ordering::Relaxed);
@@ -177,7 +192,7 @@ impl Sidecar for StableDiffusionManager {
                 "--listen-ip".into(),
                 "127.0.0.1".into(),
                 "--listen-port".into(),
-                SD_PORT.to_string(),
+                sd_port().to_string(),
             ];
             let program = binary_path.to_string_lossy().to_string();
             process
@@ -186,9 +201,10 @@ impl Sidecar for StableDiffusionManager {
                 .context("spawning sd-server process")?;
 
             // Diffusion weights take a while to load; allow generous startup time.
+            let addr = sd_addr();
             tokio::time::timeout(std::time::Duration::from_secs(120), async {
                 loop {
-                    if tokio::net::TcpStream::connect(SD_ADDR).await.is_ok() {
+                    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -197,7 +213,7 @@ impl Sidecar for StableDiffusionManager {
             .await
             .context("sd-server did not start within 120s")?;
 
-            tracing::info!("sd-server started on {SD_ADDR}");
+            tracing::info!("sd-server started on {addr}");
             Ok(())
         })
     }

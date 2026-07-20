@@ -3,7 +3,7 @@ name = "ryu-tool-exec"
 version = "0.0.5"
 edition = "2021"
 license = "Apache-2.0"
-description = "The programmatic-tool-calling (PTC) code-execution sandbox primitive for Ryu (#476): the Deno-subprocess backend (deny-by-default permissions, real process isolation, killable), the gated secure-exec V8-isolate backend, the bounded parked-execution store for Composio connect/resume, the `CodeExecutor` swappable-backend enum, the `SandboxToolInvoker`/`SandboxBridge` sandbox-to-host bridge, and the Contract-4 tool/eval schema defs. An extracted Core capability crate: in-process by default, consumed as a NON-optional path dependency (Core's PTC path — `run_sandboxed`/`resume_parked`/`is_available` — links it in every build). The MCP tool-call coupling injects via the narrow `ToolCaller` trait and the security scrubbers (untrusted-marker stripping, child-env scrub) via `HostHooks`, so the crate has ZERO dependency on apps/core: the Gateway budget/scan/audit governance bracket, the agent-allowlist resolution, and the governed `http` plugin-tool egress stay Core-side (`apps/core/src/tool_exec/mod.rs`)."
+description = "The programmatic-tool-calling (PTC) code-execution sandbox primitive for Ryu: Deno-subprocess backend with deny-by-default permissions, real process isolation, tool-call bridging back to the host, and exec budgets. Part of the Ryu monorepo (github.com/amajorai/ryu)."
 repository = "https://github.com/amajorai/ryu"
 
 # `tool-exec-deno` is the default backend (Deno on PATH — no crate dep). The

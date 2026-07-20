@@ -18,7 +18,7 @@ tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
-ryu-crypto = { path = "../crypto" }
+ryu-crypto = { path = "../crypto", version = "0.0.5" }
 
 [features]
 # Exposes the in-memory store + deterministic cipher seeding to downstream test

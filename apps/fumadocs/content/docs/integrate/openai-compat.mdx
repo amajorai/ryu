@@ -1,0 +1,133 @@
+---
+title: "OpenAI-Compatible API"
+description: "Point any OpenAI-compatible SDK, framework, or raw HTTP client at the Ryu Gateway. Every request runs through firewall, budget, evals, and audit."
+tags: ["openai", "api", "integration", "gateway", "base-url", "mastra", "langchain", "vercel-ai"]
+---
+
+The Ryu Gateway speaks the full OpenAI-compatible API. Swap the `baseURL`, add a gateway API key,
+and every request runs through Ryu's governance pipeline before reaching the upstream provider.
+
+## The endpoint
+
+```
+POST http://localhost:7981/v1/chat/completions
+```
+
+Gateway default: `http://127.0.0.1:7981`. Auth: `Authorization: Bearer <gateway-key>`.
+
+## Framework examples
+
+### OpenAI SDK (TypeScript)
+
+```typescript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://127.0.0.1:7981/v1",
+  apiKey: "ryu-sk-your-secret-key",
+});
+
+const response = await client.chat.completions.create({
+  model: "gpt-4o",
+  messages: [{ role: "user", content: "Hello from Ryu!" }],
+});
+// response.choices[0].message.content is governed
+```
+
+### Vercel AI SDK
+
+```typescript
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
+
+const result = await generateText({
+  model: openai("gpt-4o", {
+    baseURL: "http://127.0.0.1:7981/v1",
+    apiKey: "ryu-sk-your-secret-key",
+  }),
+  prompt: "Write a haiku about Rust.",
+});
+```
+
+### Mastra
+
+```typescript
+import { createOpenAI } from "@ai-sdk/openai";
+
+const ryuGateway = createOpenAI({
+  baseURL: "http://127.0.0.1:7981/v1",
+  apiKey: "ryu-sk-your-secret-key",
+});
+
+// Use ryuGateway("gpt-4o") as your model provider
+```
+
+### LangChain (TypeScript)
+
+```typescript
+import { ChatOpenAI } from "@langchain/openai";
+
+const model = new ChatOpenAI({
+  modelName: "gpt-4o",
+  openAIApiKey: "ryu-sk-your-secret-key",
+  configuration: {
+    baseURL: "http://127.0.0.1:7981/v1",
+  },
+});
+```
+
+### Raw HTTP (any language)
+
+```bash
+curl http://localhost:7981/v1/chat/completions \
+  -H "Authorization: Bearer ryu-sk-your-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+## Response headers
+
+Every response includes diagnostic headers:
+
+| Header | Meaning |
+|---|---|
+| `x-provider` | Which upstream handled the call (`openai`, `anthropic`, `local`, …) |
+| `x-request-id` | Unique ID for the audit log |
+| `x-routed-model` | The actual model after routing (may differ from requested) |
+| `x-cache` | `HIT` or `MISS` (non-streaming only) |
+| `x-ryu-policy-alert` | Base64-encoded policy alert when a rule fires |
+
+## Tool calling on this surface
+
+When tools are enabled, the Gateway injects a `tool_search` meta-tool into the request body. The
+model discovers tools via search, then calls them by exact ID. The Gateway gates execution against
+the allowlist and audits every call.
+
+See [Gateway tools](/docs/gateway/tools) for the full tool-loop mechanics.
+
+## Streaming
+
+Streaming works identically to the OpenAI API — send `"stream": true` and receive SSE events.
+The Gateway buffers tool-call rounds on the OpenAI-compat plane, then streams the final response.
+
+## Available models
+
+`GET http://localhost:7981/v1/models` returns the routable model list. See
+[Providers & Models](/docs/start-here/architecture/providers) for the full catalog.
+
+## Auth configuration
+
+See [Gateway Configuration > Auth](/docs/gateway/configuration#auth-and-api-keys) for API key
+setup, per-key rate limits, and budget caps.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/gateway/gateway-for-any-agent" />
+  <DocCard href="/docs/gateway/tools" />
+  <DocCard href="/docs/gateway/configuration" />
+  <DocCard href="/docs/start-here/architecture/providers" />
+</Cards>

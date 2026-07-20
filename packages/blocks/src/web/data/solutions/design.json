@@ -1,0 +1,81 @@
+{
+  "slug": "design",
+  "name": "Design",
+  "navLabel": "Design",
+  "category": "Engineering & Product",
+  "icon": "Palette",
+  "tagline": "Generate visuals, audit accessibility, and turn ideas into UI from one desktop app.",
+  "heroEyebrow": "Ryu for Design",
+  "heroTitle": "A creative partner that lives on your desktop.",
+  "heroSubtitle": "Generate imagery locally, write the copy, audit a screen for accessibility, and translate a mockup into front-end code, all from one private desktop app. Swap between models per task, keep work on your machine, and ground agents in your design system.",
+  "visualKey": "DesktopVisual",
+  "intro": "Design work spans many modes: ideation, visual generation, writing, and the handoff to code. Ryu brings them into one local-first desktop app, with image generation and chat that run on your machine, agents grounded in your design system, and the freedom to pick the best model for each task instead of being locked to one tool.",
+  "highlights": [
+    {
+      "title": "Visuals on your machine",
+      "description": "Generate concept imagery and variations locally, so early drafts and unreleased work never leave your device."
+    },
+    {
+      "title": "Grounded in your system",
+      "description": "Index your design tokens, components, and brand voice in Spaces, so suggestions and copy stay on-brand."
+    },
+    {
+      "title": "Design to code",
+      "description": "Hand a mockup or spec to an agent and get front-end components back as a reviewable diff on a branch."
+    },
+    {
+      "title": "Best model per task",
+      "description": "Use a strong model for ideation and a fast local one for routine edits, switching per task with no lock-in."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Concept generation",
+      "description": "Produce moodboards, hero imagery, and visual variations from a prompt, kept local until you decide to share."
+    },
+    {
+      "title": "UX copywriting",
+      "description": "Draft on-brand microcopy, empty states, and error messages grounded in your tone-of-voice guide."
+    },
+    {
+      "title": "Accessibility audit",
+      "description": "Review a screen or component for contrast, focus order, labels, and ARIA gaps against WCAG, with fixes suggested."
+    },
+    {
+      "title": "Design to front-end",
+      "description": "Turn a mockup into component code that uses your tokens, returned as a diff a developer can review and apply."
+    },
+    {
+      "title": "Design critique",
+      "description": "Get structured feedback on hierarchy, spacing, and consistency against your system before a review."
+    },
+    {
+      "title": "Research synthesis",
+      "description": "Cluster usability session notes into findings and recommendations, with quotes that ground each insight."
+    }
+  ],
+  "examplePrompts": [
+    "Generate five hero image directions for a calm, trustworthy fintech landing page.",
+    "Write empty state and error copy for the onboarding flow in our friendly, plain tone.",
+    "Audit this settings screen for accessibility issues and list the contrast and focus problems with fixes.",
+    "Turn this card mockup into a React component using our design tokens and show me the diff.",
+    "Cluster these usability notes into the top findings with a quote backing each one."
+  ],
+  "faq": [
+    {
+      "q": "Does unreleased work stay private?",
+      "a": "Yes. Ryu is local-first, so image generation and chat can run entirely on your machine with no telemetry, keeping concepts and unreleased designs off the network until you choose to share."
+    },
+    {
+      "q": "Can it keep my output on-brand?",
+      "a": "Yes. Index your design tokens, components, and tone-of-voice guide in a Space, and agents ground their visuals and copy in your system rather than producing generic output."
+    },
+    {
+      "q": "Can it help with the handoff to code?",
+      "a": "Yes. Hand a mockup or spec to an agent and it produces front-end components using your tokens, returned as a git diff that a developer reviews before it lands."
+    }
+  ],
+  "ctaTitle": "Design, write, and hand off from one place.",
+  "ctaSubtitle": "Generate, audit, and translate to code with a private partner on your desktop.",
+  "ctaNote": "Local visuals · On-brand · Design to code"
+}

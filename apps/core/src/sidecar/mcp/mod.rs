@@ -1998,13 +1998,18 @@ impl McpRegistry {
                             )),
                         };
                     }
-                    ToolBackend::Http { url, method } => {
+                    ToolBackend::Http {
+                        url,
+                        method,
+                        header_params,
+                    } => {
                         // Gateway-governed egress; the domain grant is checked first
                         // (deterministic refusal) inside `run_http_tool`.
                         return crate::tool_exec::run_http_tool(
                             &url,
                             &method,
                             arguments,
+                            &header_params,
                             &resolved.grants,
                             &resolved.plugin_id,
                             session_id.as_deref(),

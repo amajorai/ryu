@@ -208,6 +208,12 @@ pub struct PluginManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires: Option<Requires>,
 
+    /// Ids of separate plugins this app ships as a logical bundle — installed and
+    /// uninstalled TOGETHER with this app, but otherwise independent plugins
+    /// (NOT dependency edges: bundles never affect enable/disable order).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundles: Vec<String>,
+
     /// Host surfaces this plugin runs on (desktop / island / mobile / …).
     ///
     /// **Empty or absent = runs on EVERY surface.** This is the backward-compatible
@@ -279,6 +285,18 @@ pub struct PluginManifest {
     /// Logo URL (contract key `iconUrl`; Ryu extension).
     #[serde(default, rename = "iconUrl", skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
+
+    /// CSS background for the icon square (Ryu extension: `iconBackground`).
+    #[serde(default, rename = "iconBackground", skip_serializing_if = "Option::is_none")]
+    pub icon_background: Option<String>,
+
+    /// Primary brand accent color, hex (Ryu extension: `accentColor`).
+    #[serde(default, rename = "accentColor", skip_serializing_if = "Option::is_none")]
+    pub accent_color: Option<String>,
+
+    /// Detail-page hero banner spec ({colors,style,seed}); opaque passthrough (Ryu ext).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub banner: Option<serde_json::Value>,
 
     /// App-Store gallery screenshot URLs (Ryu extension).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -694,6 +694,19 @@ pub struct UninstallOutcome {
     /// here (deactivate runnables, stop sidecars, flip policy flags) — the record
     /// removal is only the store row; the runtime side effects are the caller's.
     pub disabled: Vec<PluginRecord>,
+    /// Ids of **logical bundle** children that were uninstalled TOGETHER with the
+    /// target (their store rows removed). Each is a separate, independent plugin
+    /// the target shipped as a bundle — NOT a dependency. The caller must run the
+    /// same on-disk + in-memory teardown for each of these that it runs for the
+    /// removed target (deactivate the manifest, drop its dir/MCP entry). Empty for a
+    /// target that bundles nothing.
+    pub bundled_removed: Vec<String>,
+    /// Ids of bundle children that were **skipped** (left installed) rather than
+    /// removed, because another still-installed plugin also bundles them (the bundle
+    /// axis) or a live dependent still requires them / they are built-in (the
+    /// requires / protected axis). Surfaced so the caller can report what did NOT
+    /// cascade. Empty in the common case.
+    pub bundled_skipped: Vec<String>,
 }
 
 /// Error returned when an uninstall is refused.
@@ -804,10 +817,180 @@ pub async fn uninstall_app(
     // 4. Remove the record (wires the previously-unused PluginStore::remove).
     store.remove(id).await.map_err(UninstallError::Other)?;
 
+    // 5. Logical-bundle cascade. AFTER the target is gone, uninstall the separate
+    // plugins it ships as a bundle — but SAFELY, and NEVER as dependency edges (a
+    // bundle id never touches the graph resolver). Each child is uninstalled only
+    // when nothing else still owns or needs it; a skip is not a failure.
+    let (bundled_removed, bundled_skipped) =
+        cascade_bundle_uninstall(store, id, all_manifests).await?;
+
     Ok(UninstallOutcome {
         removed: id.to_owned(),
         disabled,
+        bundled_removed,
+        bundled_skipped,
     })
+}
+
+/// Uninstall the transitive **logical-bundle** closure of a just-removed `target`.
+///
+/// Returns `(removed, skipped)` child ids. A child is REMOVED only if every axis
+/// clears; otherwise it is SKIPPED (left installed) and the target uninstall still
+/// succeeds — a bundle cascade must never fail the uninstall it rode in on.
+///
+/// # Skip axes (both checked per child, before any removal)
+///
+/// - **Bundle axis** — if ANY OTHER still-installed plugin (one not itself in the
+///   removal closure) also lists the child in ITS `bundles`, the child is still
+///   owned by that bundle, so it is skipped.
+/// - **Requires / protected axis** — removing the child goes through the ordinary
+///   [`disable_app`] (`cascade=false`, `force=false`) + record removal. If a live
+///   ENABLED dependent still requires it ([`DependencyError::BlockedByDependents`])
+///   or the child is a built-in ([`crate::plugins::builtins::is_uninstall_protected`]
+///   / load-bearing), the removal is declined and the child is skipped — caught and
+///   continued, never propagated.
+///
+/// The closure is computed transitively (a child may itself bundle grandchildren)
+/// with a `visited` set that stops bundle cycles.
+async fn cascade_bundle_uninstall(
+    store: &PluginStore,
+    target: &str,
+    all_manifests: &[PluginManifest],
+) -> Result<(Vec<String>, Vec<String>), UninstallError> {
+    // The transitive set of bundle-child ids (target excluded), cycle-safe.
+    let closure = collect_bundle_closure(target, all_manifests);
+    if closure.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    // "The set being removed" = the target plus its whole bundle closure. The
+    // bundle-axis only skips a child owned by a plugin OUTSIDE this set.
+    let mut removal_set: std::collections::HashSet<&str> =
+        closure.iter().map(String::as_str).collect();
+    removal_set.insert(target);
+
+    // Snapshot the currently-installed ids once. Plugins outside `removal_set` are
+    // never removed here, so their installed status is stable for the bundle-axis.
+    let installed_ids: std::collections::HashSet<String> = store
+        .list()
+        .await
+        .map_err(UninstallError::Other)?
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+
+    let mut removed: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+
+    for child in &closure {
+        // Nothing to do for a child that is not installed (a bundle id may name a
+        // plugin the user never had). Not a "skip" — there is nothing to skip.
+        if !installed_ids.contains(child) {
+            continue;
+        }
+
+        // Bundle axis: another still-installed plugin (outside the removal set) that
+        // also bundles this child still owns it — leave it alone.
+        let owned_by_other = all_manifests.iter().any(|p| {
+            p.id != *child
+                && !removal_set.contains(p.id.as_str())
+                && installed_ids.contains(&p.id)
+                && p.bundles.iter().any(|b| b == child)
+        });
+        if owned_by_other {
+            skipped.push(child.clone());
+            continue;
+        }
+
+        // Requires / protected axis: try an ordinary (non-cascading, non-forced)
+        // removal; a live dependent or a built-in declines it → skip, never fail.
+        match remove_bundled_child(store, child, all_manifests).await {
+            Ok(()) => removed.push(child.clone()),
+            Err(UninstallError::Dependency(_))
+            | Err(UninstallError::Protected { .. })
+            | Err(UninstallError::NotInstalled { .. }) => skipped.push(child.clone()),
+            // A genuine store fault mid-cascade: the target is already gone, so
+            // surfacing a hard error here would misreport the whole uninstall.
+            // Record the child as skipped and keep going (best-effort teardown).
+            Err(UninstallError::Other(e)) => {
+                tracing::warn!(
+                    plugin = %child,
+                    "bundle uninstall: could not remove bundled child: {e}"
+                );
+                skipped.push(child.clone());
+            }
+        }
+    }
+
+    Ok((removed, skipped))
+}
+
+/// Compute the transitive **logical-bundle** closure rooted at `target` (the target
+/// itself excluded), cycle-safe. Each id's own `bundles` are walked so a child that
+/// bundles grandchildren pulls them in. Ordered breadth-first; order does not matter
+/// (children are removed independently, records are just rows).
+fn collect_bundle_closure(target: &str, all_manifests: &[PluginManifest]) -> Vec<String> {
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    visited.insert(target.to_owned());
+    let mut closure: Vec<String> = Vec::new();
+    let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    if let Some(m) = all_manifests.iter().find(|m| m.id == target) {
+        for b in &m.bundles {
+            queue.push_back(b.clone());
+        }
+    }
+    while let Some(child) = queue.pop_front() {
+        if !visited.insert(child.clone()) {
+            continue;
+        }
+        closure.push(child.clone());
+        if let Some(m) = all_manifests.iter().find(|m| m.id == child) {
+            for gb in &m.bundles {
+                if !visited.contains(gb) {
+                    queue.push_back(gb.clone());
+                }
+            }
+        }
+    }
+    closure
+}
+
+/// Remove ONE bundle child: the leaf half of an uninstall (installed? → protected? →
+/// [`disable_app`] `cascade=false`/`force=false` → remove the record), WITHOUT its
+/// own bundle cascade (the caller already walked the whole closure). Returns the
+/// typed [`UninstallError`] the caller maps to a skip; never removes a built-in and
+/// never forces.
+async fn remove_bundled_child(
+    store: &PluginStore,
+    child: &str,
+    all_manifests: &[PluginManifest],
+) -> Result<(), UninstallError> {
+    let records = store.list().await.map_err(UninstallError::Other)?;
+    if !records.iter().any(|r| r.id == child) {
+        return Err(UninstallError::NotInstalled {
+            id: child.to_owned(),
+        });
+    }
+    // Never remove a built-in / default-on child (the seed would resurrect it).
+    if crate::plugins::builtins::is_uninstall_protected(child) {
+        return Err(UninstallError::Protected {
+            id: child.to_owned(),
+        });
+    }
+    // A live enabled dependent still needs it → BlockedByDependents → skip.
+    match disable_app(store, child, all_manifests, false, false).await {
+        Ok(_) => {}
+        Err(DisableError::NotInstalled { id }) => {
+            return Err(UninstallError::NotInstalled { id })
+        }
+        Err(DisableError::Dependency(e)) => return Err(UninstallError::Dependency(e)),
+        Err(DisableError::LoadBearing { id }) => {
+            return Err(UninstallError::Protected { id })
+        }
+        Err(DisableError::Other(e)) => return Err(UninstallError::Other(e)),
+    }
+    store.remove(child).await.map_err(UninstallError::Other)?;
+    Ok(())
 }
 
 /// Whether a requested update needs the store transition or is a no-op.
@@ -986,17 +1169,32 @@ async fn validate_grants_via_gateway(
     }
 
     // Stub mode: opt-in allow-all for environments where the Gateway endpoint
-    // is not yet available. Always logged at WARN so it is visible.
+    // is not yet available. Always logged at WARN so it is visible. In a RELEASE
+    // build the stub seam never approves an arbitrary-code-execution grant
+    // (`sidecar:process`): a shipped/misconfigured `RYU_STUB_GRANT_VALIDATION=1`
+    // must not become unsandboxed node-sidecar RCE. Debug builds (the integration
+    // harness) keep the full allow-all so node-sidecar spawn tests still exercise
+    // the path.
     if is_stub_mode() {
+        let (approved, denied): (Vec<String>, Vec<String>) =
+            grants.iter().cloned().partition(|g| stub_may_approve(g));
+        if !denied.is_empty() {
+            tracing::warn!(
+                app_id,
+                denied = ?denied,
+                "grant validation: stub mode refused arbitrary-code-execution grant(s) in a release build"
+            );
+        }
         tracing::warn!(
             app_id,
-            grants = ?grants,
-            "grant validation: RYU_STUB_GRANT_VALIDATION=1 — allowing all grants without Gateway check (stub seam)"
+            grants = ?approved,
+            "grant validation: RYU_STUB_GRANT_VALIDATION=1 — allowing grants without Gateway check (stub seam)"
         );
+        let all_approved = denied.is_empty();
         return Ok(GrantValidationResult {
-            approved: grants.to_vec(),
-            denied: vec![],
-            all_approved: true,
+            approved,
+            denied,
+            all_approved,
         });
     }
 
@@ -1064,6 +1262,16 @@ fn is_stub_mode() -> bool {
         Ok(v) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"),
         Err(_) => false,
     }
+}
+
+/// Whether the stub allow-all seam may auto-approve `grant`. In a RELEASE build it
+/// refuses `sidecar:process` (running an unsandboxed managed process from a manifest
+/// = arbitrary code execution) so a misconfigured `RYU_STUB_GRANT_VALIDATION=1`
+/// cannot become node-sidecar RCE; in a debug build (integration harness) every
+/// grant is allowed so node-sidecar tests still spawn.
+fn stub_may_approve(grant: &str) -> bool {
+    !(cfg!(not(debug_assertions))
+        && grant == crate::sidecar::manifest_sidecar::GRANT_SIDECAR_PROCESS)
 }
 
 #[cfg(test)]
@@ -2066,5 +2274,129 @@ mod tests {
         let s = store();
         let err = uninstall_app(&s, "nope", &[], false).await.unwrap_err();
         assert!(matches!(err, UninstallError::NotInstalled { .. }));
+    }
+
+    // ── logical bundles (install/uninstall cascade + zero graph edges) ──────────
+
+    /// A manifest that ships `bundles` (separate plugins that install/uninstall with
+    /// it) but declares NO `requires` — bundling is not a dependency.
+    fn make_bundle_manifest(id: &str, version: &str, bundles: &[&str]) -> PluginManifest {
+        PluginManifest {
+            bundles: bundles.iter().map(|s| (*s).to_owned()).collect(),
+            ..make_manifest(id, version, vec![])
+        }
+    }
+
+    /// Uninstalling a parent removes the separate plugin it bundles, too.
+    #[tokio::test]
+    async fn uninstall_cascade_removes_bundle_children() {
+        let _stub = StubGrants::on();
+        let s = store();
+        let parent = make_bundle_manifest("com.test.parent", "1.0.0", &["com.test.child"]);
+        let child = make_manifest("com.test.child", "1.0.0", vec![]);
+        let all = vec![parent.clone(), child.clone()];
+        install_app(&s, &parent).await.unwrap();
+        install_app(&s, &child).await.unwrap();
+
+        let out = uninstall_app(&s, "com.test.parent", &all, false)
+            .await
+            .unwrap();
+        assert_eq!(out.removed, "com.test.parent");
+        assert_eq!(out.bundled_removed, vec!["com.test.child"]);
+        assert!(out.bundled_skipped.is_empty());
+        // Both records are gone.
+        assert!(s.get("com.test.parent").await.unwrap().is_none());
+        assert!(s.get("com.test.child").await.unwrap().is_none());
+    }
+
+    /// BUNDLE AXIS: a bundle child that another still-installed plugin ALSO bundles
+    /// is left installed (that other bundle still owns it).
+    #[tokio::test]
+    async fn uninstall_skips_a_child_owned_by_another_bundle() {
+        let _stub = StubGrants::on();
+        let s = store();
+        let parent = make_bundle_manifest("com.test.parent", "1.0.0", &["com.test.shared"]);
+        let other = make_bundle_manifest("com.test.other", "1.0.0", &["com.test.shared"]);
+        let shared = make_manifest("com.test.shared", "1.0.0", vec![]);
+        let all = vec![parent.clone(), other.clone(), shared.clone()];
+        for m in &all {
+            install_app(&s, m).await.unwrap();
+        }
+
+        let out = uninstall_app(&s, "com.test.parent", &all, false)
+            .await
+            .unwrap();
+        assert_eq!(out.removed, "com.test.parent");
+        assert!(
+            out.bundled_removed.is_empty(),
+            "the shared child must not be removed"
+        );
+        assert_eq!(out.bundled_skipped, vec!["com.test.shared"]);
+        // The shared child survives — `com.test.other` still bundles it.
+        assert!(s.get("com.test.shared").await.unwrap().is_some());
+        assert!(s.get("com.test.other").await.unwrap().is_some());
+    }
+
+    /// REQUIRES AXIS: a bundle child still required by a live (enabled) dependent is
+    /// left installed, and the parent uninstall still SUCCEEDS.
+    #[tokio::test]
+    async fn uninstall_skips_a_bundle_child_still_required_by_a_live_dependent() {
+        let _stub = StubGrants::on();
+        let s = store();
+        let parent = make_bundle_manifest("com.test.parent", "1.0.0", &["com.test.lib"]);
+        let lib = make_manifest("com.test.lib", "1.0.0", vec![]);
+        let dependent =
+            make_dep_manifest("com.test.dependent", "1.0.0", &[("com.test.lib", None)]);
+        let all = vec![parent.clone(), lib.clone(), dependent.clone()];
+        for m in &all {
+            install_app(&s, m).await.unwrap();
+        }
+        let client = reqwest::Client::new();
+        // Enabling the dependent pulls `lib` up as its requires-dependency.
+        enable_app(&s, &dependent, &all, "http://127.0.0.1:7981", None, &client)
+            .await
+            .unwrap();
+
+        let out = uninstall_app(&s, "com.test.parent", &all, false)
+            .await
+            .unwrap();
+        assert_eq!(out.removed, "com.test.parent");
+        assert!(out.bundled_removed.is_empty());
+        assert_eq!(out.bundled_skipped, vec!["com.test.lib"]);
+        // `lib` survives (a live dependent needs it) and the parent is gone anyway.
+        assert!(s.get("com.test.lib").await.unwrap().is_some());
+        assert!(
+            s.get("com.test.dependent").await.unwrap().unwrap().enabled,
+            "the live dependent is untouched"
+        );
+        assert!(s.get("com.test.parent").await.unwrap().is_none());
+    }
+
+    /// INVARIANT: a bundle adds NO enable/disable graph edge. Enabling a parent that
+    /// bundles (but does not `require`) a child enables ONLY the parent — the exact
+    /// shape of `enable_without_requires_enables_only_the_target`.
+    #[tokio::test]
+    async fn bundling_adds_no_enable_edges() {
+        let _stub = StubGrants::on();
+        let s = store();
+        let parent = make_bundle_manifest("com.test.parent", "1.0.0", &["com.test.child"]);
+        let child = make_manifest("com.test.child", "1.0.0", vec![]);
+        let all = vec![parent.clone(), child.clone()];
+        install_app(&s, &parent).await.unwrap();
+        install_app(&s, &child).await.unwrap();
+
+        let client = reqwest::Client::new();
+        let out = enable_app(&s, &parent, &all, "http://127.0.0.1:7981", None, &client)
+            .await
+            .unwrap();
+
+        assert!(
+            out.dependencies.is_empty(),
+            "a bundle is not a dependency — nothing else is enabled"
+        );
+        assert_eq!(out.in_enable_order().count(), 1);
+        assert!(out.target.enabled);
+        // The bundled child is NOT auto-enabled by enabling the parent.
+        assert!(!s.get("com.test.child").await.unwrap().unwrap().enabled);
     }
 }

@@ -1,0 +1,81 @@
+{
+  "slug": "finance",
+  "name": "Finance",
+  "navLabel": "Finance",
+  "category": "Finance & Risk",
+  "icon": "Landmark",
+  "tagline": "Build models, analyze performance, and prep board decks with agents that keep financials on your machine.",
+  "heroEyebrow": "Ryu for Finance",
+  "heroTitle": "An AI analyst that never leaks the model.",
+  "heroSubtitle": "Pull actuals, build forecasts, and draft board narratives with agents that run on your own machine. Sensitive financials never leave your device unless you say so, and every model call is governed, logged, and auditable.",
+  "visualKey": "GatewayVisual",
+  "intro": "Finance teams sit on the most sensitive numbers in the company: forecasts, margins, and deal terms that can't be handed to a public chatbot. Ryu runs capable agents locally, connects into your spreadsheets and systems to pull real figures, and records every call, so FP&A moves faster without the data ever leaving your control.",
+  "highlights": [
+    {
+      "title": "Numbers stay on your machine",
+      "description": "Run a local Gemma 4 on install, or route to a cloud model with PII and DLP redaction on every request."
+    },
+    {
+      "title": "Pulls real figures",
+      "description": "Agents authenticate into spreadsheets, ERPs, and reporting tools to read actuals and assemble drafts for your review."
+    },
+    {
+      "title": "Cost under control",
+      "description": "The Gateway sets per-task budgets and routes each call to the right model, so heavy analysis never runs up a surprise bill."
+    },
+    {
+      "title": "Cites the source",
+      "description": "Ground agents on your reporting packs and policy docs with Spaces and RAG, so every figure points back to its source."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Variance and performance analysis",
+      "description": "Compare actuals to plan and prior period, explain the drivers behind each swing, and cite the underlying lines."
+    },
+    {
+      "title": "Forecast and model building",
+      "description": "Draft a driver-based forecast or scenario from your historicals, then stress test assumptions for an analyst to verify."
+    },
+    {
+      "title": "Board and investor decks",
+      "description": "Turn the month's numbers into a board narrative with the key metrics, risks, and a commentary draft to review."
+    },
+    {
+      "title": "Cash flow and runway",
+      "description": "Project cash position and runway from your AR, AP, and burn, and flag the assumptions that move the answer most."
+    },
+    {
+      "title": "Ad hoc data questions",
+      "description": "Answer 'what happened to gross margin in Q3' across your reporting packs, with the exact figures and tabs cited."
+    },
+    {
+      "title": "Spend and budget review",
+      "description": "Scan departmental spend against budget, surface the lines trending over, and draft the follow-up questions to owners."
+    }
+  ],
+  "examplePrompts": [
+    "Explain the biggest drivers of the gross margin change this quarter, with the figures behind each.",
+    "Build a driver-based revenue forecast for next year from these three years of monthly actuals.",
+    "Draft the finance section of the board deck from this month's numbers, with metrics and key risks.",
+    "Project our cash runway from the current AR, AP, and burn, and list the assumptions that matter most.",
+    "Which departments are trending over budget this quarter, and by how much?"
+  ],
+  "faq": [
+    {
+      "q": "Is our financial data safe with Ryu?",
+      "a": "Yes. Ryu is local-first: you can run a model entirely on your machine with no telemetry. When you route to a cloud model, the Gateway redacts PII and sensitive data on egress and logs the call, so confidential financials stay governed end to end."
+    },
+    {
+      "q": "Can it pull numbers from our systems?",
+      "a": "Yes. Through Connections, agents can authenticate into spreadsheets, ERPs, and reporting tools to read actuals and assemble drafts. You control what is connected and what an agent is allowed to touch."
+    },
+    {
+      "q": "Can I trust the analysis it produces?",
+      "a": "Treat it as a fast first pass for an analyst to verify. Answers cite the figures and sources behind them, and the audit trail records what the agent saw, so checking the work is quick and defensible."
+    }
+  ],
+  "ctaTitle": "Give your team an AI analyst.",
+  "ctaSubtitle": "Model, analyze, and report faster, with sensitive numbers kept private and every call on the record.",
+  "ctaNote": "Local-first · PII/DLP redaction · Budget controls"
+}

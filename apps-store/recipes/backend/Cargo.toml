@@ -19,7 +19,7 @@ path = "src/main.rs"
 # Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
 # axum router has no version skew. This crate has ZERO dependency on apps/core.
 [dependencies]
-ghost-core = { path = "../../../crates/ghost/core" }
+ghost-core = { path = "../../../crates/ghost/core", version = "0.0.5" }
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
 serde = { version = "1", features = ["derive"] }

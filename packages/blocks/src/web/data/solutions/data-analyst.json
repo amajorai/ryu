@@ -1,0 +1,81 @@
+{
+  "slug": "data-analyst",
+  "name": "Data Analysis",
+  "navLabel": "Data Analysis",
+  "category": "Engineering & Product",
+  "icon": "BarChart3",
+  "tagline": "Query, chart, and explain your data with agents that connect straight to your warehouse.",
+  "heroEyebrow": "Ryu for Data Analysis",
+  "heroTitle": "Answers from your data, with the SQL shown.",
+  "heroSubtitle": "Connect Postgres, your warehouse, and your BI tools, then ask questions in plain language. Ryu writes the query, runs it, and explains the result, with every step visible so you can verify before you ship a number to a stakeholder.",
+  "visualKey": "CoreVisual",
+  "intro": "Analysts lose hours translating vague requests into SQL and rebuilding the same pulls. Ryu connects to your databases through MCP, turns a question into a query you can read, and grounds answers in your real schema. Sensitive customer data can stay governed by the Gateway or never leave your machine at all.",
+  "highlights": [
+    {
+      "title": "Plain language to SQL",
+      "description": "Ask a question and get a query you can read and run, so you keep the rigor while skipping the boilerplate."
+    },
+    {
+      "title": "Connected to your stack",
+      "description": "Wire Postgres, your warehouse, and Slack through MCP and Connections, so an agent pulls live numbers instead of guessing."
+    },
+    {
+      "title": "Governed access",
+      "description": "The Gateway logs every query and tool call and can redact sensitive fields, so analytics on customer data stays auditable."
+    },
+    {
+      "title": "Knows your schema",
+      "description": "Ground agents on your data dictionary and past queries with Spaces, so results use the right tables and definitions."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Ad hoc data pulls",
+      "description": "Turn a Slack request into a query against the warehouse, run it, and return the table plus the SQL for review."
+    },
+    {
+      "title": "Metric investigation",
+      "description": "Ask why a KPI moved; the agent slices by dimension, compares periods, and surfaces the segments driving the change."
+    },
+    {
+      "title": "Dashboard summaries",
+      "description": "Generate a plain-language narrative of what a dashboard shows this week, with the numbers and deltas called out."
+    },
+    {
+      "title": "Data quality checks",
+      "description": "Scan a table for nulls, duplicates, and outliers, and explain which rows look wrong and why before they reach a report."
+    },
+    {
+      "title": "Recurring reports",
+      "description": "Schedule a workflow that runs the same queries each Monday and posts the formatted summary to a channel."
+    },
+    {
+      "title": "Query explanation",
+      "description": "Paste a complex SQL query and get a clear breakdown of joins, filters, and what each CTE actually computes."
+    }
+  ],
+  "examplePrompts": [
+    "Pull weekly active users by plan tier for the last 8 weeks from the warehouse and show me the SQL.",
+    "Signups dropped 12 percent week over week, break it down by channel and country to find the cause.",
+    "Check the orders table for duplicate order IDs and rows with negative totals.",
+    "Summarize this revenue dashboard for the exec update in three sentences with the key deltas.",
+    "Explain what this 40-line query does and whether the left join could be dropping rows."
+  ],
+  "faq": [
+    {
+      "q": "Can it connect to my database?",
+      "a": "Yes. Ryu connects to Postgres, warehouses, and BI tools through MCP and Connections, so an agent runs real queries against your live data rather than making numbers up."
+    },
+    {
+      "q": "Will I see the query it ran?",
+      "a": "Yes. Ryu shows the SQL it wrote and ran for every answer, and the Gateway logs each query, so you can verify the logic and audit access before trusting a result."
+    },
+    {
+      "q": "Is sensitive customer data exposed?",
+      "a": "You control it. Run a local model with no telemetry to keep data on your machine, or route to a cloud model with the Gateway redacting sensitive fields and recording every call."
+    }
+  ],
+  "ctaTitle": "Spend less time writing SQL and more time finding answers.",
+  "ctaSubtitle": "Ask in plain language, see the query, and ship numbers you can stand behind.",
+  "ctaNote": "Warehouse connectors · Query shown · Governed access"
+}

@@ -1,0 +1,218 @@
+/* Ryu Landing Animations (shared @ryu/blocks) */
+
+@keyframes scan-sweep {
+	0% {
+		transform: translateY(-100%);
+		opacity: 0;
+	}
+	10% {
+		opacity: 1;
+	}
+	90% {
+		opacity: 1;
+	}
+	100% {
+		transform: translateY(100%);
+		opacity: 0;
+	}
+}
+@keyframes threat-resolve {
+	0%,
+	40% {
+		opacity: 1;
+	}
+	60%,
+	100% {
+		opacity: 0.2;
+	}
+}
+@keyframes tool-float {
+	0% {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	20% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	80% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	100% {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+}
+@keyframes chunk-appear {
+	0% {
+		opacity: 0;
+		transform: scaleX(0);
+		transform-origin: left;
+	}
+	30% {
+		opacity: 1;
+		transform: scaleX(1);
+	}
+	70% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0.2;
+	}
+}
+@keyframes vec-orbit {
+	0% {
+		transform: rotate(0deg) translateX(20px) rotate(0deg);
+	}
+	100% {
+		transform: rotate(360deg) translateX(20px) rotate(-360deg);
+	}
+}
+@keyframes budget-fill {
+	0% {
+		width: 0%;
+	}
+	60% {
+		width: 78%;
+	}
+	80% {
+		width: 78%;
+	}
+	100% {
+		width: 0%;
+	}
+}
+@keyframes edge-trace {
+	0% {
+		stroke-dashoffset: 80;
+		opacity: 0;
+	}
+	30% {
+		opacity: 1;
+	}
+	70% {
+		stroke-dashoffset: 0;
+		opacity: 1;
+	}
+	100% {
+		stroke-dashoffset: 0;
+		opacity: 0.15;
+	}
+}
+@keyframes node-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 0 0 oklch(0.5 0 0 / 0%);
+	}
+	50% {
+		box-shadow: 0 0 0 5px oklch(0.5 0 0 / 20%);
+	}
+}
+@keyframes glow-breathe {
+	0%,
+	100% {
+		opacity: 0.12;
+		transform: scale(1);
+	}
+	50% {
+		opacity: 0.22;
+		transform: scale(1.06);
+	}
+}
+@keyframes flow-right {
+	0% {
+		transform: translateX(-8px);
+		opacity: 0;
+	}
+	20% {
+		opacity: 1;
+	}
+	80% {
+		opacity: 1;
+	}
+	100% {
+		transform: translateX(8px);
+		opacity: 0;
+	}
+}
+@keyframes flow-left {
+	0% {
+		transform: translateX(8px);
+		opacity: 0;
+	}
+	20% {
+		opacity: 1;
+	}
+	80% {
+		opacity: 1;
+	}
+	100% {
+		transform: translateX(-8px);
+		opacity: 0;
+	}
+}
+@keyframes flow-down {
+	0% {
+		transform: translateY(-8px);
+		opacity: 0;
+	}
+	20% {
+		opacity: 1;
+	}
+	80% {
+		opacity: 1;
+	}
+	100% {
+		transform: translateY(8px);
+		opacity: 0;
+	}
+}
+@keyframes marquee {
+	from {
+		transform: translateX(0);
+	}
+	to {
+		transform: translateX(-50%);
+	}
+}
+
+.animate-scan-sweep {
+	animation: scan-sweep 3s ease-in-out infinite;
+}
+.animate-threat-resolve {
+	animation: threat-resolve 2.4s ease-in-out infinite;
+}
+.animate-tool-float {
+	animation: tool-float 2s ease-in-out infinite;
+}
+.animate-chunk-appear {
+	animation: chunk-appear 2s ease-in-out infinite;
+}
+.animate-vec-orbit {
+	animation: vec-orbit 4s linear infinite;
+}
+.animate-budget-fill {
+	animation: budget-fill 3s ease-in-out infinite;
+}
+.animate-edge-trace {
+	animation: edge-trace 3s ease-in-out infinite;
+}
+.animate-node-pulse {
+	animation: node-pulse 2s ease-in-out infinite;
+}
+.animate-glow-breathe {
+	animation: glow-breathe 4s ease-in-out infinite;
+}
+.animate-flow-right {
+	animation: flow-right 1.2s ease-in-out infinite;
+}
+.animate-flow-left {
+	animation: flow-left 1.2s ease-in-out infinite;
+}
+.animate-flow-down {
+	animation: flow-down 1.2s ease-in-out infinite;
+}
+.animate-marquee {
+	animation: marquee 36s linear infinite;
+}

@@ -2,6 +2,7 @@
   "title": "Docs",
   "pages": [
     "start-here",
+    "integrate",
     "desktop",
     "cli",
     "mobile",

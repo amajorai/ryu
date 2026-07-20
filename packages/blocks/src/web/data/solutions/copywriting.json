@@ -1,0 +1,81 @@
+{
+  "slug": "copywriting",
+  "name": "Copywriting",
+  "navLabel": "Copywriting",
+  "category": "Language & Content",
+  "icon": "Pencil",
+  "visualKey": "SkillsVisual",
+  "tagline": "Spin up headlines, ads, and landing copy that stay on brand and on message.",
+  "heroEyebrow": "Ryu for Copywriting",
+  "heroTitle": "On-brand variations, generated in seconds",
+  "heroSubtitle": "Ryu drafts headlines, ad copy, and landing pages grounded on your brand voice and offer, gives you many angles to choose from, and keeps unannounced campaigns private until launch.",
+  "intro": "Copy lives and dies on voice, angle, and volume: you need many sharp variations fast, all true to the brand and the offer. Ryu grounds short-form copy on your voice guidelines and product facts, generates angles to test, and keeps pre-launch campaigns on a local model so nothing leaks. A copywriter picks and polishes the winner.",
+  "highlights": [
+    {
+      "title": "Many angles, fast",
+      "description": "Generate a batch of headline, hook, and CTA variations from one offer so you have real options to test, not a single guess."
+    },
+    {
+      "title": "On-brand every time",
+      "description": "Ground copy on your voice guidelines and product facts with Spaces and RAG so variations stay consistent and never misstate the offer."
+    },
+    {
+      "title": "Pick the best model",
+      "description": "Swap between a punchy model for hooks and a careful one for compliance-heavy copy, choosing per task without lock-in."
+    },
+    {
+      "title": "Pre-launch privacy",
+      "description": "Keep unannounced product names, prices, and campaigns on a local model with no telemetry until you are ready to go live."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Ad variation sets",
+      "description": "Generate a batch of ad headlines and primary text in different angles from one product brief, ready for A/B testing."
+    },
+    {
+      "title": "Landing page copy",
+      "description": "Draft a hero, benefit bullets, and CTA for a landing page grounded on your offer and voice, structured section by section."
+    },
+    {
+      "title": "Email subject lines",
+      "description": "Spin up many subject line and preview text options for a campaign, each tuned to a different hook or audience."
+    },
+    {
+      "title": "Product and feature naming",
+      "description": "Brainstorm name and tagline candidates for a product or feature that fit your brand, with a short rationale for each."
+    },
+    {
+      "title": "Tone and length rewrites",
+      "description": "Take an approved line and produce shorter, bolder, or more formal versions to fit a specific channel or character limit."
+    },
+    {
+      "title": "Campaign copy in one workflow",
+      "description": "Run a workflow that drafts ad, email, and landing copy for a single campaign, then drops it into your marketing tool via a connected app."
+    }
+  ],
+  "examplePrompts": [
+    "Write ten ad headlines for our new plan in our brand voice, each on a different angle.",
+    "Draft hero copy, three benefit bullets, and a CTA for this landing page using our offer details.",
+    "Give me eight email subject lines for the launch, with preview text for each.",
+    "Brainstorm five name and tagline pairs for this feature, with a one-line rationale per pair.",
+    "Rewrite this CTA in three shorter, bolder versions that fit under 40 characters."
+  ],
+  "faq": [
+    {
+      "q": "Will the copy stay on brand?",
+      "a": "Yes. Put your voice guidelines and product facts in a Space and Ryu grounds every variation on them with RAG, so the tone is consistent and the offer is stated correctly."
+    },
+    {
+      "q": "Can I keep an unannounced campaign private?",
+      "a": "Yes. Ryu runs a local model by default with no telemetry, so unreleased product names, prices, and campaign copy stay on your device until launch."
+    },
+    {
+      "q": "Does Ryu replace a copywriter?",
+      "a": "No. Ryu generates the volume of variations and angles fast, but a copywriter selects, sharpens, and approves the lines that actually ship."
+    }
+  ],
+  "ctaTitle": "More angles, less staring at a blank page.",
+  "ctaSubtitle": "Generate on-brand headlines, ads, and landing copy in seconds, then pick the winner.",
+  "ctaNote": "On-brand · Many variations · Pre-launch private"
+}

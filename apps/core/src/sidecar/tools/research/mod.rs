@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::Context;
-use ryu_research::{research_base_url, RESEARCH_ADDR, RESEARCH_PORT};
+use ryu_research::{research_base_url, RESEARCH_PORT};
 
 use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
 
@@ -164,12 +164,20 @@ impl Sidecar for ResearchManager {
         let adopted_external = Arc::clone(&self.adopted_external);
         let client = self.client.clone();
         Box::pin(async move {
+            // Profile-aware port (release 8087, dev 9087, …): the client side is
+            // steered to the same port via the `RYU_RESEARCH_UPSTREAM` env default
+            // `profile::apply_env_defaults` seeds, so a dev stack never adopts the
+            // release stack's sidecar. The release profile is byte-identical to
+            // `RESEARCH_PORT` / `RESEARCH_ADDR`.
+            let research_port = crate::profile::port(RESEARCH_PORT);
+            let research_addr = format!("127.0.0.1:{research_port}");
+
             // Adopt an already-running sidecar (e.g. `python -m ryu_research`)
             // instead of spawning a competitor that would fail to bind the port.
             if Self::server_reachable(&client).await {
                 adopted_external.store(true, Ordering::Relaxed);
                 tracing::info!(
-                    "ryu-research already running on {RESEARCH_ADDR} — adopting existing server"
+                    "ryu-research already running on {research_addr} — adopting existing server"
                 );
                 return Ok(());
             }
@@ -205,7 +213,7 @@ impl Sidecar for ResearchManager {
                 // Make `ryu_research` importable without depending on the cwd.
                 ("PYTHONPATH".into(), dir.to_string_lossy().to_string()),
                 ("RESEARCH_HOST".into(), "127.0.0.1".into()),
-                ("RESEARCH_PORT".into(), RESEARCH_PORT.to_string()),
+                ("RESEARCH_PORT".into(), research_port.to_string()),
                 (
                     "RESEARCH_EXPERIMENTS".into(),
                     dir.join("experiments").to_string_lossy().to_string(),
@@ -229,7 +237,7 @@ impl Sidecar for ResearchManager {
             // The stdlib server binds near-instantly.
             tokio::time::timeout(std::time::Duration::from_secs(20), async {
                 loop {
-                    if tokio::net::TcpStream::connect(RESEARCH_ADDR).await.is_ok() {
+                    if tokio::net::TcpStream::connect(&research_addr).await.is_ok() {
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
@@ -238,7 +246,7 @@ impl Sidecar for ResearchManager {
             .await
             .context("ryu-research did not start within 20s")?;
 
-            tracing::info!("ryu-research started on {RESEARCH_ADDR}");
+            tracing::info!("ryu-research started on {research_addr}");
             Ok(())
         })
     }

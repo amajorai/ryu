@@ -188,16 +188,16 @@ const FEATURED: Featured[] = [
     eyebrow: "Start Here",
     title: "The architecture, end to end",
     description:
-      "How a request travels App to Gateway to Core to any engine, and why each layer exists.",
+      "How a request travels from any surface through the Gateway and Core to an engine, and back.",
     accent: "var(--start-here-color)",
   },
   {
     id: "gateway",
     href: "/docs/gateway",
     eyebrow: "Gateway",
-    title: "The control plane: govern every model call",
+    title: "The Gateway: routing, firewall, and budgets",
     description:
-      "Routing, firewall, budgets, evals, and audit: what is allowed, shared, and paid for.",
+      "Every model call passes through — routing picks the provider, the firewall blocks what shouldn't leave, budgets cap spend.",
     accent: "var(--gateway-color)",
   },
   {
@@ -206,7 +206,7 @@ const FEATURED: Featured[] = [
     eyebrow: "Core",
     title: "Workflows and the DAG engine",
     description:
-      "Compose agents, tools, and sub-workflows into durable, resumable runs with retries and HITL gates.",
+      "Chain agents, tools, and sub-workflows into durable runs that survive crashes and wait for human approval.",
     accent: "var(--core-color)",
   },
   {
@@ -215,7 +215,7 @@ const FEATURED: Featured[] = [
     eyebrow: "Cookbook",
     title: "Recipes: real flows, start to finish",
     description:
-      "Watch a price into Slack, give a model a tool, route coding to Claude, ship an SDK agent.",
+      "Monitor a price and alert Slack, give a model a tool, route coding to Claude, ship an SDK agent.",
     accent: "var(--cookbook-color)",
   },
 ];
@@ -301,10 +301,9 @@ export function Hero() {
       </h1>
 
       <p className="mt-6 max-w-2xl text-balance text-base text-fd-muted-foreground leading-relaxed sm:text-lg">
-        End-to-end infrastructure for AI agents. The engines already exist
-        (OpenAI, Claude Code, Gemma, any OpenAI-compatible runtime); Ryu is the
-        whole stack around them, so any agent works everywhere, as easily as
-        installing an app.
+        Ryu wraps any AI engine — OpenAI, Claude Code, Gemma, or anything
+        OpenAI-compatible — with routing, budgets, firewall, and tooling, so you
+        can run agents without wiring infrastructure yourself.
       </p>
 
       <div className="mt-9 flex w-full max-w-xl flex-col items-center gap-4">
@@ -365,12 +364,11 @@ export function Realms() {
         className="font-heading font-medium text-fd-foreground text-xl"
         id="realms-heading"
       >
-        Explore the docs
+        Documentation
       </h2>
       <p className="mt-1 text-fd-muted-foreground text-sm">
-        Fourteen sections covering every surface: get started, the desktop app,
-        CLI, mobile, hardware, Gateway control plane, Core internals, security,
-        SDK, skills, MCP, recipes, benchmarks, and the Academy.
+        Everything from getting started and the desktop app, to the Gateway
+        control plane, Core internals, security, SDK, and hands-on recipes.
       </p>
       <nav
         aria-label="Documentation sections"
@@ -432,7 +430,7 @@ export function FeaturedRail() {
         Featured
       </h2>
       <p className="mt-1 text-fd-muted-foreground text-sm">
-        Hand-picked deep pages to get you oriented fast.
+        Deep dives to get you oriented quickly.
       </p>
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
         {FEATURED.map((item) => (

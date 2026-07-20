@@ -1,0 +1,722 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@source "../../../apps/**/*.{ts,tsx}";
+@source "../**/*.{ts,tsx}";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+	--card: oklch(1 0 0);
+	--card-foreground: oklch(0.145 0 0);
+	/* Popover surfaces track the (customizable) muted colour rather than a fixed
+	   value, so overlay menus follow theme customization. The apply engine
+	   (packages/ui/src/theme/apply.ts) deliberately does not write inline
+	   --popover, letting these references win. (--card stays its own value: some
+	   surfaces layer bg-card against bg-muted and need the two to differ.) */
+	--popover: var(--muted);
+	--popover-foreground: var(--foreground);
+	--primary: oklch(0.205 0 0);
+	--primary-foreground: oklch(0.985 0 0);
+	--secondary: oklch(0.97 0 0);
+	--secondary-foreground: oklch(0.205 0 0);
+	--muted: oklch(0.97 0 0);
+	--muted-foreground: oklch(0.556 0 0);
+	--accent: oklch(0.97 0 0);
+	--accent-foreground: oklch(0.205 0 0);
+	--destructive: oklch(0.577 0.245 27.325);
+	--success: oklch(0.62 0.17 145);
+	--success-foreground: oklch(0.985 0 0);
+	--warning: oklch(0.75 0.16 75);
+	--warning-foreground: oklch(0.205 0 0);
+	--info: oklch(0.55 0.2 255);
+	--info-foreground: oklch(0.985 0 0);
+	--border: oklch(0.922 0 0);
+	--input: oklch(0.922 0 0);
+	--ring: oklch(0.708 0 0);
+	--chart-1: oklch(0.87 0 0);
+	--chart-2: oklch(0.556 0 0);
+	--chart-3: oklch(0.439 0 0);
+	--chart-4: oklch(0.371 0 0);
+	--chart-5: oklch(0.269 0 0);
+	--radius: 0.625rem;
+	--sidebar: oklch(0.985 0 0);
+	--sidebar-foreground: oklch(0.145 0 0);
+	--sidebar-primary: oklch(0.205 0 0);
+	--sidebar-primary-foreground: oklch(0.985 0 0);
+	--sidebar-accent: oklch(0.97 0 0);
+	--sidebar-accent-foreground: oklch(0.205 0 0);
+	--sidebar-border: oklch(0.922 0 0);
+	--sidebar-ring: oklch(0.708 0 0);
+	--background: oklch(1 0 0);
+	--foreground: oklch(0.145 0 0);
+	--ryu-dialog-overlay-background: rgb(0 0 0 / 0);
+	--ryu-dialog-overlay-blur: 0px;
+}
+
+.ryu-dialog-overlay {
+	background-color: var(--ryu-dialog-overlay-background);
+	-webkit-backdrop-filter: blur(var(--ryu-dialog-overlay-blur));
+	backdrop-filter: blur(var(--ryu-dialog-overlay-blur));
+}
+
+.dark {
+	--background: oklch(0.145 0 0);
+	--foreground: oklch(0.985 0 0);
+	--card: oklch(0.205 0 0);
+	--card-foreground: oklch(0.985 0 0);
+	/* --popover inherits the :root reference to var(--muted); --muted below flips
+	   for dark mode, so it tracks it. */
+	--primary: oklch(0.922 0 0);
+	--primary-foreground: oklch(0.205 0 0);
+	--secondary: oklch(0.269 0 0);
+	--secondary-foreground: oklch(0.985 0 0);
+	--muted: oklch(0.269 0 0);
+	--muted-foreground: oklch(0.708 0 0);
+	--accent: oklch(0.269 0 0);
+	--accent-foreground: oklch(0.985 0 0);
+	--destructive: oklch(0.704 0.191 22.216);
+	--success: oklch(0.7 0.15 150);
+	--success-foreground: oklch(0.985 0 0);
+	--warning: oklch(0.8 0.15 80);
+	--warning-foreground: oklch(0.205 0 0);
+	--info: oklch(0.65 0.17 255);
+	--info-foreground: oklch(0.985 0 0);
+	--border: oklch(1 0 0 / 10%);
+	--input: oklch(1 0 0 / 15%);
+	--ring: oklch(0.556 0 0);
+	--chart-1: oklch(0.87 0 0);
+	--chart-2: oklch(0.556 0 0);
+	--chart-3: oklch(0.439 0 0);
+	--chart-4: oklch(0.371 0 0);
+	--chart-5: oklch(0.269 0 0);
+	--sidebar: oklch(0.205 0 0);
+	--sidebar-foreground: oklch(0.985 0 0);
+	--sidebar-primary: oklch(0.488 0.243 264.376);
+	--sidebar-primary-foreground: oklch(0.985 0 0);
+	--sidebar-accent: oklch(0.269 0 0);
+	--sidebar-accent-foreground: oklch(0.985 0 0);
+	--sidebar-border: oklch(1 0 0 / 10%);
+	--sidebar-ring: oklch(0.556 0 0);
+}
+
+@theme inline {
+	--font-sans: var(--font-sans);
+	--color-sidebar-ring: var(--sidebar-ring);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar: var(--sidebar);
+	--color-chart-5: var(--chart-5);
+	--color-chart-4: var(--chart-4);
+	--color-chart-3: var(--chart-3);
+	--color-chart-2: var(--chart-2);
+	--color-chart-1: var(--chart-1);
+	--color-ring: var(--ring);
+	--color-input: var(--input);
+	--color-border: var(--border);
+	--color-destructive: var(--destructive);
+	--color-success: var(--success);
+	--color-success-foreground: var(--success-foreground);
+	--color-warning: var(--warning);
+	--color-warning-foreground: var(--warning-foreground);
+	--color-info: var(--info);
+	--color-info-foreground: var(--info-foreground);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-accent: var(--accent);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-muted: var(--muted);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-secondary: var(--secondary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-primary: var(--primary);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-popover: var(--popover);
+	--color-card-foreground: var(--card-foreground);
+	--color-card: var(--card);
+	--color-foreground: var(--foreground);
+	--color-background: var(--background);
+	--radius-sm: calc(var(--radius) - 4px);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) + 4px);
+	--radius-2xl: calc(var(--radius) + 8px);
+	--radius-3xl: calc(var(--radius) + 12px);
+	--radius-4xl: calc(var(--radius) + 16px);
+	--font-heading: var(--font-heading);
+}
+
+@layer base {
+	* {
+		@apply border-border outline-ring/50;
+	}
+	body {
+		@apply font-sans bg-background text-foreground;
+	}
+	html {
+		@apply font-sans;
+	}
+	::selection {
+		color: var(--background);
+		background-color: var(--foreground);
+	}
+}
+
+/* Color theme variants — applied via data-color-theme attribute on <html> */
+[data-color-theme="zinc"] {
+	--primary: oklch(0.205 0 0);
+	--primary-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.708 0 0);
+	--sidebar-primary: oklch(0.205 0 0);
+	--sidebar-ring: oklch(0.708 0 0);
+}
+.dark[data-color-theme="zinc"],
+.dark [data-color-theme="zinc"],
+[data-color-theme="zinc"].dark {
+	--primary: oklch(0.922 0 0);
+	--primary-foreground: oklch(0.205 0 0);
+	--ring: oklch(0.556 0 0);
+	--sidebar-primary: oklch(0.488 0.243 264.376);
+	--sidebar-ring: oklch(0.556 0 0);
+}
+
+[data-color-theme="blue"] {
+	--primary: oklch(0.546 0.245 262.881);
+	--primary-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.546 0.245 262.881);
+	--sidebar-primary: oklch(0.546 0.245 262.881);
+	--sidebar-ring: oklch(0.546 0.245 262.881);
+}
+.dark[data-color-theme="blue"],
+.dark [data-color-theme="blue"],
+[data-color-theme="blue"].dark {
+	--primary: oklch(0.623 0.214 259.815);
+	--primary-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.623 0.214 259.815);
+	--sidebar-primary: oklch(0.623 0.214 259.815);
+	--sidebar-ring: oklch(0.623 0.214 259.815);
+}
+
+[data-color-theme="violet"] {
+	--primary: oklch(0.541 0.281 293.009);
+	--primary-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.541 0.281 293.009);
+	--sidebar-primary: oklch(0.541 0.281 293.009);
+	--sidebar-ring: oklch(0.541 0.281 293.009);
+}
+.dark[data-color-theme="violet"],
+.dark [data-color-theme="violet"],
+[data-color-theme="violet"].dark {
+	--primary: oklch(0.606 0.25 292.717);
+	--primary-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.606 0.25 292.717);
+	--sidebar-primary: oklch(0.606 0.25 292.717);
+	--sidebar-ring: oklch(0.606 0.25 292.717);
+}
+
+[data-color-theme="rose"] {
+	--primary: oklch(0.586 0.253 17.585);
+	--primary-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.586 0.253 17.585);
+	--sidebar-primary: oklch(0.586 0.253 17.585);
+	--sidebar-ring: oklch(0.586 0.253 17.585);
+}
+.dark[data-color-theme="rose"],
+.dark [data-color-theme="rose"],
+[data-color-theme="rose"].dark {
+	--primary: oklch(0.645 0.246 16.439);
+	--primary-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.645 0.246 16.439);
+	--sidebar-primary: oklch(0.645 0.246 16.439);
+	--sidebar-ring: oklch(0.645 0.246 16.439);
+}
+
+[data-color-theme="amber"] {
+	--primary: oklch(0.769 0.188 70.08);
+	--primary-foreground: oklch(0.145 0 0);
+	--ring: oklch(0.769 0.188 70.08);
+	--sidebar-primary: oklch(0.769 0.188 70.08);
+	--sidebar-ring: oklch(0.769 0.188 70.08);
+}
+.dark[data-color-theme="amber"],
+.dark [data-color-theme="amber"],
+[data-color-theme="amber"].dark {
+	--primary: oklch(0.828 0.189 84.429);
+	--primary-foreground: oklch(0.145 0 0);
+	--ring: oklch(0.828 0.189 84.429);
+	--sidebar-primary: oklch(0.828 0.189 84.429);
+	--sidebar-ring: oklch(0.828 0.189 84.429);
+}
+
+[data-color-theme="emerald"] {
+	--primary: oklch(0.527 0.154 150.069);
+	--primary-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.527 0.154 150.069);
+	--sidebar-primary: oklch(0.527 0.154 150.069);
+	--sidebar-ring: oklch(0.527 0.154 150.069);
+}
+.dark[data-color-theme="emerald"],
+.dark [data-color-theme="emerald"],
+[data-color-theme="emerald"].dark {
+	--primary: oklch(0.596 0.145 163.225);
+	--primary-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.596 0.145 163.225);
+	--sidebar-primary: oklch(0.596 0.145 163.225);
+	--sidebar-ring: oklch(0.596 0.145 163.225);
+}
+
+[data-color-theme="default"] {
+	--primary: oklch(0.6321 0.2018 254.09);
+	--primary-foreground: oklch(0.97 0.014 254.604);
+	--ring: oklch(0.6321 0.2018 254.09);
+	--sidebar-primary: oklch(0.6321 0.2018 254.09);
+	--sidebar-ring: oklch(0.6321 0.2018 254.09);
+}
+.dark [data-color-theme="default"],
+[data-color-theme="default"].dark {
+	--primary: oklch(0.6321 0.2018 254.09);
+	--primary-foreground: oklch(0.97 0.014 254.604);
+	--ring: oklch(0.6321 0.2018 254.09);
+	--sidebar-primary: oklch(0.6321 0.2018 254.09);
+	--sidebar-ring: oklch(0.6321 0.2018 254.09);
+}
+
+[data-color-theme="red"] {
+	--primary: hsl(0 84.2% 60.2%);
+	--primary-foreground: hsl(0 0% 98%);
+	--ring: hsl(0 84.2% 60.2%);
+	--sidebar-primary: hsl(0 84.2% 60.2%);
+	--sidebar-ring: hsl(0 84.2% 60.2%);
+}
+.dark [data-color-theme="red"],
+[data-color-theme="red"].dark {
+	--primary: hsl(0 62.8% 50%);
+	--primary-foreground: hsl(0 0% 98%);
+	--ring: hsl(0 62.8% 50%);
+	--sidebar-primary: hsl(0 62.8% 50%);
+	--sidebar-ring: hsl(0 62.8% 50%);
+}
+
+[data-color-theme="orange"] {
+	--primary: hsl(20.5 90.2% 48.2%);
+	--primary-foreground: hsl(0 0% 98%);
+	--ring: hsl(20.5 90.2% 48.2%);
+	--sidebar-primary: hsl(20.5 90.2% 48.2%);
+	--sidebar-ring: hsl(20.5 90.2% 48.2%);
+}
+.dark [data-color-theme="orange"],
+[data-color-theme="orange"].dark {
+	--primary: hsl(20.5 90.2% 55%);
+	--primary-foreground: hsl(0 0% 98%);
+	--ring: hsl(20.5 90.2% 55%);
+	--sidebar-primary: hsl(20.5 90.2% 55%);
+	--sidebar-ring: hsl(20.5 90.2% 55%);
+}
+
+[data-color-theme="yellow"] {
+	--primary: hsl(47.9 95.8% 40%);
+	--primary-foreground: hsl(0 0% 9%);
+	--ring: hsl(47.9 95.8% 40%);
+	--sidebar-primary: hsl(47.9 95.8% 40%);
+	--sidebar-ring: hsl(47.9 95.8% 40%);
+}
+.dark [data-color-theme="yellow"],
+[data-color-theme="yellow"].dark {
+	--primary: hsl(47.9 95.8% 55%);
+	--primary-foreground: hsl(0 0% 9%);
+	--ring: hsl(47.9 95.8% 55%);
+	--sidebar-primary: hsl(47.9 95.8% 55%);
+	--sidebar-ring: hsl(47.9 95.8% 55%);
+}
+
+[data-color-theme="green"] {
+	--primary: hsl(142.1 76.2% 36.3%);
+	--primary-foreground: hsl(0 0% 98%);
+	--ring: hsl(142.1 76.2% 36.3%);
+	--sidebar-primary: hsl(142.1 76.2% 36.3%);
+	--sidebar-ring: hsl(142.1 76.2% 36.3%);
+}
+.dark [data-color-theme="green"],
+[data-color-theme="green"].dark {
+	--primary: hsl(142.1 70.6% 45.3%);
+	--primary-foreground: hsl(0 0% 98%);
+	--ring: hsl(142.1 70.6% 45.3%);
+	--sidebar-primary: hsl(142.1 70.6% 45.3%);
+	--sidebar-ring: hsl(142.1 70.6% 45.3%);
+}
+
+[data-color-theme="neutral"] {
+	--primary: oklch(0.205 0 0);
+	--primary-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.205 0 0);
+	--sidebar-primary: oklch(0.205 0 0);
+	--sidebar-ring: oklch(0.205 0 0);
+}
+.dark [data-color-theme="neutral"],
+[data-color-theme="neutral"].dark {
+	--primary: oklch(0.922 0 0);
+	--primary-foreground: oklch(0.205 0 0);
+	--ring: oklch(0.556 0 0);
+	--sidebar-primary: oklch(0.922 0 0);
+	--sidebar-ring: oklch(0.556 0 0);
+}
+
+/* ===========================================================================
+   transitions.dev — semantic motion tokens + the transitions used in the app.
+   Motion values (duration/easing/distance/blur/scale) are pasted verbatim from
+   the skill's _root.css. Color tokens are mapped to the app's theme vars (which
+   already flip in .dark) instead of the skill's light-mode literals, so every
+   transition follows light / dark mode automatically.
+   ========================================================================== */
+:root {
+	/* Card resize */
+	--resize-dur: 300ms;
+	--resize-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Number pop-in */
+	--digit-dur: 500ms;
+	--digit-distance: 8px;
+	--digit-stagger: 70ms;
+	--digit-blur: 2px;
+	--digit-ease: cubic-bezier(0.34, 1.45, 0.64, 1);
+	--digit-dir-x: 0;
+	--digit-dir-y: 1;
+	/* Notification badge */
+	--badge-slide-dur: 260ms;
+	--badge-pop-dur: 500ms;
+	--badge-pop-close-dur: 180ms;
+	--badge-fade-dur: 400ms;
+	--badge-fade-close-dur: 180ms;
+	--badge-blur: 2px;
+	--badge-offset-x: -8.2px;
+	--badge-offset-y: 12.4px;
+	--badge-slide-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	--badge-pop-ease: cubic-bezier(0.34, 1.36, 0.64, 1);
+	--badge-close-ease: cubic-bezier(0.4, 0, 0.2, 1);
+	/* Text states swap */
+	--text-swap-dur: 150ms;
+	--text-swap-translate-y: 4px;
+	--text-swap-blur: 2px;
+	--text-swap-ease: ease-in-out;
+	/* Menu dropdown */
+	--dropdown-open-dur: 250ms;
+	--dropdown-close-dur: 150ms;
+	--dropdown-pre-scale: 0.97;
+	--dropdown-closing-scale: 0.99;
+	--dropdown-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Modal open / close */
+	--modal-open-dur: 250ms;
+	--modal-close-dur: 150ms;
+	--modal-scale: 0.96;
+	--modal-scale-close: 0.96;
+	--modal-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Panel reveal */
+	--panel-open-dur: 400ms;
+	--panel-close-dur: 350ms;
+	--panel-translate-y: 100px;
+	--panel-blur: 2px;
+	--panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Icon swap */
+	--icon-swap-dur: 250ms;
+	--icon-swap-blur: 2px;
+	--icon-swap-start-scale: 0.25;
+	--icon-swap-ease: ease-in-out;
+	/* Tabs sliding */
+	--tabs-dur: 250ms;
+	--tabs-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	/* Shimmer text */
+	--shimmer-dur: 2000ms;
+	--shimmer-band: 400%;
+	--shimmer-ease: linear;
+	/* Theme-mapped color tokens (follow light/dark via the app's vars) */
+	--tabs-bar-bg: var(--muted);
+	--tabs-pill-bg: var(--background);
+	--tabs-text-muted: var(--muted-foreground);
+	--tabs-text-active: var(--foreground);
+	--shimmer-base: var(--muted-foreground);
+	--shimmer-highlight: var(--foreground);
+}
+
+/* --- Notification badge (03) --- */
+@keyframes t-badge-slide-in {
+	from {
+		transform: translate(var(--badge-offset-x), var(--badge-offset-y));
+	}
+	to {
+		transform: translate(0, 0);
+	}
+}
+.t-badge {
+	position: absolute;
+	pointer-events: none;
+	will-change: transform;
+}
+.t-badge[data-open="true"] {
+	animation: t-badge-slide-in var(--badge-slide-dur) var(--badge-slide-ease);
+}
+.t-badge-dot {
+	display: block;
+	opacity: 1;
+	filter: blur(0);
+	transform: scale(1);
+	transform-origin: center;
+	transition:
+		transform var(--badge-pop-dur) var(--badge-pop-ease),
+		opacity var(--badge-fade-dur) var(--badge-pop-ease),
+		filter var(--badge-pop-dur) var(--badge-pop-ease);
+	will-change: transform, opacity, filter;
+}
+.t-badge[data-open="false"] .t-badge-dot {
+	opacity: 0;
+	filter: blur(var(--badge-blur));
+	transform: scale(0);
+	transition:
+		transform var(--badge-pop-close-dur) var(--badge-close-ease),
+		opacity var(--badge-fade-close-dur) var(--badge-close-ease),
+		filter var(--badge-pop-close-dur) var(--badge-close-ease);
+}
+
+/* --- Number pop-in (02) --- */
+@keyframes t-digit-pop-in {
+	0% {
+		transform: translate(
+			calc(var(--digit-distance) * var(--digit-dir-x)),
+			calc(var(--digit-distance) * var(--digit-dir-y))
+		);
+		opacity: 0;
+		filter: blur(var(--digit-blur));
+	}
+	100% {
+		transform: translate(0, 0);
+		opacity: 1;
+		filter: blur(0);
+	}
+}
+.t-digit-group {
+	display: inline-flex;
+	align-items: baseline;
+}
+.t-digit {
+	display: inline-block;
+	will-change: transform, opacity, filter;
+}
+.t-digit-group.is-animating .t-digit {
+	animation: t-digit-pop-in var(--digit-dur) var(--digit-ease) both;
+}
+.t-digit-group.is-animating .t-digit[data-stagger="1"] {
+	animation-delay: var(--digit-stagger);
+}
+.t-digit-group.is-animating .t-digit[data-stagger="2"] {
+	animation-delay: calc(var(--digit-stagger) * 2);
+}
+
+/* --- Text states swap (04) --- */
+.t-text-swap {
+	display: inline-block;
+	opacity: 1;
+	filter: blur(0);
+	transform: translateY(0);
+	transition:
+		transform var(--text-swap-dur) var(--text-swap-ease),
+		filter var(--text-swap-dur) var(--text-swap-ease),
+		opacity var(--text-swap-dur) var(--text-swap-ease);
+	will-change: transform, filter, opacity;
+}
+.t-text-swap.is-exit {
+	opacity: 0;
+	filter: blur(var(--text-swap-blur));
+	transform: translateY(calc(var(--text-swap-translate-y) * -1));
+}
+.t-text-swap.is-enter-start {
+	opacity: 0;
+	filter: blur(var(--text-swap-blur));
+	transform: translateY(var(--text-swap-translate-y));
+	transition: none;
+}
+
+/* --- Icon swap (09) --- */
+.t-icon-swap {
+	position: relative;
+	display: inline-grid;
+}
+.t-icon-swap .t-icon {
+	grid-area: 1 / 1;
+	transition:
+		opacity var(--icon-swap-dur) var(--icon-swap-ease),
+		filter var(--icon-swap-dur) var(--icon-swap-ease),
+		transform var(--icon-swap-dur) var(--icon-swap-ease);
+	will-change: opacity, filter, transform;
+}
+.t-icon-swap[data-state="a"] .t-icon[data-icon="a"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="b"] {
+	opacity: 1;
+	filter: blur(0);
+	transform: scale(1);
+}
+.t-icon-swap[data-state="a"] .t-icon[data-icon="b"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="a"] {
+	opacity: 0;
+	filter: blur(var(--icon-swap-blur));
+	transform: scale(var(--icon-swap-start-scale));
+}
+
+/* --- Panel reveal (07) --- */
+.t-panel-slide {
+	pointer-events: none;
+	opacity: 0;
+	filter: blur(var(--panel-blur));
+	transform: translateY(var(--panel-translate-y));
+	transition:
+		transform var(--panel-close-dur) var(--panel-ease),
+		opacity var(--panel-close-dur) var(--panel-ease),
+		filter var(--panel-close-dur) var(--panel-ease);
+	will-change: transform, opacity, filter;
+}
+.t-panel-slide[data-open="true"] {
+	pointer-events: auto;
+	opacity: 1;
+	filter: blur(0);
+	transform: translateY(0);
+	transition:
+		transform var(--panel-open-dur) var(--panel-ease),
+		opacity var(--panel-open-dur) var(--panel-ease),
+		filter var(--panel-open-dur) var(--panel-ease);
+}
+
+/* --- Tabs sliding (16) — Base UI Tabs.Indicator drives the position via
+   --active-tab-* CSS vars; we own only the tween + resting look. --- */
+.t-tabs-indicator {
+	position: absolute;
+	top: var(--active-tab-top);
+	left: var(--active-tab-left);
+	width: var(--active-tab-width);
+	height: var(--active-tab-height);
+	pointer-events: none;
+	transition:
+		top var(--tabs-dur) var(--tabs-ease),
+		left var(--tabs-dur) var(--tabs-ease),
+		width var(--tabs-dur) var(--tabs-ease),
+		height var(--tabs-dur) var(--tabs-ease);
+	will-change: top, left, width, height;
+}
+
+/* --- Plan badge shimmer — a diagonal highlight sweeping left to right,
+   looping, across the tier badge's gradient face and its edge. Both layers
+   share one keyframe so the face sheen and the border catch light in sync. */
+@keyframes t-plan-badge-shimmer {
+	from {
+		background-position: -150% 0;
+	}
+	to {
+		background-position: 250% 0;
+	}
+}
+.t-plan-badge-sheen {
+	position: absolute;
+	inset: 0;
+	background-image: linear-gradient(
+		115deg,
+		transparent 35%,
+		rgba(255, 255, 255, 0.55) 50%,
+		transparent 65%
+	);
+	background-repeat: no-repeat;
+	background-size: 250% 100%;
+	animation: t-plan-badge-shimmer var(--shimmer-dur, 2000ms)
+		var(--shimmer-ease, linear) infinite;
+}
+.t-plan-badge-border {
+	position: absolute;
+	inset: 0;
+	padding: 1px;
+	background-image: linear-gradient(
+		115deg,
+		transparent 35%,
+		rgba(255, 255, 255, 0.95) 50%,
+		transparent 65%
+	);
+	background-repeat: no-repeat;
+	background-size: 250% 100%;
+	border-radius: inherit;
+	-webkit-mask:
+		linear-gradient(#fff 0 0) content-box,
+		linear-gradient(#fff 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	animation: t-plan-badge-shimmer var(--shimmer-dur, 2000ms)
+		var(--shimmer-ease, linear) infinite;
+}
+
+/* --- Pro pricing card animated gradient border — the Pro badge's holographic
+   pastel, as a conic sweep that rotates slowly around the highlighted card.
+   Repeating the first colour at the end keeps the loop seamless; the animated
+   angle needs a registered custom property so it can tween. --- */
+@property --pro-border-angle {
+	syntax: "<angle>";
+	initial-value: 0deg;
+	inherits: false;
+}
+@keyframes t-pro-border-spin {
+	to {
+		--pro-border-angle: 360deg;
+	}
+}
+.t-pro-card-border {
+	background: conic-gradient(
+		from var(--pro-border-angle),
+		#9effef,
+		#d1ffd6,
+		#fff8ad,
+		#a3edff,
+		#bdbdff,
+		#ffb8eb,
+		#ffdda3,
+		#9effef
+	);
+	animation: t-pro-border-spin var(--pro-border-dur, 6s) linear infinite;
+}
+/* Whip the sweep around on hover. */
+.t-pro-card-border:hover {
+	--pro-border-dur: 1.2s;
+}
+
+/* --- The other cards' hover borders — the tier's conic gradient (set inline)
+   rotates continuously, exactly like the Pro card, just tinted per tier. The
+   layer itself fades in on hover via a Tailwind opacity transition; the spin
+   runs underneath the whole time so it's already in motion when it appears, and
+   whips faster while the card is hovered (mirroring the Pro border). --- */
+@property --tier-border-angle {
+	syntax: "<angle>";
+	initial-value: 0deg;
+	inherits: false;
+}
+@keyframes t-card-border-spin {
+	to {
+		--tier-border-angle: 360deg;
+	}
+}
+.t-card-border-spin {
+	animation: t-card-border-spin var(--tier-border-dur, 7s) linear infinite;
+}
+.group:hover .t-card-border-spin {
+	--tier-border-dur: 1.4s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.t-badge,
+	.t-badge-dot,
+	.t-digit-group .t-digit,
+	.t-text-swap,
+	.t-icon-swap .t-icon,
+	.t-panel-slide,
+	.t-tabs-indicator,
+	.t-plan-badge-sheen,
+	.t-plan-badge-border,
+	.t-pro-card-border,
+	.t-card-border-spin {
+		transition: none !important;
+		animation: none !important;
+	}
+}

@@ -1,0 +1,81 @@
+{
+  "slug": "consulting",
+  "name": "Consulting",
+  "navLabel": "Consulting",
+  "category": "Industries",
+  "icon": "Briefcase",
+  "tagline": "Research, model, and produce client deliverables with agents that keep each engagement walled off.",
+  "heroEyebrow": "Ryu for Consulting",
+  "heroTitle": "Bill for insight, not for slide cleanup.",
+  "heroSubtitle": "Build research, draft decks, and structure analysis with agents that run on your machine and stay grounded in each client's documents. Engagement data stays controlled, and you can spin up a tailored agent per project.",
+  "visualKey": "AgentsVisual",
+  "intro": "Consultants live in research, synthesis, and deliverables under tight deadlines, with client confidentiality non-negotiable. Ryu lets you stand up a dedicated agent per engagement, grounded in that client's data and walled off from the rest, running locally so nothing leaks. It accelerates the analyst work; the partner owns the judgment.",
+  "highlights": [
+    {
+      "title": "One agent per engagement",
+      "description": "Spin up a tailored agent per client with its own documents, tools, and policy, so engagements never bleed together."
+    },
+    {
+      "title": "Grounded synthesis",
+      "description": "Spaces and RAG keep agents anchored to the client's documents and your frameworks, citing every source."
+    },
+    {
+      "title": "Confidentiality controlled",
+      "description": "Local-first with no telemetry, plus Gateway redaction and budgets, so client material stays governed and costs stay capped."
+    },
+    {
+      "title": "No lock-in",
+      "description": "Bring your own model and key; route a fast local model for drafts and a frontier model for the final synthesis."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Market and competitor research",
+      "description": "Pull together a landscape from public sources and the client's data, organized into a structured findings memo."
+    },
+    {
+      "title": "Deliverable drafting",
+      "description": "Turn an analysis into a structured deck outline or report draft following your firm's storyline and template."
+    },
+    {
+      "title": "Interview synthesis",
+      "description": "Summarize stakeholder interview notes into themes, quotes, and implications you can validate before sharing."
+    },
+    {
+      "title": "Financial and data analysis",
+      "description": "Structure spreadsheets and figures into comparisons and a written narrative of what the numbers imply."
+    },
+    {
+      "title": "Proposal and SOW drafting",
+      "description": "Draft a tailored proposal and scope from your past engagements and the prospect's brief for your review."
+    },
+    {
+      "title": "Knowledge retrieval",
+      "description": "Ask across your firm's prior work and methodologies so the team reuses what already exists, with citations."
+    }
+  ],
+  "examplePrompts": [
+    "Build a competitor landscape for this client's market and organize it into a findings memo with sources.",
+    "Turn this analysis into a 12-slide deck outline following our pyramid storyline.",
+    "Synthesize these eight interview notes into themes with supporting quotes and implications.",
+    "Draft a narrative explaining what these quarterly figures imply for the client's cost base.",
+    "Draft a proposal and scope of work for this RFP based on our two most similar past engagements."
+  ],
+  "faq": [
+    {
+      "q": "Can I keep each client's data separated?",
+      "a": "Yes. Set up a dedicated agent per engagement with its own Spaces, tools, and Gateway policy, so one client's material is never mixed into another's work."
+    },
+    {
+      "q": "Is engagement data confidential?",
+      "a": "Ryu is local-first with no telemetry, so client material can stay on your machine. When you route to a cloud model the Gateway redacts sensitive data, caps spend with budgets, and logs every call."
+    },
+    {
+      "q": "Can it cite where insights came from?",
+      "a": "Yes. Ground agents on the client's documents and your firm's methodologies with Spaces and RAG. Findings point back to the exact source so the team can verify before it reaches the client."
+    }
+  ],
+  "ctaTitle": "Spend your hours on the thinking.",
+  "ctaSubtitle": "Research, synthesize, and draft deliverables faster with each engagement walled off and grounded.",
+  "ctaNote": "Agent per engagement · Local-first · Budgets and audit"
+}

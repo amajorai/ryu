@@ -1,0 +1,81 @@
+{
+  "slug": "insurance",
+  "name": "Insurance",
+  "navLabel": "Insurance",
+  "category": "Finance & Risk",
+  "icon": "Umbrella",
+  "tagline": "Triage claims, review policies, and assess risk with agents that keep policyholder data on your machine.",
+  "heroEyebrow": "Ryu for Insurance",
+  "heroTitle": "An AI adjuster that keeps PII protected.",
+  "heroSubtitle": "Summarize claims, check coverage, and draft decisions with agents that run on your own machine. Policyholder data never leaves your device unless you say so, and every model call is governed, logged, and auditable.",
+  "visualKey": "GatewayVisual",
+  "intro": "Insurance work runs on personal and medical data that regulators expect you to protect, so it can't be pasted into a public chatbot that trains on it. Ryu runs capable agents locally, redacts sensitive fields on egress when you route to the cloud, and logs every call, so claims and underwriting move faster without putting policyholder data at risk.",
+  "highlights": [
+    {
+      "title": "PII stays protected",
+      "description": "Run a local Gemma 4 on install, or route to a cloud model with PII and DLP redaction on every request."
+    },
+    {
+      "title": "Grounded in your policies",
+      "description": "Ground agents on your policy wordings and underwriting guidelines with Spaces and RAG, so coverage answers cite the clause."
+    },
+    {
+      "title": "Auditable by default",
+      "description": "Every model and tool call is logged in the Gateway audit trail, so each claim decision has a clear record of what the agent saw."
+    },
+    {
+      "title": "Connects to your systems",
+      "description": "Agents authenticate into your inbox, document stores, and spreadsheets to gather claim files and draft updates for review."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Claim intake and triage",
+      "description": "Turn a first notice of loss into a structured claim file, flag missing documents, and route by severity for a handler to review."
+    },
+    {
+      "title": "Coverage checking",
+      "description": "Compare a claim against the policy wording, surface relevant clauses and exclusions, and quote the language that applies."
+    },
+    {
+      "title": "Document summarization",
+      "description": "Condense medical records, adjuster reports, and correspondence into a timeline of facts a handler can verify."
+    },
+    {
+      "title": "Underwriting support",
+      "description": "Extract risk factors from an application, compare against your appetite guidelines, and draft a referral note for review."
+    },
+    {
+      "title": "Fraud signal flagging",
+      "description": "Scan a claim for inconsistencies and known red flags, listing each signal with the document and line it came from."
+    },
+    {
+      "title": "Policyholder correspondence",
+      "description": "Draft clear, compliant claim updates and information requests grounded in the specific policy and claim record."
+    }
+  ],
+  "examplePrompts": [
+    "Turn this first notice of loss into a structured claim file and list the documents we still need.",
+    "Check whether this claim is covered under the policy wording, quoting the relevant clauses and exclusions.",
+    "Summarize these medical records into a timeline of the relevant facts with source references.",
+    "Extract the risk factors from this application and compare them to our underwriting appetite.",
+    "Review this claim for inconsistencies or red flags and list each one with where it appears."
+  ],
+  "faq": [
+    {
+      "q": "Is policyholder data safe with Ryu?",
+      "a": "Yes. Ryu is local-first: you can run a model entirely on your machine with no telemetry. When you route to a cloud model, the Gateway redacts PII and sensitive data on egress and logs the call, so personal and medical data stays governed end to end."
+    },
+    {
+      "q": "Can it answer coverage questions accurately?",
+      "a": "Ground agents on your policy wordings and underwriting guidelines with Spaces and RAG. Answers cite the specific clause or exclusion, so a handler can verify the basis before relying on it."
+    },
+    {
+      "q": "Does it decide claims on its own?",
+      "a": "No. Ryu drafts triage, coverage notes, and correspondence for a qualified handler or underwriter to decide. The audit trail records what the agent saw, so each decision has a clear paper trail."
+    }
+  ],
+  "ctaTitle": "Give your team an AI adjuster.",
+  "ctaSubtitle": "Triage, assess, and respond faster, with policyholder data kept private and every call on the record.",
+  "ctaNote": "Local-first · PII/DLP redaction · Full audit trail"
+}

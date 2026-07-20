@@ -1,0 +1,81 @@
+{
+  "slug": "editing",
+  "name": "Editing & Proofreading",
+  "navLabel": "Editing & Proofreading",
+  "category": "Language & Content",
+  "icon": "FileEdit",
+  "visualKey": "SkillsVisual",
+  "tagline": "Catch errors and enforce your style guide without the copy ever leaving your control.",
+  "heroEyebrow": "Ryu for Editing & Proofreading",
+  "heroTitle": "A second pair of eyes that knows your style guide",
+  "heroSubtitle": "Ryu checks grammar, consistency, and style against your own rules, explains each suggested change, and keeps unpublished manuscripts private so you can edit faster with full control.",
+  "intro": "Proofreading is detail work where consistency matters as much as correctness, and a generic checker does not know your house style. Ryu grounds its review on your style guide and term preferences, surfaces grammar, consistency, and tone issues with an explanation for each, and never silently rewrites. An editor accepts or rejects every change, and unpublished work stays private.",
+  "highlights": [
+    {
+      "title": "Enforces your style guide",
+      "description": "Ground checks on your house style and term list with Spaces and RAG so spelling, capitalization, and usage stay consistent throughout."
+    },
+    {
+      "title": "Explains every change",
+      "description": "Each suggestion comes with the reason and the rule it applies, so you decide rather than accept a black-box rewrite."
+    },
+    {
+      "title": "Consistency across a document",
+      "description": "Flag the same term spelled or capitalized two ways, mismatched tense, and drifting tone across a long manuscript."
+    },
+    {
+      "title": "Confidential manuscripts stay home",
+      "description": "Proofread unpublished books, filings, and reports on a local model with no telemetry so the text never leaves your device."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Grammar and spelling pass",
+      "description": "An agent flags grammar, punctuation, and spelling errors with the corrected version and a short reason for each fix."
+    },
+    {
+      "title": "Style guide enforcement",
+      "description": "Check a document against your house style for capitalization, hyphenation, number formatting, and preferred terms, listing every deviation."
+    },
+    {
+      "title": "Consistency audit",
+      "description": "Scan a long manuscript for terms spelled two ways, inconsistent tense, and tone shifts, and report each location."
+    },
+    {
+      "title": "Line edit suggestions",
+      "description": "Suggest tighter, clearer phrasings sentence by sentence without changing meaning, leaving the final wording to the editor."
+    },
+    {
+      "title": "Fact and reference check",
+      "description": "Cross-check claims and citations against source material in a Space and flag anything unsupported for a human to verify."
+    },
+    {
+      "title": "Pre-publish QA workflow",
+      "description": "Run a workflow that proofreads, checks style, and verifies links before a piece goes live, returning one consolidated issue list."
+    }
+  ],
+  "examplePrompts": [
+    "Proofread this chapter for grammar and spelling, and explain each correction.",
+    "Check this article against our style guide and list every deviation with the rule it breaks.",
+    "Audit this manuscript for terms spelled inconsistently and any tense shifts.",
+    "Suggest tighter phrasings for each sentence here without changing the meaning.",
+    "Verify the claims in this report against the sources in this Space and flag anything unsupported."
+  ],
+  "faq": [
+    {
+      "q": "Can Ryu follow our house style guide?",
+      "a": "Yes. Put your style guide and term list in a Space and Ryu grounds its review on them with RAG, so it enforces your specific rules rather than generic ones."
+    },
+    {
+      "q": "Will it rewrite my text without asking?",
+      "a": "No. Ryu surfaces issues and suggests changes with an explanation for each, and an editor accepts or rejects every one, so you keep full control of the final copy."
+    },
+    {
+      "q": "Is unpublished work safe to proofread?",
+      "a": "Yes. Ryu runs a local model by default with no telemetry, so manuscripts, filings, and embargoed pieces stay entirely on your device while you edit."
+    }
+  ],
+  "ctaTitle": "Catch what you would have missed.",
+  "ctaSubtitle": "Enforce your style guide and catch every inconsistency, with every change explained and yours to approve.",
+  "ctaNote": "Style-guide aware · Explained edits · Private by default"
+}

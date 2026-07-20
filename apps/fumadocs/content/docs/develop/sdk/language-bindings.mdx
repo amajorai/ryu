@@ -9,14 +9,14 @@ embedding clients - lives once in the [`ryu-sdk`](/docs/develop/sdk/rust) Rust k
 language binding is a thin marshalling shell over that same kernel, so manifest rules, the egress
 blocklist, and the transport never drift across languages.
 
-This page covers the **UniFFI** binding path (`crates/ryu-sdk-uniffi/`), which generates idiomatic
+This page covers the **UniFFI** binding path (`crates/sdk/uniffi/`), which generates idiomatic
 packages for Python, Swift, Kotlin, and (via third-party generators) C# and Go from one Rust
 surface. For the kernel itself see [Rust SDK](/docs/develop/sdk/rust); for the TypeScript client
 see [Client SDK](/docs/develop/sdk/client).
 
 <Callout type="warn">
   Only the **Python** binding is generated and smoke-tested today. The UniFFI crate
-  (`crates/ryu-sdk-uniffi`) and the Python packaging shell (`bindings/python/`) are shipped, and CI
+  (`crates/sdk/uniffi`) and the Python packaging shell (`bindings/python/`) are shipped, and CI
   builds the cdylib, generates the Python module, and runs an exit-0 smoke test against the real
   kernel. **Swift, Kotlin, C#, and Go via UniFFI are planned** - the same pipeline, not yet wired or
   verified. Go ships today through a separate hand-written C-ABI path (`bindings/go/`), not UniFFI.
@@ -29,15 +29,15 @@ functions, which is what keeps the rules identical everywhere.
 
 | Crate | Mechanism | Targets | Status |
 |---|---|---|---|
-| `crates/ryu-sdk-napi` | napi-rs native addon | TypeScript / JS | Shipped (keeps the streaming closure via `ThreadsafeFunction`) |
-| `crates/ryu-sdk-ffi` | hand-written raw C-ABI | raw C, Go (cgo) | Shipped (`bindings/go/ryusdk/ryusdk.go`) |
-| `crates/ryu-sdk-uniffi` | `uniffi-bindgen` generated | Python (shipped), Swift / Kotlin / C# / Go (planned) | Python shipped |
+| `crates/sdk/napi` | napi-rs native addon | TypeScript / JS | Shipped (keeps the streaming closure via `ThreadsafeFunction`) |
+| `crates/sdk/ffi` | hand-written raw C-ABI | raw C, Go (cgo) | Shipped (`bindings/go/ryusdk/ryusdk.go`) |
+| `crates/sdk/uniffi` | `uniffi-bindgen` generated | Python (shipped), Swift / Kotlin / C# / Go (planned) | Python shipped |
 
 UniFFI uses **proc-macro mode** (`uniffi::setup_scaffolding!("ryu_sdk")` plus `#[uniffi::export]`),
 not a `.udl` IDL. This matches the codebase's "derive the schema from the Rust types" philosophy, so
 there is no second source of truth to drift from the Rust signatures. The foreign package is emitted
 on demand from the compiled cdylib by the `uniffi-bindgen` driver
-(`crates/ryu-sdk-uniffi/src/bin/uniffi-bindgen.rs`).
+(`crates/sdk/uniffi/src/bin/uniffi-bindgen.rs`).
 
 The namespace passed to `setup_scaffolding!` is `ryu_sdk` (not the crate name `ryu_sdk_uniffi`), so
 the generated Python package imports as `import ryu_sdk` and the Swift / Kotlin equivalents follow
@@ -51,7 +51,7 @@ which is a named future slice. The blocking `chat` and `embed` calls cover Pytho
 the same way they cover Go today. See `docs/multi-language-bindings-spec.md` for the deferred
 streaming design.
 
-The exported surface (`crates/ryu-sdk-uniffi/src/lib.rs`):
+The exported surface (`crates/sdk/uniffi/src/lib.rs`):
 
 - `validate_plugin_id(id)`
 - `parse_and_validate_manifest(json)`
@@ -78,8 +78,8 @@ and gitignored.
 
 ### Generate locally
 
-`ryu-sdk-uniffi` is a standalone crate (its own `Cargo.lock`, no workspace), so `cargo` runs from
-inside it. From `crates/ryu-sdk-uniffi/`:
+`sdk/uniffi` is a standalone crate (its own `Cargo.lock`, no workspace), so `cargo` runs from
+inside it. From `crates/sdk/uniffi/`:
 
 ```sh
 # 1. Build the cdylib.
@@ -142,11 +142,11 @@ yet wired or verified:
 | Go | `uniffi-bindgen-go` | third-party | Planned; Go ships today via the cgo C-ABI path instead |
 
 Python, Swift, and Kotlin generators are first-party to UniFFI, so they move in lockstep with the
-`uniffi` pin in `crates/ryu-sdk-uniffi/Cargo.toml`. The C# and Go generators are maintained
+`uniffi` pin in `crates/sdk/uniffi/Cargo.toml`. The C# and Go generators are maintained
 out-of-tree and pinned to specific UniFFI minors, so bumping the `uniffi` dependency is a coordinated
 cross-language event rather than a routine update.
 
-Go already works today through hand-written cgo over `crates/ryu-sdk-ffi` (`bindings/go/`), with no
+Go already works today through hand-written cgo over `crates/sdk/ffi` (`bindings/go/`), with no
 generator-lag risk. A migration to `uniffi-bindgen-go` would buy one source surface at the cost of
 inheriting that lag, so the cgo path stays as-is for now.
 

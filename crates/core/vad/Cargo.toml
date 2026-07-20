@@ -14,14 +14,14 @@ tracing = "0.1"
 # The Silero VAD download spec + model-path resolution live with the crate (VAD has
 # no sidecar — it's single-file model metadata). The DownloadSpec/DownloadKind/
 # VersionRecord types come from the already-extracted downloads primitive.
-ryu-downloads = { path = "../downloads" }
+ryu-downloads = { path = "../downloads", version = "0.0.5" }
 
 # ── Silero VAD optional dep (in-process ONNX inference) ────────────────────────
 # transcribe-rs is git-only and pulls a heavy native ONNX Runtime; it lives behind
 # the `voice-vad` feature so the default build stays free of the native dep (the
 # always-compiled energy backend keeps voice mode working). Matched to the same git
 # rev Core used before extraction (shared with ryu-stt's parakeet engine).
-transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "d97ae65debaa9bacd5d56aa7d308d13df43c97ec", default-features = false, features = ["onnx"], optional = true }
+transcribe-rs = { version = "0.3.11", default-features = false, features = ["onnx"], optional = true }
 # Only the feature-gated Silero ONNX backend uses anyhow; keep it out of the lean
 # default build alongside transcribe-rs.
 anyhow = { version = "1", optional = true }

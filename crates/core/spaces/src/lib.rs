@@ -146,6 +146,26 @@ pub struct DocAccessMeta {
     pub team_id: Option<String>,
 }
 
+/// Access metadata for a Space row — the twin of [`DocAccessMeta`] for the
+/// `spaces` table, so the Core-side `spaces::space_access_meta` shim can map it
+/// into `ResourceTenancy` for the per-resource `resource_access` row-gate (the
+/// `delete_space` write gate). Carries `system` so a caller can distinguish a
+/// node-singleton system space (`system = 1`, NULL owner) from a user space.
+#[derive(Debug, Clone)]
+pub struct SpaceAccessMeta {
+    /// The owning user id, or `None` for a system / unattributed space.
+    pub owner_user_id: Option<String>,
+    /// The owning org id, if any.
+    pub org_id: Option<String>,
+    /// The row's visibility (`NOT NULL DEFAULT 'private'`, so always present).
+    pub visibility: String,
+    /// The team the row is shared with, if any.
+    pub team_id: Option<String>,
+    /// Whether this is a Ryu-created system space (Artifacts / Meetings / Canvas /
+    /// Clips) — a node singleton with no owner, kept shared to every member.
+    pub system: bool,
+}
+
 /// Maximum characters per chunk before the ingestion pipeline splits.
 const CHUNK_CHAR_SIZE: usize = 1_000;
 
@@ -1936,6 +1956,35 @@ impl SpaceStore {
         Ok(meta)
     }
 
+    /// Load a Space's tenancy quartet (owner / org / visibility / team) plus its
+    /// `system` flag, for the by-id `delete_space` ACL gate. Twin of
+    /// [`Self::get_access_meta`]. Returns `Ok(None)` when the space row does not
+    /// exist. A system space has `system = 1` and NULL owner, which the shared
+    /// `resource_access` gate reads as unattributable → denied on a bound node
+    /// (system spaces are node singletons, not user-deletable via HTTP).
+    pub async fn space_access_meta(&self, space_id: &str) -> Result<Option<SpaceAccessMeta>> {
+        let conn = self.conn.lock().await;
+        let meta = conn
+            .query_row(
+                "SELECT owner_user_id, org_id, visibility, team_id, system
+                 FROM spaces WHERE id = ?1",
+                params![space_id],
+                |row| {
+                    Ok(SpaceAccessMeta {
+                        owner_user_id: row.get(0)?,
+                        org_id: row.get(1)?,
+                        // NOT NULL DEFAULT 'private' in the schema, so always present.
+                        visibility: row.get(2)?,
+                        team_id: row.get(3)?,
+                        system: row.get::<_, i64>(4)? != 0,
+                    })
+                },
+            )
+            .optional()
+            .context("reading space access metadata")?;
+        Ok(meta)
+    }
+
     pub async fn get_document(&self, doc_id: &str) -> Result<Option<DocumentContent>> {
         let conn = self.conn.lock().await;
         let doc = conn
@@ -2618,24 +2667,51 @@ impl SpaceStore {
     /// Space; `None` returns the global graph across every Space. Nodes are
     /// documents plus synthetic *pending* nodes for unresolved link targets;
     /// edges are wiki/mention links and the `parent_id` hierarchy.
-    async fn build_graph(&self, space_filter: Option<&str>) -> Result<DocGraph> {
+    ///
+    /// `filter` applies [`DOC_TENANCY_VISIBLE_PREDICATE`] so on a bound node a
+    /// member never sees another member's private document node — nor its title
+    /// or link topology leaking through an edge. An edge (and its resolved dst /
+    /// pending title) is surfaced ONLY when the caller can read its `src`
+    /// document, because the link and the target title originate from the src's
+    /// body; a resolved dst the caller cannot read is dropped too. Pass
+    /// [`DocFilter::unrestricted`] for the in-process / unbound-node full graph
+    /// (byte-identical to the pre-ACL behaviour).
+    async fn build_graph(
+        &self,
+        space_filter: Option<&str>,
+        filter: DocFilter<'_>,
+    ) -> Result<DocGraph> {
         let conn = self.conn.lock().await;
         let mut graph = DocGraph::default();
 
-        // Nodes: every document (top-level and child row-pages are all real pages).
-        let mut doc_stmt = conn.prepare(
-            "SELECT id, space_id, title, kind, parent_id FROM documents
-             WHERE (?1 IS NULL OR space_id = ?1)",
+        // Nodes: every document the caller may read (top-level and child row-pages
+        // are all real pages).
+        let doc_sql = format!(
+            "SELECT d.id, d.space_id, d.title, d.kind, d.parent_id FROM documents d
+             WHERE (:space IS NULL OR d.space_id = :space)
+               AND {DOC_TENANCY_VISIBLE_PREDICATE}"
+        );
+        let mut doc_stmt = conn.prepare(&doc_sql)?;
+        let doc_rows = doc_stmt.query_map(
+            named_params! {
+                ":space": space_filter,
+                ":bound": filter.bound_flag(),
+                ":uid": filter.owner_user_id,
+                ":org": filter.org_id,
+            },
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
         )?;
-        let doc_rows = doc_stmt.query_map(params![space_filter], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-            ))
-        })?;
+        // Collect nodes first; defer parent edges until the full visible set is
+        // known, so a `parent` the caller cannot read never appears as an edge.
+        let mut pending_parent_edges: Vec<(String, String)> = Vec::new();
         for row in doc_rows {
             let (id, space_id, title, kind, parent_id) = row?;
             graph.nodes.push(DocGraphNode {
@@ -2647,6 +2723,13 @@ impl SpaceStore {
             });
             // parent_id hierarchy edge (database → row page).
             if let Some(parent) = parent_id {
+                pending_parent_edges.push((parent, id));
+            }
+        }
+        let visible: std::collections::HashSet<String> =
+            graph.nodes.iter().map(|n| n.id.clone()).collect();
+        for (parent, id) in pending_parent_edges {
+            if visible.contains(&parent) {
                 graph.edges.push(DocGraphEdge {
                     src: parent,
                     dst: id,
@@ -2655,7 +2738,10 @@ impl SpaceStore {
             }
         }
 
-        // Link edges + pending nodes.
+        // Link edges + pending nodes. The link (and any pending/resolved target
+        // title) originates from `src`'s body, so gate on `src` being visible; a
+        // resolved dst the caller cannot read is dropped so it never surfaces even
+        // as a node.
         let mut seen_pending: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut link_stmt = conn.prepare(
             "SELECT space_id, src_doc_id, dst_doc_id, dst_title, link_kind
@@ -2672,8 +2758,16 @@ impl SpaceStore {
         })?;
         for row in link_rows {
             let (space_id, src, dst_doc_id, dst_title, kind) = row?;
+            if !visible.contains(&src) {
+                continue;
+            }
             let dst = match dst_doc_id {
-                Some(id) => id,
+                Some(id) => {
+                    if !visible.contains(&id) {
+                        continue;
+                    }
+                    id
+                }
                 None => {
                     let pending_id = pending_node_id(&space_id, &dst_title);
                     if seen_pending.insert(pending_id.clone()) {
@@ -2693,14 +2787,15 @@ impl SpaceStore {
         Ok(graph)
     }
 
-    /// The document-link graph for one Space.
-    pub async fn space_graph(&self, space_id: &str) -> Result<DocGraph> {
-        self.build_graph(Some(space_id)).await
+    /// The document-link graph for one Space, filtered to what `filter` may read.
+    pub async fn space_graph(&self, space_id: &str, filter: DocFilter<'_>) -> Result<DocGraph> {
+        self.build_graph(Some(space_id), filter).await
     }
 
-    /// The global document-link graph across all Spaces.
-    pub async fn global_graph(&self) -> Result<DocGraph> {
-        self.build_graph(None).await
+    /// The global document-link graph across all Spaces, filtered to what `filter`
+    /// may read.
+    pub async fn global_graph(&self, filter: DocFilter<'_>) -> Result<DocGraph> {
+        self.build_graph(None, filter).await
     }
 
     /// Follow resolved wiki links out from `seed_doc_ids` up to `hops` and return
@@ -3487,6 +3582,78 @@ mod tests {
         assert!(ids.contains(&sys.as_str()), "system space stays shared to every member");
     }
 
+    /// The link graph must not leak another member's private document node, title,
+    /// or link topology on a bound node — and must be byte-identical (full graph)
+    /// on an unbound / unrestricted call. Twin of
+    /// `list_spaces_filters_owner_but_keeps_system_shared` for `build_graph`.
+    #[tokio::test]
+    async fn graph_filters_private_nodes_and_edges_on_bound_node() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let space = store.create_space("Shared", None, &owned("alice")).await.unwrap();
+        // Alice's private page links to Bob's private page.
+        let alice_doc = store.create_page(&space, "AlicePriv", &owned("alice")).await.unwrap();
+        let bob_doc = store.create_page(&space, "BobPriv", &owned("bob")).await.unwrap();
+        store
+            .update_document(&alice_doc, "AlicePriv", "Secret note about [[BobPriv]].")
+            .await
+            .unwrap();
+
+        // Bound node, viewed as Bob: Alice's node/title and the edge originating
+        // from Alice's body must be absent.
+        let bob_graph = store
+            .space_graph(&space, DocFilter::for_caller(Some("bob"), Some("org1"), true))
+            .await
+            .unwrap();
+        assert!(
+            bob_graph.nodes.iter().all(|n| n.id != alice_doc),
+            "Bob must not see Alice's private document node"
+        );
+        assert!(
+            bob_graph.nodes.iter().all(|n| n.title != "AlicePriv"),
+            "Bob must not see Alice's private document title"
+        );
+        assert!(
+            bob_graph.edges.iter().all(|e| e.src != alice_doc),
+            "no edge may originate from a document Bob cannot read"
+        );
+        assert!(
+            bob_graph.nodes.iter().any(|n| n.id == bob_doc),
+            "Bob still sees his own document"
+        );
+
+        // Unrestricted (unbound / in-process): the full graph, both nodes + the edge.
+        let full = store
+            .space_graph(&space, DocFilter::unrestricted())
+            .await
+            .unwrap();
+        assert!(full.nodes.iter().any(|n| n.id == alice_doc));
+        assert!(full.nodes.iter().any(|n| n.id == bob_doc));
+        assert!(
+            full.edges.iter().any(|e| e.src == alice_doc && e.dst == bob_doc),
+            "unrestricted graph keeps the cross-owner edge"
+        );
+    }
+
+    /// `space_access_meta` reads back the owner the choke point stamped, and marks a
+    /// system space so the `delete_space` gate can fail it closed on a bound node.
+    #[tokio::test]
+    async fn space_access_meta_reads_owner_and_system_flag() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let alice_space = store.create_space("Alice", None, &owned("alice")).await.unwrap();
+        let sys = store.ensure_system_space("Artifacts", None).await.unwrap();
+
+        let meta = store.space_access_meta(&alice_space).await.unwrap().unwrap();
+        assert_eq!(meta.owner_user_id.as_deref(), Some("alice"));
+        assert_eq!(meta.org_id.as_deref(), Some("org1"));
+        assert!(!meta.system);
+
+        let sys_meta = store.space_access_meta(&sys).await.unwrap().unwrap();
+        assert!(sys_meta.system, "system space is flagged");
+        assert!(sys_meta.owner_user_id.is_none(), "system space has no owner");
+
+        assert!(store.space_access_meta("nope").await.unwrap().is_none());
+    }
+
     // De-risk gate: proves the sqlite-vec C extension actually links and the
     // vec0 KNN path works on this platform (cargo check cannot verify linking).
     #[test]
@@ -3705,14 +3872,14 @@ mod tests {
         let out = store.get_outgoing_links(&a).await.unwrap();
         assert_eq!(out.len(), 1);
         assert!(out[0].dst_doc_id.is_none());
-        let graph = store.space_graph(&space).await.unwrap();
+        let graph = store.space_graph(&space, DocFilter::unrestricted()).await.unwrap();
         assert!(graph.nodes.iter().any(|n| n.pending && n.title == "Ghost"));
 
         // Creating the target page back-fills the pending link.
         let ghost = store.create_page(&space, "Ghost", &DocOwner::unattributed()).await.unwrap();
         let out = store.get_outgoing_links(&a).await.unwrap();
         assert_eq!(out[0].dst_doc_id.as_deref(), Some(ghost.as_str()));
-        let graph = store.space_graph(&space).await.unwrap();
+        let graph = store.space_graph(&space, DocFilter::unrestricted()).await.unwrap();
         assert!(!graph.nodes.iter().any(|n| n.pending));
     }
 
@@ -3786,7 +3953,7 @@ mod tests {
         let out = store.get_outgoing_links(&a).await.unwrap();
         assert_eq!(out.len(), 1);
         assert!(out[0].dst_doc_id.is_none());
-        let graph = store.space_graph(&space).await.unwrap();
+        let graph = store.space_graph(&space, DocFilter::unrestricted()).await.unwrap();
         assert!(graph.nodes.iter().any(|n| n.pending && n.title == "Bravo"));
     }
 

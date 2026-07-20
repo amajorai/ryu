@@ -31,7 +31,7 @@ futures-util = "0.3"
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 tracing = "0.1"
 async-trait = "0.1"
-ryu-notify = { path = "../../../crates/core/notify" }
+ryu-notify = { path = "../../../crates/core/notify", version = "0.0.5" }
 humantime = "2"
 regex = "1"
 sha2 = "0.10"

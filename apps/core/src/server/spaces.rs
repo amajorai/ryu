@@ -144,6 +144,24 @@ pub async fn doc_access_meta(store: &SpaceStore, doc_id: &str) -> Result<Option<
     }))
 }
 
+/// Read a Space's access metadata and map it into the shared [`ResourceTenancy`]
+/// the `resource_access` row-gate expects — the twin of [`doc_access_meta`] for the
+/// `delete_space` write gate. A system space (`system = 1`, NULL owner) maps to an
+/// owner-less tenancy which `resource_access` denies on a bound node, so a
+/// node-singleton system space is not user-deletable over HTTP (the danger-zone
+/// in-process bulk clear bypasses this gate and is unaffected).
+pub async fn space_access_meta(
+    store: &SpaceStore,
+    space_id: &str,
+) -> Result<Option<ResourceTenancy>> {
+    Ok(store.space_access_meta(space_id).await?.map(|m| ResourceTenancy {
+        owner_user_id: m.owner_user_id,
+        org_id: m.org_id,
+        visibility: m.visibility,
+        team_id: m.team_id,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     // The `ModelRegistry`-level "retrieval mode + extraction model are

@@ -1,0 +1,81 @@
+{
+  "slug": "customer-success",
+  "name": "Customer Success",
+  "navLabel": "Customer Success",
+  "category": "Sales & Marketing",
+  "icon": "HeartHandshake",
+  "tagline": "Spot churn risk, prep for QBRs, and keep every account moving with agents that know your book.",
+  "heroEyebrow": "Ryu for Customer Success",
+  "heroTitle": "An agent that watches every account so you don't have to.",
+  "heroSubtitle": "Pull usage, tickets, and notes into a health read on each account, draft the QBR deck, and flag the renewals at risk before they slip. Build a CSM agent as a card with your own playbook, model, and connected tools, governed end to end.",
+  "visualKey": "AgentsVisual",
+  "intro": "Customer success is pattern-matching across too many accounts: who's slipping, who's ready to expand, what to say in the next call. The signals are scattered across your CRM, product analytics, and support tool. Ryu lets you build a CSM agent grounded in your playbook that pulls those signals together and drafts the next move for you to take.",
+  "highlights": [
+    {
+      "title": "A CSM agent, your way",
+      "description": "Agents are swappable cards: set the model, your playbook, memory, and the tools each one can touch."
+    },
+    {
+      "title": "Health from real signals",
+      "description": "Agents connect to your CRM, product data, and support tool to read usage, tickets, and sentiment together."
+    },
+    {
+      "title": "Grounded in your playbook",
+      "description": "Spaces and RAG keep the agent on your success motions and messaging, with answers tied to the source."
+    },
+    {
+      "title": "Governed and private",
+      "description": "The Gateway logs every call and redacts customer data, so account intelligence never leaks."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Account health checks",
+      "description": "Combine usage trends, open tickets, and recent notes into a health score and a short why-it-changed summary."
+    },
+    {
+      "title": "Churn risk flagging",
+      "description": "Watch the book for warning signs like dropping logins or rising tickets, and surface at-risk renewals early."
+    },
+    {
+      "title": "QBR prep",
+      "description": "Assemble a quarterly business review: adoption, value delivered, open issues, and a recommended next-quarter plan."
+    },
+    {
+      "title": "Renewal and expansion briefs",
+      "description": "Draft a renewal brief with usage justification, or spot accounts ready for an upsell based on their behavior."
+    },
+    {
+      "title": "Onboarding tracking",
+      "description": "Track each new account against your onboarding milestones and draft the next nudge when a step stalls."
+    },
+    {
+      "title": "Call prep and recaps",
+      "description": "Brief you before a call with the account's history, then turn your notes into a recap and follow-up tasks."
+    }
+  ],
+  "examplePrompts": [
+    "Give me a health read on Acme Corp using their usage, open tickets, and our last three call notes.",
+    "Which accounts in my book are showing churn signals this month and why?",
+    "Build a QBR deck for Globex covering adoption, value delivered, and a next-quarter plan.",
+    "Draft a renewal brief for Initech with usage stats that justify the price.",
+    "Prep me for my call with Umbrella: history, open issues, and three talking points."
+  ],
+  "faq": [
+    {
+      "q": "Can the agent see all my account tools at once?",
+      "a": "Yes. With Connections it authenticates into your CRM, product analytics, and support tool, so it reads usage, tickets, and notes together instead of you stitching them by hand."
+    },
+    {
+      "q": "Can I tailor an agent to our success motion?",
+      "a": "Agents are swappable cards. You set the model, attach your playbook and messaging through Spaces, give it memory, and choose exactly which tools it can use. No two cards are alike."
+    },
+    {
+      "q": "Does it replace the CSM?",
+      "a": "No. It does the gathering and drafting so you spend time on the relationship. You decide what to act on, and every model and tool call is logged in the Gateway audit trail."
+    }
+  ],
+  "ctaTitle": "Catch the slip before it becomes a churn.",
+  "ctaSubtitle": "Health reads, QBR prep, and renewal briefs from an agent that knows your whole book.",
+  "ctaNote": "Account-aware · Playbook-grounded · Fully governed"
+}

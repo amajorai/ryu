@@ -1,0 +1,81 @@
+{
+  "slug": "accounting",
+  "name": "Accounting",
+  "navLabel": "Accounting",
+  "category": "Finance & Risk",
+  "icon": "Calculator",
+  "tagline": "Close the books, reconcile accounts, and prep statements with agents that keep client financials on your machine.",
+  "heroEyebrow": "Ryu for Accounting",
+  "heroTitle": "An AI accountant that respects the numbers.",
+  "heroSubtitle": "Reconcile ledgers, chase variances, and draft financial statements with agents that run on your own machine. Client books never leave your device unless you say so, and every model call is governed, logged, and auditable.",
+  "visualKey": "GatewayVisual",
+  "intro": "Accounting runs on sensitive financial data that can't be pasted into a public chatbot that trains on what it sees. Ryu runs capable agents locally, connects into your accounting tools to pull real transactions, and records every call in an audit trail, so you can speed up the close without exposing a single client ledger.",
+  "highlights": [
+    {
+      "title": "Books stay on your machine",
+      "description": "Run a local Gemma 4 on install, or route to a cloud model with PII and DLP redaction on every request."
+    },
+    {
+      "title": "Connects to your ledger",
+      "description": "Agents authenticate into QuickBooks, Xero, and spreadsheets to pull real transactions and post drafts for your review."
+    },
+    {
+      "title": "Auditable by default",
+      "description": "Every model and tool call is logged in the Gateway audit trail, so you can show exactly what an agent touched."
+    },
+    {
+      "title": "Cites the source",
+      "description": "Ground agents on your chart of accounts and policy docs with Spaces and RAG, so answers point back to the record."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Bank reconciliation",
+      "description": "Match bank statement lines to ledger entries, flag unmatched items, and draft the adjusting entries for you to approve."
+    },
+    {
+      "title": "Month-end close",
+      "description": "Run a close checklist agent that chases accruals, prepaids, and open items, then summarizes what is blocking the books."
+    },
+    {
+      "title": "Variance analysis",
+      "description": "Compare actuals to budget and prior period, explain the largest swings, and quote the underlying transactions."
+    },
+    {
+      "title": "Financial statement drafting",
+      "description": "Assemble a first-pass P&L, balance sheet, and cash flow from the trial balance for an accountant to verify."
+    },
+    {
+      "title": "Transaction categorization",
+      "description": "Classify uncategorized expenses against your chart of accounts, with a confidence note and the rule it applied."
+    },
+    {
+      "title": "Client query response",
+      "description": "Turn a client question into a grounded answer that cites the exact ledger entries and invoices behind the number."
+    }
+  ],
+  "examplePrompts": [
+    "Reconcile this bank statement against the ledger in Xero and list every unmatched transaction.",
+    "Explain the three largest variances between this month's actuals and budget, with the transactions behind each.",
+    "Categorize the uncategorized expenses in this export against our chart of accounts and flag anything unusual.",
+    "Draft a first-pass P&L and balance sheet from this trial balance for me to review.",
+    "Summarize what is still blocking the month-end close and which accruals are missing."
+  ],
+  "faq": [
+    {
+      "q": "Is client financial data safe with Ryu?",
+      "a": "Yes. Ryu is local-first: you can run a model entirely on your machine with no telemetry. When you route to a cloud model, the Gateway redacts PII and sensitive data on egress and logs the call, so client books stay governed end to end."
+    },
+    {
+      "q": "Can it work with my accounting software?",
+      "a": "Yes. Through Connections, agents can authenticate into tools like QuickBooks, Xero, and spreadsheets to read transactions and post drafts. You stay in control of what is connected and what an agent is allowed to touch."
+    },
+    {
+      "q": "Will it post entries on its own?",
+      "a": "No. Ryu drafts reconciliations, entries, and statements for a qualified accountant to review and approve. The audit trail records what the agent saw and proposed, so that review is fast and defensible."
+    }
+  ],
+  "ctaTitle": "Give your practice an AI accountant.",
+  "ctaSubtitle": "Reconcile, analyze, and close faster, with client books kept private and every call on the record.",
+  "ctaNote": "Local-first · PII/DLP redaction · Full audit trail"
+}

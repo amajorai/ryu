@@ -34,8 +34,8 @@ utoipa = { version = "5", features = ["axum_extras", "chrono"] }
 # GGUF as a selectable installed model (`installed::record`). Both are extracted
 # crates (ZERO apps/core dependency); the sidecar shares the SAME on-disk indices
 # under `${RYU_DIR}` that Core reads.
-ryu-model-catalog = { path = "../../../crates/core/model-catalog" }
-ryu-model-format = { path = "../../../crates/core/model-format" }
+ryu-model-catalog = { path = "../../../crates/core/model-catalog", version = "0.0.5" }
+ryu-model-format = { path = "../../../crates/core/model-format", version = "0.0.5" }
 # Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-mail`
 # and `ryu-teams`. Core already pulls all of these, so there is no new dependency
 # in the in-process build.

@@ -1,0 +1,82 @@
+---
+title: "Desktop Companion Integration"
+description: "Build an in-desktop overlay panel that interacts with the chat, memory, and tools — the companion surface for plugins."
+tags: ["companion", "desktop", "plugin", "overlay", "panel", "ui", "integration"]
+---
+
+A companion is an in-desktop overlay panel declared by a plugin. It renders inside the desktop app
+and can interact with the chat, memory, tools, and Gateway.
+
+## The companion surface
+
+Declare a companion in `plugin.json`:
+
+```json
+{
+  "id": "com.example.my-plugin",
+  "name": "My Plugin",
+  "version": "1.0.0",
+  "runnables": [],
+  "companion": {
+    "label": "My Panel",
+    "icon": "sparkles",
+    "shortcut": "ctrl+shift+m"
+  }
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `label` | yes | Display name in the sidebar |
+| `icon` | no | Lucide icon name |
+| `shortcut` | no | Keyboard shortcut to toggle the panel |
+
+## How it connects
+
+The companion panel is rendered by the desktop shell. It communicates with Core through the
+same HTTP API every other surface uses:
+
+- **Chat** — `POST /api/chat/stream` for conversations
+- **Memory** — `GET /api/memory/recall` for long-term context
+- **Tools** — `GET /api/tools/search` for tool discovery
+- **Spaces** — `POST /api/spaces/:id/search` for RAG
+
+All calls are Gateway-governed.
+
+## Desktop extension host
+
+For richer integration, the SDK exposes a desktop extension host API
+(`packages/sdk/src/plugin/ryu-plugin.ts`):
+
+```typescript
+import type { RyuPlugin } from "@ryuhq/sdk/plugin";
+
+export function activate(context: RyuPlugin): void {
+  // Register commands
+  context.registerCommand("my-action", () => { /* ... */ });
+  
+  // Register a panel
+  context.registerPanel("My Panel", MyPanelComponent);
+  
+  // Access host services
+  const agents = await context.host.listAgents();
+  await context.host.gateway.chat(messages);
+  await context.host.spaces.ingestDocument(spaceId, doc);
+}
+```
+
+<Callout type="warn">
+  The desktop extension host is **partly live**. The manifest carries `contributes` blocks and
+  activation events, and the activation runtime wakes plugins on `onStartup`. But the full
+  in-process plugin API (registering commands, panels, routes) is still being built. See
+  [Plugin Runtime](/docs/develop/extensions/plugin-runtime) for the current state.
+</Callout>
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/develop/extensions/desktop-companion" />
+  <DocCard href="/docs/develop/extensions/plugin-runtime" />
+  <DocCard href="/docs/develop/extensions/plugin-json-manifest" />
+  <DocCard href="/docs/desktop/surfaces" />
+</Cards>

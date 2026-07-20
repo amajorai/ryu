@@ -29,7 +29,7 @@ name is `plugin.json`; the legacy `ryu.json` name is still read for back-compat 
 rename, #457). The SDK's bundled output is `plugin.bundle.json`.
 
 The authoritative schema lives in Core at `apps/core/src/plugin_manifest/{mod.rs,schema.rs}`, mirrored
-in Rust at [`crates/ryu-sdk/src/manifest.rs`](/docs/develop/sdk/rust) and in TypeScript at
+in Rust at [`crates/sdk/core/src/manifest.rs`](/docs/develop/sdk/rust) and in TypeScript at
 `packages/sdk/src/manifest.ts` (a Zod `PluginManifestSchema`). All three deserialize the same bytes.
 
 ## Manifest schema
@@ -91,7 +91,7 @@ contract enforced by `validate_runnable` (`apps/core/src/plugin_manifest/schema.
   The TypeScript SDK's `RunnableKindSchema` (`packages/sdk/src/manifest.ts`) enums only the four most
   common kinds (`agent`, `workflow`, `tool`, `skill`). Core validates all eight. To author the other
   four (companion / channel / engine / policy), write the `plugin.json` directly rather than relying
-  on the TS type. The Rust kernel (`ryu-sdk`) covers all eight.
+  on the TS type. The Rust kernel (`sdk/core`) covers all eight.
 </Callout>
 
 ### CompanionSurface
@@ -287,7 +287,7 @@ are Core-tier and opt-in. Their dev seed env vars (`GATEWAY_FIREWALL_ENABLED`,
 ### External-runtime provisioning (scaffold)
 
 A plugin may declare an external language runtime - today a Python venv with pip dependencies - via
-an optional `runtime` block, modeled on the `apps/tts-sidecar` precedent. The provisioner is
+an optional `runtime` block, modeled on the `apps-store/voice/` precedent. The provisioner is
 `apps/core/src/sidecar/external_runtime.rs`: it derives OS-correct venv paths
 (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` elsewhere) and a best-effort `provision()`
 that creates the venv and runs `pip install`. The enable path calls `provision_external_runtime`

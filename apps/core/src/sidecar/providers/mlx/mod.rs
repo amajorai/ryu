@@ -10,7 +10,7 @@ use anyhow::Context;
 
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 use crate::win_process::NoWindow;
-use process::DEFAULT_PORT;
+use process::default_port;
 
 /// Default model MLX serves when none is configured. Like vLLM/SGLang, MLX binds
 /// to a specific model at launch, so activation needs *a* model to start at all.
@@ -32,7 +32,7 @@ impl MlxManager {
     pub fn new() -> Self {
         Self {
             model: None,
-            port: DEFAULT_PORT,
+            port: default_port(),
             running: Arc::new(AtomicBool::new(false)),
             process: Arc::new(Mutex::new(None)),
             client: reqwest::Client::builder()
@@ -49,7 +49,7 @@ impl MlxManager {
         self
     }
 
-    /// Override the default port (8082).
+    /// Override the default port (8086).
     pub fn with_port(mut self, port: u16) -> Self {
         self.port = port;
         self

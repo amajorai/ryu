@@ -1,0 +1,153 @@
+---
+title: "Gateway Extensibility"
+description: "Extend the Gateway's governance pipeline — custom firewall patterns, router backends, WASM policy plugins, and the passthrough proxy."
+tags: ["gateway", "firewall", "routing", "wasm", "policy", "extensibility", "custom"]
+---
+
+The Gateway follows a **registry pattern** for its core subsystems: each is an interface-backed
+backend that can be registered, swapped at runtime, or extended. This page covers the extensibility
+points for each subsystem.
+
+## The registry pattern
+
+Four Gateway subsystems share the same pattern:
+
+| Subsystem | Registry type | Builtin | Live-swap? |
+|---|---|---|---|
+| Router | `RouterRegistry` | `ModelRouter` | No (restart required) |
+| Firewall | `FirewallRegistry` | `FirewallScanner` | Yes |
+| Budget | `BudgetRegistry` | budget enforcer | Yes |
+| Passthrough | `PassthroughRegistry` | passthrough backends | Yes |
+
+Each registry:
+- Has a `BUILTIN` constant (the default active backend)
+- Exposes `register(id, backend)` for extension
+- Exposes `set_active(id)` for live swap
+- Returns `active()` — a clone of the active `Arc` out of the read lock
+
+## Custom firewall patterns
+
+The firewall (`apps/gateway/src/firewall/mod.rs`) scans inbound and outbound text for PII,
+secrets, prompt injection, code injection, toxicity, and bias. You can add custom patterns.
+
+### Adding patterns via config
+
+Custom patterns are regex-based and declared in `gateway.toml`:
+
+```toml
+[firewall]
+enabled = true
+policy = "warn_and_continue"
+
+[firewall.custom_patterns]
+# Pattern name → regex
+internal_api_key = "AKIA[0-9A-Z]{16}"
+custom_token = "tok_[a-zA-Z0-9]{32}"
+```
+
+Custom patterns run alongside the built-in detectors. A match triggers the same policy action
+as any other detection (`block`, `warn_and_continue`, or `redact` depending on `policy`).
+
+### Pattern detection kinds
+
+| Kind | What it catches | Default action |
+|---|---|---|
+| `pii` | Email, phone, SSN, credit card, IP address | `redact` |
+| `secrets` | API keys, tokens, passwords | `block` |
+| `injection` | Prompt injection attempts | `block` |
+| `code_injection` | Code injection patterns | `block` |
+| `toxicity` | Toxic or harmful content | `warn` |
+| `bias` | Biased content | `warn` |
+
+See [Security](/docs/gateway/security) for the full firewall configuration.
+
+## Custom router backends
+
+The `ModelRouter` (`apps/gateway/src/router/mod.rs`) resolves a model name to a provider. You
+can add custom routing logic.
+
+### The RouterBackend trait
+
+```rust
+pub trait RouterBackend: Send + Sync {
+    fn route(&self, model: &str, ctx: &RequestContext) -> RouteDecision;
+    fn route_modality_with_slot(&self, model: &str, modality: &str, slot: Option<&str>) -> RouteDecision;
+    fn fallback_chain(&self, primary: &RouteDecision) -> Vec<RouteDecision>;
+    fn eval_route(&self, model: &str, eval_name: &str) -> RouteDecision;
+}
+```
+
+Register a custom backend at startup:
+
+```rust
+router_registry.register("custom-router", my_router_backend);
+router_registry.set_active("custom-router");
+```
+
+### Configuration-driven routing
+
+Most routing needs are met by configuration rather than code. See [Routing](/docs/gateway/routing)
+for:
+
+- `routing.model_map` — exact and prefix model remapping
+- `routing.fallback_chain` — failover between providers
+- `routing.smart` — classifier-driven model selection
+- `routing.modality` — per-modality provider routing
+
+## WASM policy plugins
+
+The Gateway supports WASM-based policy plugins for custom governance logic
+(`apps/gateway/src/wasm_policy/mod.rs`). A WASM policy can inspect, modify, or reject requests
+and responses.
+
+<Callout type="warn">
+  WASM policy plugins are an advanced extension point. The API surface is subject to change. For
+  most governance needs, use the firewall config, budget rules, or custom patterns instead.
+</Callout>
+
+### When to use WASM policies
+
+| Need | Use instead |
+|---|---|
+| Block specific content patterns | Custom firewall patterns |
+| Rate limit by user/agent | Budget rules |
+| Route to different providers | Routing config |
+| Custom request/response transformation | WASM policy |
+| Custom audit logging | WASM policy |
+| Compliance-specific checks | WASM policy |
+
+## Extending the passthrough proxy
+
+The passthrough proxy (`apps/gateway/src/passthrough/mod.rs`) handles non-OpenAI-compat wire
+formats (Anthropic Messages, OpenAI Responses). You can add new upstream formats.
+
+### The PassthroughBackend trait
+
+```rust
+pub trait PassthroughBackend: Send + Sync {
+    async fn forward(
+        &self,
+        format: WireFormat,
+        upstream_base: &str,
+        request: &Request,
+    ) -> Result<Response>;
+}
+```
+
+Register a custom passthrough:
+
+```rust
+passthrough_registry.register("custom", my_passthrough_backend);
+```
+
+This is used for adding support for new agent wire formats that don't speak OpenAI-compatible JSON.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/gateway/security" />
+  <DocCard href="/docs/gateway/routing" />
+  <DocCard href="/docs/gateway/configuration" />
+  <DocCard href="/docs/gateway/gateway-for-any-agent" />
+  <DocCard href="/docs/gateway/agent-hardening" />
+</Cards>

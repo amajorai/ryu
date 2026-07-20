@@ -1,0 +1,223 @@
+// apps/desktop/src/lib/api/monitors.ts
+//
+// Typed client for the Core website-monitoring API (`/api/monitors/*`). Field
+// names are snake_case to match Core's serde shapes exactly (the Rust structs
+// use no rename). The alert SSE stream uses fetch + ReadableStream rather than
+// EventSource so the bearer token can be attached.
+
+import { type ApiTarget, request } from "./client.ts";
+import { streamChannel } from "./eventStream.ts";
+
+export type FetchBackend = "http" | "spider" | "agentbrowser";
+
+export type NumComparator =
+	| "changed"
+	| "less_than"
+	| "greater_than"
+	| "drops_by_pct"
+	| "rises_by_pct";
+
+// Internally-tagged union mirroring Core's `CheckType` (`{ "type": ... }`).
+export type CheckType =
+	| { type: "uptime"; expect_status?: number[] }
+	| {
+			type: "keyword";
+			pattern: string;
+			is_regex?: boolean;
+			case_sensitive?: boolean;
+			alert_when_present?: boolean;
+	  }
+	| { type: "content_diff"; region_regex?: string | null }
+	| {
+			type: "price";
+			extract_regex: string;
+			comparator?: NumComparator;
+			threshold?: number | null;
+	  }
+	| {
+			type: "stock";
+			in_stock_pattern: string;
+			is_regex?: boolean;
+			alert_when_in_stock?: boolean;
+	  };
+
+export type NotifyTarget =
+	| { kind: "webhook"; url: string }
+	| { kind: "telegram"; bot_token: string; chat_id: string }
+	| { kind: "expo_push"; token: string };
+
+export type CheckStatus = "ok" | "triggered" | "error";
+
+export interface Monitor {
+	backend: FetchBackend;
+	check: CheckType;
+	created_at: string;
+	enabled: boolean;
+	id: string;
+	interval: string;
+	last_check_at?: string | null;
+	last_status?: CheckStatus | null;
+	last_value?: string | null;
+	name: string;
+	notify: NotifyTarget[];
+	updated_at: string;
+	url: string;
+}
+
+export interface Snapshot {
+	checked_at: string;
+	content_hash?: string | null;
+	http_status?: number | null;
+	id: number;
+	latency_ms?: number | null;
+	monitor_id: string;
+	note?: string | null;
+	status: CheckStatus;
+	value?: string | null;
+}
+
+export interface Alert {
+	acknowledged: boolean;
+	created_at: string;
+	id: number;
+	kind: string;
+	message: string;
+	monitor_id: string;
+	monitor_name: string;
+	title: string;
+}
+
+/** The fields needed to create or update a monitor. */
+export interface MonitorInput {
+	backend: FetchBackend;
+	check: CheckType;
+	enabled: boolean;
+	interval: string;
+	name: string;
+	notify: NotifyTarget[];
+	url: string;
+}
+
+export async function listMonitors(target: ApiTarget): Promise<Monitor[]> {
+	const json = await request<{ monitors?: Monitor[] }>(target, "/api/monitors");
+	return json.monitors ?? [];
+}
+
+export async function getMonitor(
+	target: ApiTarget,
+	id: string
+): Promise<Monitor> {
+	const json = await request<{ monitor?: Monitor; error?: string }>(
+		target,
+		`/api/monitors/${id}`
+	);
+	if (!json.monitor) {
+		throw new Error(json.error ?? "monitor not found");
+	}
+	return json.monitor;
+}
+
+export async function createMonitor(
+	target: ApiTarget,
+	data: MonitorInput
+): Promise<Monitor> {
+	const json = await request<{ monitor?: Monitor; error?: string }>(
+		target,
+		"/api/monitors",
+		{ method: "POST", body: data }
+	);
+	if (!json.monitor) {
+		throw new Error(json.error ?? "failed to create monitor");
+	}
+	return json.monitor;
+}
+
+export async function updateMonitor(
+	target: ApiTarget,
+	id: string,
+	data: MonitorInput
+): Promise<Monitor> {
+	const json = await request<{ monitor?: Monitor; error?: string }>(
+		target,
+		`/api/monitors/${id}`,
+		{ method: "PUT", body: data }
+	);
+	if (!json.monitor) {
+		throw new Error(json.error ?? "failed to update monitor");
+	}
+	return json.monitor;
+}
+
+export async function deleteMonitor(
+	target: ApiTarget,
+	id: string
+): Promise<void> {
+	await request(target, `/api/monitors/${id}`, { method: "DELETE" });
+}
+
+export async function runMonitor(
+	target: ApiTarget,
+	id: string
+): Promise<CheckStatus> {
+	const json = await request<{ status?: CheckStatus; error?: string }>(
+		target,
+		`/api/monitors/${id}/run`,
+		{ method: "POST" }
+	);
+	if (!json.status) {
+		throw new Error(json.error ?? "check failed");
+	}
+	return json.status;
+}
+
+export async function listSnapshots(
+	target: ApiTarget,
+	id: string,
+	limit = 50
+): Promise<Snapshot[]> {
+	const json = await request<{ snapshots?: Snapshot[] }>(
+		target,
+		`/api/monitors/${id}/snapshots?limit=${limit}`
+	);
+	return json.snapshots ?? [];
+}
+
+export async function listMonitorAlerts(
+	target: ApiTarget,
+	id: string,
+	limit = 100
+): Promise<Alert[]> {
+	const json = await request<{ alerts?: Alert[] }>(
+		target,
+		`/api/monitors/${id}/alerts?limit=${limit}`
+	);
+	return json.alerts ?? [];
+}
+
+export async function listAllAlerts(
+	target: ApiTarget,
+	limit = 100
+): Promise<Alert[]> {
+	const json = await request<{ alerts?: Alert[] }>(
+		target,
+		`/api/monitors/alerts?limit=${limit}`
+	);
+	return json.alerts ?? [];
+}
+
+export async function ackAlert(target: ApiTarget, id: number): Promise<void> {
+	await request(target, `/api/monitors/alerts/${id}/ack`, { method: "POST" });
+}
+
+/**
+ * Subscribe to monitor alert events and invoke `onAlert` for every event.
+ * Resolves when `signal` aborts. Shares the single multiplexed node connection
+ * (`/api/events/all`, see eventStream.ts) instead of its own HTTP socket.
+ */
+export function streamMonitorAlerts(
+	target: ApiTarget,
+	onAlert: (alert: Alert) => void,
+	signal?: AbortSignal
+): Promise<void> {
+	return streamChannel(target, "monitors", onAlert, signal);
+}

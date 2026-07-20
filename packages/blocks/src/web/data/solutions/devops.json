@@ -1,0 +1,81 @@
+{
+  "slug": "devops",
+  "name": "DevOps",
+  "navLabel": "DevOps",
+  "category": "Engineering & Product",
+  "icon": "Server",
+  "tagline": "Triage incidents, fix pipelines, and edit infra as code with agents you can govern.",
+  "heroEyebrow": "Ryu for DevOps",
+  "heroTitle": "An on-call teammate that never sleeps.",
+  "heroSubtitle": "Run agents from the CLI or command bar to investigate alerts, fix broken pipelines, and propose infra changes on a git branch. Every model and tool call routes through the Gateway, so you keep budgets, audit, and guardrails on automated actions.",
+  "visualKey": "CliVisual",
+  "intro": "DevOps work happens at the terminal and under pressure: a pipeline is red, an alert is firing, a config drifted. Ryu brings agents to the CLI and command bar where you already live, connects them to your tooling through MCP, and routes every call through the Gateway so automation stays bounded, logged, and reversible.",
+  "highlights": [
+    {
+      "title": "Terminal-native",
+      "description": "Drive agents from the CLI and a global command bar, so you stay in the shell instead of switching to a chat window."
+    },
+    {
+      "title": "Infra changes as diffs",
+      "description": "Edits to Terraform, manifests, and CI config land on a git branch, so you review the plan before anything applies."
+    },
+    {
+      "title": "Governed automation",
+      "description": "The Gateway logs every tool call and enforces budgets and policy, so an agent's actions stay bounded and auditable."
+    },
+    {
+      "title": "Wired to your tools",
+      "description": "Connect GitHub, your cloud, observability, and chat through MCP, so an agent can read logs and act in one loop."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Incident triage",
+      "description": "Pull recent logs and metrics on an alert, correlate the timeline, and propose the most likely cause and a first mitigation."
+    },
+    {
+      "title": "Fix a broken pipeline",
+      "description": "Read a failing CI run, identify the failing step, and patch the workflow file on a branch for you to review."
+    },
+    {
+      "title": "Infra as code edits",
+      "description": "Draft Terraform or Kubernetes manifest changes from a request, then show the diff and the plan before anything applies."
+    },
+    {
+      "title": "Config drift checks",
+      "description": "Compare deployed state against the repo and flag where the live config diverged from what is committed."
+    },
+    {
+      "title": "Runbook automation",
+      "description": "Turn a repeated manual procedure into a workflow with steps and triggers, so routine ops run on a schedule."
+    },
+    {
+      "title": "Postmortem drafts",
+      "description": "Assemble a timeline from logs and chat into a first-pass incident report with impact, cause, and action items."
+    }
+  ],
+  "examplePrompts": [
+    "The deploy pipeline is red on the build step, read the run logs and patch the workflow on a branch.",
+    "Investigate the latency alert on the checkout service, pull the last hour of metrics and logs and tell me the likely cause.",
+    "Draft a Terraform change to add a read replica to the orders database and show me the plan.",
+    "Compare the live ingress config against the repo and flag any drift.",
+    "Build a workflow that rotates the staging secrets every Sunday and posts a confirmation to ops."
+  ],
+  "faq": [
+    {
+      "q": "Will an agent run commands against production on its own?",
+      "a": "Only within the limits you set. Infra changes land as a reviewable git diff, and the Gateway logs every tool call and enforces policy and budgets, so automated actions stay bounded and auditable."
+    },
+    {
+      "q": "Does it work from the terminal?",
+      "a": "Yes. Ryu drives agents from the CLI and a global command bar, so you can triage and act without leaving the shell, alongside the desktop app when you want a fuller view."
+    },
+    {
+      "q": "Can it read my logs and metrics?",
+      "a": "Yes. Connect your observability stack, cloud, and GitHub through MCP, so an agent can pull live logs and metrics and act in the same loop, with every call recorded."
+    }
+  ],
+  "ctaTitle": "Put an agent on the pager with you.",
+  "ctaSubtitle": "Triage, fix, and automate from the terminal, with every action governed and logged.",
+  "ctaNote": "CLI-native · Infra as diffs · Bounded automation"
+}

@@ -162,9 +162,12 @@ fn seed_overrides() -> [SeedSpec; 14] {
             id: crate::plugins::builtins::ACTIVITY_PLUGIN_ID,
             // Its sandboxed frame renders Core's read-only unified activity feed
             // (`GET /api/activity`) via the `activity:read` bridge capability (host-direct,
-            // monitors pattern). Ships a prebuilt companion UI. Core-tier, so it must NOT
-            // declare `sidecar:process` (the Gateway denies that grant at enable).
-            grants: &["activity:read"],
+            // monitors pattern). It ALSO holds `shell:integrate` — the generic shell-primitive
+            // lane (`docs/renderer-host-slice-1.md`): the feed's clickable rows open the chat
+            // tab through the route-allowlisted `shell.openTab` (replacing the old bespoke
+            // `activity.openSession` verb). Ships a prebuilt companion UI. Core-tier, so it
+            // must NOT declare `sidecar:process` (the Gateway denies that grant at enable).
+            grants: &["activity:read", "shell:integrate"],
             ui_code: Some(ACTIVITY_UI_HTML),
         },
         SeedSpec {
@@ -208,9 +211,13 @@ fn seed_overrides() -> [SeedSpec; 14] {
             // grants. Ships a prebuilt companion UI. `com.ryu.approvals` was a wave-2
             // gate-only governance shell (gating `/api/approvals/*`); the W7 frontend
             // extraction upgrades it in place to ALSO carry the companion runnable.
-            // Core-tier, so it must NOT declare `sidecar:process` (the Gateway denies that
-            // grant at enable).
-            grants: &["approvals:crud", "quests:crud"],
+            // It ALSO holds `shell:integrate` — the generic shell-primitive lane
+            // (`docs/renderer-host-slice-1.md`): the "open in chat" action opens a new
+            // chat tab through the route-allowlisted `shell.openTab` (replacing the old
+            // bespoke `suggestions.openInChat` verb), and the frame subscribes to the
+            // live host theme. Core-tier, so it must NOT declare `sidecar:process` (the
+            // Gateway denies that grant at enable).
+            grants: &["approvals:crud", "quests:crud", "shell:integrate"],
             ui_code: Some(APPROVALS_UI_HTML),
         },
         SeedSpec {
@@ -221,9 +228,13 @@ fn seed_overrides() -> [SeedSpec; 14] {
             // but device-LOCAL: the host calls Shadow (:3030) WITHOUT a node token (the
             // `shadow.ts` INVARIANT — captured screen/input is machine-pinned), the same
             // host-direct-to-Shadow shape the approvals inbox uses for `/proactive`.
-            // Ships a prebuilt companion UI. Core-tier, so it must NOT declare
-            // `sidecar:process` (the Gateway denies that grant at enable).
-            grants: &["timeline:read"],
+            // It ALSO holds `shell:integrate` — the generic shell-primitive lane
+            // (docs/renderer-host-slice-1.md) its Weekly-Review + Settings opens now
+            // route through (`shell.openTab`, replacing the bespoke
+            // `timeline.openReview`/`timeline.openSettings` verbs). Ships a prebuilt
+            // companion UI. Core-tier, so it must NOT declare `sidecar:process` (the
+            // Gateway denies that grant at enable).
+            grants: &["timeline:read", "shell:integrate"],
             ui_code: Some(TIMELINE_UI_HTML),
         },
         SeedSpec {
@@ -232,9 +243,15 @@ fn seed_overrides() -> [SeedSpec; 14] {
             // front-matter form fields + a markdown body + server-backed version history —
             // via the `skills:crud` bridge capability (host-direct, monitors pattern): the
             // host calls the existing `/api/skills` authoring endpoints (the desktop
-            // `skills.ts` client). Ships a prebuilt companion UI. Core-tier, so it must NOT
-            // declare `sidecar:process` (the Gateway denies that grant at enable).
-            grants: &["skills:crud"],
+            // `skills.ts` client). It ALSO holds `shell:integrate` — the generic
+            // shell-primitive lane (`docs/renderer-host-slice-1.md`): the decoupled frame
+            // subscribes to the live host theme (`shell.subscribeTheme`), so it re-themes
+            // on a light/dark toggle instead of holding a mount-time snapshot. It has no
+            // navigation verb to move onto `shell.openTab` (its `setTitle` renames the
+            // current owning tab, which no slice-1 primitive covers, so that stays on the
+            // `skills:crud` bridge). Ships a prebuilt companion UI. Core-tier, so it must
+            // NOT declare `sidecar:process` (the Gateway denies that grant at enable).
+            grants: &["skills:crud", "shell:integrate"],
             ui_code: Some(SKILL_EDITOR_UI_HTML),
         },
     ]
@@ -624,26 +641,14 @@ mod tests {
         assert_eq!(
             with_ui,
             vec![
-                crate::plugin_manifest::WHITEBOARD_PLUGIN_ID,
-                crate::plugin_manifest::CANVAS_PLUGIN_ID,
-                crate::plugin_manifest::FINETUNE_PLUGIN_ID,
-                crate::plugins::builtins::MEETINGS_PLUGIN_ID,
-                crate::plugins::builtins::QUESTS_PLUGIN_ID,
-                crate::plugins::builtins::APPROVALS_PLUGIN_ID,
-                crate::plugins::builtins::LEARNING_PLUGIN_ID,
-                crate::plugins::builtins::MONITORS_PLUGIN_ID,
-                crate::plugins::builtins::WORKFLOWS_PLUGIN_ID,
                 crate::plugins::builtins::WEBHOOKS_PLUGIN_ID,
-                crate::plugins::builtins::ACTIVITY_PLUGIN_ID,
                 crate::plugins::builtins::CALENDAR_PLUGIN_ID,
-                crate::plugins::builtins::TIMELINE_PLUGIN_ID,
-                crate::plugins::builtins::SKILL_EDITOR_PLUGIN_ID,
             ],
-            "only the companions ship a prebuilt UI bundle, in CORE_DEFAULT_ON order \
-             (meetings right after the fine-tuning app — at its wave-1 default-on position, \
-             after spaces — then quests/approvals/learning at their wave-2 positions, \
-             mid-list, then monitors/workflows, then webhooks, activity, calendar, \
-             timeline, and the skill-editor last — the W7 frontend extraction)"
+            "only the companions that STAY default-on ship a prebuilt UI bundle, in \
+             CORE_DEFAULT_ON order. The other companion apps (whiteboard/canvas/finetune/ \
+             meetings/quests/approvals/learning/monitors/workflows/activity/timeline/ \
+             skill-editor) are now opt-in (default-off), so they leave the default-on seed \
+             even though their SeedSpec overrides still carry ui_code (inert until enabled)"
         );
         // Non-companion Core plugins seed with EMPTY grants, exactly as the generic
         // loop did before this module existed.

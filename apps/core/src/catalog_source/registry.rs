@@ -457,18 +457,15 @@ fn builtin_sources() -> HashMap<CatalogKind, Vec<Source>> {
     map.insert(
         CatalogKind::Plugin,
         vec![
-            // Primary (default active): the Ryu Marketplace federated source
-            // (#467) — the real (Mongo) plugin/app catalog.
-            Source::RyuMarketplace(RyuMarketplaceSource::builtin(CatalogKind::Plugin)),
-            // The first-party OPEN catalog: the git `amajorai/ryu-marketplace`
-            // repo, read via the generalized git `MarketplaceSource` (Phase 2).
-            // Repo override via `RYU_MARKETPLACE_REPO` ("nothing hardcoded" beyond
-            // the default). Registered AFTER the Mongo primary so the default
-            // active source is unchanged; `merged_plugin_catalog_entries` folds its
-            // items into the browse list.
+            // Primary (default active): the ONE universal GitHub source (unified
+            // 2026-07-19). The first-party OPEN catalog git repo (`amajorai/ryu-
+            // marketplace`, override via `RYU_MARKETPLACE_REPO`), read via the
+            // generalized git `MarketplaceSource`. It is `primary()` (first in the vec),
+            // so the store opens on it and the confusing "Ryu Marketplace" vs "Ryu
+            // Catalog" two-source split is gone — GitHub is the single browse catalog.
             Source::Marketplace(MarketplaceSource::new(
                 "ryu-catalog",
-                "Ryu Catalog",
+                "Ryu Marketplace",
                 std::env::var("RYU_MARKETPLACE_REPO")
                     .ok()
                     .map(|s| s.trim().to_string())
@@ -476,6 +473,14 @@ fn builtin_sources() -> HashMap<CatalogKind, Vec<Source>> {
                     .unwrap_or_else(|| "amajorai/ryu-marketplace".to_string()),
                 CatalogKind::Plugin,
             )),
+            // DEMOTED, not removed: the hosted (Mongo, api.ryuhq.com) source stays wired
+            // as the COMMERCE + signing backend. A static GitHub repo cannot process
+            // payments or issue per-user signed download grants, so PAID items still need
+            // this server for Stripe checkout + entitlement + `verify_manifest_signature`
+            // at install (see `sources.rs` paid gate + `packages/marketplace`
+            // `startPurchase`/`useLicenses`). It is no longer the primary browse source;
+            // `merged_plugin_catalog_entries` still folds its paid listings into the list.
+            Source::RyuMarketplace(RyuMarketplaceSource::builtin(CatalogKind::Plugin)),
             // Browse every publicly documented integration surface
             // (MCP/OpenAPI/GraphQL/CLI) as descriptor-only marketplace entries.
             Source::IntegrationsSh(IntegrationsShSource::builtin()),

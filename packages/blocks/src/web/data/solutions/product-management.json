@@ -1,0 +1,81 @@
+{
+  "slug": "product-management",
+  "name": "Product Management",
+  "navLabel": "Product Management",
+  "category": "Engineering & Product",
+  "icon": "Boxes",
+  "tagline": "Draft specs, triage feedback, and run the busywork with agents wired to your tools.",
+  "heroEyebrow": "Ryu for Product Management",
+  "heroTitle": "Spend the week on the product, not the admin.",
+  "heroSubtitle": "Turn scattered feedback into themes, write the spec, and keep the backlog moving with agents connected to Linear, Jira, Slack, and your docs. Chain steps into workflows that run on a schedule, and bring in a panel of agents when a decision is hard.",
+  "visualKey": "WorkflowsVisual",
+  "intro": "Product management is glued together by writing and coordination: specs, summaries, ticket grooming, and chasing context across tools. Ryu connects agents to the systems where that work lives, drafts the documents from real inputs, and lets you script the repetitive parts into workflows so you get the week back.",
+  "highlights": [
+    {
+      "title": "Connected to your stack",
+      "description": "Wire Linear, Jira, Slack, and your docs through Connections, so an agent reads real tickets and feedback, not summaries."
+    },
+    {
+      "title": "Workflows that recur",
+      "description": "Chain steps with schedules and triggers, so the weekly digest or feedback rollup runs itself and lands where the team looks."
+    },
+    {
+      "title": "A panel on demand",
+      "description": "Council chat lets you mention several agents at once for a fast pro and con on a tradeoff before you commit."
+    },
+    {
+      "title": "Grounded in your product",
+      "description": "Index PRDs, research, and roadmaps in Spaces, so drafts match your context and cite where a claim came from."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Feedback synthesis",
+      "description": "Cluster support tickets, reviews, and call notes into themes with frequency and representative quotes for each."
+    },
+    {
+      "title": "Spec drafting",
+      "description": "Turn a problem statement into a first-pass PRD with goals, scope, edge cases, and open questions for review."
+    },
+    {
+      "title": "Backlog grooming",
+      "description": "Read incoming requests, deduplicate against existing tickets, and draft clear titles, descriptions, and acceptance criteria."
+    },
+    {
+      "title": "Release notes",
+      "description": "Assemble merged PRs and tickets into customer-ready release notes grouped by feature, fix, and improvement."
+    },
+    {
+      "title": "Competitive scans",
+      "description": "Summarize a competitor's changelog and positioning into a brief, with sources, for the next planning review."
+    },
+    {
+      "title": "Status digests",
+      "description": "Run a scheduled workflow that pulls progress from Linear and posts a plain-language weekly update to the team channel."
+    }
+  ],
+  "examplePrompts": [
+    "Cluster the last 200 support tickets into themes and show me the top five with example quotes.",
+    "Draft a PRD for self-serve seat management from this problem statement, with goals and open questions.",
+    "Read the new feature requests in Linear, dedupe them, and draft acceptance criteria for the top three.",
+    "Turn this sprint's merged PRs into release notes grouped by feature, fix, and improvement.",
+    "Build a workflow that posts a weekly progress digest from Linear to the product channel every Friday."
+  ],
+  "faq": [
+    {
+      "q": "Can it read my real tickets and feedback?",
+      "a": "Yes. Ryu connects to Linear, Jira, Slack, and your docs through Connections, so agents work from your live data and can write back, like creating or updating a ticket, with every action logged."
+    },
+    {
+      "q": "Can I automate the recurring work?",
+      "a": "Yes. Chain steps into a workflow with a schedule or trigger, so a weekly digest or feedback rollup runs on its own and posts where your team already looks."
+    },
+    {
+      "q": "How do I pressure-test a decision?",
+      "a": "Use council chat to mention several agents at once and get differing takes on a tradeoff in one thread, then keep the reasoning as a record for the team."
+    }
+  ],
+  "ctaTitle": "Get the busywork off your plate.",
+  "ctaSubtitle": "Draft, triage, and report with agents wired to the tools you already use.",
+  "ctaNote": "Tool connectors · Recurring workflows · Council chat"
+}

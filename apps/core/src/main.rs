@@ -46,6 +46,9 @@ mod learning;
 pub use ryu_mcp_catalog as mcp_catalog;
 mod mcp_catalog_host;
 mod meetings_client;
+/// OpenAPI/Swagger spec → `http`-backed tool descriptors (integrations.sh REST
+/// install-abstraction). Pure transform; install/persist wiring lives in `server`.
+mod openapi_import;
 mod mesh_host;
 /// Re-export shim: the Hugging Face model catalog + device-fit primitive now
 /// lives in the `ryu-model-catalog` crate. Consumers reference

@@ -1,0 +1,81 @@
+{
+  "slug": "healthcare",
+  "name": "Healthcare",
+  "navLabel": "Healthcare",
+  "category": "Industries",
+  "icon": "HeartPulse",
+  "tagline": "Cut the admin load with agents that keep patient data on-device and on the record.",
+  "heroEyebrow": "Ryu for Healthcare",
+  "heroTitle": "Reclaim hours from paperwork without exposing patient data.",
+  "heroSubtitle": "Draft visit summaries, structure intake forms, and answer questions across your own protocols with agents that run on your machine. Patient information stays on-device by default, and every model call is governed and logged.",
+  "visualKey": "GatewayVisual",
+  "intro": "Clinical and operational staff lose hours to documentation, intake, and chasing information, but patient data can't be pasted into a public chatbot. Ryu runs capable agents locally so sensitive data stays on-device, with the Gateway redacting and logging anything that does leave. It helps a clinician work faster, it never makes the clinical call.",
+  "highlights": [
+    {
+      "title": "Patient data stays on-device",
+      "description": "Run a local model with no telemetry by default, so protected information never leaves the machine unless you allow it."
+    },
+    {
+      "title": "Governed and logged",
+      "description": "Every model and tool call passes through the Gateway with PII and DLP redaction and a full audit trail you can review."
+    },
+    {
+      "title": "Grounded in your protocols",
+      "description": "Spaces and RAG let agents answer from your own clinical guidelines and SOPs, citing the exact source."
+    },
+    {
+      "title": "A human decides",
+      "description": "Ryu drafts and summarizes for review; clinicians make every diagnostic and treatment decision."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Visit documentation",
+      "description": "Turn rough consultation notes into a structured summary draft that the clinician edits and signs off."
+    },
+    {
+      "title": "Intake structuring",
+      "description": "Convert a free-text patient intake into clean structured fields, flagging missing information to collect."
+    },
+    {
+      "title": "Protocol lookup",
+      "description": "Answer staff questions from your own clinical guidelines and SOPs, citing the document and section."
+    },
+    {
+      "title": "Patient communication drafts",
+      "description": "Draft plain-language appointment reminders and aftercare instructions in the patient's language for staff to send."
+    },
+    {
+      "title": "Prior authorization prep",
+      "description": "Assemble the supporting details and a draft justification for an authorization request, leaving the submission to staff."
+    },
+    {
+      "title": "Operations summaries",
+      "description": "Summarize scheduling backlogs, no-show patterns, and inventory notes into a daily brief for the practice manager."
+    }
+  ],
+  "examplePrompts": [
+    "Turn these consultation notes into a structured visit summary draft for me to review and sign.",
+    "Convert this patient intake form into structured fields and flag anything missing.",
+    "What does our protocol say about post-op wound care follow-up timing? Cite the section.",
+    "Draft a plain-language aftercare instruction sheet for a patient recovering from a minor procedure.",
+    "Summarize this week's no-show data into a short brief with the top patterns."
+  ],
+  "faq": [
+    {
+      "q": "Is patient data safe with Ryu?",
+      "a": "Ryu is local-first with no telemetry, so patient information can stay entirely on-device. When you route to a cloud model the Gateway redacts sensitive data on egress and logs the call. This helps you keep data on-device and governed; it is not a regulatory certification."
+    },
+    {
+      "q": "Does Ryu make clinical or diagnostic decisions?",
+      "a": "No. Ryu drafts documentation, structures data, and looks up your protocols. Every clinical and treatment decision is made by a licensed professional who reviews the output."
+    },
+    {
+      "q": "Can it answer from our own clinical guidelines?",
+      "a": "Yes. Ground agents on your SOPs and protocols with Spaces and RAG so answers cite the exact source document, and a human verifies before acting."
+    }
+  ],
+  "ctaTitle": "Take back the time admin steals.",
+  "ctaSubtitle": "Document, structure, and look up faster while patient data stays on-device and governed.",
+  "ctaNote": "On-device by default · PII/DLP redaction · Full audit trail"
+}

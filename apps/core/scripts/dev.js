@@ -13,6 +13,13 @@ const sharedTarget = path.resolve(
 );
 process.env.CARGO_TARGET_DIR = sharedTarget;
 
+// Dev-stack isolation: default onto the dev profile (~/.ryu-dev, ports +1000)
+// so a dev Core never touches a release install's data. Explicit wins —
+// RYU_PROFILE=release restores the shared-folder behaviour.
+if (!(process.env.RYU_PROFILE ?? "").trim()) {
+	process.env.RYU_PROFILE = "dev";
+}
+
 if (process.platform === "win32") {
 	try {
 		execSync("taskkill /F /IM ryu-core.exe", { stdio: "ignore" });
@@ -117,6 +124,29 @@ const browserOut = path.resolve(
 	"main",
 	"index.js"
 );
+// The sidecar is NOT a turbo dev task (a standalone `electron-vite dev` window
+// would be unmanaged: no RYU_EXT_TOKEN, fail-closed control server). Core is the
+// only launcher — lazy spawn on first use, idle-stop — so just build the output
+// here when it's missing. Best-effort: a failed build warns but never blocks Core.
+if (!existsSync(browserOut)) {
+	try {
+		execSync("bun run build", {
+			cwd: path.resolve(
+				import.meta.dirname,
+				"..",
+				"..",
+				"..",
+				"apps-store",
+				"browser",
+				"sidecar"
+			),
+			stdio: "inherit",
+			env: process.env,
+		});
+	} catch (err) {
+		console.warn(`[dev] browser sidecar build failed: ${err.message}`);
+	}
+}
 if (existsSync(browserOut)) {
 	const launcher =
 		process.platform === "win32" ? "ryu-browser-dev.cmd" : "ryu-browser-dev.sh";

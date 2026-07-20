@@ -1,0 +1,81 @@
+{
+  "slug": "education",
+  "name": "Education",
+  "navLabel": "Education",
+  "category": "Industries",
+  "icon": "GraduationCap",
+  "tagline": "Plan lessons, build materials, and give feedback with agents that keep student data private.",
+  "heroEyebrow": "Ryu for Education",
+  "heroTitle": "More teaching, less prep, with student data kept on-device.",
+  "heroSubtitle": "Plan lessons, generate practice sets, and draft feedback with agents that run on your machine and ground answers in your own curriculum. Student information stays on-device by default, and every model call is governed and logged.",
+  "visualKey": "SkillsVisual",
+  "intro": "Educators spend evenings on prep, grading drafts, and paperwork while student records demand strict privacy. Ryu runs capable agents locally so student data stays on-device, grounds answers in your own curriculum, and drafts materials and feedback you review. It supports the teacher, it never grades or decides on its own.",
+  "highlights": [
+    {
+      "title": "Student data stays on-device",
+      "description": "Run a local model with no telemetry by default, so student names and work never leave the machine unless you allow it."
+    },
+    {
+      "title": "Grounded in your curriculum",
+      "description": "Spaces and RAG let agents build from your own standards, textbooks, and rubrics and cite the source."
+    },
+    {
+      "title": "Reusable skills",
+      "description": "Save your best prompts as Skills, like a lesson-plan builder or rubric grader, and reuse them across classes."
+    },
+    {
+      "title": "Governed and logged",
+      "description": "Every model call passes through the Gateway with PII redaction and an audit trail, so use stays accountable."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Lesson planning",
+      "description": "Generate a lesson plan aligned to your standards with objectives, activities, and timing for you to adapt."
+    },
+    {
+      "title": "Practice and quiz generation",
+      "description": "Create differentiated practice sets and quiz questions at multiple levels from a single topic or reading."
+    },
+    {
+      "title": "Feedback drafts",
+      "description": "Draft constructive, rubric-aligned feedback on a student submission that the teacher reviews and personalizes."
+    },
+    {
+      "title": "Material adaptation",
+      "description": "Rewrite a passage at a different reading level or translate instructions to support multilingual learners."
+    },
+    {
+      "title": "Curriculum Q&A",
+      "description": "Answer questions across your textbooks and standards with citations, so staff find the right reference fast."
+    },
+    {
+      "title": "Parent communication",
+      "description": "Draft clear, warm progress notes and newsletter blurbs in the right tone for staff to send."
+    }
+  ],
+  "examplePrompts": [
+    "Build a 45-minute lesson plan on photosynthesis aligned to our grade-7 standards, with objectives and a quick check.",
+    "Create a 10-question quiz on this reading with three difficulty levels.",
+    "Draft rubric-aligned feedback on this essay, highlighting two strengths and two next steps.",
+    "Rewrite this passage at a lower reading level for English-language learners.",
+    "Draft a short, encouraging progress note for a student improving in math participation."
+  ],
+  "faq": [
+    {
+      "q": "Is student data kept private?",
+      "a": "Ryu is local-first with no telemetry, so student names and work can stay entirely on-device. When you route to a cloud model the Gateway redacts sensitive data and logs the call. This helps you keep data on-device and governed; it is not a regulatory certification."
+    },
+    {
+      "q": "Does Ryu grade students for me?",
+      "a": "No. Ryu drafts rubric-aligned feedback and practice materials. The teacher reviews, adjusts, and assigns every grade. Ryu speeds the prep, the educator stays in charge."
+    },
+    {
+      "q": "Can it use our own curriculum and standards?",
+      "a": "Yes. Ground agents on your textbooks, standards, and rubrics with Spaces and RAG so materials and answers align to what you teach and cite the source."
+    }
+  ],
+  "ctaTitle": "Give every educator an evening back.",
+  "ctaSubtitle": "Plan, generate, and give feedback faster while student data stays on-device and governed.",
+  "ctaNote": "On-device by default · Curriculum-grounded · Full audit trail"
+}

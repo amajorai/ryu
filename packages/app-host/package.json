@@ -1,0 +1,32 @@
+{
+  "name": "@ryu/app-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./rpc": "./src/rpc.ts",
+    "./views": "./src/views.ts",
+    "./ExtensionHost": "./src/ExtensionHost.tsx",
+    "./third-party-plugin": "./src/third-party-plugin.ts",
+    "./widget-bootstrap": "./src/widget-bootstrap.ts",
+    "./widget-state-store": "./src/widget-state-store.ts",
+    "./example-plugin": "./src/example-plugin.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "zustand": "^5"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@ryu/config": "workspace:*",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "catalog:",
+    "typescript": "^5.9.3"
+  }
+}

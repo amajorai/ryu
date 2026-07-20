@@ -18,9 +18,17 @@ use tokio::process::{Child, Command};
 use crate::win_process::NoWindow;
 
 pub const DEFAULT_HOST: &str = "127.0.0.1";
-/// MLX-VLM's loopback port. 8084 is the next free slot in the 808x block
-/// (8080 = llama.cpp, 8081 = embeddings, 8082 = mlx-lm, 8083 = stable-diffusion).
-pub const DEFAULT_PORT: u16 = 8084;
+/// MLX-VLM's canonical (release) loopback port. 8084 sits in the 808x block
+/// (8080 = llama.cpp, 8081 = embeddings, 8082 = rerank, 8083 = stable-diffusion,
+/// 8086 = mlx-lm). The concrete port is profile-aware; see [`default_port`].
+pub const DEFAULT_PORT_BASE: u16 = 8084;
+
+/// Profile-aware MLX-VLM port (release 8084, dev 9084, …). Both the spawn side
+/// (`--port`) and the client base URL (`active_engine::local_engine_url`) resolve
+/// the SAME port through here, so a dev stack never dials the release engine.
+pub fn default_port() -> u16 {
+    crate::profile::port(DEFAULT_PORT_BASE)
+}
 
 pub struct MlxVlmProcess {
     python: String,

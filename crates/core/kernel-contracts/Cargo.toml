@@ -4,6 +4,7 @@ version = "0.0.5"
 edition = "2021"
 description = "Ryu kernel contracts — the single, pure-data definition of the plugin.json manifest model (types + validation) shared by apps/core and the Ryu SDK. No I/O, no runtime deps; serde/schemars only."
 license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
 
 [lib]
 name = "ryu_kernel_contracts"

@@ -3,7 +3,7 @@ title: "Decomposition Program"
 description: "The multi-wave extraction plan: from a monolithic Core to ~40 self-contained packages, with acceptance criteria, effort estimates, and what stays in the kernel."
 ---
 
-Ryu is undergoing a systematic decomposition from a monolithic Core (~195k LoC) into ~40
+Ryu is undergoing a systematic decomposition from a monolithic Core (~143k LoC after extraction) into ~40
 self-contained capability packages. This page documents the program: the waves, the acceptance
 criteria, what has been extracted, and what stays in the kernel permanently.
 
@@ -13,7 +13,7 @@ For the capability layer model (L0-L3 + Lg), see [Capability Layers](/docs/start
 
 A module counts as decomposed when **any one** of these is true:
 
-1. **Own package** — code has moved to its own crate (`crates/ryu-*`) or app directory (`apps-store/<app>/`)
+1. **Own package** — code has moved to its own crate (`crates/core/*`, `crates/gateway/*`) or app directory (`apps-store/<app>/`)
 2. **Own TS package + shell page deleted** — the frontend component lives in its own package and the old monolithic page is gone
 3. **Adjudicated KERNEL or UTIL** — a written reason explains why this module stays in Core (e.g., "hot per-request primitive", "circular dependency risk")
 
@@ -46,17 +46,17 @@ flowchart LR
 
 | Wave | Scope | Effort | Status |
 |---|---|---|---|
-| **W0** | Root virtual workspace, close raw-route gaps | ~2-3 days | In progress |
-| **W1** | Tracer extractions: `crates/ryu-quests`, `ryu-recipes`, `ryu-clips` | ~3-5 days | In progress |
+| **W0** | Root virtual workspace, close raw-route gaps | ~2-3 days | Done |
+| **W1** | Tracer extractions: `crates/core/quests`, `recipes`, `clips` | ~3-5 days | Done |
 | **W1.5** | Layout normalization to `apps-store/<app>/{plugin.json, backend/, sidecar/, ui/, tests/}` | ~1 day | Done |
-| **W2** | L0 primitives: `ryu-storage`, `ryu-crypto`, `ryu-engines`, `ryu-downloads`, `ryu-vault` | ~2-3 weeks | Not started |
-| **W3** | L1 primitives: 13 packages (rag, tts, stt, vad, image, collab, realtime, workspace, sandbox, webhook-ingress, mesh, usage-metering, email-send) | ~2-3 weeks | Not started |
-| **W4** | L2 features: 14 packages (memory, spaces, retrieval, search, knowledge, tool-registry, tool-exec, mcp-catalog, model-catalog, composio, identity, activity, tracing, sync) | ~2-3 weeks | Not started |
-| **W5** | L3 apps to sidecars: 15+ app packages (meetings, monitors, approvals, learning, healing, research, teams, dashboards, skills, hardware, workflows, agents-catalog, predict, voice, finetune) | ~2-3 weeks | Not started |
-| **W6** | Gateway: open `ProviderKind`, config-driven `set_active`, invert firewall/DLP + router + smart-router + passthrough to traits, stage crates | ~2 weeks | Not started |
+| **W2** | L0 primitives: `storage`, `crypto`, `engines`, `downloads`, `vault` | ~2-3 weeks | Done |
+| **W3** | L1 primitives: 13 packages (rag, tts, stt, vad, image, collab, realtime, workspace, sandbox, webhook-ingress, mesh, usage-metering, email-send) | ~2-3 weeks | Done |
+| **W4** | L2 features: 14 packages (memory, spaces, retrieval, search, knowledge, tool-registry, tool-exec, mcp-catalog, model-catalog, composio, identity, activity, tracing, sync) | ~2-3 weeks | Done |
+| **W5** | L3 apps to sidecars: all 11 feature apps (mail, teams, research, clips, finetune, quests, healing, monitors, dashboards, meetings, recipes) are now out-of-process | ~2-3 weeks | Done |
+| **W6** | Gateway: open `ProviderKind`, config-driven `set_active`, invert firewall/DLP + router + smart-router + passthrough to traits, stage crates | ~2 weeks | In progress |
 | **W7** | Frontend: 7 tracer companions, 3 medium extractions, Native WebViewExtensionHost, UI-layer (`@ryu/ui` + tailwind preset as build-time deps, theme token bridge) | ~1-2 weeks | Not started |
-| **W8** | Platform: extension host runtime, versioned host API, dev loop, activation events, grant consent, shadcn-style UI registry, file-based definition distribution | ~1-2 months | Not started |
-| **W9** | Browser app: `apps-store/browser/` with Electron sidecar + real Chromium + CDP, `browser.control` capability | ~2-3 weeks | Not started |
+| **W8** | Platform: extension host runtime, versioned host API, dev loop, activation events, grant consent, shadcn-style UI registry, file-based definition distribution | ~1-2 months | In progress |
+| **W9** | Browser app: `apps-store/browser/` with Electron sidecar + real Chromium + CDP, `browser.control` capability | ~2-3 weeks | In progress |
 
 **Total effort:** Multi-month program. W0-W1 are quick wins; W2-W4 are the bulk of the extraction;
 W5-W9 are the platform and frontend layers.
@@ -94,12 +94,12 @@ starts, and health-checks it.
 
 ### 4. Contracts crate
 
-Extract shared types into a pure-data crate (`crates/ryu-kernel-contracts`). Both Core and
+Extract shared types into a pure-data crate (`crates/core/kernel-contracts`). Both Core and
 apps depend on the contracts crate, so neither can drift from the wire format.
 
 ### 5. Verify-every-wave
 
-Each wave ships with an integration test suite (`crates/ryu-integration-tests`) that proves
+Each wave ships with an integration test suite (`crates/testing/integration`) that proves
 the old path still works and the new path produces identical results. A wave is not done
 until the tests pass.
 
@@ -121,11 +121,11 @@ needed by everything or would create circular dependencies:
 | Auth / identity | Needed by every authenticated endpoint | ~3k |
 | Gateway shell | Starts and configures the Gateway sidecar | ~2k |
 | Scheduler | Needed by workflows, monitors, and periodic tasks | ~3k |
-| Notifications | 4 dispatch shapes — not a single capability | ~2k |
+| Notifications | `ryu-notify` (kernel crate) — extracted from monitors app, shared delivery layer |
 | ~30 UTIL modules | Small helpers not worth extracting | ~10k |
 | **Total** | | **~37k** |
 
-The estimated end-state kernel is **~40-50k LoC** (down from ~195k today).
+The estimated end-state kernel is **~40-50k LoC** (down from ~143k today after extraction).
 
 ## What stays in Core by design
 
@@ -166,16 +166,17 @@ RYU_PROFILE=auditsmoke cargo run --manifest-path apps/core/Cargo.toml
 cargo test -p ryu-integration-tests
 ```
 
-## Current state (as of 2026-07-16)
+## Current state (as of 2026-07-18)
 
-The 5-agent deep audit found:
+The full app sidecar-ization is **complete**. All 11 feature-app backends now serve their `/api/*`
+surface out-of-process (`mail`·`teams`·`research`·`clips`·`finetune`·`quests`·`healing`·`monitors`·
+`dashboards`·`meetings`·`recipes`). Of those, 7 link zero crate code in Core while 4 keep a
+non-optional path-dep for a welded kernel path. Core has shrunk from ~195k to ~143k LoC (~87% of
+non-kernel Core now lives in capability packages).
 
-- **Physical extraction: ~5%** — only mail has been physically moved to its own package
-- **Capability graph: 3 nodes / 2 edges** out of ~40 mapped — the graph is mostly aspirational
-- **Mechanisms are strong** — the broker, contracts crate, and sidecar loader are built and working
-- **Migration is weak** — most code is still in-crate; the extraction has not started in earnest
-
-This is honest: the decomposition infrastructure is built, but the extraction itself is early.
+The decomposition infrastructure is built and the extraction is substantially complete. Remaining
+work is on the Gateway trait inversion (W6), frontend extraction (W7), platform tier (W8), and
+browser app (W9).
 
 ## Related
 

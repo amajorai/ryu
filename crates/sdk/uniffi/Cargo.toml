@@ -1,9 +1,10 @@
 [package]
 name = "ryu-sdk-uniffi"
-version = "0.1.0"
+version = "0.0.5"
 edition = "2021"
 description = "UniFFI binding surface over the ryu-sdk Rust core — the multi-language (Python/Swift/Kotlin, and optionally C#/Go) path. Exposes only the BLOCKING surface; streaming is a deferred callback-interface slice (see docs/multi-language-bindings-spec.md)."
 license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
 
 [lib]
 name = "ryu_sdk_uniffi"

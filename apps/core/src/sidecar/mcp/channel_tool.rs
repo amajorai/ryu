@@ -75,6 +75,16 @@ pub async fn dispatch(http: &Client, tool: &str, arguments: Value) -> Result<Val
                 ));
             }
 
+            // Gateway egress DLP gate (webhook-unify #4): route the text through
+            // the same firewall the workflow `ChannelSend` node uses so this
+            // agent-callable path can't be an ungoverned egress bypass. A tripped
+            // guardrail (or a fail-closed unreachable gateway) returns a structured
+            // refusal so the agent's turn continues — `Err` stays reserved for
+            // malformed calls.
+            if let Err(reason) = crate::sidecar::gateway::govern_egress(text).await {
+                return Ok(json!({ "ok": false, "blocked": true, "reason": reason }));
+            }
+
             // Slack expects `{text}`, Discord expects `{content}`. Send both keys
             // so a single payload works for either provider's webhook.
             let resp = http

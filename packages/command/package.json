@@ -1,0 +1,31 @@
+{
+  "name": "@ryu/command",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./CommandPalette": "./src/CommandPalette.tsx",
+    "./ChatView": "./src/ChatView.tsx",
+    "./registry": "./src/registry.ts",
+    "./types": "./src/types.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "@hugeicons/core-free-icons": "^4.2.0",
+    "@hugeicons/react": "^1.1.6",
+    "@ryu/ui": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@ryu/config": "workspace:*",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "catalog:",
+    "typescript": "^5.9.3"
+  }
+}

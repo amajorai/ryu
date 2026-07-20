@@ -15,4 +15,4 @@ serde_json = "1"
 # default_parallel_slots}`) are computed from detected hardware; that detection
 # lives in the model-catalog crate. No cycle: ryu-model-catalog never depends on
 # ryu-engines.
-ryu-model-catalog = { path = "../model-catalog" }
+ryu-model-catalog = { path = "../model-catalog", version = "0.0.5" }

@@ -1,0 +1,81 @@
+{
+  "slug": "recruiting",
+  "name": "Recruiting",
+  "navLabel": "Recruiting",
+  "category": "People & Operations",
+  "icon": "UserPlus",
+  "tagline": "Screen resumes, schedule interviews, and keep candidates moving with agents wired into your ATS.",
+  "heroEyebrow": "Ryu for Recruiting",
+  "heroTitle": "Move every candidate forward, faster.",
+  "heroSubtitle": "Agents read the requisition, screen the inbound, draft the outreach, and book the interviews, all connected to your ATS and calendar. Candidate data is redacted on egress and every screening decision is logged, so your pipeline runs fast and stays defensible.",
+  "visualKey": "ConnectionsVisual",
+  "intro": "Recruiting is a logistics problem wrapped in judgment calls: screening volume, chasing candidates, and coordinating calendars eats the hours you'd rather spend on the people. Ryu connects agents to your ATS and calendar to handle the logistics, grounds screening on your real rubric, and keeps candidate data governed throughout.",
+  "highlights": [
+    {
+      "title": "Wired into your ATS",
+      "description": "Agents connect to your applicant tracking system and calendar to screen, update stages, and book interviews."
+    },
+    {
+      "title": "Consistent screening",
+      "description": "Ground agents on your scorecard and rubric with Spaces so candidates are evaluated against the same bar."
+    },
+    {
+      "title": "Candidate data protected",
+      "description": "The Gateway redacts personal data on egress and logs every screening call for a defensible record."
+    },
+    {
+      "title": "Repeatable pipelines",
+      "description": "Turn a hiring process into a workflow so every req runs the same intake, screen, and outreach steps."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Resume screening",
+      "description": "Score inbound applicants against the requisition and your rubric, with the reasoning shown for each."
+    },
+    {
+      "title": "Interview scheduling",
+      "description": "Find slots across panel calendars, draft the invites, and book the interview once the candidate confirms."
+    },
+    {
+      "title": "Candidate outreach",
+      "description": "Draft personalized sourcing messages and timely follow-ups so no candidate goes cold in the funnel."
+    },
+    {
+      "title": "Job description and rubric drafting",
+      "description": "Turn a hiring-manager brief into a clear JD and a structured interview scorecard for the panel."
+    },
+    {
+      "title": "Interview prep and debriefs",
+      "description": "Brief interviewers with the candidate's background and questions, then summarize the panel's feedback."
+    },
+    {
+      "title": "Pipeline status reports",
+      "description": "Pull the funnel by stage across open reqs and write a status update for the hiring managers."
+    }
+  ],
+  "examplePrompts": [
+    "Screen these 40 applicants against the senior backend req and rank them with reasons.",
+    "Find a 45-minute slot next week across the panel's calendars and draft the interview invite.",
+    "Draft a personalized outreach message to this candidate referencing their open-source work.",
+    "Turn this hiring-manager brief into a job description and a structured interview scorecard.",
+    "Give me a pipeline report across all open engineering reqs by stage, with the bottlenecks."
+  ],
+  "faq": [
+    {
+      "q": "Can agents actually schedule and update the ATS?",
+      "a": "Yes. With Connections, agents authenticate into your applicant tracking system and calendar to move candidates between stages and book interviews, not just draft text. You keep approval where it matters."
+    },
+    {
+      "q": "How is screening kept fair and consistent?",
+      "a": "Ground the agent on your scorecard and rubric with Spaces so every candidate is evaluated against the same criteria, and the reasoning is shown. A recruiter makes the call; the agent just does the first pass."
+    },
+    {
+      "q": "Is candidate data handled responsibly?",
+      "a": "The Gateway redacts personal data on egress and logs every model call, so you have a defensible record of what the agent saw and decided. You can also run screening on a local model to keep data on-device."
+    }
+  ],
+  "ctaTitle": "Spend your time on people, not logistics.",
+  "ctaSubtitle": "Screen, schedule, and follow up from one place, connected to your ATS and grounded in your rubric.",
+  "ctaNote": "ATS-connected · Consistent rubric · Auditable screening"
+}

@@ -478,9 +478,9 @@ export function Architecture() {
             Ryu Gateway
           </text>
           <rect
-            x={456}
+            x={446}
             y={126}
-            width={78}
+            width={98}
             height={24}
             rx={12}
             fill="none"
@@ -496,7 +496,7 @@ export function Architecture() {
             fill="var(--color-fd-background)"
             textAnchor="middle"
           >
-            the moat
+            governs calls
           </text>
           <text
             x={292}
@@ -826,7 +826,7 @@ export function Architecture() {
               </h3>
             </div>
             <span className="rounded-full bg-fd-background/15 px-2 py-0.5 font-medium text-[10px] text-fd-background/70">
-              the moat
+              governs calls
             </span>
           </div>
           <p className="mt-1 text-fd-background/65 text-xs">

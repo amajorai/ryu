@@ -2,6 +2,9 @@
 name = "ryu-eval-code"
 version = "0.0.5"
 edition = "2021"
+license = "Apache-2.0"
+description = "Core-side code evaluators for Ryu: runs a user (input, output, expected, vars) -> {score} function in an isolated runtime (JS via the deny-all Deno sandbox, Python via the swappable sandbox backend) to score one eval case. An extracted Core capability crate with ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
 
 # Core-side **code evaluators** (unified-evaluator plan, P4), extracted verbatim
 # from `apps/core/src/eval_code`. Runs a user `(input, output, expected, vars) ->
@@ -18,8 +21,8 @@ default = ["tool-exec-deno"]
 tool-exec-deno = ["ryu-tool-exec/tool-exec-deno"]
 
 [dependencies]
-ryu-tool-exec = { path = "../tool-exec", default-features = false }
-ryu-sandbox = { path = "../sandbox" }
+ryu-tool-exec = { path = "../tool-exec", default-features = false, version = "0.0.5" }
+ryu-sandbox = { path = "../sandbox", version = "0.0.5" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["io-util", "process", "time", "rt", "macros", "sync"] }

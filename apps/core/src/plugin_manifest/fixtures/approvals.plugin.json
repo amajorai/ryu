@@ -18,7 +18,7 @@
 			}
 		}
 	],
-	"permission_grants": ["approvals:crud", "quests:crud"],
+	"permission_grants": ["approvals:crud", "quests:crud", "shell:integrate"],
 	"companion": {
 		"label": "Inbox",
 		"icon": "shield-01"

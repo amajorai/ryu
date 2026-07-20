@@ -1,0 +1,8 @@
+# Build artifacts
+/target/
+/WixTools/
+/msi/
+
+# IDE
+/.idea/
+/.vscode/

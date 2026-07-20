@@ -495,11 +495,13 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     "spider",
     "agentbrowser",
     // NOTE: com.ryu.mail is intentionally NOT default-on. It is sidecar-only now
-    // (the in-process path was deleted, Track C), and the `ryu-mail` binary is not
-    // yet shipped/resolvable by packaging — a default-on entry 502s `/api/mail/*` on
-    // every fresh install. Kept in CORE_PLUGINS (installable/enable-able) and made
-    // opt-in until the release ships `ryu-mail` to `~/.ryu/bin` (or a dev build puts
-    // it on PATH / sets RYU_MAIL_BIN). See docs/platform-decomposition-handoff.md.
+    // (the in-process path was deleted, Track C). The release now builds + ships the
+    // `ryu-mail` binary alongside the other 10 sidecar bins (see
+    // `.github/workflows/release.yml`), so the old "binary not yet shipped" blocker is
+    // gone; mail is kept OPT-IN by product choice (an unconfigured inbox should not
+    // surface on a fresh install). Stays in CORE_PLUGINS (installable/enable-able); a
+    // dev build can also put it on PATH / set RYU_MAIL_BIN. See
+    // docs/platform-decomposition-handoff.md.
     // RAG — default-on so retrieval works out of the box; requires `engines`
     // (the embed sidecar), which the capability graph pulls in + protects.
     RAG_PLUGIN_ID,
@@ -516,28 +518,17 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     "quest-board",
     "worktree-diff-review",
     "gateway-budget-dial",
-    // Whiteboard — default-on so opening a whiteboard Space document just works. Its
-    // grants + `ui_code` come from its `plugins::seed::SeedSpec` override.
-    "com.ryu.whiteboard",
-    // Canvas — default-on so opening a canvas Space document just works. Same seed
-    // mechanism as the whiteboard (a `plugins::seed::SeedSpec` override).
-    "com.ryu.canvas",
-    // Fine-tuning — default-on so the app appears in the sidebar "Apps" section and
-    // "Fine-tune this model" opens it. Its grants + `ui_code` come from its
-    // `plugins::seed::SeedSpec` override.
-    "com.ryu.finetune",
-    // Meetings is deliberately listed BEFORE the Spaces it depends on.
-    //
-    // This list is hand-written and is NOT topological, and it must never have to
-    // be: `plugins::seed::seed_order` resolves the real order from `requires`, so
-    // Spaces is always seeded (and enabled) before Meetings regardless of what is
-    // written here. Keeping the "wrong" order is the point — it means the real
-    // fresh-install seed path exercises the topological reorder against real
-    // fixtures on every boot, instead of only in a synthetic unit test.
-    MEETINGS_PLUGIN_ID,
+    // NOTE (default-off apps): whiteboard / canvas / finetune / meetings / quests /
+    // approvals / learning / healing / monitors / workflows / activity / timeline /
+    // skill-editor are intentionally NOT default-on — they stay installable +
+    // enable-able from the Store (still in CORE_PLUGINS), but a fresh install ships
+    // them OFF so the sidebar/App surface isn't pre-loaded with every feature.
+    // Spaces stays default-on (it is a shared dependency, not a leaf feature).
     SPACES_PLUGIN_ID,
-    // The five leaf-feature governance shells, default-on so their always-on routes
-    // stay reachable after gating (see CORE_PLUGINS). `clips`/`recipes` are declared
+    // The five leaf-feature sidecar Apps (each serves `/api/<feature>/*` out-of-process
+    // via a `public_mount` sidecar + the generic ext-proxy loader), default-on so their
+    // always-on surface stays reachable (the mount is live only while enabled; see
+    // CORE_PLUGINS). `clips`/`recipes` are declared
     // here alongside their deps (`shadow`/`ghost`, both already default-on); the
     // hand-written order is irrelevant — `seed::seed_order` topologically reorders
     // by `requires`, so a dependency is always seeded before its dependent.
@@ -546,26 +537,15 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     TEAMS_PLUGIN_ID,
     CLIPS_PLUGIN_ID,
     RECIPES_PLUGIN_ID,
-    // The wave-2 five, default-on so their always-on routes stay reachable after
-    // gating (see CORE_PLUGINS). `learning`/`healing` are declared here alongside
-    // their deps (`skills`/`approvals`); the hand-written order is irrelevant —
-    // `seed::seed_order` topologically reorders by `requires`, so a dependency is
-    // always seeded before its dependent.
-    QUESTS_PLUGIN_ID,
-    APPROVALS_PLUGIN_ID,
+    // `skills` stays default-on (a shared capability). `quests`/`approvals`/
+    // `learning`/`healing` are default-OFF (see the note above) — `learning` requires
+    // `skills` and `healing` requires `approvals`, so both leave the default set with
+    // their dep, never orphaned.
     SKILLS_PLUGIN_ID,
-    LEARNING_PLUGIN_ID,
-    HEALING_PLUGIN_ID,
-    // The wave-3 two, default-on so their always-on routes stay reachable after
-    // gating (see CORE_PLUGINS). Neither has a `requires` edge.
-    MONITORS_PLUGIN_ID,
+    // `monitors` is default-OFF (see the note above). `hardware` stays default-on.
     HARDWARE_PLUGIN_ID,
-    // Wave-4 leaf features turned into governance-shell Apps (toggle via the plugin
-    // lifecycle + route gate; impl stays in-crate). Both default-on so the gate is
-    // transparent on a fresh install (the routes were always-on before). Neither
-    // declares `requires`. `agents` is additionally LOAD-BEARING (see
-    // `LOAD_BEARING_PLUGINS`) because chat depends on the agent list.
-    WORKFLOWS_PLUGIN_ID,
+    // `workflows` is default-OFF (see the note above). `agents` stays default-on and
+    // is LOAD-BEARING (see `LOAD_BEARING_PLUGINS`) — chat depends on the agent list.
     AGENTS_PLUGIN_ID,
     // The W0 three data-path shells, default-on so their always-on routes stay
     // reachable after gating (see CORE_PLUGINS). Neither has a `requires` edge.
@@ -584,18 +564,10 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     // W7: the webhooks companion, default-on so it is present on every fresh install
     // (the page it replaced was always-on). No `requires` edge; not a route gate.
     WEBHOOKS_PLUGIN_ID,
-    // W7: the activity-feed companion, default-on so it is present on every fresh
-    // install (the page it replaced was always-on). No `requires` edge; not a route gate.
-    ACTIVITY_PLUGIN_ID,
     // W7: the calendar companion, default-on so it is present on every fresh install
     // (the page it replaced was always-on). No `requires` edge; not a route gate.
     CALENDAR_PLUGIN_ID,
-    // W7: the timeline companion, default-on so it is present on every fresh install
-    // (the page it replaced was always-on). No `requires` edge; not a route gate.
-    TIMELINE_PLUGIN_ID,
-    // W7: the skill-editor companion, default-on so the `/skills/new` + `/skills/:id/edit`
-    // routes resolve on every fresh install. No `requires` edge; not a route gate.
-    SKILL_EDITOR_PLUGIN_ID,
+    // `activity` / `timeline` / `skill-editor` are default-OFF (see the note above).
 ];
 
 /// The [`crate::plugin_manifest::PluginTier`] of a plugin, derived from
@@ -926,25 +898,11 @@ mod tests {
         assert!(!store.get(MEETINGS_PLUGIN_ID).await.unwrap().unwrap().enabled);
     }
 
-    /// The real seed table is NOT topological (Meetings is declared before the
-    /// Spaces it needs) — on purpose, so the real fresh-install path exercises the
-    /// reorder. Spaces must still be seeded first.
+    /// The real default-on set must be fully satisfiable — every default-on plugin's
+    /// `requires` is met from within the set, so nothing is fail-closed skipped, and
+    /// Spaces (a shared dependency that stays default-on) is seeded.
     #[test]
-    fn real_seed_order_puts_spaces_before_meetings_despite_declaration_order() {
-        // The declaration order really is "wrong" — otherwise this proves nothing.
-        let declared_meetings = CORE_DEFAULT_ON
-            .iter()
-            .position(|id| *id == MEETINGS_PLUGIN_ID)
-            .unwrap();
-        let declared_spaces = CORE_DEFAULT_ON
-            .iter()
-            .position(|id| *id == SPACES_PLUGIN_ID)
-            .unwrap();
-        assert!(
-            declared_meetings < declared_spaces,
-            "this test is only meaningful while the declaration order is non-topological"
-        );
-
+    fn real_default_on_set_is_fully_satisfiable() {
         let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
         let specs = crate::plugins::seed::default_on_specs();
         let (ordered, skipped) = crate::plugins::seed::seed_order(&specs, &manifests);
@@ -953,27 +911,16 @@ mod tests {
             skipped.is_empty(),
             "no default-on plugin may be unsatisfiable: {skipped:?}"
         );
-        let seeded_spaces = ordered.iter().position(|id| id == SPACES_PLUGIN_ID).unwrap();
-        let seeded_meetings = ordered
-            .iter()
-            .position(|id| id == MEETINGS_PLUGIN_ID)
-            .unwrap();
         assert!(
-            seeded_spaces < seeded_meetings,
-            "the seed must enable Spaces before Meetings, got {ordered:?}"
+            ordered.iter().any(|id| id == SPACES_PLUGIN_ID),
+            "Spaces stays default-on and must be seeded, got {ordered:?}"
         );
     }
 
-    /// THE backward-compat test for this whole slice.
-    ///
-    /// Gating `/api/meetings/*` changed Meetings from *always reachable* to
-    /// *reachable iff its record is enabled* — so on every existing install, the
-    /// feature staying alive now rests entirely on the real seed enabling it on the
-    /// next boot. The pieces are tested above; this drives the REAL
-    /// `seed_default_on` over the REAL manifest set and asserts the end state a
-    /// user actually gets. If this fails, Meetings is dark for 100% of users.
+    /// Spaces stays default-on; Meetings is now OPT-IN (default-off). A fresh seed
+    /// enables Spaces but must NOT install Meetings — enabling it is a Store action.
     #[tokio::test]
-    async fn the_real_seed_enables_meetings_and_its_spaces_dependency() {
+    async fn the_real_seed_enables_spaces_but_leaves_meetings_optin() {
         use crate::plugins::PluginStore;
 
         let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
@@ -986,25 +933,11 @@ mod tests {
             .await
             .unwrap()
             .expect("the seed must install Spaces");
-        let meetings = store
-            .get(MEETINGS_PLUGIN_ID)
-            .await
-            .unwrap()
-            .expect("the seed must install Meetings");
-
         assert!(spaces.enabled, "Spaces must be seeded ENABLED");
-        assert!(
-            meetings.enabled,
-            "Meetings must be seeded ENABLED — otherwise the new route gate makes \
-             /api/meetings/* dead on every existing install"
-        );
 
-        // The dependency was satisfied, not skipped: Meetings carries the grant it
-        // declares, so the record does not claim less than the app actually does.
         assert!(
-            meetings.approved_grants.contains(&"spaces:docs".to_owned()),
-            "Meetings must be seeded with the spaces:docs grant it declares, got {:?}",
-            meetings.approved_grants
+            store.get(MEETINGS_PLUGIN_ID).await.unwrap().is_none(),
+            "Meetings is opt-in (default-off) — the seed must not install it"
         );
     }
 
@@ -1109,49 +1042,42 @@ mod tests {
     /// companions go dark for 100% of users with nothing but a log line. This drives
     /// the REAL seed over the REAL manifests and asserts the end state a user gets.
     #[tokio::test]
-    async fn the_real_seed_enables_every_space_owning_app_after_spaces() {
+    async fn the_real_seed_enables_spaces_and_leaves_its_space_owning_apps_optin() {
         use crate::plugin_manifest::{CANVAS_PLUGIN_ID, WHITEBOARD_PLUGIN_ID};
         use crate::plugins::PluginStore;
 
         let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
 
-        // Nothing may be skipped, and Spaces must be ordered before every dependent.
+        // Nothing may be skipped, and Spaces (still default-on) must be seeded.
         let specs = crate::plugins::seed::default_on_specs();
         let (ordered, skipped) = crate::plugins::seed::seed_order(&specs, &manifests);
         assert!(
             skipped.is_empty(),
             "no default-on plugin may be unsatisfiable: {skipped:?}"
         );
-        let spaces_at = ordered
-            .iter()
-            .position(|id| id == SPACES_PLUGIN_ID)
-            .expect("Spaces must be seeded");
-        for id in [MEETINGS_PLUGIN_ID, WHITEBOARD_PLUGIN_ID, CANVAS_PLUGIN_ID] {
-            let at = ordered
-                .iter()
-                .position(|o| o == id)
-                .unwrap_or_else(|| panic!("'{id}' must be seeded, got {ordered:?}"));
-            assert!(
-                spaces_at < at,
-                "Spaces must be seeded before its dependent '{id}', got {ordered:?}"
-            );
-        }
+        assert!(
+            ordered.iter().any(|id| id == SPACES_PLUGIN_ID),
+            "Spaces must be seeded, got {ordered:?}"
+        );
 
-        // And the store really ends up that way.
+        // Spaces is enabled; its former default-on dependents (meetings/whiteboard/
+        // canvas) are now opt-in, so the seed must NOT install them.
         let store = PluginStore::open_in_memory().unwrap();
         crate::plugins::seed::seed_default_on(&store, &manifests).await;
-        for id in [
-            SPACES_PLUGIN_ID,
-            MEETINGS_PLUGIN_ID,
-            WHITEBOARD_PLUGIN_ID,
-            CANVAS_PLUGIN_ID,
-        ] {
-            let rec = store
-                .get(id)
+        assert!(
+            store
+                .get(SPACES_PLUGIN_ID)
                 .await
                 .unwrap()
-                .unwrap_or_else(|| panic!("the seed must install '{id}'"));
-            assert!(rec.enabled, "'{id}' must be seeded ENABLED");
+                .expect("the seed must install Spaces")
+                .enabled,
+            "Spaces must be seeded ENABLED"
+        );
+        for id in [MEETINGS_PLUGIN_ID, WHITEBOARD_PLUGIN_ID, CANVAS_PLUGIN_ID] {
+            assert!(
+                store.get(id).await.unwrap().is_none(),
+                "'{id}' is opt-in (default-off) — the seed must not install it"
+            );
         }
     }
 

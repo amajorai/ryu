@@ -3,7 +3,7 @@ title: "Rust SDK (ryu-sdk)"
 description: "The shared Rust kernel - manifest validation, the RunnableKind model, and the gateway-mandatory model client"
 ---
 
-`ryu-sdk` (`crates/ryu-sdk/`) is the **shared Rust kernel** every Ryu language binding builds on. It
+`sdk/core` (`crates/sdk/core/`) is the **shared Rust kernel** every Ryu language binding builds on. It
 is not a Rust-only SDK; it is the one implementation of the parts that must never drift across
 languages:
 
@@ -25,7 +25,7 @@ surface only.
 
 ## The Runnable model
 
-`RunnableKind` (`crates/ryu-sdk/src/runnable.rs`) is the union of every executable thing in Ryu. It
+`RunnableKind` (`crates/sdk/core/src/runnable.rs`) is the union of every executable thing in Ryu. It
 mirrors `RunnableKind` in `apps/core/src/runnable/mod.rs` byte-for-byte (same
 `#[serde(rename_all = "snake_case")]` wire form), so a manifest authored against this enum
 deserializes identically in Core. The eight kinds and their meaning are documented once on
@@ -69,7 +69,7 @@ validate_runnable(&entry)?; // Ok(()) - tool has a non-empty slug
 
 ## Manifest validation
 
-`PluginManifest` (`crates/ryu-sdk/src/manifest.rs`) is the in-memory model of a `plugin.json`,
+`PluginManifest` (`crates/sdk/core/src/manifest.rs`) is the in-memory model of a `plugin.json`,
 mirroring `PluginManifest` in `apps/core/src/plugin_manifest/mod.rs`.
 
 ```rust
@@ -129,12 +129,12 @@ Every model call routes through the Ryu Gateway. The crate enforces this by cons
 reads `RYU_GATEWAY_URL` (falling back to the default); `resolve_gateway_token()` reads
 `RYU_GATEWAY_TOKEN`.
 
-`assert_allowed_egress(base_url)` (`crates/ryu-sdk/src/gateway.rs`) rejects known direct-provider
+`assert_allowed_egress(base_url)` (`crates/sdk/core/src/gateway.rs`) rejects known direct-provider
 hosts (`api.openai.com`, `api.anthropic.com`, `openrouter.ai`, Google, Cohere, Mistral, Groq,
 Together, Replicate, Perplexity) with an `EgressNotAllowed` error. Loopback, the configured gateway,
 and private addresses are allowed. Provider credentials belong in the Gateway, never in SDK config.
 
-`ModelClient` (`crates/ryu-sdk/src/model.rs`) POSTs to `{base}/v1/chat/completions`. It is
+`ModelClient` (`crates/sdk/core/src/model.rs`) POSTs to `{base}/v1/chat/completions`. It is
 constructed via `ModelClient::new(model, options)` or the `define_model(model, options)` convenience
 factory (mirroring the TS `defineModel`). The egress check runs at construction time, so a
 direct-provider base URL fails before any request.
@@ -168,7 +168,7 @@ URL), `Transport` (network failure), and `Http { status, url, body }` (non-2xx f
 
 ## The gateway-mandatory embedding client
 
-`EmbeddingClient` (`crates/ryu-sdk/src/embedding.rs`) is the retrieval-side sibling of `ModelClient`.
+`EmbeddingClient` (`crates/sdk/core/src/embedding.rs`) is the retrieval-side sibling of `ModelClient`.
 It POSTs to `{base}/v1/embeddings` on the gateway and is constructed via
 `EmbeddingClient::new(model, options)` or the `define_embedding(model, options)` factory. The same
 `assert_allowed_egress` rule runs at construction, so a direct-provider base URL is rejected before
@@ -191,7 +191,7 @@ mirrors `ModelError` with `Egress`, `Transport`, and `Http { status, url, body }
 
 ## OpenAPI codegen (optional)
 
-The canonical OpenAPI specs are vendored under `crates/ryu-sdk/specs/`
+The canonical OpenAPI specs are vendored under `crates/sdk/core/specs/`
 (`core-openapi.json`, `gateway-openapi.yaml`) as the contract. The crate ships a hand-written
 `reqwest` client as the shipping transport; an optional `codegen` Cargo feature can generate a client
 from the vendored spec.
@@ -205,7 +205,7 @@ from the vendored spec.
 ## Crate API at a glance
 
 ```rust
-// Re-exported from crates/ryu-sdk/src/lib.rs:
+// Re-exported from crates/sdk/core/src/lib.rs:
 pub use embedding::{ define_embedding, Embedding, EmbeddingClient, EmbeddingClientOptions,
                      EmbeddingError, EmbeddingResult, EmbeddingUsage };
 pub use gateway::{ assert_allowed_egress, resolve_gateway_token, resolve_gateway_url,
@@ -229,16 +229,16 @@ never drift across languages:
 
 | Crate | Target | Mechanism |
 |---|---|---|
-| `crates/ryu-sdk-napi` | TypeScript / JS | napi-rs native addon (keeps the streaming closure boundary via `ThreadsafeFunction`) |
-| `crates/ryu-sdk-ffi` | Go (today) | hand-written raw C-ABI |
-| `crates/ryu-sdk-uniffi` | Python / Swift / Kotlin (and C# / Go via third-party generators) | `uniffi-bindgen` generated |
+| `crates/sdk/napi` | TypeScript / JS | napi-rs native addon (keeps the streaming closure boundary via `ThreadsafeFunction`) |
+| `crates/sdk/ffi` | Go (today) | hand-written raw C-ABI |
+| `crates/sdk/uniffi` | Python / Swift / Kotlin (and C# / Go via third-party generators) | `uniffi-bindgen` generated |
 
-The UniFFI surface (`crates/ryu-sdk-uniffi/src/lib.rs`) exports `validate_plugin_id`,
+The UniFFI surface (`crates/sdk/uniffi/src/lib.rs`) exports `validate_plugin_id`,
 `parse_and_validate_manifest`, `plugin_manifest_json_schema`, the gateway resolvers,
 `assert_allowed_egress`, and blocking `ModelClient` / `EmbeddingClient` objects. The
 `uniffi::setup_scaffolding!("ryu_sdk")` namespace makes the emitted package import as `ryu_sdk`
 in Python. Bindings are emitted on demand by the `uniffi-bindgen` driver
-(`crates/ryu-sdk-uniffi/src/bin/uniffi-bindgen.rs`).
+(`crates/sdk/uniffi/src/bin/uniffi-bindgen.rs`).
 
 <Callout type="warn">
   Only the **Python** binding is generated by `uniffi-bindgen` and smoke-tested (exit 0) against the

@@ -616,6 +616,14 @@ struct MarketplacePlugin {
     keywords: Vec<String>,
     #[serde(default, rename = "iconUrl")]
     icon_url: Option<String>,
+    #[serde(default, rename = "iconBackground")]
+    icon_background: Option<String>,
+    #[serde(default, rename = "accentColor")]
+    accent_color: Option<String>,
+    #[serde(default)]
+    banner: Option<serde_json::Value>,
+    #[serde(default)]
+    developer: Option<String>,
     #[serde(default)]
     screenshots: Vec<String>,
     #[serde(default)]
@@ -660,6 +668,10 @@ struct MarketplaceItemMeta {
     license: Option<String>,
     keywords: Vec<String>,
     icon_url: Option<String>,
+    icon_background: Option<String>,
+    accent_color: Option<String>,
+    banner: Option<serde_json::Value>,
+    developer: Option<String>,
     screenshots: Vec<String>,
     tagline: Option<String>,
     example_prompts: Vec<String>,
@@ -683,6 +695,10 @@ impl MarketplacePlugin {
             license: self.license.clone(),
             keywords: self.keywords.clone(),
             icon_url: self.icon_url.clone(),
+            icon_background: self.icon_background.clone(),
+            accent_color: self.accent_color.clone(),
+            banner: self.banner.clone(),
+            developer: self.developer.clone(),
             screenshots: self.screenshots.clone(),
             tagline: self.tagline.clone(),
             example_prompts: self.example_prompts.clone(),
@@ -858,6 +874,33 @@ impl MarketplaceSource {
                     if !item.meta.targets.is_empty() {
                         obj.insert("targets".to_owned(), serde_json::json!(item.meta.targets));
                     }
+                    // Snake_case presentation keys for the browse card + hero.
+                    if let Some(icon) = &item.meta.icon_url {
+                        obj.insert("icon_url".to_owned(), serde_json::json!(icon));
+                    }
+                    if let Some(bg) = &item.meta.icon_background {
+                        obj.insert("icon_background".to_owned(), serde_json::json!(bg));
+                    }
+                    if let Some(accent) = &item.meta.accent_color {
+                        obj.insert("accent_color".to_owned(), serde_json::json!(accent));
+                    }
+                    if let Some(banner) = &item.meta.banner {
+                        obj.insert("banner".to_owned(), banner.clone());
+                    }
+                    if let Some(category) = &item.meta.category {
+                        obj.insert("category".to_owned(), serde_json::json!(category));
+                    }
+                    if let Some(dev) = item
+                        .meta
+                        .developer
+                        .clone()
+                        .or_else(|| item.meta.author.as_ref().and_then(author_developer_string))
+                    {
+                        obj.insert("developer".to_owned(), serde_json::json!(dev));
+                    }
+                    if let Some(tagline) = &item.meta.tagline {
+                        obj.insert("tagline".to_owned(), serde_json::json!(tagline));
+                    }
                 }
                 card
             }
@@ -926,10 +969,24 @@ impl CatalogSource for MarketplaceSource {
         if let Some(icon) = &meta.icon_url {
             detail.insert("iconUrl".to_owned(), serde_json::json!(icon));
         }
+        if let Some(bg) = &meta.icon_background {
+            detail.insert("iconBackground".to_owned(), serde_json::json!(bg));
+        }
+        if let Some(accent) = &meta.accent_color {
+            detail.insert("accentColor".to_owned(), serde_json::json!(accent));
+        }
+        if let Some(banner) = &meta.banner {
+            detail.insert("banner".to_owned(), banner.clone());
+        }
         if !meta.screenshots.is_empty() {
             detail.insert("screenshots".to_owned(), serde_json::json!(meta.screenshots));
         }
-        if let Some(dev) = meta.author.as_ref().and_then(author_developer_string) {
+        // Prefer an explicitly declared `developer`; fall back to the author string.
+        if let Some(dev) = meta
+            .developer
+            .clone()
+            .or_else(|| meta.author.as_ref().and_then(author_developer_string))
+        {
             detail.insert("developer".to_owned(), serde_json::json!(dev));
         }
         if let Some(category) = &meta.category {
@@ -2608,7 +2665,16 @@ impl CatalogSource for RyuMarketplaceSource {
         if self.kind == CatalogKind::Plugin {
             let mut descriptor = self.detail_to_descriptor(id, &detail)?;
             let ui_code = gate_plugin_ui_code(id, &detail, signed)?;
-            let manifest = detail.get("manifest").cloned().unwrap_or(Value::Null);
+            let mut manifest = detail.get("manifest").cloned().unwrap_or(Value::Null);
+            // Backend CODE CARRIAGE (HIGH-2): unlike `ui_code`, the node backend
+            // bundle rides INLINE in the manifest, so a valid signature already
+            // covers it — but an UNSIGNED item carries executable `backend_code`
+            // attested by nothing (only a self-referential `backend_sha256` the
+            // attacker controls both sides of). Strip it before it lands in
+            // `descriptor.raw` (which `install_plugin_from_catalog` deserializes and
+            // persists) so unattested backend never reaches disk. Signed items are
+            // untouched — the code is inside the verified surface.
+            gate_plugin_backend_code(id, &mut manifest, signed);
             descriptor.raw = serde_json::json!({
                 "manifest": manifest,
                 "ui_code": ui_code,
@@ -2714,6 +2780,37 @@ fn gate_plugin_ui_code(id: &str, detail: &Value, signed: bool) -> Result<Option<
         );
     }
     Ok(Some(code.to_string()))
+}
+
+/// Strip an UNSIGNED plugin's inline node-backend bundle from `manifest` before it
+/// is carried into the install descriptor.
+///
+/// The node backend bundle (`backend_code` + its `backend_sha256`) rides INLINE in
+/// the manifest — so for a SIGNED item it is inside the Gateway-verified surface
+/// and is left as-is. For an UNSIGNED item there is nothing attesting the code (the
+/// self-referential `backend_sha256` is attacker-controlled on both sides), so the
+/// executable blob is removed here: unattested backend code must never reach disk
+/// via the marketplace path. Both keys are dropped together — leaving a dangling
+/// `backend_sha256` would trip the install-door "declares hash but carries no code"
+/// check. Mirrors the trust decision of [`gate_plugin_ui_code`] (carry runnable
+/// code only off a valid signature). No-op when `signed` or when the manifest
+/// carries no backend.
+fn gate_plugin_backend_code(id: &str, manifest: &mut Value, signed: bool) {
+    if signed {
+        return;
+    }
+    let Some(obj) = manifest.as_object_mut() else {
+        return;
+    };
+    let had_code = obj.remove("backend_code").is_some();
+    obj.remove("backend_sha256");
+    if had_code {
+        tracing::warn!(
+            id,
+            "plugin is unsigned; stripping inline backend_code (no signature attests it — \
+             unattested backend never reaches disk)"
+        );
+    }
 }
 
 /// Largest base64 `artifact` string carried on a paid-bundle install. The blob is
@@ -4262,6 +4359,50 @@ mod tests {
         let carried = gate_plugin_ui_code("com.acme.plugin", &detail, true)
             .expect("signed manifest-only plugin is valid");
         assert_eq!(carried, None);
+    }
+
+    #[test]
+    fn backend_gate_strips_unsigned_inline_backend_code() {
+        // HIGH-2: an UNSIGNED plugin's inline node backend is attested by nothing,
+        // so both the code and its self-referential hash are removed before the
+        // manifest is carried into the install descriptor.
+        let mut manifest = serde_json::json!({
+            "id": "com.acme.plugin",
+            "version": "1.0.0",
+            "backend_code": "export function activate(){ steal(); }",
+            "backend_sha256": "deadbeef",
+        });
+        gate_plugin_backend_code("com.acme.plugin", &mut manifest, false);
+        let obj = manifest.as_object().unwrap();
+        assert!(
+            !obj.contains_key("backend_code"),
+            "unsigned backend_code must be stripped"
+        );
+        assert!(
+            !obj.contains_key("backend_sha256"),
+            "dangling backend_sha256 must be stripped too (else the install-door \
+             hash check trips)"
+        );
+    }
+
+    #[test]
+    fn backend_gate_keeps_signed_inline_backend_code() {
+        // A signed manifest's backend is INSIDE the verified surface — untouched.
+        let code = "export function activate(){}";
+        let mut manifest = serde_json::json!({
+            "id": "com.acme.plugin",
+            "version": "1.0.0",
+            "backend_code": code,
+            "backend_sha256": "abc123",
+        });
+        gate_plugin_backend_code("com.acme.plugin", &mut manifest, true);
+        let obj = manifest.as_object().unwrap();
+        assert_eq!(
+            obj.get("backend_code").and_then(|v| v.as_str()),
+            Some(code),
+            "signed backend_code must be preserved"
+        );
+        assert!(obj.contains_key("backend_sha256"));
     }
 
     // ── PAID-ARTIFACT CARRIAGE (Phase 4A): entitlement-gated bundle integrity ──

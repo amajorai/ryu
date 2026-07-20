@@ -1,0 +1,53 @@
+{
+  "name": "@ryu/marketplace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./types": "./src/types.ts",
+    "./host": "./src/host.tsx",
+    "./star-rating": "./src/star-rating.tsx",
+    "./states": "./src/states.tsx",
+    "./licenses-tab": "./src/licenses-tab.tsx",
+    "./sell-tab": "./src/sell-tab.tsx",
+    "./use-marketplace-purchase": "./src/use-marketplace-purchase.ts",
+    "./catalog/host": "./src/catalog/host.tsx",
+    "./catalog/types": "./src/catalog/types.ts",
+    "./catalog/grant-labels": "./src/catalog/grant-labels.ts",
+    "./catalog/apps": "./src/catalog/apps-catalog-section.tsx",
+    "./catalog/skills": "./src/catalog/skills-catalog-section.tsx",
+    "./catalog/models": "./src/catalog/models-catalog-section.tsx",
+    "./catalog/chrome/catalog-badges": "./src/catalog/chrome/catalog-badges.tsx",
+    "./catalog/chrome/resizable-master-detail": "./src/catalog/chrome/resizable-master-detail.tsx",
+    "./catalog/chrome/infinite-sentinel": "./src/catalog/chrome/infinite-sentinel.tsx",
+    "./catalog/chrome/store-chrome": "./src/catalog/chrome/store-chrome.tsx",
+    "./catalog/chrome/store-toolbar": "./src/catalog/chrome/store-toolbar.tsx",
+    "./catalog/chrome/store-list-header": "./src/catalog/chrome/store-list-header.tsx",
+    "./catalog/chrome/store-catalog-layout": "./src/catalog/chrome/store-catalog-layout.tsx",
+    "./catalog/chrome/store-catalog-card": "./src/catalog/chrome/store-catalog-card.tsx",
+    "./catalog/chrome/store-item-action": "./src/catalog/chrome/store-item-action.tsx"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "@hugeicons/core-free-icons": "^4.2.0",
+    "@hugeicons/react": "^1.1.6",
+    "@pierre/trees": "^1.0.0-beta.4",
+    "@ryu/blocks": "workspace:*",
+    "@ryu/ui": "workspace:*",
+    "lucide-react": "catalog:",
+    "sileo": "latest"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@ryu/config": "workspace:*",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "catalog:",
+    "typescript": "^5.9.3"
+  }
+}

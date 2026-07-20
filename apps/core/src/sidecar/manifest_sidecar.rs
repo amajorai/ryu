@@ -633,6 +633,21 @@ async fn spawn(
     handle.start_path_with_env(program, args, &env).await
 }
 
+/// Spawn a program with a MINIMAL env — the child does NOT inherit Core's
+/// environment; it sees only the benign allow-list plus the explicit `env`. Used
+/// for the experimental node extension host so a third-party JS backend can never
+/// read Core's `RYU_TOKEN`/`RYU_MASTER_KEY`/provider keys (which would let it forge
+/// any other plugin's ext-token). See [`ProcessHandle::start_path_with_clean_env`].
+async fn spawn_clean(
+    handle: &ProcessHandle,
+    program: &str,
+    args: &[String],
+    env: &BTreeMap<String, String>,
+) -> anyhow::Result<()> {
+    let env: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    handle.start_path_with_clean_env(program, args, &env).await
+}
+
 impl Sidecar for ManifestSidecar {
     fn name(&self) -> &str {
         &self.name
@@ -762,15 +777,43 @@ impl Sidecar for ManifestSidecar {
                     env.insert("RYU_HOST_HEALTH_PATH".to_owned(), spec.health_path.clone());
                     env.insert(
                         "RYU_HOST_PLUGIN_VERSION".to_owned(),
-                        manifest.map(|m| m.version).unwrap_or_default(),
+                        manifest
+                            .as_ref()
+                            .map(|m| m.version.clone())
+                            .unwrap_or_default(),
                     );
                     env.insert(
                         "RYU_HOST_API_VERSION".to_owned(),
                         ryu_kernel_contracts::host_api::HOST_API_VERSION.to_owned(),
                     );
 
+                    // Loud audit trail on every node-host spawn: it runs third-party
+                    // code unsandboxed with full host access, so record who/what/which
+                    // grants approved it (the single load-bearing containment is the
+                    // Gateway grant gate on `sidecar:process`).
+                    tracing::warn!(
+                        target: "ryu::permissions",
+                        sidecar = %name,
+                        plugin_id = %plugin_id,
+                        version = %manifest
+                            .as_ref()
+                            .map(|m| m.version.clone())
+                            .unwrap_or_default(),
+                        backend_sha256 = %manifest
+                            .as_ref()
+                            .and_then(|m| m.backend_sha256.clone())
+                            .unwrap_or_default(),
+                        declared_grants = ?manifest
+                            .as_ref()
+                            .map(|m| m.permission_grants.clone())
+                            .unwrap_or_default(),
+                        "spawning experimental node extension host — third-party code runs \
+                         UNSANDBOXED with full host access (env-scrubbed of secrets; \
+                         gated only by the Gateway `sidecar:process` grant)"
+                    );
                     let args = vec![bootstrap.to_string_lossy().into_owned()];
-                    spawn(&handle, &runtime, &args, &env).await?;
+                    // Node backends get a scrubbed/minimal env (never Core's secrets).
+                    spawn_clean(&handle, &runtime, &args, &env).await?;
                 }
             }
             tracing::info!("manifest sidecar '{name}' started");

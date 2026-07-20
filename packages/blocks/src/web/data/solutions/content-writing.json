@@ -1,0 +1,81 @@
+{
+  "slug": "content-writing",
+  "name": "Content Writing",
+  "navLabel": "Content Writing",
+  "category": "Language & Content",
+  "icon": "PenLine",
+  "visualKey": "SkillsVisual",
+  "tagline": "Research, outline, and draft long-form content that sounds like you, not a chatbot.",
+  "heroEyebrow": "Ryu for Content Writing",
+  "heroTitle": "Long-form drafts grounded in your voice and your sources",
+  "heroSubtitle": "Ryu researches a topic, outlines it, and drafts in your house style, grounding every section on your past articles and source material so the writing stays on-brand and on-topic.",
+  "intro": "Generic AI content reads flat and ignores your brand voice, your sources, and what you have already published. Ryu grounds drafts on your style guide and existing articles, pulls in research with connected tools, and produces structured long-form copy that a writer shapes into the finished piece. Unpublished drafts can stay on a local model so nothing leaks before launch.",
+  "highlights": [
+    {
+      "title": "Writes in your voice",
+      "description": "Ground drafts on your style guide and published articles with Spaces and RAG so the tone matches what readers already know."
+    },
+    {
+      "title": "Research that cites",
+      "description": "Pull facts from the web and your own source material with connected tools, with each claim pointing back to where it came from."
+    },
+    {
+      "title": "Outline before draft",
+      "description": "Turn a brief into a structured outline you approve first, so the long-form draft follows the angle you actually want."
+    },
+    {
+      "title": "Embargo-safe drafting",
+      "description": "Keep unannounced launches and unpublished pieces on a local model with no telemetry so nothing leaks early."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Researched blog post",
+      "description": "An agent researches a topic, drafts a structured long-form post in your house style, and lists the sources behind each claim."
+    },
+    {
+      "title": "Brief to outline",
+      "description": "Turn a one-line content brief into a detailed outline with sections, key points, and a suggested angle for you to approve."
+    },
+    {
+      "title": "Whitepaper and report sections",
+      "description": "Draft individual sections of a long report grounded on your research data, keeping terminology and framing consistent throughout."
+    },
+    {
+      "title": "Repurpose into a newsletter",
+      "description": "Take an existing long article and reshape it into a newsletter issue that keeps the voice but fits the shorter format."
+    },
+    {
+      "title": "Content gap analysis",
+      "description": "Scan your published library to surface topics you have not covered and suggest new pieces with working titles."
+    },
+    {
+      "title": "Draft straight into your CMS",
+      "description": "Run a workflow that researches, drafts, and saves the piece into your CMS or docs tool through a connected app, ready for editing."
+    }
+  ],
+  "examplePrompts": [
+    "Research and draft a 1200-word blog post on agent orchestration in our house voice, citing every source.",
+    "Turn this brief into a detailed outline with sections and key points before you write anything.",
+    "Draft the methodology section of our report using the research notes in this Space.",
+    "Reshape our latest feature article into a newsletter issue that keeps the same voice.",
+    "Scan our published posts and list five topics we have not covered yet with working titles."
+  ],
+  "faq": [
+    {
+      "q": "Will the writing match our brand voice?",
+      "a": "Yes. Put your style guide and published articles in a Space and Ryu grounds drafts on them with RAG, so tone and terminology stay consistent with what you already publish."
+    },
+    {
+      "q": "Can it research and cite sources?",
+      "a": "Yes. With connected tools and MCP, Ryu can pull facts from the web and your own material and attribute each claim, so an editor can verify before publishing."
+    },
+    {
+      "q": "Does Ryu write the whole piece for me?",
+      "a": "Ryu produces a researched, structured first draft, but a writer shapes the angle, sharpens the prose, and fact-checks before anything ships."
+    }
+  ],
+  "ctaTitle": "Draft long-form that sounds like you.",
+  "ctaSubtitle": "Research, outline, and write grounded in your voice and your sources, with drafts kept private.",
+  "ctaNote": "On-brand voice · Cited research · Embargo-safe"
+}

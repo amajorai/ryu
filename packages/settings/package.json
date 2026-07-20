@@ -1,0 +1,48 @@
+{
+  "name": "@ryu/settings",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ryu/auth": "workspace:*",
+    "@ryu/db": "workspace:*",
+    "@ryu/ui": "workspace:*",
+    "@tanstack/react-query": "^5.62.0",
+    "date-fns": "^4.1.0",
+    "lucide-react": "catalog:",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-qr-code": "^2.0.15",
+    "sileo": "latest",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "next": ">=14.0.0",
+    "react-router-dom": ">=6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    },
+    "react-router-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@ryu/config": "workspace:*",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "catalog:",
+    "next": "^16.1.1",
+    "react-router-dom": "^7",
+    "typescript": "^5.9.3"
+  }
+}

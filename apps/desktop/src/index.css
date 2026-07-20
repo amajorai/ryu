@@ -1,0 +1,405 @@
+@import "@ryu/ui/globals.css";
+@import "@ryu/ui/components/editor/editor.css";
+/* NOTE: @fontsource-variable/{inter,geist} are imported from the JS entrypoints
+   (main.tsx), NOT here. Tailwind v4's `@import` inlines a package's CSS without
+   rebasing its relative `url()`s, so the fonts' `url(./files/*.woff2)` survived
+   into the bundle verbatim, resolved against the OUTPUT css (/assets/files/…),
+   404'd, and both the webapp and desktop release builds rendered with no Inter
+   or Geist. Importing the CSS from JS makes Vite process each package's CSS with
+   its own base, so the woff2 files are emitted and the urls point at them. */
+@import "../components/agent-elements/agent-ui.css";
+@import "@xyflow/react/dist/base.css";
+@import "sileo/styles.css";
+
+@source "../components";
+@source "./";
+@source "../../../packages/blocks/src/desktop";
+@source "../../../packages/blocks/src/web";
+
+@theme inline {
+	--font-sans: "Inter Variable", sans-serif;
+	--font-heading: "Geist Variable", sans-serif;
+	--font-code:
+		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+		"Courier New", monospace;
+}
+
+/* NOT `inline`: spacing acts as a runtime global UI zoom. A non-inline @theme
+   makes Tailwind emit utilities as calc(var(--spacing) * N), so overriding
+   --spacing at runtime (setSpacing in useThemePreset) actually rescales the UI.
+   With `inline` the literal value is baked into every utility and the slider
+   does nothing. */
+@theme {
+	--spacing: 0.24rem;
+}
+
+/* Scroll fade effect (CSS scroll-driven animations) — fades the top/bottom
+   edges of a scroll container as you scroll. Used by the chat sidebar. */
+@property --top-mask-height {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 0px;
+}
+
+@property --bottom-mask-height {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 48px;
+}
+
+@keyframes show-top-mask {
+	to {
+		--top-mask-height: var(--mask-height);
+	}
+}
+
+@keyframes hide-bottom-mask {
+	to {
+		--bottom-mask-height: 0px;
+	}
+}
+
+@utility scroll-fade-effect-y {
+	--mask-height: 48px;
+	--scroll-buffer: 2rem;
+
+	mask-image:
+		linear-gradient(to top, transparent, black 90%),
+		linear-gradient(to bottom, transparent 0%, black 100%),
+		linear-gradient(black, black);
+	mask-size:
+		100% var(--top-mask-height),
+		100% var(--bottom-mask-height),
+		100% 100%;
+	mask-repeat: no-repeat, no-repeat, no-repeat;
+	mask-position:
+		0 0,
+		0 100%,
+		0 0;
+	mask-composite: exclude;
+
+	animation-name: show-top-mask, hide-bottom-mask;
+	animation-timeline: scroll(self), scroll(self);
+	animation-range:
+		0 var(--scroll-buffer),
+		calc(100% - var(--scroll-buffer)) 100%;
+	animation-fill-mode: both, both;
+}
+
+@layer base {
+	* {
+		-moz-user-select: none;
+		-ms-user-select: none;
+		-webkit-user-select: none;
+		user-select: none;
+		@apply border-border outline-ring/50;
+	}
+	body {
+		overflow: hidden;
+		/* Keep the window body transparent so the rounded root div's corners show
+		   through (the visible surface is painted by that div, not the body).
+		   Declared last and standalone so a formatter reordering @apply can't
+		   flip the cascade and repaint an opaque square over the rounded corners. */
+		background: transparent !important;
+		@apply text-foreground;
+	}
+	code,
+	pre,
+	kbd,
+	samp,
+	.shiki,
+	.shiki * {
+		font-family: var(--font-code) !important;
+	}
+
+	/* Prevent dragging of images (and other draggables) across the whole app
+     so a click-drag selects nothing and never lifts a ghost image. */
+	img,
+	a,
+	picture,
+	video,
+	svg {
+		-webkit-user-drag: none;
+	}
+
+	/* Allow text selection inside chat bubbles for both agent and user
+     messages. Agent content renders through `.an-markdown`; user messages
+     render inside the `group/user-message` bubble. `.prose`/`.select-text`/
+     `.shiki` remain opt-in escape hatches elsewhere in the app. */
+	.prose,
+	.prose *,
+	.select-text,
+	.select-text *,
+	.shiki,
+	.shiki *,
+	.an-markdown,
+	.an-markdown *,
+	.group\/user-message,
+	.group\/user-message * {
+		-moz-user-select: text !important;
+		-ms-user-select: text !important;
+		-webkit-user-select: text !important;
+		user-select: text !important;
+	}
+}
+
+/* Background customization (Settings → Appearance → Backgrounds). Layers an
+   optional gradient/image OVER the theme's solid surface color. The CSS vars are
+   set on :root by hooks/useBackgroundCustomization.ts; unset → `none` keeps the
+   default flat look. Unlayered so it wins over the Tailwind `bg-*` color
+   utilities (which only set background-color, never background-image). The
+   sidebar surface is `[data-slot="sidebar-inner"]` (docked) plus the floating
+   panel marker; the page surface is the `[data-slot="sidebar-inset"]` main. */
+[data-slot="sidebar-inner"],
+.ryu-sidebar-surface {
+	background-image: var(--ryu-sidebar-bg-image, none);
+	background-repeat: var(--ryu-sidebar-bg-repeat, repeat);
+	background-position: var(--ryu-sidebar-bg-position, 0 0);
+	background-size: var(--ryu-sidebar-bg-size, auto);
+}
+
+[data-slot="sidebar-inset"] {
+	background-image: var(--ryu-page-bg-image, none);
+	background-repeat: var(--ryu-page-bg-repeat, repeat);
+	background-position: var(--ryu-page-bg-position, 0 0);
+	background-size: var(--ryu-page-bg-size, auto);
+}
+
+@layer utilities {
+	.scrollbar-hide {
+		-ms-overflow-style: none;
+		scrollbar-width: none;
+	}
+	.scrollbar-hide::-webkit-scrollbar {
+		display: none;
+	}
+}
+
+::-webkit-scrollbar {
+	width: 5px;
+	height: 5px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: transparent;
+	border-radius: 5px;
+	transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-corner {
+	@apply bg-transparent;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+	background: var(--border);
+}
+
+*:active::-webkit-scrollbar-thumb {
+	background: var(--border);
+}
+
+* {
+	scrollbar-color: transparent transparent;
+	scrollbar-width: thin;
+}
+
+*:hover {
+	scrollbar-color: var(--border) transparent;
+}
+
+/* Chrome shadows off — disabled via the Appearance setting. Strips the
+   box-shadow (titlebar nav + action groups, sidebar inset-shadow) and the
+   filter drop-shadow (floating sidebar) on the marked elements only. The
+   titlebar's backdrop-blur and ring sit on backdrop-filter/box-shadow-ring
+   tokens we deliberately leave alone via these specific properties. */
+html[data-chrome-shadows="off"] .ryu-chrome-shadow {
+	box-shadow: none !important;
+	filter: none !important;
+}
+
+/* Dialog transparent mode (blur off, default) — no backdrop overlay and no
+   panel shadow on dialogs, alert dialogs, sheets, or drawers. */
+html:not([data-dialog-overlay-blur="on"]) .ryu-dialog-overlay {
+	display: none;
+}
+
+html:not([data-dialog-overlay-blur="on"]) [data-slot="dialog-content"],
+html:not([data-dialog-overlay-blur="on"]) [data-slot="alert-dialog-content"],
+html:not([data-dialog-overlay-blur="on"]) [data-slot="sheet-content"],
+html:not([data-dialog-overlay-blur="on"]) [data-slot="drawer-content"] {
+	box-shadow: none !important;
+}
+
+html:not([data-dialog-overlay-blur="on"]) [data-slot="drawer-content"]::before {
+	box-shadow: none !important;
+}
+
+/* Pointer cursor mode — enabled via the Appearance setting */
+html[data-pointer-cursor="true"] button:not([disabled]),
+html[data-pointer-cursor="true"] a[href],
+html[data-pointer-cursor="true"] [role="button"]:not([aria-disabled="true"]),
+html[data-pointer-cursor="true"] [role="checkbox"],
+html[data-pointer-cursor="true"] [role="switch"],
+html[data-pointer-cursor="true"] [role="radio"],
+html[data-pointer-cursor="true"] [role="tab"],
+html[data-pointer-cursor="true"] [role="menuitem"],
+html[data-pointer-cursor="true"] [role="menuitemcheckbox"],
+html[data-pointer-cursor="true"] [role="menuitemradio"],
+html[data-pointer-cursor="true"] [role="option"],
+html[data-pointer-cursor="true"] [role="link"],
+html[data-pointer-cursor="true"] [role="combobox"],
+html[data-pointer-cursor="true"] input[type="checkbox"],
+html[data-pointer-cursor="true"] input[type="radio"],
+html[data-pointer-cursor="true"] input[type="range"],
+html[data-pointer-cursor="true"] select,
+html[data-pointer-cursor="true"] label[for] {
+	cursor: pointer;
+}
+
+/* Pointer cursor mode OFF (the default) — the inverse rule that makes the
+   setting authoritative everywhere. Without this, any component that hardcodes
+   the `cursor-pointer` utility (and native `a[href]` links) would keep showing
+   a pointer even when the setting is off. We mirror the ON selector list and
+   force the native default cursor, and we neutralize the `.cursor-pointer`
+   utility directly so every desktop AND @ryu/ui component honors the toggle
+   with no per-component changes. Disabled elements are excluded so their
+   own cursor (e.g. not-allowed) is preserved. */
+html:not([data-pointer-cursor="true"]) button:not([disabled]),
+html:not([data-pointer-cursor="true"]) a[href],
+html:not([data-pointer-cursor="true"])
+	[role="button"]:not([aria-disabled="true"]),
+html:not([data-pointer-cursor="true"]) [role="checkbox"],
+html:not([data-pointer-cursor="true"]) [role="switch"],
+html:not([data-pointer-cursor="true"]) [role="radio"],
+html:not([data-pointer-cursor="true"]) [role="tab"],
+html:not([data-pointer-cursor="true"]) [role="menuitem"],
+html:not([data-pointer-cursor="true"]) [role="menuitemcheckbox"],
+html:not([data-pointer-cursor="true"]) [role="menuitemradio"],
+html:not([data-pointer-cursor="true"]) [role="option"],
+html:not([data-pointer-cursor="true"]) [role="link"],
+html:not([data-pointer-cursor="true"]) [role="combobox"],
+html:not([data-pointer-cursor="true"]) input[type="checkbox"],
+html:not([data-pointer-cursor="true"]) input[type="radio"],
+html:not([data-pointer-cursor="true"]) input[type="range"],
+html:not([data-pointer-cursor="true"]) select,
+html:not([data-pointer-cursor="true"]) label[for],
+html:not([data-pointer-cursor="true"])
+	.cursor-pointer:not([disabled]):not([aria-disabled="true"]) {
+	cursor: default;
+}
+
+div[data-tauri-decorum-tb] {
+	padding-top: 0 !important;
+	padding-right: 0 !important;
+}
+
+button#decorum-tb-close {
+	border-top-right-radius: 20px !important;
+}
+
+div[data-tauri-decorum-tb] {
+	pointer-events: none !important;
+}
+
+div[data-tauri-decorum-tb] button,
+div[data-tauri-decorum-tb] .decorum-tb-btn {
+	pointer-events: auto !important;
+}
+
+/* React Flow zoom controls. We import only base.css (minimal positioning), so
+   the controls ship unstyled — these rules give them a minimal, borderless,
+   dark-mode-aware look that matches the floating panels. */
+.workflow-controls {
+	overflow: hidden;
+	outline: 1px solid color-mix(in oklab, white 10%, transparent);
+	background: color-mix(in oklab, var(--popover) 90%, transparent);
+	border-radius: 0.75rem;
+	box-shadow: none;
+	backdrop-filter: blur(8px);
+}
+
+.workflow-controls .react-flow__controls-button {
+	width: 1.9rem;
+	height: 1.9rem;
+	color: var(--muted-foreground);
+	background: transparent;
+	border: none;
+	border-right: 1px solid color-mix(in oklab, white 8%, transparent);
+	transition:
+		background 0.12s ease,
+		color 0.12s ease;
+}
+
+.workflow-controls .react-flow__controls-button:last-child {
+	border-right: none;
+}
+
+.workflow-controls .react-flow__controls-button:hover {
+	color: var(--foreground);
+	background: color-mix(in oklab, var(--accent) 60%, transparent);
+}
+
+.workflow-controls .react-flow__controls-button svg {
+	max-width: 0.85rem;
+	max-height: 0.85rem;
+	fill: currentColor;
+}
+
+/*
+ * react-grid-layout (Home dashboard) resize handles. The library default chevron
+ * is a faint rgba(0,0,0,0.4) mark — invisible on dark themes — so we theme it to
+ * the muted foreground and enlarge the grab target. Handles stay hidden until the
+ * widget is hovered (Notion-style), matching the hover-only header chrome.
+ */
+.react-grid-item > .react-resizable-handle {
+	width: 22px;
+	height: 22px;
+	transition: opacity 0.12s ease;
+}
+
+.react-grid-item > .react-resizable-handle::after {
+	width: 7px;
+	height: 7px;
+	border-right: 2px solid var(--muted-foreground);
+	border-bottom: 2px solid var(--muted-foreground);
+}
+
+/*
+ * The drop placeholder shown while dragging/resizing a widget. The library
+ * default is a flat red block; theme it to a soft, rounded accent tint that
+ * matches the rounded-2xl widget cards so the drop target reads cleanly.
+ */
+.react-grid-item.react-grid-placeholder {
+	background: var(--primary);
+	border-radius: 1rem;
+	opacity: 0.12;
+}
+
+/*
+ * Gooey tap — a springy "jelly" press shared by the sidebar-footer action
+ * buttons (inbox, downloads, settings) so they read consistently with the "+"
+ * gooey menu beside them. The back-out easing gives a liquid overshoot on
+ * hover/release. Gated behind prefers-reduced-motion like the t-badge anims.
+ */
+.gooey-tap {
+	transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.gooey-tap:hover {
+	transform: scale(1.12);
+}
+.gooey-tap:active {
+	transform: scale(0.85);
+}
+@media (prefers-reduced-motion: reduce) {
+	.gooey-tap {
+		transition: none;
+	}
+	.gooey-tap:hover,
+	.gooey-tap:active {
+		transform: none;
+	}
+}

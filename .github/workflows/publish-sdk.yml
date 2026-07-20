@@ -1,14 +1,17 @@
 name: publish-sdk
 
-# Publishes the TypeScript SDK packages to npm on a v* tag.
+# Publishes the TypeScript SDK packages to npm (packages/client + sdk + create-ryu-app).
 # Requires an NPM_TOKEN repository secret; the job cleanly no-ops if it's absent.
+#
+# SINGLE-OWNER RULE: the authoritative npm publisher is the PRIVATE
+# .github/workflows/publish-sdk.yml, which fires on the version-bump commit to main
+# and owns @ryuhq/sdk + create-ryu-app. To avoid a double-publish version conflict,
+# this overlay does NOT auto-fire on the v* tag; it is manual-dispatch-only, kept for
+# publishing packages/client (which the private path does not cover) on demand.
 # crates.io publishing is intentionally deferred until `cargo deny check licenses` passes
 # (see docs/open-core.md) and a CARGO_REGISTRY_TOKEN secret is added.
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:

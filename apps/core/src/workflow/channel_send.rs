@@ -47,7 +47,8 @@ pub async fn run(
     };
 
     // Gateway egress DLP gate: refuse the send if the firewall blocks the text.
-    govern_channel_egress(text).await?;
+    // Shared with the agent-callable `channel__send` tool so egress never drifts.
+    crate::sidecar::gateway::govern_egress(text).await?;
 
     let http = reqwest::Client::new();
     let started = Instant::now();
@@ -96,73 +97,4 @@ pub async fn run(
         "recipient": recipient,
     })
     .to_string())
-}
-
-/// Route the outbound message text through the Gateway firewall before it leaves
-/// the box. Returns `Ok(())` when the gateway allows it (or there is nothing to
-/// scan), and `Err(reason)` when a guardrail trips OR the gateway is unreachable
-/// (fail-closed). Mirrors `run_guardrails` / the support-bundle egress gate,
-/// including the `RYU_ALLOW_GATEWAY_FALLBACK=1` escape hatch, so all egress gates
-/// agree. Only `pii`/`secret` are requested — the `jailbreak`/`injection`
-/// patterns target inbound prompts, not outbound chat.
-async fn govern_channel_egress(text: &str) -> Result<(), String> {
-    use crate::sidecar::gateway::{gateway_token, gateway_url};
-
-    if text.trim().is_empty() {
-        return Ok(());
-    }
-
-    let allow_fallback = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK")
-        .ok()
-        .is_some_and(|v| v == "1");
-
-    let payload = serde_json::json!({
-        "text": text,
-        "checks": ["pii", "secret"],
-    });
-
-    let client = reqwest::Client::new();
-    let endpoint = format!("{}/v1/firewall/check", gateway_url().trim_end_matches('/'));
-    let mut builder = client
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(10))
-        .json(&payload);
-    if let Some(token) = gateway_token() {
-        builder = builder.bearer_auth(token);
-    }
-
-    let resp = match builder.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            if allow_fallback {
-                return Ok(());
-            }
-            return Err(format!(
-                "channel_send: gateway firewall unreachable (fail-closed): {e}"
-            ));
-        }
-    };
-    if !resp.status().is_success() {
-        if allow_fallback {
-            return Ok(());
-        }
-        return Err(format!(
-            "channel_send: gateway firewall returned HTTP {}",
-            resp.status()
-        ));
-    }
-
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("channel_send: invalid gateway firewall response: {e}"))?;
-    let allowed = body
-        .get("allowed")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    if allowed {
-        Ok(())
-    } else {
-        Err("channel_send: message blocked by the gateway firewall (egress DLP)".to_string())
-    }
 }

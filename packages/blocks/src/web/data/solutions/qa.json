@@ -1,0 +1,81 @@
+{
+  "slug": "qa",
+  "name": "QA & Testing",
+  "navLabel": "QA & Testing",
+  "category": "Engineering & Product",
+  "icon": "Bug",
+  "tagline": "Generate tests, hunt edge cases, and reproduce bugs with agents that run on a branch.",
+  "heroEyebrow": "Ryu for QA & Testing",
+  "heroTitle": "An agent that tries to break it before users do.",
+  "heroSubtitle": "Turn a feature into a test plan, write the suite, and probe the edge cases an agent dreams up. Runs land on a git branch so new tests come back as a reviewable diff, and you keep code private and every call governed.",
+  "visualKey": "RedTeamVisual",
+  "intro": "QA is about imagining how something fails, then proving it. Ryu runs agents that enumerate edge cases, write the tests, and reproduce reported bugs on an isolated git worktree, so coverage lands as a clean diff you review. The code stays on your machine and every model call is logged.",
+  "highlights": [
+    {
+      "title": "Adversarial by nature",
+      "description": "Agents enumerate boundary, error, and concurrency cases you might miss, then write tests that try to break the feature."
+    },
+    {
+      "title": "Tests land as a diff",
+      "description": "New and updated tests come back on a git branch, so you review the additions before they merge into the suite."
+    },
+    {
+      "title": "Reproduces real bugs",
+      "description": "Hand over a report and an agent builds a failing test that captures it, so the fix has something to prove against."
+    },
+    {
+      "title": "Knows your conventions",
+      "description": "Ground agents on your existing test suite with Spaces, so generated tests match your framework and patterns."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Test plan from a feature",
+      "description": "Turn a spec or PR into a structured test plan covering the golden path, error states, and boundary conditions."
+    },
+    {
+      "title": "Unit and integration tests",
+      "description": "Generate tests for new code that match your framework and assertions, returned as a diff against the suite."
+    },
+    {
+      "title": "Edge case discovery",
+      "description": "Probe a function or flow for nulls, overflows, race conditions, and malformed input, then write a test for each."
+    },
+    {
+      "title": "Bug reproduction",
+      "description": "Convert a vague report into a minimal failing test that reproduces the issue, so a fix is verifiable."
+    },
+    {
+      "title": "End-to-end flows",
+      "description": "Author and run browser or mobile flows for critical journeys, then triage and explain the failures."
+    },
+    {
+      "title": "Coverage gap analysis",
+      "description": "Scan the codebase against the test suite to flag untested branches and the riskiest paths to cover first."
+    }
+  ],
+  "examplePrompts": [
+    "Write a test plan for the password reset flow covering expiry, reuse, and rate limiting.",
+    "Generate unit tests for the discount calculator and include the boundary cases on the percentage input.",
+    "Find edge cases in this date parsing function and write a failing test for each one you find.",
+    "Reproduce this crash report as a minimal failing test on a new branch.",
+    "Scan the cart module for untested branches and tell me which ones are riskiest."
+  ],
+  "faq": [
+    {
+      "q": "Will it match my test framework?",
+      "a": "Yes. Ground agents on your existing suite in a Space and they reuse your framework, helpers, and assertion style, so generated tests fit in rather than fighting your conventions."
+    },
+    {
+      "q": "How do new tests reach the suite?",
+      "a": "Each run executes on its own git branch, so new and updated tests come back as a diff. You review the additions and apply them or open a pull request before anything merges."
+    },
+    {
+      "q": "Can it reproduce a bug from a report?",
+      "a": "Yes. Hand an agent a bug report and it builds a minimal failing test that captures the behavior, giving the eventual fix a concrete target to satisfy."
+    }
+  ],
+  "ctaTitle": "Find the failure before your users file it.",
+  "ctaSubtitle": "Generate tests, hunt edge cases, and reproduce bugs with runs you review.",
+  "ctaNote": "Adversarial coverage · Tests as diffs · Local-first"
+}

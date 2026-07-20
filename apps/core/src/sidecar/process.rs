@@ -121,6 +121,44 @@ impl ProcessHandle {
         Ok(())
     }
 
+    /// Spawn a PATH-resolved command with a MINIMAL env: the child does NOT inherit
+    /// Core's environment at all. It starts from an `env_clear()`ed command seeded
+    /// with ONLY the small benign allow-list
+    /// ([`crate::sidecar::env_scrub::mcp_safe_env`]: PATH/HOME/Windows essentials +
+    /// `XDG_*`), then layers the explicit `env` on top.
+    ///
+    /// This is the containment for the experimental node extension host: a
+    /// third-party JS backend must never see Core's `RYU_TOKEN` (the per-plugin
+    /// ext-token seed), `RYU_MASTER_KEY`, or any provider API key — inheriting
+    /// `RYU_TOKEN` alone would let it forge every other plugin's ext-token. The
+    /// allow-list is stricter than the deny-list scrub used for the gateway child
+    /// because the node host declares its own env explicitly (the reserved
+    /// `RYU_EXT_*`/`RYU_HOST_*`/`RYU_DIR`/`RYU_CORE_PORT` contract in `env`), so it
+    /// needs nothing else from the parent. `env_clear()` before seeding is
+    /// load-bearing — without it the child keeps the full inherited env.
+    pub async fn start_path_with_clean_env(
+        &self,
+        program: &str,
+        args: &[String],
+        env: &[(String, String)],
+    ) -> Result<()> {
+        let mut command = tokio::process::Command::new(program);
+        command.args(args).kill_on_drop(true).no_window();
+        command.env_clear();
+        for (key, value) in crate::sidecar::env_scrub::mcp_safe_env(std::env::vars()) {
+            command.env(key, value);
+        }
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let child = command
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("failed to spawn {program}: {e}"))?;
+        *self.child.lock().unwrap() = Some(child);
+        self.running.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
     pub async fn stop(&self) -> Result<()> {
         let child = { self.child.lock().unwrap().take() };
         if let Some(mut c) = child {

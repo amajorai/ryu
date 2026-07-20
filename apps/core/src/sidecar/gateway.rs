@@ -82,6 +82,78 @@ pub fn gateway_bearer() -> anyhow::Result<String> {
     Ok("ryu-local".to_owned())
 }
 
+/// Route outbound message `text` through the Gateway firewall before it leaves
+/// the box (egress DLP). The shared governance seam for every outbound channel
+/// send — the workflow `ChannelSend` node and the agent-callable `channel__send`
+/// tool both call this, so their egress can never drift.
+///
+/// Returns `Ok(())` when the gateway allows it (or there is nothing to scan), and
+/// `Err(reason)` when a guardrail trips OR the gateway is unreachable
+/// (fail-closed, matching `run_guardrails` / the support-bundle egress gate,
+/// including the `RYU_ALLOW_GATEWAY_FALLBACK=1` escape hatch). Only `pii`/`secret`
+/// are requested — the `jailbreak`/`injection` patterns target inbound prompts,
+/// not outbound chat. The firewall has no sanitize surface for Core to call, so a
+/// tripped guardrail is block-and-refuse.
+pub async fn govern_egress(text: &str) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Ok(());
+    }
+
+    let allow_fallback = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK")
+        .ok()
+        .is_some_and(|v| v == "1");
+
+    let payload = serde_json::json!({
+        "text": text,
+        "checks": ["pii", "secret"],
+    });
+
+    let client = reqwest::Client::new();
+    let endpoint = format!("{}/v1/firewall/check", gateway_url().trim_end_matches('/'));
+    let mut builder = client
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(10))
+        .json(&payload);
+    if let Some(token) = gateway_token() {
+        builder = builder.bearer_auth(token);
+    }
+
+    let resp = match builder.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            if allow_fallback {
+                return Ok(());
+            }
+            return Err(format!(
+                "channel egress: gateway firewall unreachable (fail-closed): {e}"
+            ));
+        }
+    };
+    if !resp.status().is_success() {
+        if allow_fallback {
+            return Ok(());
+        }
+        return Err(format!(
+            "channel egress: gateway firewall returned HTTP {}",
+            resp.status()
+        ));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("channel egress: invalid gateway firewall response: {e}"))?;
+    let allowed = body
+        .get("allowed")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if allowed {
+        Ok(())
+    } else {
+        Err("channel egress: message blocked by the gateway firewall (egress DLP)".to_string())
+    }
+}
+
 /// Resolve the OpenAI-compatible base URL of the currently selected local
 /// engine, for registering it as the gateway's `local` provider (U19).
 ///

@@ -132,10 +132,12 @@ fn default_gateway_config() -> Option<PathBuf> {
 ///   - `GATEWAY_CONFIG`     — the gateway config path (child + Core's own reader).
 ///   - `RYU_SHADOW_URL`     — every Shadow client (`clips`, `mcp/shadow`, `meetings`).
 ///   - `RYU_EMBED_BASE_URL` / `RYU_RERANKER_BASE_URL` — the RAG registry clients.
+///   - `RYU_RESEARCH_UPSTREAM` — the `ryu_research` crate's `research_base_url`
+///     (the proxy + `research__*` tools), whose port const lives out of boundary.
 ///
-/// The matching *spawn* sides (llama.cpp chat/embed/rerank, Shadow, the SDK app)
-/// are threaded directly through [`port`] in `sidecar/**`, so both sides shift
-/// together.
+/// The matching *spawn* sides (llama.cpp chat/embed/rerank, Shadow, the SDK app,
+/// and the research sidecar) are threaded directly through [`port`] in
+/// `sidecar/**`, so both sides shift together.
 pub fn apply_env_defaults() {
     if is_release() {
         return;
@@ -161,6 +163,10 @@ pub fn apply_env_defaults() {
     set_if_unset(
         "RYU_RERANKER_BASE_URL",
         format!("http://127.0.0.1:{}", port(8082)),
+    );
+    set_if_unset(
+        "RYU_RESEARCH_UPSTREAM",
+        format!("http://127.0.0.1:{}", port(8087)),
     );
 }
 
@@ -197,6 +203,11 @@ mod tests {
         assert_eq!(port_for(8080, "dev"), 9080); // llamacpp chat
         assert_eq!(port_for(8081, "dev"), 9081); // llamacpp embed
         assert_eq!(port_for(8082, "dev"), 9082); // llamacpp rerank
+        assert_eq!(port_for(8083, "dev"), 9083); // sdcpp media
+        assert_eq!(port_for(8084, "dev"), 9084); // mlx-vlm
+        assert_eq!(port_for(8086, "dev"), 9086); // mlx-lm
+        assert_eq!(port_for(8087, "dev"), 9087); // research sidecar
+        assert_eq!(port_for(8090, "dev"), 9090); // whisper stt
         assert_eq!(port_for(3030, "dev"), 4030); // shadow
         assert_eq!(port_for(3200, "dev"), 4200); // sdk app
         assert_eq!(port_for(7980, "dev"), 8980); // core bind

@@ -23,15 +23,28 @@ use anyhow::Context;
 
 use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
 
-/// Loopback port the whisper voice server binds to. Deliberately distinct from
-/// llama.cpp's 8080 so a chat engine and the voice engine can run together.
-pub const WHISPER_PORT: u16 = 8090;
-const WHISPER_ADDR: &str = "127.0.0.1:8090";
+/// Canonical (release) loopback port the whisper voice server binds to.
+/// Deliberately distinct from llama.cpp's 8080 so a chat engine and the voice
+/// engine can run together. The concrete port is profile-aware — see
+/// [`whisper_port`].
+pub const WHISPER_PORT_BASE: u16 = 8090;
+
+/// Profile-aware whisper port (release 8090, dev 9090, …). Both the spawn side
+/// (`--port`) and every client (`whisper_base_url`) resolve the SAME port here,
+/// so a dev stack never adopts the release stack's whisper server.
+pub fn whisper_port() -> u16 {
+    crate::profile::port(WHISPER_PORT_BASE)
+}
+
+/// Loopback `host:port` the whisper server binds to (profile-aware).
+fn whisper_addr() -> String {
+    format!("127.0.0.1:{}", whisper_port())
+}
 
 /// Base URL the whisper server serves on once resident. The transcribe data
 /// path posts audio to `{base}/inference` (whisper.cpp's multipart STT API).
 pub fn whisper_base_url() -> String {
-    format!("http://{WHISPER_ADDR}")
+    format!("http://{}", whisper_addr())
 }
 
 /// Default GGML model file whisper loads when `RYU_WHISPER_MODEL` is unset. A
@@ -123,7 +136,8 @@ impl Sidecar for WhisperCppManager {
             if Self::server_reachable(&client).await {
                 adopted_external.store(true, Ordering::Relaxed);
                 tracing::info!(
-                    "whisper server already running on {WHISPER_ADDR} — adopting existing server"
+                    "whisper server already running on {} — adopting existing server",
+                    whisper_addr()
                 );
                 return Ok(());
             }
@@ -155,7 +169,7 @@ impl Sidecar for WhisperCppManager {
                 "--host".into(),
                 "127.0.0.1".into(),
                 "--port".into(),
-                WHISPER_PORT.to_string(),
+                whisper_port().to_string(),
                 "-m".into(),
                 model.to_string_lossy().to_string(),
             ];
@@ -165,9 +179,10 @@ impl Sidecar for WhisperCppManager {
                 .await
                 .context("spawning whisper-server process")?;
 
+            let addr = whisper_addr();
             tokio::time::timeout(std::time::Duration::from_secs(30), async {
                 loop {
-                    if tokio::net::TcpStream::connect(WHISPER_ADDR).await.is_ok() {
+                    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -176,7 +191,7 @@ impl Sidecar for WhisperCppManager {
             .await
             .context("whisper-server did not start within 30s")?;
 
-            tracing::info!("whisper-server started on {WHISPER_ADDR}");
+            tracing::info!("whisper-server started on {addr}");
             Ok(())
         })
     }

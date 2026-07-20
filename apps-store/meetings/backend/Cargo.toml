@@ -41,7 +41,7 @@ hound = "3"
 # Built at DEFAULT features (NO `voice-parakeet`) so the sidecar stays free of the
 # heavy git `transcribe-rs` + native ONNX Runtime dep; `default_stt_engine()` then
 # resolves to whisper, matching Core's lean-build fallback. ZERO apps/core dep.
-ryu-stt = { path = "../../../crates/core/stt" }
+ryu-stt = { path = "../../../crates/core/stt", version = "0.0.5" }
 # Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-quests` /
 # `ryu-teams`. Core already pulls all of these, so there is no new dependency in the
 # in-process build.

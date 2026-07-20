@@ -2,7 +2,7 @@
 name = "ryu-gw-cache"
 version = "0.0.5"
 edition = "2021"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
 description = "Ryu Gateway response-cache stage: the exact-match TTL cache (CacheBackend) and the embedding-similarity semantic cache (SemanticCacheBackend), each a swappable trait + id-keyed registry with an in-memory built-in. A self-contained extracted gateway stage crate."
 

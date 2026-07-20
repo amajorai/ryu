@@ -41,7 +41,8 @@
       "!apps/web/public/compare-logos",
       "!apps/tui/components/ui",
       "!apps/tui/hooks",
-      "!apps/tui/lib"
+      "!apps/tui/lib",
+      "!**/components/dither-kit"
     ]
   },
   "formatter": {

@@ -15,8 +15,8 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 tracing = "0.1"
 async-trait = "0.1"
 urlencoding = "2"
-ryu-downloads = { path = "../downloads" }
-ryu-model-format = { path = "../model-format" }
+ryu-downloads = { path = "../downloads", version = "0.0.5" }
+ryu-model-format = { path = "../model-format", version = "0.0.5" }
 
 [dev-dependencies]
 tempfile = "3"

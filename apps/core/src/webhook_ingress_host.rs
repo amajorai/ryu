@@ -31,6 +31,14 @@ impl WebhookIngressHost for CoreWebhookIngressHost {
         crate::composio_auth::is_configured()
     }
 
+    fn has_webhook_trigger(&self) -> bool {
+        crate::workflow::store::list_workflows().iter().any(|wf| {
+            wf.triggers
+                .iter()
+                .any(|t| matches!(t, crate::workflow::WorkflowTrigger::Webhook { .. }))
+        })
+    }
+
     fn verify_webhook_signature(&self, raw_body: &[u8], signature: Option<&str>) -> bool {
         crate::composio_triggers::verify_webhook_signature(raw_body, signature)
     }

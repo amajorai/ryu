@@ -1,0 +1,81 @@
+{
+  "slug": "software-engineer",
+  "name": "Software Engineering",
+  "navLabel": "Software Engineering",
+  "category": "Engineering & Product",
+  "icon": "Code",
+  "tagline": "Ship features with coding agents that run on a git branch and open a PR you review.",
+  "heroEyebrow": "Ryu for Software Engineering",
+  "heroTitle": "A coding agent that works like a teammate.",
+  "heroSubtitle": "Point Ryu at a folder, pick a branch, and let an agent build on an isolated git worktree. You review the diff, then apply it or open a pull request. Swap Claude Code, Codex, Gemini CLI, or a local model per task, with every call governed.",
+  "visualKey": "CodePaneSplit",
+  "intro": "Coding agents are powerful but hard to trust when they edit your working tree directly. Ryu wraps the engines you already use and runs each task on a per-run git worktree, so changes land as a diff you review before anything touches main. You stay in control, keep code on your machine, and never get locked to one model.",
+  "highlights": [
+    {
+      "title": "Git-native by design",
+      "description": "Every run gets its own branch and worktree, so you review a clean diff and apply it or open a PR instead of trusting blind edits."
+    },
+    {
+      "title": "Any engine, per task",
+      "description": "Wrap Claude Code, Codex, Gemini CLI, or Pi, and switch the model behind an agent without rewiring your setup."
+    },
+    {
+      "title": "Local and private",
+      "description": "Run a local model on install with no telemetry, so proprietary source never leaves your machine unless you choose to route out."
+    },
+    {
+      "title": "Grounded in your repo",
+      "description": "Spaces and RAG index your codebase and docs, so agents answer with the patterns and conventions you actually use."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Implement a feature",
+      "description": "Hand an agent a ticket and a branch; it writes the code on a worktree and returns a diff you can review and apply or turn into a PR."
+    },
+    {
+      "title": "Fix a failing build",
+      "description": "Point an agent at the failing test or stack trace, let it reproduce and patch on an isolated run, then confirm the suite passes before merge."
+    },
+    {
+      "title": "Refactor safely",
+      "description": "Rename, extract, or restructure across many files on a worktree, so the change is reviewable as one diff and easy to revert."
+    },
+    {
+      "title": "Review a pull request",
+      "description": "Run a reviewer agent over an open PR to flag bugs, missing edge cases, and style drift against your repo conventions."
+    },
+    {
+      "title": "Parallel background runs",
+      "description": "Kick off several agents on separate worktrees at once, so independent tasks make progress without colliding on your working tree."
+    },
+    {
+      "title": "Connect your tools",
+      "description": "Wire GitHub, Linear, Jira, and Postgres through MCP and Connections, so an agent can read an issue, query data, and open the PR."
+    }
+  ],
+  "examplePrompts": [
+    "On a new branch, add rate limiting to the /api/auth endpoint and open a PR with tests.",
+    "Reproduce the failing checkout test, find the root cause, and patch it on a worktree.",
+    "Refactor the user service to use the repository pattern across all call sites, then show me the diff.",
+    "Review PR #482 for race conditions and missing error handling, with the risky lines quoted.",
+    "Read Linear issue ENG-204, implement it, and link the PR back to the ticket."
+  ],
+  "faq": [
+    {
+      "q": "Will an agent edit my working tree directly?",
+      "a": "No. Each run executes on its own git worktree and branch under the hood. You see the result as a diff and choose to apply it or open a pull request, so your active checkout is never touched without review."
+    },
+    {
+      "q": "Can I keep using Claude Code or Codex?",
+      "a": "Yes. Ryu wraps the engines you already run instead of replacing them, so Claude Code, Codex, Gemini CLI, and Pi all work behind one interface. You can swap the model per task without changing your workflow."
+    },
+    {
+      "q": "Does my source code leave my machine?",
+      "a": "Only if you choose. Ryu runs a local model on install with no telemetry, and when you route to a cloud model the Gateway governs and logs every call, so you decide what leaves and can audit it."
+    }
+  ],
+  "ctaTitle": "Ship faster without losing control of the diff.",
+  "ctaSubtitle": "Run coding agents on a git branch, review the change, and merge on your terms.",
+  "ctaNote": "Git-native runs · Any engine · Local-first"
+}

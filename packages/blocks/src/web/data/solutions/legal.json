@@ -1,0 +1,81 @@
+{
+  "slug": "legal",
+  "name": "Legal",
+  "navLabel": "Legal",
+  "category": "Legal & Compliance",
+  "icon": "Scale",
+  "tagline": "Draft, review, and research with agents that keep privileged data on your machine.",
+  "heroEyebrow": "Ryu for Legal",
+  "heroTitle": "An AI legal team that never leaks.",
+  "heroSubtitle": "Review contracts, surface risky clauses, and draft first passes with agents that run on your own machine. Privileged matter never leaves your device unless you say so, and every model call is governed, logged, and auditable.",
+  "visualKey": "GatewayVisual",
+  "intro": "Legal work is high-stakes and confidential: a contract review, a discovery summary, or a memo can't be pasted into a public chatbot that trains on your data. Ryu runs the same caliber of agent locally, with the Gateway redacting sensitive data on egress and recording every call, so you get speed without surrendering privilege.",
+  "highlights": [
+    {
+      "title": "Privilege stays private",
+      "description": "Run a local Gemma 4 on install, or route to a cloud model with PII and DLP redaction on every request."
+    },
+    {
+      "title": "Auditable by default",
+      "description": "Every model and tool call is logged in the Gateway audit trail, so you can show exactly what an agent saw and did."
+    },
+    {
+      "title": "Cites its sources",
+      "description": "Ground agents on your own clause library and matter files with Spaces and RAG, so answers point back to the document."
+    },
+    {
+      "title": "No lock-in",
+      "description": "Bring your own model and key. Swap Claude, GPT, or a local model per task without rewriting a thing."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Contract review",
+      "description": "Flag non-standard terms, missing clauses, and one-sided indemnities against your playbook, with the risky language quoted inline."
+    },
+    {
+      "title": "First-pass drafting",
+      "description": "Generate NDAs, engagement letters, and clause variations from your own templates, then redline against a counterparty's markup."
+    },
+    {
+      "title": "Discovery & summaries",
+      "description": "Summarize long filings, deposition transcripts, and document dumps into timelines and issue lists you can verify."
+    },
+    {
+      "title": "Legal research",
+      "description": "Ask questions across your matter files and clause library; answers cite the exact document and section they came from."
+    },
+    {
+      "title": "Due diligence",
+      "description": "Run a checklist agent across a data room, extracting parties, dates, change-of-control triggers, and obligations into a table."
+    },
+    {
+      "title": "Intake & triage",
+      "description": "Turn an inbound matter into a structured brief: parties, issues, deadlines, and a recommended next step, drafted for review."
+    }
+  ],
+  "examplePrompts": [
+    "Review this MSA and list every clause that deviates from our standard playbook, with the risky language quoted.",
+    "Draft a mutual NDA from our template for a SaaS vendor, 2-year term, Singapore governing law.",
+    "Summarize this 80-page deposition into a timeline of key admissions with page citations.",
+    "Extract all change-of-control and assignment provisions from the contracts in this Space.",
+    "Turn this client email into a structured intake brief with parties, issues, and deadlines."
+  ],
+  "faq": [
+    {
+      "q": "Is client-confidential data safe with Ryu?",
+      "a": "Yes. Ryu is local-first: you can run a model entirely on your machine with no telemetry. When you route to a cloud model, the Gateway redacts PII and sensitive data on egress and logs the call, so privileged material is governed end to end."
+    },
+    {
+      "q": "Can it cite the source documents?",
+      "a": "Yes. Ground agents on your clause library and matter files with Spaces and RAG. Answers point back to the specific document and section, so a human can verify before relying on them."
+    },
+    {
+      "q": "Is this a replacement for a lawyer?",
+      "a": "No. Ryu accelerates review, drafting, and research, but every output is a first pass for a qualified professional to check. The audit trail makes that review fast and defensible."
+    }
+  ],
+  "ctaTitle": "Give your practice an AI associate.",
+  "ctaSubtitle": "Review, draft, and research faster, with privilege kept private and every call on the record.",
+  "ctaNote": "Local-first · PII/DLP redaction · Full audit trail"
+}

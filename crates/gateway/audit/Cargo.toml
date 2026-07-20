@@ -2,7 +2,7 @@
 name = "ryu-gw-audit"
 version = "0.0.5"
 edition = "2021"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
 description = "Ryu Gateway audit stage: the SQLite-backed append-only request log + lifetime token totals + query/summary, exposed as a swappable AuditBackend trait + id-keyed AuditRegistry with the built-in AuditLogger active by default. An extracted gateway stage crate (mirrors ryu-gw-budget / ryu-gw-evals)."
 

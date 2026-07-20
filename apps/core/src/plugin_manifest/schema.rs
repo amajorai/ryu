@@ -152,7 +152,8 @@ mod tests {
             http.resolve_backend().unwrap(),
             ToolBackend::Http {
                 url: "https://api.example.com/quote".to_owned(),
-                method: "POST".to_owned()
+                method: "POST".to_owned(),
+                header_params: vec![],
             }
         );
     }

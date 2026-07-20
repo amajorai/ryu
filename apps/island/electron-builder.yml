@@ -1,0 +1,89 @@
+appId: ai.amajor.ryu.island
+productName: Ryu Island
+# Stable, predictable artifact names so a downloader (e.g. the desktop's
+# `~/.ryu/bin`-style managed-companion install, mirroring ryu-core's
+# `install.rs`) can hardcode a `releases/latest/download/<name>` URL. Without a
+# pinned name electron-builder emits version-stamped, space-containing defaults
+# ("Ryu Island Setup 0.0.1.exe") that no fixed URL can resolve. The two Windows
+# `.exe` producers (nsis, portable) get distinct `-setup`/`-portable` overrides
+# below to avoid a same-name collision; every other target differs by extension.
+artifactName: ryu-island-${os}-${arch}.${ext}
+directories:
+  output: artifacts
+  # `resources/` (not the conventional `build/`, which the root .gitignore excludes)
+  # so the tracked `resources/icon.png` reaches CI. electron-builder auto-discovers
+  # `icon.png` here and derives the per-target icons (.ico / .icns / linux png set).
+  buildResources: resources
+# electron-vite emits main/preload/renderer bundles into out/; package those plus
+# the manifest. `resources/**` carries `?asset` files (e.g. the tray icon, which
+# the main bundle references as `__dirname/../../resources/...`). Everything else
+# (src, node_modules dev deps) is excluded.
+files:
+  - out/**
+  - resources/**
+  - package.json
+# `uiohook-napi` is a native module (its prebuilt `.node` powers hold-to-talk key
+# release + Tab agent-cycling in the island). Native binaries cannot be `require`d
+# from inside the asar, so unpack them onto the real filesystem. electron-builder's
+# smartUnpack normally detects this, but pin it explicitly since the feature breaks
+# silently (voice input still works via the global shortcut) if the binary is missing.
+asarUnpack:
+  - "**/node_modules/uiohook-napi/**"
+# Icons for every target are derived by electron-builder from `resources/icon.png`
+# (512×512, the buildResources dir above): it emits the .ico (Windows), .icns
+# (macOS), and the Linux png set.
+# `mica-electron` is a Windows-only optionalDependency loaded lazily + win32-guarded
+# (see main/window.ts), so it never breaks the macOS/Linux package. Code signing /
+# notarization is still out of scope — unsigned builds run with a Gatekeeper warning
+# (macOS) and need the AppImage chmod'd (Linux); CI signing is a follow-on.
+win:
+  target:
+    - nsis
+    - portable
+# `portable` is the spawnable single-exe target (no install step): it self-extracts
+# to a temp dir on launch, so a desktop-managed companion install can download this
+# one file and spawn it directly, exactly like the self-contained `ryu-core` binary.
+# Stable name (no version) so `releases/latest/download/ryu-island-windows-<arch>-portable.exe`
+# always resolves.
+portable:
+  artifactName: ryu-island-${os}-${arch}-portable.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Ryu Island
+  # Distinct from the portable exe (both are `.exe`) so they never collide in the
+  # release. This is the interactive installer for users who install island standalone.
+  artifactName: ryu-island-${os}-${arch}-setup.${ext}
+# macOS: the island is a menu-bar companion, so `LSUIElement: true` makes it an
+# accessory app (menu-bar tray + global hotkey, no Dock icon, no app menu).
+# NSMicrophoneUsageDescription is required for the renderer's getUserMedia voice
+# input. Ship both `dmg` (download) and `zip` (electron-updater reads the zip +
+# latest-mac.yml — a .dmg alone cannot auto-update).
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  extendInfo:
+    LSUIElement: true
+    NSMicrophoneUsageDescription: Ryu Island uses the microphone for voice input.
+# Linux: AppImage (portable, supports electron-updater) + deb. The tray needs an
+# AppIndicator host (KDE/Unity have it natively; GNOME needs the AppIndicator
+# extension) — the global hotkey is the fallback control surface where it is absent.
+linux:
+  category: Utility
+  target:
+    - AppImage
+    - deb
+# Auto-update feed: GitHub releases on the canonical Ryu repo, matching Core's
+# `RYU_REPO` ("amajorai/ryu"). electron-updater reads this feed via the
+# `app-update.yml` electron-builder emits into the packaged resources.
+publish:
+  provider: github
+  owner: amajorai
+  repo: ryu
+  # Auto-publish (not a draft): the island installers land in amajorai/ryu's matching
+  # v{version} release — the same one the desktop + binaries are mirrored into, so a
+  # single release holds every bundle for the version.
+  releaseType: release

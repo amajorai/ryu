@@ -4,6 +4,7 @@ version = "0.0.5"
 edition = "2021"
 description = "C-ABI surface over the ryu-sdk Rust core, consumed by the Go (cgo) binding and any other C-FFI client."
 license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
 
 [lib]
 name = "ryu_sdk_ffi"

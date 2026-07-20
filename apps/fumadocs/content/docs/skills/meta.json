@@ -5,6 +5,7 @@
   "icon": "Sparkles",
   "pages": [
     "index",
+    "ecosystem",
     "setup-ryu",
     "catalog",
     "authoring",

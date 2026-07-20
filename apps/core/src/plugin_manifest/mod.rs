@@ -197,27 +197,31 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("fixtures/finetune.plugin.json"),
     // Spaces + Meetings — the first REAL plugin→plugin dependency edge.
     //
-    // Both are "governance shells" (zero runnables, like ghost/shadow): the code
-    // stays in-crate (`server/spaces.rs`, `server/meetings_api.rs`) and the record
-    // is what governs it — install/enable/disable + the route gate. Declaring a
-    // runnable here would register a PHANTOM tool with no implementation.
+    // Both have zero runnables (like ghost/shadow), so the record governs them —
+    // install/enable/disable. They differ in where the impl lives: `spaces` stays
+    // IN-PROCESS (`server/spaces.rs`, no `public_mount`); `meetings` was moved
+    // OUT-OF-PROCESS (2026-07-18) and now serves `/api/meetings/*` via a `public_mount`
+    // sidecar (`apps-store/meetings/backend`, reached over loopback via
+    // `meetings_client.rs`) — the old in-crate `server/meetings_api.rs` is gone.
+    // Declaring a runnable here would register a PHANTOM tool with no implementation.
     //
     // Order matters only for readability: `plugins::seed` resolves the topological
     // order from `requires`, so the dependency is seeded before its dependent no
     // matter how these are listed.
     include_str!("fixtures/spaces.plugin.json"),
     // Meetings `requires` Spaces because it genuinely writes its notes into the
-    // "Meetings" Space (`server/meetings_api.rs::save_notes_to_space` →
-    // `state.spaces.ingest_document` / `create_space`). Disabling Spaces under it
-    // would leave that write path pointing at a disabled capability, which is
-    // exactly what `plugins::graph` now refuses.
+    // "Meetings" Space (the sidecar's note-save path lands in `state.spaces` via the
+    // Core-side `MeetingIngest`/spaces seam). Disabling Spaces under it would leave that
+    // write path pointing at a disabled capability, which is exactly what
+    // `plugins::graph` now refuses.
     include_str!("fixtures/meetings.plugin.json"),
-    // Five clean LEAF features turned into governance-shell Apps (toggle via the
-    // plugin lifecycle + physically compile-out-able for a lean kernel). Each gates
-    // its own `/api/<feature>/*` route surface via `require_app_enabled`; the impl
-    // stays in-crate. All five are default-on (see `plugins::builtins`) so the gate
-    // is transparent on a fresh install — the routes were always-on before, so only
-    // a default-on seed keeps them reachable (identical to the Meetings/Spaces edge).
+    // Five clean LEAF features turned into out-of-process sidecar Apps (2026-07-18).
+    // Each serves its own `/api/<feature>/*` surface OUT-OF-PROCESS via a `public_mount`
+    // sidecar bin + the generic ext-proxy loader; no in-process routes remain. The
+    // plugin record governs install/enable/disable (toggle via the plugin lifecycle).
+    // All five are default-on (see `plugins::builtins`) so the surface is reachable on a
+    // fresh install — the routes were always-on before, so only a default-on seed keeps
+    // them reachable (identical to the Meetings/Spaces edge).
     //
     // `research`/`dashboards`/`teams` declare NO `requires`. `clips` requires the
     // `shadow` capture app (it is a Core→Shadow proxy) and `recipes` requires the
@@ -229,9 +233,13 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("fixtures/teams.plugin.json"),
     include_str!("fixtures/clips.plugin.json"),
     include_str!("fixtures/recipes.plugin.json"),
-    // Wave-2: five more leaf features turned into governance-shell Apps (toggle via
-    // the plugin lifecycle + route gate; impl stays in-crate). All default-on so the
-    // gate is transparent on a fresh install (the routes were always-on before).
+    // Wave-2: five more leaf features turned into Apps (toggle via the plugin lifecycle).
+    // Of these `quests` + `healing` now serve `/api/<feature>/*` OUT-OF-PROCESS via a
+    // `public_mount` sidecar + the generic ext-proxy loader; `approvals`/`skills`/`learning`
+    // remain IN-PROCESS governance shells that gate their own route surface via
+    // `require_app_enabled` (`learning` is the Outcome-B in-process exception). All
+    // default-on so the surface is reachable on a fresh install (the routes were always-on
+    // before).
     //
     // `quests`/`approvals`/`skills` declare NO `requires`. `learning` requires the
     // `skills` app (it writes synthesized skills) and `healing` requires the
@@ -248,13 +256,15 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("fixtures/skills.plugin.json"),
     include_str!("fixtures/learning.plugin.json"),
     include_str!("fixtures/healing.plugin.json"),
-    // Wave-3: two more leaf features turned into governance-shell Apps (toggle via
-    // the plugin lifecycle + route gate; impl stays in-crate). Both default-on so the
-    // gate is transparent on a fresh install (the routes were always-on before).
+    // Wave-3: two more leaf features turned into Apps (toggle via the plugin lifecycle).
+    // `monitors` now serves `/api/monitors/*` OUT-OF-PROCESS via a `public_mount` sidecar
+    // + the generic ext-proxy loader; `hardware` stays IN-PROCESS and gates its route
+    // surface via `require_app_enabled`. Both default-on so the surface is reachable on a
+    // fresh install (the routes were always-on before).
     //
-    // Both declare NO `requires`. `monitors` gates ONLY its `/api/monitors/*` route
-    // surface (the interleaved `/api/activity/*`, `/api/events/*`, and
-    // `/api/notifications/*` streams are separate concerns and stay ungated).
+    // Both declare NO `requires`. `monitors` owns ONLY its `/api/monitors/*` surface
+    // (the interleaved `/api/activity/*`, `/api/events/*`, and
+    // `/api/notifications/*` streams are separate concerns and stay Core-side, ungated).
     // `hardware` gates ONLY the PROTECTED `/api/hardware/devices*` device-registry
     // CRUD; the PUBLIC device channel (`/api/hardware/{ws,pair,display}`) stays ungated
     // because physical ESP32 devices connect there and gating it would break pairing.
@@ -311,6 +321,13 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // manifest exists only to seed the companion's UI bundle + `timeline:read` grant,
     // not to gate a route surface.
     include_str!("fixtures/timeline.plugin.json"),
+    // The Calendar app — a sandboxed companion (`ui_format:"html"`). It was already
+    // in the default-on seed set (`plugins::seed` maps CALENDAR_UI_HTML) and routed
+    // in the desktop (`/calendar`), but its MANIFEST was never registered here, so
+    // the record seeded with no manifest and calendar could not appear in
+    // `/api/plugins`, plugin contributions, or the marketplace Apps catalog. Register
+    // it so it loads like every other companion.
+    include_str!("fixtures/calendar.plugin.json"),
     // W7 frontend extraction: the SKILL.md authoring editor moved to a sandboxed
     // companion app (`apps-store/skill-editor/ui`). Default-on, no `requires` — the
     // `/api/skills` authoring endpoints stay ungated on the Core router (the desktop host

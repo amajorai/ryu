@@ -1,0 +1,81 @@
+{
+  "slug": "hr",
+  "name": "Human Resources",
+  "navLabel": "Human Resources",
+  "category": "People & Operations",
+  "icon": "Users",
+  "tagline": "Answer policy questions, draft sensitive documents, and handle people data without exposing it.",
+  "heroEyebrow": "Ryu for Human Resources",
+  "heroTitle": "An HR partner that keeps people data private.",
+  "heroSubtitle": "Answer policy questions from your real handbook, draft offers and reviews, and prep onboarding without pasting employee data into a public chatbot. Run locally for the sensitive work, and let the Gateway redact and log everything else.",
+  "visualKey": "AgentsVisual",
+  "intro": "HR handles the most sensitive data in the company: salaries, performance, health, complaints. That rules out generic AI tools that train on your input. Ryu runs a capable agent on your own machine, grounds it on your actual policies, and uses the Gateway to redact and audit every call, so you get help without putting people data at risk.",
+  "highlights": [
+    {
+      "title": "People data stays put",
+      "description": "Run a local model for sensitive work, so salaries, reviews, and complaints never leave your device."
+    },
+    {
+      "title": "Answers from your handbook",
+      "description": "Ground agents on your real policies and benefits docs with Spaces, so answers cite the actual source."
+    },
+    {
+      "title": "Redacted and logged",
+      "description": "When you use a cloud model, the Gateway strips PII on egress and records the call for compliance."
+    },
+    {
+      "title": "Configurable per task",
+      "description": "Build an HR agent as a card with the right model, tools, and access for each kind of work."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Policy Q and A",
+      "description": "Answer employee questions on leave, benefits, and conduct straight from your handbook, with a citation."
+    },
+    {
+      "title": "Document drafting",
+      "description": "Draft offer letters, PIPs, warning letters, and review summaries from your templates for HR to finalize."
+    },
+    {
+      "title": "Onboarding prep",
+      "description": "Build a new-hire onboarding plan, draft the welcome note, and assemble the first-week checklist."
+    },
+    {
+      "title": "Job description writing",
+      "description": "Turn a hiring-manager brief into a structured, inclusive job description aligned to your leveling framework."
+    },
+    {
+      "title": "Engagement survey analysis",
+      "description": "Summarize open-ended survey responses into themes and sentiment without exposing individual answers."
+    },
+    {
+      "title": "Compliance reminders",
+      "description": "Track training and certification deadlines and draft the reminder nudges for who's due."
+    }
+  ],
+  "examplePrompts": [
+    "How many days of parental leave does our policy give, and what's the notice period? Cite the handbook.",
+    "Draft an offer letter from our template for a senior engineer in Singapore at this band.",
+    "Build a first-week onboarding plan and welcome note for a new product manager.",
+    "Turn this hiring-manager brief into an inclusive job description aligned to our L4 framework.",
+    "Summarize these 200 open-ended survey responses into themes, without quoting anyone identifiable."
+  ],
+  "faq": [
+    {
+      "q": "Is employee data safe to use with Ryu?",
+      "a": "Yes. Ryu is local-first, so you can run an agent entirely on your machine with no telemetry for sensitive work. When you route to a cloud model, the Gateway redacts PII and logs the call for compliance."
+    },
+    {
+      "q": "Will policy answers be accurate to our company?",
+      "a": "Ground agents on your own handbook and benefits docs with Spaces and RAG. Answers cite the specific policy section, so you can confirm before sharing with an employee."
+    },
+    {
+      "q": "Can it make HR decisions for us?",
+      "a": "No. Ryu drafts documents and surfaces information so an HR professional can decide and finalize. Every output is a first pass for a human, and the audit trail keeps it accountable."
+    }
+  ],
+  "ctaTitle": "Help your people faster, keep their data private.",
+  "ctaSubtitle": "Policy answers, sensitive drafts, and onboarding prep, grounded in your handbook and kept on your machine.",
+  "ctaNote": "Local-first · PII redaction · Handbook-grounded"
+}

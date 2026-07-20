@@ -38,11 +38,19 @@ export async function getLLMText(page: InferPageType<typeof source>) {
   const descriptionFromSpec =
     openapi?.structuredData?.contents?.[0]?.content ?? "";
 
+  // Extract tags from frontmatter for agent-optimized discoverability
+  const frontmatter = (page.data as Record<string, unknown>).frontmatter as
+    | { tags?: string[] }
+    | undefined;
+  const tags = frontmatter?.tags;
+  const tagsLine = tags?.length ? `Tags: ${tags.join(", ")}` : "";
+
   const header = [
     `Source: ${siteConfig.url}${page.url}`,
     `Title: ${page.data.title}`,
     methodLine ? `${methodLine}` : "",
-    `Description: ${page.data.description || descriptionFromSpec}`,
+    `Description: ${page.data.description || descriptionFromSpec || "(no description)"}`,
+    tagsLine,
   ]
     .filter(Boolean)
     .join("\n");

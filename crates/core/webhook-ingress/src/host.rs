@@ -43,6 +43,12 @@ pub trait WebhookIngressHost: Send + Sync {
     // ── Composio (the trust-relay + global-secret path) ──────────────────────
     /// Whether a Composio key is configured (the RyuRelay opt-in-by-use gate).
     fn composio_is_configured(&self) -> bool;
+    /// Whether this node has at least one workflow declaring a `Webhook`
+    /// trigger. The second explicit-use signal that opens the RyuRelay ingress:
+    /// a user-created webhook trigger is reachable only when Core is registered
+    /// with the relay, so the presence of one is enough to justify the outbound
+    /// subscription (the composio key is not the only legitimate use).
+    fn has_webhook_trigger(&self) -> bool;
     /// Verify an inbound Composio webhook against the global Composio secret.
     fn verify_webhook_signature(&self, raw_body: &[u8], signature: Option<&str>) -> bool;
     /// Verify a per-workflow webhook against a trigger-specific secret.

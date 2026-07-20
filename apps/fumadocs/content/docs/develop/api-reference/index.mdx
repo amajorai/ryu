@@ -23,7 +23,7 @@ several languages, and a live "try it" playground.
   `apps/core` (or fetch `GET /api/openapi.json` from a running Core), which writes
   `apps/fumadocs/specs/core-openapi.json` and adds deprecated `/api/apps` alias
   paths via `scripts/postprocess-core-openapi.py`. Copy the result to
-  `crates/ryu-sdk/specs/core-openapi.json` and `apps/web/public/openapi.json` to
+  `crates/sdk/core/specs/core-openapi.json` and `apps/web/public/openapi.json` to
   keep SDK conformance tests and agent discovery in sync.
 
 The reference pages themselves are produced from those specs by

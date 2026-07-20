@@ -1,0 +1,81 @@
+{
+  "slug": "data-science",
+  "name": "Data Science",
+  "navLabel": "Data Science",
+  "category": "Engineering & Product",
+  "icon": "Brain",
+  "tagline": "Explore, model, and document experiments with agents that keep your data on your machine.",
+  "heroEyebrow": "Ryu for Data Science",
+  "heroTitle": "An agent that does the grunt work of the notebook.",
+  "heroSubtitle": "Profile a dataset, draft feature pipelines, and write the model evaluation while you keep your hands on the science. Ryu runs locally so training data stays private, wraps any engine, and grounds answers in your own experiment history.",
+  "visualKey": "CoreVisual",
+  "intro": "Data science is mostly the unglamorous middle: cleaning, profiling, feature engineering, and writing up results. Ryu runs agents that handle that grind on your machine, so proprietary datasets never leave, and grounds them on your past notebooks and methods so suggestions match how your team actually works.",
+  "highlights": [
+    {
+      "title": "Data stays on device",
+      "description": "Run a local model with no telemetry, so training sets and proprietary features never leave your machine."
+    },
+    {
+      "title": "From data to draft",
+      "description": "Profile a dataset and get cleaning steps, feature ideas, and a starter pipeline you can run and refine."
+    },
+    {
+      "title": "Grounded in your work",
+      "description": "Index past notebooks and methods with Spaces and RAG, so an agent reuses your conventions instead of generic boilerplate."
+    },
+    {
+      "title": "Pick the right brain",
+      "description": "Swap a strong reasoning model for hard derivations and a local model for routine cleanup, per task, with no lock-in."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Exploratory analysis",
+      "description": "Profile a new dataset for distributions, missingness, and correlations, and surface the variables worth modeling."
+    },
+    {
+      "title": "Feature engineering",
+      "description": "Draft transformation and encoding steps from your column definitions, then explain the assumptions behind each one."
+    },
+    {
+      "title": "Model evaluation",
+      "description": "Compute and interpret metrics, build a confusion matrix breakdown, and explain where a model fails and why."
+    },
+    {
+      "title": "Experiment write-ups",
+      "description": "Turn a run's parameters and results into a clear report with the method, findings, and next experiments to try."
+    },
+    {
+      "title": "Literature grounding",
+      "description": "Ask questions across papers and internal docs in a Space, with answers citing the exact source for each claim."
+    },
+    {
+      "title": "Reproducibility checks",
+      "description": "Audit a notebook for hidden state, unseeded randomness, and leakage between train and test splits before you publish."
+    }
+  ],
+  "examplePrompts": [
+    "Profile this customer churn dataset and tell me which features look predictive and which are leaking the label.",
+    "Draft a feature pipeline that encodes the categoricals and handles the missing values in the income column.",
+    "Compare these two model runs by precision, recall, and calibration, and explain which one I should ship.",
+    "Write up this experiment as a report with the setup, results, and three follow-up experiments.",
+    "Check this notebook for data leakage and any randomness that isn't seeded."
+  ],
+  "faq": [
+    {
+      "q": "Is my training data safe?",
+      "a": "Yes. Ryu is local-first, so you can run a model entirely on your machine with no telemetry and keep proprietary datasets and features off the network entirely."
+    },
+    {
+      "q": "Can it learn how my team works?",
+      "a": "Yes. Index your past notebooks, methods, and docs in a Space, and agents ground their suggestions in your conventions and cite the source, instead of returning generic code."
+    },
+    {
+      "q": "Can I use a stronger model for hard problems?",
+      "a": "Yes. Ryu lets you swap engines per task, so you can route a derivation or proof to a strong reasoning model and keep routine cleanup on a fast local one, with no lock-in."
+    }
+  ],
+  "ctaTitle": "Automate the grind, keep the science.",
+  "ctaSubtitle": "Profile, engineer, and document experiments with agents that respect your data.",
+  "ctaNote": "Local-first data · Grounded in your notebooks · Any model"
+}

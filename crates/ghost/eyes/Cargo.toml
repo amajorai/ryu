@@ -10,7 +10,7 @@ repository = "https://github.com/amajorai/ghost"
 name = "ghost_eyes"
 
 [dependencies]
-ghost-permissions = { path = "../permissions" }
+ghost-permissions = { path = "../permissions", version = "0.0.5" }
 anyhow = "1"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }

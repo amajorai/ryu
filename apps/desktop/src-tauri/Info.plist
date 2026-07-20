@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Tauri merges this file into the generated macOS bundle Info.plist.
+
+  NSMicrophoneUsageDescription is MANDATORY: without it, the first
+  navigator.mediaDevices.getUserMedia() call hard-crashes the app via the
+  macOS TCC kill (it is not a graceful permission denial). The string below is
+  what the one-time OS microphone prompt shows the user.
+
+  Only the microphone key is declared on purpose. Voice input is the single
+  media capability this desktop app exercises today; camera/location/etc. are
+  intentionally omitted so we never request a permission we do not use. On
+  Windows the equivalent prompt is suppressed via the window's
+  additionalBrowserArgs (--use-fake-ui-for-media-stream) in tauri.conf.json.
+-->
+<plist version="1.0">
+  <dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Ryu uses your microphone for voice input so you can speak to your agents instead of typing.</string>
+  </dict>
+</plist>

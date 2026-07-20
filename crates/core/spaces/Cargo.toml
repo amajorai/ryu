@@ -21,11 +21,11 @@ tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
-ryu-rag = { path = "../rag" }
+ryu-rag = { path = "../rag", version = "0.0.5" }
 # The shared tenancy composition layer (`ResourceKey`). A pure-data contract
 # crate (serde/schemars/semver only) — NOT apps/core — so depending on it to
 # derive `DocOwner` keeps the "ZERO apps/core dependency" invariant intact.
-ryu-kernel-contracts = { path = "../kernel-contracts" }
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.5" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

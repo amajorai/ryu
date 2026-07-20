@@ -34,6 +34,30 @@ pub async fn from_prefs(prefs: &PreferencesStore, server_url: &str) -> Ingress {
     ryu_webhook_ingress::from_prefs(backend.as_deref(), url.as_deref(), server_url)
 }
 
+/// Ensure the ingress subscription is live after a workflow with a `Webhook`
+/// trigger is saved, so its per-workflow URL becomes reachable without a Core
+/// restart. Scoped to the managed **RyuRelay** backend: only the relay needs a
+/// per-node register (to mint the token `relay_inbound_url` composes); the tunnel
+/// backends (Cloudflared / Tailscale / OwnRelay) forward every path to Core and
+/// already started at boot, so a workflow webhook is reachable through them with
+/// no re-registration. Best-effort: a failure just leaves the URL unresolved
+/// (the caller can retry on the next save) and never affects the save itself.
+pub async fn ensure_relay_started_after_save() {
+    let prefs = match PreferencesStore::open_default() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::debug!("webhook-ingress: prefs unavailable for relay ensure-start ({e})");
+            return;
+        }
+    };
+    if configured_kind(&prefs).await != IngressKind::RyuRelay {
+        return;
+    }
+    if let Err(e) = ryu_webhook_ingress::ensure_relay_started().await {
+        tracing::info!("webhook-ingress: relay ensure-start after save not active ({e})");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! The real-wiring canary for the extraction: exercises the crate's unified

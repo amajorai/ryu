@@ -17,10 +17,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
-ryu-crypto = { path = "../crypto" }
+ryu-crypto = { path = "../crypto", version = "0.0.5" }
 # The shared tenancy composition layer (`ResourceKey`). A pure-data contract
 # crate (NOT apps/core), so the "ZERO apps/core dependency" invariant holds.
-ryu-kernel-contracts = { path = "../kernel-contracts" }
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.5" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

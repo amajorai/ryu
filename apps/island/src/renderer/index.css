@@ -1,0 +1,87 @@
+@import "@ryu/ui/globals.css";
+
+@source "./";
+
+@theme inline {
+	--font-sans: "Inter Variable", sans-serif;
+}
+
+@layer base {
+	html,
+	body,
+	#root {
+		height: 100%;
+		margin: 0;
+		overflow: hidden;
+		background: transparent;
+	}
+	body {
+		-webkit-user-select: none;
+		user-select: none;
+	}
+}
+
+/* Scrollbars: the desktop's ScrollArea look (packages/ui scroll-area.tsx) — a
+   fat, fully-rounded `bg-border` pill that floats inside a transparent track.
+   The 2px transparent border + background-clip:padding-box give the inset/
+   floating gap; it darkens to muted-foreground on hover. NOTE: we deliberately
+   do NOT set `scrollbar-width`/`scrollbar-color` — in modern Chromium setting
+   either one disables `::-webkit-scrollbar` styling, and this is Electron
+   (Chromium only), so the webkit pseudo-elements are all we need. */
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	/* The island sits on a near-black Siri gradient, where --border (white/10%)
+	   would be invisible — use a light translucent pill so it reads like the
+	   desktop's visible rounded thumb. */
+	background-color: rgba(255, 255, 255, 0.22);
+	background-clip: padding-box;
+	border: 2px solid transparent;
+	border-radius: 9999px;
+	transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background-color: rgba(255, 255, 255, 0.4);
+	background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+/* Siri-style bottom-lit border (iOS/iPadOS/macOS 26+ look). Instead of a uniform
+   `ring`, the outline is brightest along the bottom edge and fades to invisible
+   as it wraps up the left/right sides, so the whole border only reads at the
+   bottom. Implemented as a masked gradient ring: a `::after` fills the shape,
+   paints a radial highlight anchored below-center, then a border-box XOR mask
+   punches out the interior so only a 1.5px rim remains. `border-radius: inherit`
+   tracks the parent's animated radius; `pointer-events: none` keeps it inert. */
+.island-siri-border::after {
+	position: absolute;
+	inset: 0;
+	z-index: 2;
+	padding: 1.5px;
+	pointer-events: none;
+	content: "";
+	background: radial-gradient(
+		130% 150% at 50% 118%,
+		rgba(255, 255, 255, 0.9) 0%,
+		rgba(255, 255, 255, 0.45) 28%,
+		rgba(255, 255, 255, 0.12) 48%,
+		transparent 64%
+	);
+	border-radius: inherit;
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+}

@@ -1,0 +1,34 @@
+/* Plate editor styles (vendored, isolated from globals.css).
+ *
+ * NOTE: globals.css owns the `dark` custom-variant (`&:is(.dark *)`). We
+ * deliberately do NOT redefine `@custom-variant dark` here: this file is
+ * @imported AFTER globals.css, so a redefinition would override it and drop
+ * dark mode app-wide.
+ *
+ * We also avoid `@plugin "tailwind-scrollbar-hide"` because @plugin resolves
+ * relative to the host entry CSS (apps/desktop/src), where that package isn't a
+ * dependency. The `.scrollbar-hide` utility the editor uses is inlined below. */
+
+:root {
+	--highlight: oklch(0.852 0.199 91.936);
+	--brand: oklch(0.623 0.214 259.815);
+}
+
+.dark {
+	--highlight: oklch(0.852 0.199 91.936);
+	--brand: oklch(0.707 0.165 254.624);
+}
+
+@theme inline {
+	--color-highlight: var(--highlight);
+	--color-brand: var(--brand);
+}
+
+/* Inlined `tailwind-scrollbar-hide` utility (editor scroll containers use it). */
+.scrollbar-hide {
+	-ms-overflow-style: none;
+	scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+	display: none;
+}

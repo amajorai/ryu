@@ -8,8 +8,13 @@
     "runnable-model",
     "capability-layers",
     "batteries-included",
+    "---The Ryu Agent---",
+    "ryu-agent",
+    "pi-engine",
+    "---Protocols---",
     "acp-agents",
     "providers",
+    "---Decomposition---",
     "platform-decomposition",
     "decomposition-program",
     "open-core"

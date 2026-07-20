@@ -718,9 +718,68 @@ pub async fn persist_workflow(mut workflow: Workflow) -> Result<Workflow, String
     }
     workflow.updated_at = Some(now);
 
+    backfill_webhook_secrets(&mut workflow);
+
     store::save_workflow(&workflow).map_err(|e| e.to_string())?;
     reconcile_triggers(&workflow).await;
     Ok(workflow)
+}
+
+/// Ensure every `Webhook` trigger carries a signing secret so the endpoint can
+/// actually fire. A secret-less webhook trigger is a **dead endpoint** — the
+/// inbound dispatcher fail-closes on `NoSecret` (an unauthenticated public
+/// trigger is a forgery vector), so a workflow created without one (e.g. via the
+/// NL builder or the API) would never run.
+///
+/// Idempotent and non-clobbering: a user-set secret is left untouched; an empty
+/// secret first reuses the previously-stored secret for this workflow (so a
+/// re-save from a stale client never rotates it), and only mints a fresh
+/// high-entropy secret when none exists yet. The value is surfaced back to the
+/// canvas trigger panel (read-only) so the caller can sign with it.
+fn backfill_webhook_secrets(workflow: &mut Workflow) {
+    let has_empty_webhook = workflow.triggers.iter().any(|t| {
+        matches!(t, WorkflowTrigger::Webhook { secret }
+            if secret.as_deref().map(str::trim).unwrap_or("").is_empty())
+    });
+    if !has_empty_webhook {
+        return;
+    }
+
+    // The secret already stored for this workflow (if any), reused so a re-save
+    // that omits the secret preserves it rather than rotating it.
+    let prior_secret = if workflow.id.is_empty() {
+        None
+    } else {
+        store::load_workflow(&workflow.id).ok().and_then(|prior| {
+            prior.triggers.iter().find_map(|t| match t {
+                WorkflowTrigger::Webhook { secret } => secret
+                    .as_ref()
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty()),
+                _ => None,
+            })
+        })
+    };
+
+    for trigger in &mut workflow.triggers {
+        if let WorkflowTrigger::Webhook { secret } = trigger {
+            let empty = secret.as_deref().map(str::trim).unwrap_or("").is_empty();
+            if empty {
+                *secret = Some(prior_secret.clone().unwrap_or_else(generate_webhook_secret));
+            }
+        }
+    }
+}
+
+/// Mint a fresh high-entropy webhook signing secret (256 bits of UUIDv4 entropy
+/// as hex, matching the hex the HMAC verifier keys on). Dependency-light: reuses
+/// the `uuid` crate already used to mint workflow ids.
+fn generate_webhook_secret() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 /// Reconcile a workflow's declared triggers into the external resources that
@@ -731,6 +790,20 @@ pub async fn persist_workflow(mut workflow: Workflow) -> Result<Workflow, String
 pub async fn reconcile_triggers(workflow: &Workflow) {
     // Schedules are local + fast, so reconcile inline.
     triggers::apply_schedule_reconcile(&workflow.id, &workflow.name, &workflow.triggers);
+
+    // A webhook trigger is only reachable on a laptop once Core has registered
+    // with the managed relay (which mints the token `relay_inbound_url` composes).
+    // Ensure that registration + subscription is live so a trigger created after
+    // boot resolves its public URL without a Core restart. Spawned so the network
+    // register (up to ~20s) never blocks the save; idempotent server- and
+    // client-side, and a no-op for the non-relay tunnel backends.
+    let has_webhook = workflow
+        .triggers
+        .iter()
+        .any(|t| matches!(t, WorkflowTrigger::Webhook { .. }));
+    if has_webhook {
+        tokio::spawn(crate::webhook_ingress::ensure_relay_started_after_save());
+    }
 
     // Composio reconcile makes a network call per subscription; keep it
     // best-effort and inline so a save reflects the declared set, but never let
@@ -777,6 +850,72 @@ pub async fn reconcile_triggers(workflow: &Workflow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn webhook_workflow(secret: Option<&str>) -> Workflow {
+        Workflow {
+            id: String::new(), // empty id → backfill skips the prior-secret disk lookup
+            name: "wh".into(),
+            description: None,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            triggers: vec![WorkflowTrigger::Webhook {
+                secret: secret.map(str::to_owned),
+            }],
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    fn first_webhook_secret(wf: &Workflow) -> Option<String> {
+        wf.triggers.iter().find_map(|t| match t {
+            WorkflowTrigger::Webhook { secret } => secret.clone(),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn backfill_generates_secret_when_absent() {
+        let mut wf = webhook_workflow(None);
+        backfill_webhook_secrets(&mut wf);
+        let secret = first_webhook_secret(&wf).expect("a secret was generated");
+        assert!(!secret.trim().is_empty(), "generated secret is non-empty");
+        assert!(secret.len() >= 32, "generated secret has real entropy");
+    }
+
+    #[test]
+    fn backfill_generates_secret_when_blank() {
+        let mut wf = webhook_workflow(Some("   "));
+        backfill_webhook_secrets(&mut wf);
+        let secret = first_webhook_secret(&wf).expect("a secret was generated");
+        assert!(!secret.trim().is_empty());
+    }
+
+    #[test]
+    fn backfill_preserves_user_secret() {
+        let mut wf = webhook_workflow(Some("user-set-secret"));
+        backfill_webhook_secrets(&mut wf);
+        assert_eq!(
+            first_webhook_secret(&wf).as_deref(),
+            Some("user-set-secret"),
+            "a user-set secret is never clobbered"
+        );
+    }
+
+    #[test]
+    fn backfill_is_noop_without_webhook_trigger() {
+        let mut wf = Workflow {
+            id: String::new(),
+            name: "n".into(),
+            description: None,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            triggers: vec![WorkflowTrigger::Manual],
+            created_at: None,
+            updated_at: None,
+        };
+        backfill_webhook_secrets(&mut wf);
+        assert!(matches!(wf.triggers[0], WorkflowTrigger::Manual));
+    }
 
     fn node(id: &str, kind: NodeKind) -> WorkflowNode {
         WorkflowNode {

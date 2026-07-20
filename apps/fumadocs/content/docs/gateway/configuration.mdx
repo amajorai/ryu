@@ -69,8 +69,11 @@ trusted_forwarder = false          # honor x-ryu-user-id / x-ryu-agent-id for bu
 
 Every request carries its key as a bearer token:
 
-```
-Authorization: Bearer ryu-sk-your-secret-key
+```bash
+curl http://localhost:7981/v1/chat/completions \
+  -H "Authorization: Bearer ryu-sk-your-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]}'
 ```
 
 ### Field reference
@@ -327,9 +330,37 @@ These override `gateway.toml` keys at load time. Setting `GATEWAY_MASTER_KEY` al
 
 Read and edit config without restarting the process:
 
-```
-GET /v1/config
-PUT /v1/config
+```bash
+# Read the live config (secrets are redacted)
+curl http://localhost:7981/v1/config \
+  -H "Authorization: Bearer $GATEWAY_MASTER_KEY"
+
+# Patch firewall settings live
+curl -X PUT http://localhost:7981/v1/config \
+  -H "Authorization: Bearer $GATEWAY_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "firewall": {
+      "enabled": true,
+      "policy": "warn_and_continue"
+    }
+  }'
+
+# Patch budget rules live
+curl -X PUT http://localhost:7981/v1/config \
+  -H "Authorization: Bearer $GATEWAY_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "budgets": {
+      "rules": [
+        {
+          "subject": "user:default",
+          "token_limit": 100000,
+          "window_secs": 3600
+        }
+      ]
+    }
+  }'
 ```
 
 `GET /v1/config` returns the live firewall, budgets, routing, and a redacted view of providers and

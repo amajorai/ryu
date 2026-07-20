@@ -1,0 +1,81 @@
+{
+  "slug": "research",
+  "name": "Research",
+  "navLabel": "Research",
+  "category": "Industries",
+  "icon": "Microscope",
+  "tagline": "Review literature, extract data, and chain analysis with agents grounded in your own corpus.",
+  "heroEyebrow": "Ryu for Research",
+  "heroTitle": "Move from question to finding without drowning in papers.",
+  "heroSubtitle": "Screen literature, extract structured data, and orchestrate multi-step analysis with agents that run on your machine and cite every source. Unpublished data stays on-device, and reproducible workflows let you rerun the same pipeline on demand.",
+  "visualKey": "CoreVisual",
+  "intro": "Research is bottlenecked by literature review, data extraction, and repetitive analysis, while unpublished results demand discretion. Ryu grounds agents in your own corpus so answers cite sources, runs locally so sensitive data stays on-device, and chains steps into reproducible Workflows you can rerun. It assists the researcher; you verify every claim.",
+  "highlights": [
+    {
+      "title": "Cites every source",
+      "description": "Spaces and RAG ground answers in your own paper corpus and datasets, pointing back to the exact passage."
+    },
+    {
+      "title": "Reproducible workflows",
+      "description": "Chain extraction, analysis, and summary into a Workflow you can rerun on new inputs and schedule."
+    },
+    {
+      "title": "Sensitive data on-device",
+      "description": "Run a local model with no telemetry, so unpublished results and confidential datasets stay on your machine."
+    },
+    {
+      "title": "Right model per step",
+      "description": "Route a cheap local model for bulk screening and a frontier model for careful synthesis, no lock-in."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Literature screening",
+      "description": "Triage a stack of papers against your inclusion criteria, summarizing each and flagging the ones worth a full read."
+    },
+    {
+      "title": "Data extraction",
+      "description": "Pull methods, sample sizes, and results from papers into a structured table for a review or meta-analysis."
+    },
+    {
+      "title": "Corpus Q&A",
+      "description": "Ask questions across your reference library and get answers that cite the specific paper and section."
+    },
+    {
+      "title": "Analysis pipelines",
+      "description": "Chain a Workflow that ingests data, runs the analysis tools, and drafts a summary of what the results show."
+    },
+    {
+      "title": "Manuscript drafting",
+      "description": "Draft related-work sections, abstracts, and figure captions from your notes and cited sources for your edit."
+    },
+    {
+      "title": "Grant and proposal support",
+      "description": "Draft specific-aims and background sections grounded in your prior work and the literature, for your revision."
+    }
+  ],
+  "examplePrompts": [
+    "Screen these 40 abstracts against my inclusion criteria and list which to read in full and why.",
+    "Extract sample size, method, and primary outcome from each paper in this Space into a table.",
+    "What does the literature in my corpus say about this mechanism? Cite the papers.",
+    "Build a workflow that ingests this dataset, runs the analysis, and drafts a results summary.",
+    "Draft a related-work section comparing these five cited papers to my approach."
+  ],
+  "faq": [
+    {
+      "q": "Will answers be traceable to sources?",
+      "a": "Yes. Ground agents on your paper corpus and datasets with Spaces and RAG. Every answer cites the specific source so you can verify it before it enters a manuscript or report."
+    },
+    {
+      "q": "Is unpublished data kept private?",
+      "a": "Ryu is local-first with no telemetry, so unpublished results and confidential datasets can stay entirely on your machine. When you route to a cloud model the Gateway redacts sensitive data and logs every call."
+    },
+    {
+      "q": "Can I reproduce an analysis later?",
+      "a": "Yes. Capture the steps as a Workflow that chains tools and agents, then rerun it on new inputs or schedule it. The Gateway audit trail records what ran, which keeps the pipeline accountable."
+    }
+  ],
+  "ctaTitle": "Spend more time on discovery.",
+  "ctaSubtitle": "Screen, extract, and analyze faster with every answer cited and sensitive data on-device.",
+  "ctaNote": "Source-cited · Local-first · Reproducible workflows"
+}

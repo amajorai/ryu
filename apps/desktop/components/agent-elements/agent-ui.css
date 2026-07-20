@@ -1,0 +1,173 @@
+/* Agent Elements — animations + markdown/diff structural CSS.
+ *
+ * Colors and component chrome now come entirely from the shadcn design tokens
+ * in @ryu/ui (background / foreground / muted / border / primary / …). The
+ * former `--an-*` token system has been removed; components style themselves
+ * with shadcn utilities and shadcn `<Button>`s. Only animation keyframes and
+ * the markdown/diff rules that can't be expressed as utilities live here, and
+ * they reference shadcn vars directly. */
+
+/* TextShimmer animation */
+@keyframes an-shimmer {
+	from {
+		background-position: 100% center;
+	}
+	to {
+		background-position: 0% center;
+	}
+}
+
+@keyframes an-blink {
+	50% {
+		opacity: 0;
+	}
+}
+
+@keyframes loading-dots {
+	0%,
+	100% {
+		opacity: 0;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+@keyframes an-ellipsis {
+	0% {
+		width: 0;
+	}
+	33% {
+		width: 0.33em;
+	}
+	66% {
+		width: 0.66em;
+	}
+	100% {
+		width: 1em;
+	}
+}
+
+.an-text-shimmer {
+	display: inline-block;
+	color: transparent;
+	background-image: linear-gradient(
+		90deg,
+		var(--muted-foreground) 0%,
+		var(--muted-foreground) 40%,
+		var(--foreground) 50%,
+		var(--muted-foreground) 60%,
+		var(--muted-foreground) 100%
+	);
+	background-repeat: no-repeat;
+	-webkit-background-clip: text;
+	background-clip: text;
+	background-size: 250% 100%;
+}
+
+.an-text-shimmer--active {
+	animation: an-shimmer var(--an-shimmer-duration, 2s) linear infinite;
+}
+
+.an-ellipsis {
+	display: inline-block;
+	width: 0;
+	overflow: hidden;
+	vertical-align: bottom;
+	animation: an-ellipsis 1.2s steps(1, end) infinite;
+}
+
+/* Diff */
+.an-edit-diff,
+.an-edit-diff pre,
+.an-edit-diff code {
+	font-size: 12px;
+}
+
+.an-markdown pre code {
+	counter-reset: none !important;
+}
+
+.an-markdown pre code > span::before {
+	display: none !important;
+	content: none !important;
+}
+
+.an-markdown pre code > span {
+	padding-left: 0 !important;
+}
+
+.dark .an-edit-tool-card {
+	background-color: #000;
+}
+
+[data-theme="dark"] .an-edit-tool-card {
+	background-color: #000;
+}
+
+.dark .an-edit-tool-card .an-edit-diff,
+.dark .an-edit-tool-card .an-edit-diff pre,
+.dark .an-edit-tool-card .an-edit-diff code {
+	background-color: #000 !important;
+}
+
+[data-theme="dark"] .an-edit-tool-card .an-edit-diff,
+[data-theme="dark"] .an-edit-tool-card .an-edit-diff pre,
+[data-theme="dark"] .an-edit-tool-card .an-edit-diff code {
+	background-color: #000 !important;
+}
+
+/* Markdown Code Block */
+.an-markdown [data-streamdown="code-block"] {
+	gap: 0;
+	padding: 0;
+	background: transparent;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+.an-markdown [data-streamdown="code-block-header"] {
+	position: relative;
+	height: 28px;
+	padding: 0px 10px 0px 8px;
+	font-size: 12px;
+	background: transparent;
+	background-color: var(--muted);
+	border-bottom: 1px solid var(--border);
+}
+
+.an-markdown div:has(> [data-streamdown="code-block-actions"]) {
+	position: absolute;
+	top: 0;
+	right: 0;
+	height: 28px;
+	padding-right: 8px;
+	margin: 0;
+}
+
+.an-markdown [data-streamdown="code-block-actions"] {
+	padding: 0;
+	background: transparent;
+	border: none;
+	backdrop-filter: none;
+}
+
+.an-markdown [data-streamdown="code-block-actions"] button > svg {
+	width: 14px;
+	height: 14px;
+}
+
+.an-markdown [data-streamdown="code-block-body"] {
+	padding-top: 8px;
+	padding-bottom: 8px;
+	margin: 0;
+	overflow-x: auto;
+	background: transparent;
+	border: transparent;
+}
+
+.an-markdown [data-streamdown="code-block"] pre,
+.an-markdown [data-streamdown="code-block"] code {
+	font-size: 12px;
+	background: transparent;
+}

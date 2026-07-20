@@ -1,0 +1,81 @@
+{
+  "slug": "marketing",
+  "name": "Marketing",
+  "navLabel": "Marketing",
+  "category": "Sales & Marketing",
+  "icon": "Megaphone",
+  "tagline": "Plan campaigns, draft copy, and ship content with agents wired into the tools you already use.",
+  "heroEyebrow": "Ryu for Marketing",
+  "heroTitle": "A marketing team that ships, not just chats.",
+  "heroSubtitle": "Brief a campaign once and have agents draft the posts, schedule them, update the brief in Notion, and pull the numbers back into a recap. Agents connect to your real stack and take real actions, with every model call governed and on budget.",
+  "visualKey": "ConnectionsVisual",
+  "intro": "Marketing lives in a dozen tabs: a doc, a calendar, an email tool, an analytics dashboard, three social schedulers. Most AI tools just give you text to copy and paste back into all of them. Ryu connects agents into those apps so they finish the loop, and the Gateway keeps brand voice consistent, costs predictable, and a record of what shipped.",
+  "highlights": [
+    {
+      "title": "Connected to your stack",
+      "description": "Agents authenticate into Slack, Notion, HubSpot, and your social tools to draft, post, and update, not just suggest."
+    },
+    {
+      "title": "On-brand by grounding",
+      "description": "Point agents at your brand guidelines and past campaigns with Spaces so copy sounds like you, with citations."
+    },
+    {
+      "title": "Cost stays in budget",
+      "description": "The Gateway caps spend per agent and routes cheap drafts to a local model, premium work to a frontier one."
+    },
+    {
+      "title": "Repeatable as workflows",
+      "description": "Turn a launch into a workflow that runs the same steps every time, on a schedule or a trigger."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Campaign planning",
+      "description": "Turn a one-line goal into a multi-channel plan: messaging, channel mix, calendar, and draft assets ready to edit."
+    },
+    {
+      "title": "Content drafting at volume",
+      "description": "Spin one blog post into a thread, a LinkedIn post, three ad variations, and an email, all in your brand voice."
+    },
+    {
+      "title": "Social scheduling",
+      "description": "Draft a week of posts and queue them into your scheduler or post them to Slack for sign-off first."
+    },
+    {
+      "title": "Competitor and trend research",
+      "description": "Browse the web for competitor launches and trending angles, then summarize the takeaways into a brief."
+    },
+    {
+      "title": "Performance recaps",
+      "description": "Pull last week's numbers, compare against goals, and write a plain-English recap with what to do next."
+    },
+    {
+      "title": "Repurposing long-form",
+      "description": "Take a webinar transcript or report and cut it into clips, quotes, captions, and a recap newsletter."
+    }
+  ],
+  "examplePrompts": [
+    "Plan a 3-week launch for our new pricing page across email, LinkedIn, and X, with a content calendar.",
+    "Turn this blog post into a LinkedIn post, an X thread, and 3 ad headline variations in our brand voice.",
+    "Draft next week's social posts and queue them in our scheduler, but post each to #marketing for approval first.",
+    "Research what our top 3 competitors shipped this month and summarize the angles we should counter.",
+    "Pull last week's campaign metrics and write a recap with wins, misses, and next steps."
+  ],
+  "faq": [
+    {
+      "q": "Can agents actually post and update tools, or just write text?",
+      "a": "Both. With Connections powered by Composio, agents authenticate into apps like Slack, Notion, and your social schedulers and take real actions. You can require sign-off in a channel before anything goes live."
+    },
+    {
+      "q": "Will the copy stay on-brand?",
+      "a": "Ground agents on your brand guidelines, tone docs, and past campaigns with Spaces and RAG. The output references your own material, so voice stays consistent and you can check the source."
+    },
+    {
+      "q": "How do we keep AI costs from spiraling?",
+      "a": "The Gateway sets budgets per agent and routes work to the right model: a free local model for drafts, a frontier model for the high-stakes piece. You see the spend and the full call history."
+    }
+  ],
+  "ctaTitle": "Run your marketing on agents that finish the job.",
+  "ctaSubtitle": "Plan, draft, schedule, and recap in one place, connected to the tools your team already lives in.",
+  "ctaNote": "Connected apps · On-brand grounding · Budget control"
+}

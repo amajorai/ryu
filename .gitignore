@@ -90,3 +90,9 @@ opensrc/
 apps/desktop/src-tauri/Python/
 # Playwright MCP scratch artifacts (screenshots, console logs)
 .playwright-mcp/
+.openlogs/
+
+# Python virtualenvs and caches (e.g. apps/*-sidecar)
+.venv/
+__pycache__/
+*.pyc

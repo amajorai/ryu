@@ -1,0 +1,55 @@
+{
+  "name": "island",
+  "private": true,
+  "version": "0.0.5",
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "electron-vite build",
+    "dist": "electron-vite build && electron-builder --config electron-builder.yml",
+    "dist:win": "electron-vite build && electron-builder --win --config electron-builder.yml",
+    "dist:mac": "electron-vite build && electron-builder --mac --config electron-builder.yml",
+    "dist:linux": "electron-vite build && electron-builder --linux --config electron-builder.yml",
+    "preview": "electron-vite preview",
+    "check-types": "tsc --noEmit",
+    "test": "bun test src",
+    "clean": "rm -rf out artifacts && rm -f electron.vite.config.*.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@ryu/app-host": "workspace:*",
+    "@ryu/blocks": "workspace:*",
+    "@ryu/command": "workspace:*",
+    "@ryu/ui": "workspace:*",
+    "@ryuhq/core-client": "workspace:*",
+    "@ryuhq/protocol": "workspace:*",
+    "electron-updater": "^6.3.9",
+    "motion": "^11",
+    "react": "^19",
+    "react-dom": "^19",
+    "uiohook-napi": "^1.5.5",
+    "zustand": "^5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "electron": "^33.2.1",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^2.3.0",
+    "tailwindcss": "catalog:",
+    "typescript": "^5",
+    "vite": "^6"
+  },
+  "optionalDependencies": {
+    "koffi": "^2.10.0",
+    "mica-electron": "^1.5.17"
+  },
+  "author": {
+    "name": "A Major Pte. Ltd.",
+    "email": "hello@ryuhq.com"
+  },
+  "homepage": "https://ryuhq.com"
+}

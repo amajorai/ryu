@@ -72,7 +72,7 @@ returns a clear error pointing you to install the OuteTTS voice engine from the 
 
 ### Universal Ryu TTS sidecar
 
-For engines beyond OuteTTS, Core manages the `ryutts` sidecar (`apps/tts-sidecar`), a small Python
+For engines beyond OuteTTS, Core manages the `ryutts` sidecar (`apps-store/voice/`), a small Python
 FastAPI server on port `8085` that fronts many TTS engines behind one normalized HTTP contract:
 `/health`, `/engines`, `/generate`, `/unload`. Adding an engine is one backend file plus one registry
 row in that app, so Core never grows a per-engine branch

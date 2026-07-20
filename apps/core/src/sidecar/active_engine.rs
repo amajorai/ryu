@@ -53,10 +53,18 @@ pub fn local_engine_base_url(name: &str) -> Option<String> {
         "vllm" => Some("http://127.0.0.1:8000".to_owned()),
         // sglang launch_server (DEFAULT_PORT = 30000).
         "sglang" => Some("http://127.0.0.1:30000".to_owned()),
-        // mlx_lm server (DEFAULT_PORT = 8082).
-        "mlx" => Some("http://127.0.0.1:8082".to_owned()),
-        // mlx_vlm.server (DEFAULT_PORT = 8084).
-        "mlx-vlm" => Some("http://127.0.0.1:8084".to_owned()),
+        // mlx_lm server (DEFAULT_PORT_BASE = 8086). Profile-aware: matches the
+        // spawn port in `providers/mlx/process.rs`.
+        "mlx" => Some(format!(
+            "http://127.0.0.1:{}",
+            crate::sidecar::providers::mlx::process::default_port()
+        )),
+        // mlx_vlm.server (DEFAULT_PORT_BASE = 8084). Profile-aware: matches the
+        // spawn port in `providers/mlx_vlm/process.rs`.
+        "mlx-vlm" => Some(format!(
+            "http://127.0.0.1:{}",
+            crate::sidecar::providers::mlx_vlm::process::default_port()
+        )),
         // omlx serve (DEFAULT_PORT = 8000 — shared with vLLM; mutually exclusive).
         "omlx" => Some("http://127.0.0.1:8000".to_owned()),
         // Docker Model Runner serves its OpenAI-compat API under `/engines/v1`
@@ -81,7 +89,7 @@ pub fn local_engine_base_url(name: &str) -> Option<String> {
 ///   - `ollama`   → Ollama daemon on `11434`
 ///   - `vllm`     → `vllm serve --port 8000` (`providers/vllm/process.rs`)
 ///   - `sglang`   → `sglang.launch_server --port 30000` (`providers/sglang/process.rs`)
-///   - `mlx`      → `mlx_lm server --port 8082` (`providers/mlx/process.rs`, Apple Silicon only)
+///   - `mlx`      → `mlx_lm server --port 8086` (`providers/mlx/process.rs`, Apple Silicon only)
 ///
 /// Returns `None` for names that are not managed local engines.
 pub fn local_engine_url(name: &str) -> Option<String> {
@@ -94,8 +102,14 @@ pub fn local_engine_url(name: &str) -> Option<String> {
         "ollama" => Some("http://127.0.0.1:11434/v1".to_owned()),
         "vllm" => Some("http://127.0.0.1:8000/v1".to_owned()),
         "sglang" => Some("http://127.0.0.1:30000/v1".to_owned()),
-        "mlx" => Some("http://127.0.0.1:8082/v1".to_owned()),
-        "mlx-vlm" => Some("http://127.0.0.1:8084/v1".to_owned()),
+        "mlx" => Some(format!(
+            "http://127.0.0.1:{}/v1",
+            crate::sidecar::providers::mlx::process::default_port()
+        )),
+        "mlx-vlm" => Some(format!(
+            "http://127.0.0.1:{}/v1",
+            crate::sidecar::providers::mlx_vlm::process::default_port()
+        )),
         // oMLX shares vLLM's :8000 — safe, the two never reside at once.
         "omlx" => Some("http://127.0.0.1:8000/v1".to_owned()),
         // Docker Model Runner's OpenAI-compat API is under `/engines/v1`; the
@@ -193,9 +207,11 @@ mod tests {
             local_engine_base_url("sglang").as_deref(),
             Some("http://127.0.0.1:30000")
         );
+        // mlx is profile-aware; under the (default) release profile in tests it is
+        // the canonical :8086 (moved off 8082 to free the reranker's port).
         assert_eq!(
             local_engine_base_url("mlx").as_deref(),
-            Some("http://127.0.0.1:8082")
+            Some("http://127.0.0.1:8086")
         );
         // Non-engines (agents/tools) have no local inference endpoint.
         assert_eq!(local_engine_base_url("zeroclaw"), None);

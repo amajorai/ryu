@@ -16,6 +16,11 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/api/", "/og/"],
       },
       {
+        userAgent: "ChatGPT-User",
+        allow: "/",
+        disallow: ["/api/", "/og/"],
+      },
+      {
         userAgent: "Google-Extended",
         allow: "/",
         disallow: ["/api/", "/og/"],
@@ -27,6 +32,16 @@ export default function robots(): MetadataRoute.Robots {
       },
       {
         userAgent: "anthropic-ai",
+        allow: "/",
+        disallow: ["/api/", "/og/"],
+      },
+      {
+        userAgent: "PerplexityBot",
+        allow: "/",
+        disallow: ["/api/", "/og/"],
+      },
+      {
+        userAgent: "Bytespider",
         allow: "/",
         disallow: ["/api/", "/og/"],
       },

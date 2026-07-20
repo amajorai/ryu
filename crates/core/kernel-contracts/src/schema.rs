@@ -98,6 +98,12 @@ pub struct ToolConfig {
     /// Optional JSON Schema for the tool input, surfaced in discovery.
     #[serde(default)]
     pub input_schema: Option<serde_json::Value>,
+    /// `http`: arg names that are sent as request HEADERS rather than as path /
+    /// query / body params. This is how an OpenAPI operation routes its
+    /// `in: header` parameters and how auth (an `apiKey` header, a bearer token
+    /// injected by the identity vault) reaches the request. Empty/absent = none.
+    #[serde(default)]
+    pub header_params: Option<Vec<String>>,
 }
 
 /// The resolved, dispatch-ready backend of a [`ToolConfig`]. Produced by
@@ -109,7 +115,13 @@ pub enum ToolBackend {
     /// Run `code` in the `tool_exec` Deno sandbox (grant: `tool:execute`).
     InlineDeno { code: String },
     /// Proxy the call to `url` with `method` (grant: `tool:http-egress:<domain>`).
-    Http { url: String, method: String },
+    /// `header_params` are the arg names lowered onto request headers (auth +
+    /// OpenAPI `in: header` params); the rest lower onto path/query/body.
+    Http {
+        url: String,
+        method: String,
+        header_params: Vec<String>,
+    },
 }
 
 impl ToolConfig {
@@ -149,6 +161,7 @@ impl ToolConfig {
                 Ok(ToolBackend::Http {
                     url: url.to_owned(),
                     method,
+                    header_params: self.header_params.clone().unwrap_or_default(),
                 })
             }
             other => Err(format!(
@@ -1267,7 +1280,8 @@ mod tests {
             http.resolve_backend().unwrap(),
             ToolBackend::Http {
                 url: "https://api.example.com/quote".to_owned(),
-                method: "POST".to_owned()
+                method: "POST".to_owned(),
+                header_params: vec![],
             }
         );
     }

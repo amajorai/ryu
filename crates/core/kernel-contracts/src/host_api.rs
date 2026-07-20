@@ -235,6 +235,21 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
     m("skills.snapshot", "skills.crud", Some("skills:crud"), false, true),
     m("skills.restore", "skills.crud", Some("skills:crud"), false, true),
     m("skills.setTitle", "skills.crud", Some("skills:crud"), false, true),
+    // Shell primitives (grant `shell:integrate`) — the generic `window.ryu.shell.*`
+    // lane that gives a DECOUPLED companion the shell-integration privileges a
+    // compiled-in first-party panel has: open an allowlisted shell tab, subscribe to
+    // the live theme, contribute Cmd+K palette commands, and subscribe to the node
+    // event stream. One capability (`shell.integrate`) gates the whole family; the
+    // three subscribe/register verbs are STREAMING (host→frame push over the existing
+    // chunk path), `openTab` is unary. Host-direct: the desktop host owns the tabs /
+    // theme / palette / event-stream seams, so there is no Core bridge fetch (the
+    // shell verbs are `ts_host = true` but have no `plugin_bridge_api.rs` branch — like
+    // the existing `activity.openSession`/`meetings.open` nav verbs they resolve
+    // entirely in the trusted webview). See `docs/renderer-host-slice-1.md`.
+    m("shell.openTab", "shell.integrate", Some("shell:integrate"), false, true),
+    m("shell.themeSubscribe", "shell.integrate", Some("shell:integrate"), true, true),
+    m("shell.registerCommand", "shell.integrate", Some("shell:integrate"), true, true),
+    m("shell.eventsSubscribe", "shell.integrate", Some("shell:integrate"), true, true),
     // Rust-bridge-only: a declarative-view action relayed to the owning app (the
     // shell's `view.action` intent). Grant-gated (`views:actions`) but NOT a TS
     // app-host method — `ts_host = false` keeps it out of the derived TS tables.

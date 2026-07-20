@@ -1,0 +1,118 @@
+---
+title: "Capability Broker"
+description: "How plugins declare abstract capabilities and how Core resolves them to concrete provider apps — the platform decomposition layer."
+tags: ["capability", "broker", "binding", "plugin", "platform", "decomposition"]
+---
+
+The capability broker is the platform decomposition layer. A plugin declares an abstract
+`requires.capabilities: [{rag}]` edge; the registry resolves it to a concrete provider app,
+lowers it to a bare app-id edge, and the existing dependency graph handles enable/disable/cycles.
+
+## How it works
+
+### 1. A plugin declares capabilities
+
+In `plugin.json`, a plugin can declare both what it provides and what it requires:
+
+```json
+{
+  "id": "com.example.my-app",
+  "provides": [
+    {
+      "capability": "rag",
+      "version": "1.0.0",
+      "sidecar": "my-rag-sidecar",
+      "route": "/api/my-rag",
+      "grant": "rag:use"
+    }
+  ],
+  "requires": {
+    "capabilities": ["rag"]
+  }
+}
+```
+
+### 2. Core resolves bindings
+
+When a plugin with `requires.capabilities` is enabled, the `BindingRegistry`
+(`apps/core/src/plugins/binding.rs`) resolves each required capability to a concrete provider:
+
+1. **Override** — if a user-specified override exists for this capability, use it
+2. **Single provider** — if exactly one installed plugin provides this capability, use it
+3. **Ambiguous** — if multiple providers exist, refuse with an error (no silent selection)
+
+The resolution produces a `Binding`:
+
+```rust
+pub struct Binding {
+    pub capability: String,      // e.g. "rag"
+    pub provider_id: String,     // e.g. "com.ryu.rag"
+    pub provided_version: String, // e.g. "1.0.0"
+}
+```
+
+### 3. The dependency graph handles the rest
+
+Once resolved, the binding is lowered to a bare app-id edge. The existing plugin dependency graph
+(`apps/core/src/plugins/graph.rs`) handles:
+
+- Topological enable/disable ordering
+- Cycle detection
+- Dependent plugin cascading
+
+## The resolution ladder
+
+```
+Plugin requires: rag
+  │
+  ├─ Override exists? → use override provider
+  │
+  ├─ Exactly one provider? → use that provider
+  │
+  ├─ Multiple providers? → Ambiguous error (operator must pick)
+  │
+  └─ No providers? → MissingDependency error
+```
+
+## Configuring overrides
+
+Set capability overrides through the binding config:
+
+```json
+{
+  "overrides": {
+    "rag": "com.custom.rag",
+    "tts": "com.custom.tts"
+  }
+}
+```
+
+This tells the binding registry to use `com.custom.rag` instead of the default when any plugin
+requests the `rag` capability.
+
+## Built-in capabilities
+
+| Capability | Default provider | What it does |
+|---|---|---|
+| `rag` | `com.ryu.rag` | Embedding, vector storage, and retrieval |
+| `tts` | `com.ryu.tts` | Text-to-speech synthesis |
+| `stt` | `com.ryu.stt` | Speech-to-text transcription |
+| `image` | `com.ryu.image` | Image generation |
+| `storage` | `com.ryu.storage` | File and blob storage |
+| `sandbox` | `com.ryu.sandbox` | Code execution sandbox |
+
+## How the broker connects to the Gateway
+
+The capability broker is a Core-side concern (it decides what runs). When a plugin is enabled
+with a resolved binding, the provider's sidecar is spawned and its routes are mounted. Model
+calls from the provider still flow through the Gateway for governance.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/core/app-manifest-lifecycle" />
+  <DocCard href="/docs/develop/extensions/plugin-json-manifest" />
+  <DocCard href="/docs/develop/sdk/plugin-api" />
+  <DocCard href="/docs/start-here/architecture/platform-decomposition" />
+  <DocCard href="/docs/start-here/architecture/capability-layers" />
+</Cards>

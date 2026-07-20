@@ -2,7 +2,7 @@
 name = "ryu-gw-providers"
 version = "0.0.5"
 edition = "2021"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
 description = "Ryu Gateway concrete backend providers: the OpenAI/Anthropic/local/core/OpenRouter/Modal/GenAI/Replicate/Fal HTTP implementations behind the `Provider` trait, the shared provider HTTP helpers (retry, rate-limit header parsing, media-output normalization, model discovery), the per-provider quota sink, and the video-job value types. The `ProviderRegistry` + config-driven registration + key custody stay in apps/gateway ('engine moves, wiring stays'); the trait returns a crate-local `ProviderError` that the gateway maps to its `GatewayError` at the pipeline boundary, so a new provider is a drop-in."
 

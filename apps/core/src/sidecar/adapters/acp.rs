@@ -2975,9 +2975,14 @@ pub fn ryu_pi_acp_cmd() -> Option<String> {
 /// `RYU_GATEWAY_URL` / `RYU_GATEWAY_TOKEN` env vars as overridden at runtime.
 ///
 /// DEFERRED: Claude Code (Anthropic `/v1/messages`) and Gemini CLI (Google
-/// format) are NOT covered here. The gateway router speaks only the OpenAI
-/// `/v1/chat/completions` format (`api/mod.rs:17`), so governing them requires a
-/// translating ingress — this is a follow-on unit, explicitly out of scope here.
+/// format) are NOT covered here. Claude Code is now governable via the gateway's
+/// Anthropic passthrough (`claude_gateway_cmd`), but Gemini CLI reads
+/// `GOOGLE_GEMINI_BASE_URL` / `CODE_ASSIST_ENDPOINT` (Google wire format) — never
+/// `OPENAI_BASE_URL` — and the gateway registers no Google-format ingress (only
+/// Anthropic + OpenAI-Responses passthroughs, `apps/gateway/src/passthrough`), so
+/// pointing those at the gateway would 404 and break Gemini rather than govern it.
+/// Governing Gemini needs a new gateway Google passthrough — a follow-on unit,
+/// out of scope here. See `docs/routing-planes.md` (chat-egress coverage matrix).
 #[cfg(target_os = "windows")]
 fn codex_acp_cmd() -> String {
     let gateway_base = crate::sidecar::gateway::gateway_url();

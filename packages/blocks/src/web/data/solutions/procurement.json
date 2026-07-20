@@ -1,0 +1,81 @@
+{
+  "slug": "procurement",
+  "name": "Procurement",
+  "navLabel": "Procurement",
+  "category": "People & Operations",
+  "icon": "ShoppingCart",
+  "tagline": "Compare vendors, review contracts, and track spend with agents connected to your sourcing tools.",
+  "heroEyebrow": "Ryu for Procurement",
+  "heroTitle": "Source smarter, with every quote and clause checked.",
+  "heroSubtitle": "Agents compare supplier quotes, flag risky contract terms against your standards, and track spend across the tools you buy through. Connected to your sourcing and finance systems, with the Gateway keeping pricing and supplier data governed and on the record.",
+  "visualKey": "ConnectionsVisual",
+  "intro": "Procurement is comparison and diligence at scale: quotes that don't line up, contracts full of one-sided terms, renewals that creep. The data sits across spreadsheets, emails, and your sourcing tool. Ryu connects agents to those systems to normalize the comparison, check the terms against your standards, and keep a defensible record of every decision.",
+  "highlights": [
+    {
+      "title": "Apples-to-apples comparison",
+      "description": "Agents normalize quotes with different units, terms, and bundles into one table you can actually compare."
+    },
+    {
+      "title": "Connected to your systems",
+      "description": "Reach your sourcing, ERP, and finance tools to pull spend, supplier records, and POs directly."
+    },
+    {
+      "title": "Terms checked to your standard",
+      "description": "Ground agents on your contract playbook with Spaces to flag clauses that deviate, with the language quoted."
+    },
+    {
+      "title": "Governed and on the record",
+      "description": "The Gateway logs every call and protects pricing and supplier data, so sourcing decisions stay defensible."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "Quote comparison",
+      "description": "Normalize competing quotes into one table by unit price, terms, and total cost, with the best option called out."
+    },
+    {
+      "title": "Contract term review",
+      "description": "Flag auto-renewals, price-escalation, liability, and termination clauses that deviate from your standards."
+    },
+    {
+      "title": "Vendor research and diligence",
+      "description": "Pull together a supplier profile: offerings, financial signals, references, and risk flags from public sources."
+    },
+    {
+      "title": "Spend analysis",
+      "description": "Aggregate spend across categories and vendors, surface duplicates and savings, and write the summary."
+    },
+    {
+      "title": "RFP drafting and scoring",
+      "description": "Draft an RFP from a requirements brief, then score incoming responses against your weighted criteria."
+    },
+    {
+      "title": "Renewal tracking",
+      "description": "Track contract end dates and notice windows, and draft a brief before each renewal decision comes due."
+    }
+  ],
+  "examplePrompts": [
+    "Compare these three supplier quotes on a like-for-like basis and recommend the best total-cost option.",
+    "Review this vendor MSA and flag any auto-renewal, price escalation, or liability terms outside our standard.",
+    "Build a diligence profile on this supplier: offerings, financial signals, and risk flags.",
+    "Aggregate last quarter's spend by category and vendor, and find duplicate or consolidation opportunities.",
+    "Track which contracts renew in the next 90 days and draft a brief for each upcoming decision."
+  ],
+  "faq": [
+    {
+      "q": "Can it pull data straight from our sourcing and finance tools?",
+      "a": "Yes. With Connections, agents authenticate into your sourcing system, ERP, and finance tools to pull spend, supplier records, and purchase orders, so comparisons and analyses use live data."
+    },
+    {
+      "q": "How does it know our contract standards?",
+      "a": "Ground the agent on your contract playbook and standard terms with Spaces and RAG. It flags clauses that deviate and quotes the language, citing the standard, so your team reviews the real exceptions."
+    },
+    {
+      "q": "Is pricing and supplier data kept confidential?",
+      "a": "The Gateway redacts sensitive data on egress and logs every model call, and you can run on a local model for the most confidential negotiations, so commercial data stays protected and on the record."
+    }
+  ],
+  "ctaTitle": "Buy better, with the diligence built in.",
+  "ctaSubtitle": "Compare quotes, check contracts, and track spend from one place, connected to your sourcing stack.",
+  "ctaNote": "System-connected · Playbook-checked · Confidential by default"
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@ryu/hotkeys",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./chord": "./src/chord.ts",
+    "./registry": "./src/registry.ts",
+    "./react": "./src/react.tsx"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "bun test src"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@ryu/config": "workspace:*",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "catalog:",
+    "typescript": "^5.9.3"
+  }
+}

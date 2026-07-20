@@ -33,7 +33,7 @@ pub use dispatch::{
     workflow_webhook_path, InboundOutcome, WorkflowWebhookOutcome,
 };
 pub use host::{set_global_host, WebhookIngressHost, WorkflowWebhookSecret};
-pub use ryu_relay::relay_inbound_url;
+pub use ryu_relay::{ensure_relay_started, relay_inbound_url};
 pub use tunnels::{
     CloudflaredSource, Ingress, OwnRelaySource, RyuRelaySource, TailscaleFunnelSource,
     OWN_RELAY_URL_ENV, WEBHOOK_PATH,

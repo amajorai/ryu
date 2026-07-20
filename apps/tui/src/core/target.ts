@@ -9,7 +9,13 @@
 
 import type { ApiTarget } from "@ryuhq/core-client/client";
 
-export const DEFAULT_CORE_URL = "http://127.0.0.1:7980";
+// Profile-aware: under RYU_PROFILE=dev (the repo's `bun dev` default) Core binds
+// :8980 (+1000 offset, matching apps/core/src/profile.rs); release stays :7980.
+const ryuProfile = (process.env.RYU_PROFILE ?? "").trim().toLowerCase();
+export const DEFAULT_CORE_URL =
+	ryuProfile && ryuProfile !== "release"
+		? "http://127.0.0.1:8980"
+		: "http://127.0.0.1:7980";
 
 export const buildTarget = (): ApiTarget => {
 	const url = process.env.RYU_CORE_URL?.trim() || DEFAULT_CORE_URL;

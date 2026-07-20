@@ -1,0 +1,81 @@
+{
+  "slug": "translation",
+  "name": "Translation",
+  "navLabel": "Translation",
+  "category": "Language & Content",
+  "icon": "Languages",
+  "visualKey": "SkillsVisual",
+  "tagline": "Translate faster while keeping your terminology, tone, and meaning intact.",
+  "heroEyebrow": "Ryu for Translation",
+  "heroTitle": "Consistent translations across every language pair",
+  "heroSubtitle": "Ryu grounds each translation on your glossary and past work, lets you pick the best model per language, and keeps confidential source text private so you can draft faster without losing nuance.",
+  "intro": "Machine translation drifts on terminology, mishandles tone, and rarely respects a client glossary. Ryu grounds every draft on your termbase, style guide, and approved past translations so wording stays consistent, then lets a human translator review and finalize. Confidential source material can stay on a local model so nothing leaves your machine.",
+  "highlights": [
+    {
+      "title": "Best model per language pair",
+      "description": "Route Japanese to one model and Spanish to another, picking whichever handles each pair best without changing your workflow."
+    },
+    {
+      "title": "Glossary-grounded output",
+      "description": "Ground translations on your termbase and approved phrasing via Spaces and RAG so client terminology stays consistent across documents."
+    },
+    {
+      "title": "Private by default",
+      "description": "Translate embargoed or NDA-bound source text on a local model so sensitive content never leaves your device."
+    },
+    {
+      "title": "Tone and register preserved",
+      "description": "Tell the agent the target register and audience so legal, marketing, and technical texts each read the way they should."
+    }
+  ],
+  "useCases": [
+    {
+      "title": "First-pass document translation",
+      "description": "An agent drafts a translation of a full document grounded on your glossary, leaving you to review and refine rather than start from scratch."
+    },
+    {
+      "title": "Terminology consistency check",
+      "description": "Scan a finished translation against your termbase and flag every place a term diverges from the approved equivalent."
+    },
+    {
+      "title": "Back-translation for QA",
+      "description": "Translate the target text back into the source language so a reviewer can verify meaning was preserved before delivery."
+    },
+    {
+      "title": "Bilingual glossary extraction",
+      "description": "Pull source and target term pairs from past translations into a clean glossary you can reuse and grow over time."
+    },
+    {
+      "title": "Localized formatting and units",
+      "description": "Adapt dates, currencies, measurements, and address formats to the target locale while keeping the translated meaning unchanged."
+    },
+    {
+      "title": "Multilingual batch from one source",
+      "description": "Drive a workflow that translates one source file into several target languages in sequence, each grounded on its own glossary."
+    }
+  ],
+  "examplePrompts": [
+    "Translate this contract into French using our legal glossary in Spaces, then list any terms with no approved equivalent.",
+    "Back-translate the attached German marketing copy into English so I can check the meaning held.",
+    "Check this Spanish translation against our termbase and flag every inconsistent term.",
+    "Extract a bilingual glossary of source and target term pairs from these three past translations.",
+    "Translate this product page into Japanese, German, and Korean, keeping our brand terms unchanged."
+  ],
+  "faq": [
+    {
+      "q": "Will Ryu keep my client glossary consistent?",
+      "a": "Yes. Put your termbase and style guide in a Space and Ryu grounds every translation on them with RAG, so approved terminology is reused and you can see when something diverges."
+    },
+    {
+      "q": "Can I keep confidential source documents private?",
+      "a": "Yes. Ryu runs a local model by default with no telemetry, so embargoed or NDA-bound source text can be translated entirely on your device."
+    },
+    {
+      "q": "Does Ryu replace a human translator?",
+      "a": "No. Ryu produces a grounded first draft and consistency checks so you work faster, but a human translator reviews and finalizes every delivery."
+    }
+  ],
+  "ctaTitle": "Translate faster, stay consistent.",
+  "ctaSubtitle": "Ground every draft on your glossary, pick the right model per language, and keep source text private.",
+  "ctaNote": "Local-first · Glossary-grounded · Multi-model"
+}

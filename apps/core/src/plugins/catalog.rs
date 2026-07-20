@@ -265,6 +265,36 @@ pub fn plan_install_closure(
         .collect())
 }
 
+/// Extend a requires-closure install `order` with a target's **logical bundle**
+/// children (and any of their own manifests) that were fetched but are not already
+/// in `order`.
+///
+/// [`plan_install_closure`]'s `order` covers ONLY the target's `requires` closure.
+/// A logical bundle (`PluginManifest::bundles`) is *not* a dependency edge — it
+/// never enters [`resolve_enable_order`] — so bundle children never appear in
+/// `order`. This is the post-ordering step that adds them: every `fetched` manifest
+/// whose id is neither already in `order` nor already installed is appended (records
+/// are written DISABLED, so install order among them is irrelevant). Dedup by id.
+///
+/// Keeping this strictly separate from (and AFTER) `plan_install_closure` is the
+/// invariant that a bundle id can never reach an ordering function — enable/disable
+/// topological order is unchanged.
+pub fn extend_install_list_with_bundles(
+    order: Vec<PluginManifest>,
+    fetched: &[PluginManifest],
+    installed_ids: &HashSet<&str>,
+) -> Vec<PluginManifest> {
+    let mut extended = order;
+    let mut seen: HashSet<String> = extended.iter().map(|m| m.id.clone()).collect();
+    for m in fetched {
+        if !seen.contains(&m.id) && !installed_ids.contains(m.id.as_str()) {
+            seen.insert(m.id.clone());
+            extended.push(m.clone());
+        }
+    }
+    extended
+}
+
 /// A closure install that failed part-way and was rolled back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClosureInstallFailure<E> {
@@ -669,5 +699,57 @@ mod tests {
         assert_eq!(failure.failed, "base");
         assert!(failure.rolled_back.is_empty());
         assert!(sink.removed.lock().unwrap().is_empty());
+    }
+
+    // ── extend_install_list_with_bundles (logical-bundle install cascade) ──────
+
+    /// A manifest that ships `bundles` (logical bundle children) and no deps.
+    fn mbundle(id: &str, version: &str, bundles: &[&str]) -> PluginManifest {
+        PluginManifest {
+            bundles: bundles.iter().map(|s| (*s).to_owned()).collect(),
+            ..m(id, version, &[])
+        }
+    }
+
+    /// A parent that bundles a separate `child` installs the child too — even though
+    /// the requires-order is JUST the parent (a bundle is not a dependency edge).
+    #[test]
+    fn bundle_children_are_appended_to_the_install_list() {
+        let parent = mbundle("parent", "1.0.0", &["child"]);
+        let child = m("child", "1.0.0", &[]);
+        let fetched = vec![parent, child];
+
+        let order = plan_install_closure("parent", &[], &fetched).unwrap();
+        assert_eq!(ids(&order), vec!["parent"], "a bundle adds no requires edge");
+
+        let installed_ids: HashSet<&str> = HashSet::new();
+        let extended = extend_install_list_with_bundles(order, &fetched, &installed_ids);
+        let mut got = ids(&extended);
+        got.sort_unstable();
+        assert_eq!(
+            got,
+            vec!["child", "parent"],
+            "the bundle child is installed alongside the parent"
+        );
+    }
+
+    /// An already-installed bundle child is not re-installed (no duplicate/409): it is
+    /// in `installed_ids`, so the extension filters it out even if it appears fetched.
+    #[test]
+    fn already_installed_bundle_child_is_not_reinstalled() {
+        let parent = mbundle("parent", "1.0.0", &["child"]);
+        let child = m("child", "1.0.0", &[]);
+
+        let order = plan_install_closure("parent", &[], std::slice::from_ref(&parent)).unwrap();
+        assert_eq!(ids(&order), vec!["parent"]);
+
+        let installed_ids: HashSet<&str> = ["child"].into_iter().collect();
+        let fetched = vec![parent, child];
+        let extended = extend_install_list_with_bundles(order, &fetched, &installed_ids);
+        assert_eq!(
+            ids(&extended),
+            vec!["parent"],
+            "an already-installed bundle child is never re-added"
+        );
     }
 }

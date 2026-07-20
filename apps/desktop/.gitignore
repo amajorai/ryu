@@ -1,0 +1,8 @@
+
+# Tauri updater signing key (private) — must live only in CI secrets, never committed
+.tauri/*.key
+
+# Playwright plugin-runtime cert artifacts
+test-results/
+playwright-report/
+e2e/harness/dist/

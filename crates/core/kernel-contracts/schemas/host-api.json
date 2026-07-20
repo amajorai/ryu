@@ -960,6 +960,34 @@
       "tsHost": true
     },
     {
+      "capability": "shell.integrate",
+      "grant": "shell:integrate",
+      "method": "shell.openTab",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "shell.integrate",
+      "grant": "shell:integrate",
+      "method": "shell.themeSubscribe",
+      "streaming": true,
+      "tsHost": true
+    },
+    {
+      "capability": "shell.integrate",
+      "grant": "shell:integrate",
+      "method": "shell.registerCommand",
+      "streaming": true,
+      "tsHost": true
+    },
+    {
+      "capability": "shell.integrate",
+      "grant": "shell:integrate",
+      "method": "shell.eventsSubscribe",
+      "streaming": true,
+      "tsHost": true
+    },
+    {
       "capability": "view.action",
       "grant": "views:actions",
       "method": "view.action",

@@ -9,6 +9,7 @@
     "getting-started/install-sidecar",
     "getting-started/first-chat",
     "environment-variables",
+    "glossary",
     "architecture/index",
     "architecture/why-ryu",
     "architecture/three-products",

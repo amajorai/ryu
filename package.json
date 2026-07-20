@@ -38,7 +38,7 @@
     "release:local": "bash scripts/release/release-local.sh",
     "publish:npm": "bash tools/publish-npm.sh",
     "publish:crates": "bash tools/publish-crates.sh",
-    "dev": "turbo dev --concurrency=20 --continue",
+    "dev": "node scripts/dev-stack.mjs",
     "kill-ports": "node scripts/free-ports.mjs",
     "build": "turbo build",
     "check-types": "turbo check-types",

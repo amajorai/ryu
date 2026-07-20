@@ -7,6 +7,11 @@
 **/.turbo
 **/.env
 **/.env.*
+# Exception: apps/webapp/.env.production is PUBLIC client config (api URL,
+# public analytics keys) that vite MUST bake at build time. Without this the
+# webapp falls back to http://localhost:3000 and hosted sign-in breaks. The
+# negation must follow the **/.env.* rule to take effect.
+!apps/webapp/.env.production
 **/*.log
 **/.DS_Store
 # Rust / desktop / native build outputs not needed for server or web images.
