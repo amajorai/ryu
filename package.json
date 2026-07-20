@@ -6,7 +6,6 @@
       "apps/*",
       "packages/*",
       "apps-store/*/ui",
-      "apps-store/browser/sidecar",
       "crates/sdk/napi",
       "!apps/raycast"
     ],

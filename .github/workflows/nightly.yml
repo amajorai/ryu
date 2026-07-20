@@ -78,6 +78,116 @@ jobs:
             --title "Nightly ($DATE)" \
             --notes-file notes.md
 
+  # Desktop installers. The source is source-available in this repo (see
+  # LICENSE-COMMERCIAL.md), so it builds HERE on free public runners instead of
+  # the private repo.
+  #
+  # Signing is OPTIONAL and secret-gated: with TAURI_SIGNING_PRIVATE_KEY set on
+  # this repo the artifacts are signed and the updater accepts them; without it
+  # the installers still build and are downloadable, they just carry no update
+  # signature. That keeps the release working before any decision is made about
+  # putting the signing key on a public repo.
+  desktop:
+    needs: [gate, prepare]
+    name: desktop (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: windows-latest
+            args: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Install Linux build deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: bun install
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NODE_OPTIONS: --max-old-space-size=8192
+          # Vite INLINES these; apps/desktop/.env is gitignored, so without them a
+          # released build bakes the localhost fallbacks and cannot sign in.
+          VITE_APP_BACKEND_URL: ${{ vars.VITE_APP_BACKEND_URL || 'https://api.ryuhq.com' }}
+          VITE_APP_FRONTEND_URL: ${{ vars.VITE_APP_FRONTEND_URL || 'https://ryuhq.com' }}
+          VITE_APP_WEB_URL: ${{ vars.VITE_APP_WEB_URL || 'https://ryuhq.com' }}
+          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+          VITE_POSTHOG_KEY: ${{ vars.VITE_POSTHOG_KEY }}
+          VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
+          SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+        with:
+          projectPath: apps/desktop
+          tagName: nightly
+          releaseName: nightly
+          # The notes job already wrote the real changelog — do not overwrite it.
+          releaseBody: ""
+          releaseDraft: false
+          prerelease: true
+          args: ${{ matrix.args }}
+
+  # Island companion (Electron). Same rationale as desktop: source-available here,
+  # so it builds on free public runners.
+  island:
+    needs: [gate, prepare]
+    name: island (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+      - run: bun install
+      # `build` only runs electron-vite; `dist` is the one that packages installers
+      # via electron-builder. --publish never: the upload step below owns that, so
+      # electron-builder never needs a token or races the release.
+      - name: Package Island
+        working-directory: apps/island
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run dist -- --publish never
+      - name: Collect installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-island
+          # electron-builder's output layout varies per platform; take the
+          # installers and skip the unpacked build trees.
+          find apps/island -type f \
+            \( -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.exe" -o -name "*.zip" \) \
+            -not -path "*/node_modules/*" -not -path "*unpacked*" \
+            -exec cp {} dist-island/ \; || true
+          ls -la dist-island || true
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          files: dist-island/*
+          # Island packaging is still being brought onto this repo; a platform that
+          # produces no installer must not fail the whole release.
+          fail_on_unmatched_files: false
+          make_latest: false
+
   build:
     needs: [gate, prepare]
     if: needs.gate.outputs.build == 'true'
