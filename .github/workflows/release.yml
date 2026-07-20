@@ -99,12 +99,18 @@ jobs:
           ( cd dist
             if command -v sha256sum >/dev/null 2>&1; then sha256sum "ryu-cli-${plat}${ext}" > "ryu-cli-${plat}${ext}.sha256"
             elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "ryu-cli-${plat}${ext}" > "ryu-cli-${plat}${ext}.sha256"; fi )
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
+      # Artifacts, NOT a release upload: the org disables contents:write for
+      # GITHUB_TOKEN, so uploading straight to the release 403s with
+      # "Resource not accessible by integration". Artifacts need no write scope;
+      # tools/attach-artifacts.sh downloads them and attaches them to the release
+      # using a token that does have it.
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: dist/*
-          fail_on_unmatched_files: true
+          name: ${{ github.job }}-${{ runner.os }}-${{ strategy.job-index }}
+          path: dist/*
+          if-no-files-found: ignore
+          retention-days: 7
 
   # Desktop installers. The source is source-available in this repo (see
   # LICENSE-COMMERCIAL.md), so it builds HERE on free public runners instead of
@@ -162,13 +168,28 @@ jobs:
           SENTRY_DSN: ${{ vars.SENTRY_DSN }}
         with:
           projectPath: apps/desktop
-          tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: ${{ github.event.inputs.tag || github.ref_name }}
-          # The notes job already wrote the real changelog — do not overwrite it.
-          releaseBody: ""
-          releaseDraft: false
-          prerelease: false
+          # NO tagName/releaseName: passing them makes tauri-action publish to the
+          # release itself, which 403s because the org disables contents:write for
+          # GITHUB_TOKEN. Without them it just builds, and the installers are
+          # collected as artifacts below.
           args: ${{ matrix.args }}
+      - name: Collect desktop installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-desktop
+          find apps/desktop/src-tauri/target -type f \
+            \( -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \
+               -o -name "*.msi" -o -name "*-setup.exe" -o -name "*.sig" \) \
+            -not -path "*deps*" -exec cp {} dist-desktop/ \; || true
+          ls -la dist-desktop || true
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}-${{ strategy.job-index }}
+          path: dist-desktop/*
+          if-no-files-found: ignore
+          retention-days: 7
 
   # Island companion (Electron). Same rationale as desktop: source-available here,
   # so it builds on free public runners.
@@ -206,14 +227,18 @@ jobs:
             -not -path "*/node_modules/*" -not -path "*unpacked*" \
             -exec cp {} dist-island/ \; || true
           ls -la dist-island || true
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
+      # Artifacts, NOT a release upload: the org disables contents:write for
+      # GITHUB_TOKEN, so uploading straight to the release 403s with
+      # "Resource not accessible by integration". Artifacts need no write scope;
+      # tools/attach-artifacts.sh downloads them and attaches them to the release
+      # using a token that does have it.
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: dist-island/*
-          # Island packaging is still being brought onto this repo; a platform that
-          # produces no installer must not fail the whole release.
-          fail_on_unmatched_files: false
+          name: ${{ github.job }}-${{ runner.os }}-${{ strategy.job-index }}
+          path: dist/*
+          if-no-files-found: ignore
+          retention-days: 7
 
   build:
     needs: notes
@@ -284,12 +309,15 @@ jobs:
             elif command -v shasum   >/dev/null 2>&1; then shasum -a 256 "$asset" > "$asset.sha256"
             else echo "! no sha256 tool — skipping checksum for $asset" >&2; fi )
 
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
+      # Artifacts, NOT a release upload: the org disables contents:write for
+      # GITHUB_TOKEN, so uploading straight to the release 403s with
+      # "Resource not accessible by integration". Artifacts need no write scope;
+      # tools/attach-artifacts.sh downloads them and attaches them to the release
+      # using a token that does have it.
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: dist/*
-          fail_on_unmatched_files: true
-          # Only a real v* release claims `releases/latest` (the updater + installers
-          # fetch /releases/latest/download/<asset>); anything else must not steal it.
-          make_latest: ${{ startsWith(github.event.inputs.tag || github.ref_name, 'v') && 'true' || 'false' }}
+          name: ${{ github.job }}-${{ runner.os }}-${{ strategy.job-index }}
+          path: dist/*
+          if-no-files-found: ignore
+          retention-days: 7
