@@ -23,6 +23,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use ryu_kernel_contracts::schema::{ProviderRegistrationSpec, PROVIDER_OWNER_FIELD};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -677,6 +678,127 @@ fn upsert_provider(id: &str, patch: Map<String, Value>) -> Result<()> {
         *entry = Value::Object(patch);
     }
     write_models(&models)
+}
+
+// ── Sidecar-declared providers (auth bridges) ─────────────────────────────────
+
+/// Register a plugin sidecar's OpenAI-compatible endpoint as a selectable provider.
+///
+/// Called by the sidecar supervisor once the process reports healthy, driven by the
+/// sidecar's `provides_provider` manifest declaration. A sidecar cannot do this for
+/// itself: it holds only `RYU_EXT_TOKEN` (scoped to the ext-proxy hop and
+/// `/api/host/*`) and the host-RPC vocabulary has no provider-registration method.
+///
+/// Refuses, rather than merges, when:
+/// - the id is not a safe token (path separators / case tricks that could shadow a
+///   built-in under a different normalization), or
+/// - the id names a **built-in** provider or the managed/gateway pair, or
+/// - the id names an existing entry owned by someone else (a hand-configured provider
+///   or another plugin).
+///
+/// That last pair is the load-bearing guard. `baseUrl` is where inference traffic —
+/// carrying the user's live credential — is sent, so letting a plugin overwrite
+/// `openai-codex` or a user's own entry would hand it that traffic. See
+/// [`ProviderRegistrationSpec`] for the full rationale.
+/// `api_key` is the sidecar's minted `RYU_EXT_TOKEN`. It is written into the entry so
+/// Pi — which reads `models.json` and calls `baseUrl` **directly**, bypassing Core's
+/// ext-proxy — presents the bearer the extension-host bootstrap demands. Without it
+/// every inference request is refused 401 by the bootstrap's `authorized()` gate, since
+/// loopback is deliberately not treated as authentication.
+pub fn register_sidecar_provider(
+    plugin_id: &str,
+    spec: &ProviderRegistrationSpec,
+    port: u16,
+    api_key: Option<&str>,
+) -> Result<()> {
+    let id = spec.id.trim();
+    if !ProviderRegistrationSpec::id_is_safe(id) {
+        anyhow::bail!(
+            "provider id '{id}' is not a safe token (lowercase alphanumerics, '-', '_', max 64)"
+        );
+    }
+    if provider_meta(id).is_some() || is_managed_or_gateway(id) {
+        anyhow::bail!(
+            "plugin '{plugin_id}' may not register provider '{id}': it collides with a built-in \
+             provider; a plugin overriding a built-in could redirect subscription traffic"
+        );
+    }
+    if let Some(owner) = provider_owner(id) {
+        if owner != plugin_id {
+            anyhow::bail!(
+                "plugin '{plugin_id}' may not register provider '{id}': already owned by \
+                 '{owner}'"
+            );
+        }
+    } else if custom_provider_ids().iter().any(|existing| existing == id) {
+        anyhow::bail!(
+            "plugin '{plugin_id}' may not register provider '{id}': an unowned provider with \
+             that id already exists (configured by hand?)"
+        );
+    }
+
+    let mut patch = Map::new();
+    patch.insert(
+        "baseUrl".to_owned(),
+        Value::String(spec.base_url(port)),
+    );
+    patch.insert(
+        "api".to_owned(),
+        Value::String(spec.effective_api().to_owned()),
+    );
+    patch.insert(
+        PROVIDER_OWNER_FIELD.to_owned(),
+        Value::String(plugin_id.to_owned()),
+    );
+    if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
+        // models.json is written with `write_secret_file`, so this rides with the same
+        // protection as any other provider credential.
+        patch.insert("apiKey".to_owned(), Value::String(key.to_owned()));
+    }
+    if let Some(label) = spec.label.as_deref().filter(|s| !s.trim().is_empty()) {
+        patch.insert("label".to_owned(), Value::String(label.to_owned()));
+    }
+    if !spec.models.is_empty() {
+        patch.insert(
+            "models".to_owned(),
+            Value::Array(
+                spec.models
+                    .iter()
+                    .map(|m| json!({ "id": m }))
+                    .collect::<Vec<_>>(),
+            ),
+        );
+    }
+    upsert_provider(id, patch)
+}
+
+/// Remove a provider previously registered by `plugin_id`. Called when the plugin is
+/// disabled or uninstalled, so a dead loopback port is never left selectable.
+///
+/// A no-op unless the entry is stamped as owned by this plugin, so a plugin can never
+/// delete a hand-configured provider or one owned by another plugin. Returns whether
+/// an entry was actually removed.
+pub fn deregister_sidecar_provider(plugin_id: &str, provider_id: &str) -> Result<bool> {
+    let id = provider_id.trim();
+    if id.is_empty() {
+        return Ok(false);
+    }
+    match provider_owner(id) {
+        Some(owner) if owner == plugin_id => {
+            remove_provider(id)?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+/// The plugin id stamped on a custom provider entry, if it was sidecar-registered.
+fn provider_owner(id: &str) -> Option<String> {
+    read_models()["providers"]
+        .get(id)?
+        .get(PROVIDER_OWNER_FIELD)?
+        .as_str()
+        .map(str::to_owned)
 }
 
 fn custom_provider_ids() -> Vec<String> {
@@ -2294,6 +2416,142 @@ mod tests {
             assert_eq!(entry["api"], "openai-completions");
             assert_eq!(entry["models"][0]["id"], "llama3.1:8b");
             assert!(!is_gateway_routing());
+        });
+    }
+
+    /// A sidecar-declared provider round-trips: registered at the sidecar's loopback
+    /// port with ownership stamped, then removed again on deregistration.
+    #[test]
+    fn sidecar_provider_registers_and_deregisters() {
+        with_temp_dir(|| {
+            let spec = ProviderRegistrationSpec {
+                id: "chatgpt-bridge".to_owned(),
+                label: Some("ChatGPT bridge".to_owned()),
+                api: None,
+                base_path: None,
+                models: vec!["gpt-5".to_owned()],
+            };
+            register_sidecar_provider("com.example.bridge", &spec, 7997, Some("ext-tok")).unwrap();
+
+            let entry = read_models()["providers"]["chatgpt-bridge"].clone();
+            assert_eq!(entry["baseUrl"], "http://127.0.0.1:7997/v1");
+            assert_eq!(entry["api"], "openai-completions");
+            assert_eq!(entry[PROVIDER_OWNER_FIELD], "com.example.bridge");
+            assert_eq!(entry["models"][0]["id"], "gpt-5");
+            // The ext-token MUST be written as the apiKey: Pi calls baseUrl directly,
+            // bypassing the ext-proxy, and the extension-host bootstrap 401s any request
+            // without this exact bearer. Dropping it silently breaks every inference call.
+            assert_eq!(entry["apiKey"], "ext-tok");
+
+            assert!(deregister_sidecar_provider("com.example.bridge", "chatgpt-bridge").unwrap());
+            assert!(read_models()["providers"]
+                .get("chatgpt-bridge")
+                .is_none());
+        });
+    }
+
+    /// The load-bearing guard: a plugin may NOT claim a built-in provider id. Allowing
+    /// it would let a plugin repoint `openai-codex`'s baseUrl at its own server and
+    /// collect the user's live subscription token on the next request.
+    #[test]
+    fn sidecar_provider_cannot_override_builtin() {
+        with_temp_dir(|| {
+            let spec = ProviderRegistrationSpec {
+                id: "openai-codex".to_owned(),
+                label: None,
+                api: None,
+                base_path: None,
+                models: vec![],
+            };
+            let err = register_sidecar_provider("com.evil.plugin", &spec, 9999, None).unwrap_err();
+            assert!(
+                err.to_string().contains("built-in"),
+                "expected built-in collision refusal, got: {err}"
+            );
+            assert!(read_models()["providers"].get("openai-codex").is_none());
+        });
+    }
+
+    /// A plugin may not hijack, or delete, a provider another owner created.
+    #[test]
+    fn sidecar_provider_respects_ownership() {
+        with_temp_dir(|| {
+            let spec = ProviderRegistrationSpec {
+                id: "shared-id".to_owned(),
+                label: None,
+                api: None,
+                base_path: None,
+                models: vec![],
+            };
+            register_sidecar_provider("com.first.plugin", &spec, 7001, None).unwrap();
+
+            let err = register_sidecar_provider("com.second.plugin", &spec, 7002, None).unwrap_err();
+            assert!(
+                err.to_string().contains("already owned by"),
+                "expected ownership refusal, got: {err}"
+            );
+            // The original entry is untouched.
+            assert_eq!(
+                read_models()["providers"]["shared-id"]["baseUrl"],
+                "http://127.0.0.1:7001/v1"
+            );
+            // And a non-owner cannot remove it.
+            assert!(!deregister_sidecar_provider("com.second.plugin", "shared-id").unwrap());
+            assert!(read_models()["providers"].get("shared-id").is_some());
+        });
+    }
+
+    /// An id that is not a safe token is refused before it can reach the models file.
+    #[test]
+    fn sidecar_provider_rejects_unsafe_id() {
+        with_temp_dir(|| {
+            for bad in ["", "../escape", "Has-Caps", "with space", "sla/sh"] {
+                let spec = ProviderRegistrationSpec {
+                    id: bad.to_owned(),
+                    label: None,
+                    api: None,
+                    base_path: None,
+                    models: vec![],
+                };
+                let err = register_sidecar_provider("com.example.bridge", &spec, 7003, None)
+                    .unwrap_err();
+                assert!(
+                    err.to_string().contains("not a safe token"),
+                    "id {bad:?} should be refused, got: {err}"
+                );
+            }
+        });
+    }
+
+    /// A hand-configured provider (no owner stamp) is never adopted or clobbered.
+    #[test]
+    fn sidecar_provider_refuses_unowned_existing() {
+        with_temp_dir(|| {
+            configure_provider(ProviderConfigInput {
+                provider: "handmade".to_owned(),
+                api_key: None,
+                base_url: Some("http://localhost:1234/v1".to_owned()),
+                api: None,
+                routing: None,
+            })
+            .unwrap();
+
+            let spec = ProviderRegistrationSpec {
+                id: "handmade".to_owned(),
+                label: None,
+                api: None,
+                base_path: None,
+                models: vec![],
+            };
+            let err = register_sidecar_provider("com.example.bridge", &spec, 7004, None).unwrap_err();
+            assert!(
+                err.to_string().contains("unowned provider"),
+                "expected unowned refusal, got: {err}"
+            );
+            assert_eq!(
+                read_models()["providers"]["handmade"]["baseUrl"],
+                "http://localhost:1234/v1"
+            );
         });
     }
 

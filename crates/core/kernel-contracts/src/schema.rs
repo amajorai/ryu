@@ -486,6 +486,100 @@ pub struct SidecarSpec {
     /// [`RYU_SIDECAR_IDLE_SECS`]: the manager's env-seeded idle config.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_stop_secs: Option<u64>,
+
+    /// Optional **model-provider** declaration: when present, this sidecar serves an
+    /// OpenAI-compatible endpoint and Core registers it as a selectable provider once
+    /// the process reports healthy, then deregisters it when the plugin is disabled or
+    /// uninstalled. This is what makes a third-party *auth bridge* possible without a
+    /// Core change: the plugin performs its own login/refresh, serves `/v1`, and
+    /// declares that fact here. Absent = the sidecar is not a model provider.
+    ///
+    /// A sidecar cannot self-register: it holds only `RYU_EXT_TOKEN` (scoped to the
+    /// ext-proxy hop and `/api/host/*`), and the host-RPC vocabulary has no
+    /// provider-registration method. Registration is therefore Core-side, driven by
+    /// this declaration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provides_provider: Option<ProviderRegistrationSpec>,
+}
+
+/// Declares that a [`SidecarSpec`] serves an OpenAI-compatible model endpoint Core
+/// should register as a provider while the sidecar is healthy.
+///
+/// Security posture: the declared [`id`] is validated against the built-in provider
+/// table at registration and a collision is REFUSED, never merged. Without that guard
+/// a plugin could claim a built-in id (`openai-codex`, `anthropic`) and silently
+/// redirect the user's subscription traffic — and their live bearer token — to an
+/// attacker-controlled `baseUrl`. Core also stamps [`OWNER_FIELD`] into the written
+/// entry so deregistration can only ever remove an entry this plugin created.
+///
+/// [`id`]: ProviderRegistrationSpec::id
+/// [`OWNER_FIELD`]: crate::schema::PROVIDER_OWNER_FIELD
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ProviderRegistrationSpec {
+    /// Provider id as it appears in the model picker. Must not collide with a built-in
+    /// provider id, and must be a safe single token (lowercase alphanumerics, `-`, `_`).
+    pub id: String,
+
+    /// Human-readable label for the picker. Defaults to [`id`] when absent.
+    ///
+    /// [`id`]: ProviderRegistrationSpec::id
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+
+    /// Pi `api` type the endpoint speaks. Defaults to `"openai-completions"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api: Option<String>,
+
+    /// Path prefix appended to `http://127.0.0.1:<port>` to form the provider's
+    /// `baseUrl`. Defaults to `"/v1"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_path: Option<String>,
+
+    /// Optional model ids to seed the entry with, for an endpoint whose `GET /models`
+    /// discovery is unavailable or slow. Absent = rely on discovery.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
+}
+
+/// Field Core stamps into a sidecar-registered `models.json` provider entry naming the
+/// owning plugin. Deregistration removes an entry ONLY when this matches, so a plugin
+/// can never delete a provider the user configured by hand or that another plugin owns.
+pub const PROVIDER_OWNER_FIELD: &str = "_ryuOwnerPlugin";
+
+/// Default [`ProviderRegistrationSpec::base_path`].
+pub const DEFAULT_PROVIDER_BASE_PATH: &str = "/v1";
+
+/// Default [`ProviderRegistrationSpec::api`].
+pub const DEFAULT_PROVIDER_API: &str = "openai-completions";
+
+impl ProviderRegistrationSpec {
+    /// Whether `id` is a safe provider token: non-empty, lowercase alphanumerics plus
+    /// `-`/`_`, and bounded. Rejects path separators, whitespace, and case tricks that
+    /// could shadow a built-in id under a different normalization.
+    pub fn id_is_safe(id: &str) -> bool {
+        !id.is_empty()
+            && id.len() <= 64
+            && id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+    }
+
+    /// The `api` to write, applying the default.
+    pub fn effective_api(&self) -> &str {
+        self.api.as_deref().unwrap_or(DEFAULT_PROVIDER_API)
+    }
+
+    /// The loopback `baseUrl` for `port`, applying the [`base_path`] default.
+    ///
+    /// [`base_path`]: ProviderRegistrationSpec::base_path
+    pub fn base_url(&self, port: u16) -> String {
+        let path = self
+            .base_path
+            .as_deref()
+            .unwrap_or(DEFAULT_PROVIDER_BASE_PATH);
+        let path = path.strip_suffix('/').unwrap_or(path);
+        format!("http://127.0.0.1:{port}{path}")
+    }
 }
 
 /// Minimum legal [`SidecarSpec::idle_stop_secs`]: a shorter idle window would churn

@@ -1,7 +1,17 @@
 "use client";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@ryu/ui/components/avatar";
-import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar";
+// Extensions are REQUIRED here. `@ryu/ui` resolves through an `exports`
+// wildcard (`./components/*` -> `./src/components/*`), and Next/webpack matches
+// those paths exactly — it will not append `.tsx`. An extensionless specifier
+// resolves to nothing, the module comes out undefined, and the only symptom is
+// a runtime `ReferenceError: EntityAvatar is not defined` in the browser.
+// (Vite, which the desktop uses, papers over this — so it fails on web only.)
+import {
+	Avatar,
+	AvatarFallback,
+	AvatarImage,
+} from "@ryu/ui/components/avatar.tsx";
+import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 
 /**

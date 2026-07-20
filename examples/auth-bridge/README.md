@@ -91,21 +91,10 @@ Never hand-edit `plugin.json`.
 
 2. **Install the plugin** from the generated `plugin.json`.
 
-3. **Register it as a provider.** Core cannot yet do this for you (see Limitations),
-   so register it once by hand:
-
-   ```bash
-   curl -X POST http://127.0.0.1:7980/api/pi-config/providers \
-     -H 'content-type: application/json' \
-     -H "authorization: Bearer $RYU_TOKEN" \
-     -d '{"provider":"chatgpt-bridge",
-          "baseUrl":"http://127.0.0.1:7997/v1",
-          "api":"openai-completions"}'
-   ```
-
-   The desktop provider settings UI does the same thing.
-
-4. **Select it** as the active provider and send a message.
+3. **Select it** as the active provider and send a message. Registration is automatic:
+   the sidecar's `provides_provider` declaration tells Core to register
+   `chatgpt-bridge` at `http://127.0.0.1:7997/v1` once the process reports healthy,
+   and to remove it again when the plugin is disabled or stopped.
 
 Check the bridge itself at any time:
 
@@ -123,14 +112,14 @@ These are real and worth understanding before building on this.
   parse it correctly, but text arrives all at once rather than token by token.
   Fixing this properly means teaching the bootstrap to accept a stream from the
   handler, which is a Core change.
-- **No self-registration.** A sidecar receives `RYU_EXT_TOKEN`, which is scoped to
-  the ext-proxy hop and `/api/host/*`. It is not given `RYU_TOKEN`, and the host RPC
-  vocabulary has no provider-registration capability, so a bridge cannot register
-  itself. Hence the manual step above.
-- **No lifecycle cleanup.** Disabling or uninstalling the plugin leaves the provider
-  entry in `models.json` pointing at a dead port. Remove it manually.
 - **Translation is minimal.** Seam 3 handles text in and text out. Tool calls,
   images, and structured output are not mapped.
+
+Note that a sidecar still cannot register *itself*: it holds only `RYU_EXT_TOKEN`,
+scoped to the ext-proxy hop and `/api/host/*`, and the host-RPC vocabulary has no
+provider-registration method. `provides_provider` is a **declaration** Core acts on,
+which is why the id is validated against the built-in provider table and the written
+entry is stamped with its owning plugin.
 
 ## Trust
 

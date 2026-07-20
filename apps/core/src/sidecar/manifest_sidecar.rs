@@ -27,9 +27,13 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
-use crate::plugin_manifest::schema::{BinarySpec, SidecarProcess, SidecarSpec};
+use crate::plugin_manifest::schema::{
+    BinarySpec, ProviderRegistrationSpec, SidecarProcess, SidecarSpec,
+};
 use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
 
 /// The Gateway grant a Community-tier plugin must hold (approved) before Core will
@@ -344,6 +348,10 @@ pub struct ManifestSidecar {
     spec: SidecarSpec,
     downloads: crate::downloads::DownloadCenter,
     handle: ProcessHandle,
+    /// Whether this sidecar's `provides_provider` declaration is currently registered
+    /// as a model provider. Health is *polled*, so this latches the Unhealthy→Healthy
+    /// transition: registration fires once on the way up, deregistration once on stop.
+    provider_registered: Arc<AtomicBool>,
 }
 
 impl ManifestSidecar {
@@ -362,6 +370,41 @@ impl ManifestSidecar {
             spec,
             downloads,
             handle: ProcessHandle::new(),
+            provider_registered: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Register this sidecar's declared model provider, if it declares one. Idempotent
+    /// via [`provider_registered`]: the health monitor polls, so only the transition
+    /// into Healthy performs the write.
+    ///
+    /// A registration failure is logged, not propagated: a refused id (collision with a
+    /// built-in or another owner) must not take the sidecar itself down.
+    ///
+    /// [`provider_registered`]: ManifestSidecar::provider_registered
+
+    /// Deregister this sidecar's declared model provider, so a stopped sidecar never
+    /// leaves a provider selectable at a dead loopback port. No-op when it was never
+    /// registered, or when the entry is not owned by this plugin.
+    fn deregister_provider(&self) {
+        let Some(spec) = self.spec.provides_provider.as_ref() else {
+            return;
+        };
+        if !self.provider_registered.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        match crate::pi_config::deregister_sidecar_provider(&self.plugin_id, &spec.id) {
+            Ok(true) => tracing::info!(
+                plugin = %self.plugin_id,
+                provider = %spec.id,
+                "deregistered sidecar model provider"
+            ),
+            Ok(false) => {}
+            Err(e) => tracing::warn!(
+                plugin = %self.plugin_id,
+                provider = %spec.id,
+                "sidecar provider deregistration failed: {e}"
+            ),
         }
     }
 
@@ -459,6 +502,41 @@ async fn inject_cap_shims(env: &mut BTreeMap<String, String>, plugin_id: &str, p
             error = %e,
             "could not materialize capability CLI shims; sidecar spawns without them"
         ),
+    }
+}
+
+/// Register a sidecar-declared model provider exactly once, latching on `flag`.
+///
+/// Free function (not a method) so the polled health future — which owns only clones,
+/// never `&self` — can drive it on the Unhealthy→Healthy edge.
+///
+/// A refused registration (id collides with a built-in, or is owned by another plugin)
+/// is logged and the latch is released so a later health transition retries. It never
+/// propagates: a provider that cannot be registered must not take its sidecar down.
+fn register_provider_once(
+    plugin_id: &str,
+    spec: &ProviderRegistrationSpec,
+    port: u16,
+    ext_token: &str,
+    flag: &AtomicBool,
+) {
+    if flag.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    match crate::pi_config::register_sidecar_provider(plugin_id, spec, port, Some(ext_token)) {
+        Ok(()) => tracing::info!(
+            plugin = %plugin_id,
+            provider = %spec.id,
+            "registered sidecar model provider at 127.0.0.1:{port}"
+        ),
+        Err(e) => {
+            tracing::warn!(
+                plugin = %plugin_id,
+                provider = %spec.id,
+                "sidecar provider registration refused: {e}"
+            );
+            flag.store(false, Ordering::SeqCst);
+        }
     }
 }
 
@@ -822,6 +900,9 @@ impl Sidecar for ManifestSidecar {
     }
 
     fn stop(&self) -> BoxFuture<anyhow::Result<()>> {
+        // Drop the provider entry BEFORE the process goes away, so there is no window
+        // where a selectable provider points at a port nothing is listening on.
+        self.deregister_provider();
         let handle = self.handle.clone();
         Box::pin(async move { handle.stop().await })
     }
@@ -833,6 +914,12 @@ impl Sidecar for ManifestSidecar {
         // route (defense in depth) still admits Core's own check — closing the
         // previously-unauthenticated probe. A sidecar that ignores it is unaffected.
         let token = self.ext_token();
+        // Captured for the provider registration the Healthy edge triggers: the future
+        // outlives this borrow, so it takes owned clones rather than `&self`.
+        let provider = self.spec.provides_provider.clone();
+        let plugin_id = self.plugin_id.clone();
+        let port = self.effective_port();
+        let registered = Arc::clone(&self.provider_registered);
         Box::pin(async move {
             if !running {
                 return HealthStatus::Unhealthy("process not running".to_owned());
@@ -842,7 +929,16 @@ impl Sidecar for ManifestSidecar {
                 Err(e) => return HealthStatus::Degraded(format!("client build failed: {e}")),
             };
             match client.get(&url).bearer_auth(&token).send().await {
-                Ok(resp) if resp.status().is_success() => HealthStatus::Healthy,
+                Ok(resp) if resp.status().is_success() => {
+                    // Healthy means the endpoint is actually serving, so this is the
+                    // first moment it is safe to publish as a selectable provider.
+                    if let Some(spec) = provider.as_ref() {
+                        // Same token the probe just presented: Pi will send it as the
+                        // provider's apiKey when it calls the sidecar directly.
+                        register_provider_once(&plugin_id, spec, port, &token, &registered);
+                    }
+                    HealthStatus::Healthy
+                }
                 Ok(resp) => HealthStatus::Degraded(format!("health returned {}", resp.status())),
                 Err(e) => HealthStatus::Unhealthy(format!("health check failed: {e}")),
             }
@@ -906,12 +1002,64 @@ mod tests {
             host_api: None,
             lazy: false,
             idle_stop_secs: None,
+            provides_provider: None,
         }
     }
 
     #[test]
     fn namespaced_name_joins_plugin_and_local() {
         assert_eq!(namespaced_name("com.acme.tool", "engine"), "com.acme.tool/engine");
+    }
+
+    /// The `provides_provider` block a bridge manifest ships (see
+    /// `examples/auth-bridge/build.mjs`) deserializes and yields the loopback baseUrl
+    /// Core registers. Pins the on-the-wire field names so the example cannot silently
+    /// drift from the Rust contract.
+    #[test]
+    fn provides_provider_deserializes_from_manifest_json() {
+        let spec: SidecarSpec = serde_json::from_str(
+            r#"{
+                "name": "bridge",
+                "process": { "kind": "node", "entry": "./backend.js" },
+                "port": 7997,
+                "health_path": "/health",
+                "provides_provider": {
+                    "id": "chatgpt-bridge",
+                    "label": "ChatGPT (subscription bridge)",
+                    "api": "openai-completions",
+                    "base_path": "/v1",
+                    "models": ["gpt-5", "gpt-5-codex"]
+                }
+            }"#,
+        )
+        .expect("bridge manifest should deserialize");
+
+        let provider = spec.provides_provider.expect("provides_provider present");
+        assert_eq!(provider.id, "chatgpt-bridge");
+        assert_eq!(provider.effective_api(), "openai-completions");
+        assert_eq!(provider.base_url(7997), "http://127.0.0.1:7997/v1");
+        assert_eq!(provider.models.len(), 2);
+    }
+
+    /// Omitting the block leaves the sidecar a non-provider, and the optional
+    /// sub-fields fall back to their documented defaults.
+    #[test]
+    fn provides_provider_is_optional_with_defaults() {
+        let spec: SidecarSpec = serde_json::from_str(
+            r#"{
+                "name": "plain",
+                "process": { "kind": "node", "entry": "./x.js" },
+                "port": 7001
+            }"#,
+        )
+        .expect("manifest without provides_provider should deserialize");
+        assert!(spec.provides_provider.is_none());
+
+        let minimal: ProviderRegistrationSpec =
+            serde_json::from_str(r#"{ "id": "some-bridge" }"#).expect("minimal spec");
+        assert_eq!(minimal.effective_api(), "openai-completions");
+        assert_eq!(minimal.base_url(9000), "http://127.0.0.1:9000/v1");
+        assert!(minimal.models.is_empty());
     }
 
     #[test]
@@ -990,6 +1138,7 @@ mod tests {
             host_api: None,
             lazy: false,
             idle_stop_secs: None,
+            provides_provider: None,
         };
         let downloads = crate::downloads::DownloadCenter::with_default_client();
         let sc = ManifestSidecar::new("com.acme.voice".to_owned(), spec, downloads);

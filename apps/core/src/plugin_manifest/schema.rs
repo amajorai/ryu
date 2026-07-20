@@ -293,6 +293,7 @@ mod tests {
             host_api: None,
             lazy: false,
             idle_stop_secs: None,
+            provides_provider: None,
         }
     }
 
@@ -406,6 +407,7 @@ mod tests {
             host_api: None,
             lazy: false,
             idle_stop_secs: None,
+            provides_provider: None,
         };
         assert!(validate_sidecar_spec(&spec).unwrap_err().contains("entry"));
     }

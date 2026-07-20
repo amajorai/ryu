@@ -52,6 +52,16 @@ const manifest = {
 			// No host_api grants: this reference never calls ctx.host.call(). A bridge that
 			// persists its credential through Core storage would declare ["storage:kv"].
 			host_api: { grants: [] },
+			// Declares this sidecar as a model provider. Core registers it once the
+			// process reports healthy and removes it again on stop, so no manual
+			// registration step is needed. The id may not collide with a built-in.
+			provides_provider: {
+				id: "chatgpt-bridge",
+				label: "ChatGPT (subscription bridge)",
+				api: "openai-completions",
+				base_path: "/v1",
+				models: ["gpt-5", "gpt-5-codex"],
+			},
 		},
 	],
 };

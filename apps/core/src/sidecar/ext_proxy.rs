@@ -1243,6 +1243,7 @@ mod tests {
                 host_api: None,
                 lazy: false,
                 idle_stop_secs: None,
+                provides_provider: None,
             }],
             provides: vec![ProvidesEntry {
                 capability: "rag".to_owned(),
