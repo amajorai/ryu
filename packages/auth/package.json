@@ -18,8 +18,6 @@
     "@better-auth/expo": "catalog:",
     "@polar-sh/better-auth": "catalog:",
     "@polar-sh/sdk": "^0.42.2",
-    "@ryu/db": "workspace:*",
-    "@ryu/email": "workspace:*",
     "@ryu/env": "workspace:*",
     "better-auth": "catalog:",
     "dotenv": "catalog:",
