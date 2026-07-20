@@ -206,6 +206,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.5
+      # uiohook-napi compiles libuiohook from source on Linux and needs the X11
+      # headers; without them node-gyp dies with "X11/keysym.h: No such file".
+      - name: Linux build deps
+        if: runner.os == Linux
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxinerama-dev libxkbcommon-dev libxkbfile-dev
       - run: bun install
       # `build` only runs electron-vite; `dist` is the one that packages installers
       # via electron-builder. --publish never: the upload step below owns that, so
