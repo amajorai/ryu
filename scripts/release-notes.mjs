@@ -54,11 +54,11 @@ const commits = raw
   : [];
 
 const SECTIONS = [
-  ["feat", "### 🚀 Features"],
-  ["fix", "### 🐛 Fixes"],
-  ["perf", "### ⚡ Performance"],
-  ["docs", "### 📚 Documentation"],
-  ["other", "### 🧹 Other changes"],
+  ["feat", "### Features"],
+  ["fix", "### Fixes"],
+  ["perf", "### Performance"],
+  ["docs", "### Documentation"],
+  ["other", "### Other changes"],
 ];
 
 const bucket = (subject) => {
@@ -119,8 +119,38 @@ if (channel === "canary" || channel === "nightly") {
   out.push(`Built from commit [\`${shortHead}\`](https://github.com/${repo}/commit/${head}).`, "");
 }
 
+// Install block sits at the TOP, before the changelog: most people landing on a
+// release want the download, not the diff. Desktop first because that is what
+// most people want; the headless stack second for devs and self-hosters.
+if (channel === "release" || channel === "beta") {
+  out.push(
+    "### Install",
+    "",
+    "**Most people — the desktop app.** Download the installer for your OS from the assets below, or from https://ryuhq.com/download.",
+    "",
+    "| macOS | Windows | Linux |",
+    "|---|---|---|",
+    "| `.dmg` (Apple Silicon) | `.msi` / `.exe` | `.AppImage` / `.deb` |",
+    "",
+    "**Developers, self-hosters, servers — the headless stack** (`ryu-core`, `ryu-gateway`, `ryu-cli`) into `~/.ryu/bin`:",
+    "",
+    "```bash",
+    "# macOS / Linux",
+    "curl -fsSL https://raw.githubusercontent.com/amajorai/ryu/main/install.sh | sh",
+    "```",
+    "",
+    "```powershell",
+    "# Windows (PowerShell)",
+    "irm https://raw.githubusercontent.com/amajorai/ryu/main/install.ps1 | iex",
+    "```",
+    "",
+    "Then `ryu-cli` — it starts a local Core on first run, no API key needed. Individual binaries are attached below with `.sha256` checksums.",
+    ""
+  );
+}
+
 if (breaking.length) {
-  out.push("### ⚠️ Breaking changes", "", ...breaking, "");
+  out.push("### Breaking changes", "", ...breaking, "");
 }
 
 let any = false;
@@ -133,7 +163,7 @@ for (const [key, heading] of SECTIONS) {
 if (!any) out.push("_No code changes since the previous build._", "");
 
 if (contributors.size) {
-  out.push("### 🙌 Contributors", "", `Thanks to ${[...contributors].sort().join(", ")}.`, "");
+  out.push("### Contributors", "", `Thanks to ${[...contributors].sort().join(", ")}.`, "");
 }
 
 if (prev) {

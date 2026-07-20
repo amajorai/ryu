@@ -3,10 +3,10 @@ name: release
 # Builds the full headless binary set and attaches it to a GitHub Release.
 # Triggers on a pushed v* tag, or manually via workflow_dispatch with a tag input.
 #
-# The set is the 3 headless binaries (core / gateway / cli) plus the 11 feature-app
-# backend sidecars (mail / teams / research / clips / finetune / quests / healing /
-# monitors / dashboards / meetings / recipes) — 14 bins × {linux-x86_64, macos-aarch64,
-# windows-x86_64}. Asset names match Core's updater + installer contract
+# The set is core + gateway (Rust) and the TUI (Bun, shipped under the `ryu-cli`
+# asset name) × {linux-x86_64, macos-aarch64, windows-x86_64}. The 11 feature-app
+# backends build in their OWN satellite repos (amajorai/ryu-<app>), not here.
+# Asset names match Core's updater + installer contract
 # (apps/desktop/src-tauri/src/core/install.rs OPTIONAL_SIDECARS, release-local.sh):
 # ryu-core / ryu-gateway / ryu-cli / ryu-<app>, each `<asset>-<os>-<arch>[.exe]`, with a
 # sibling `<asset>.sha256` the installers verify against.
@@ -45,12 +45,66 @@ jobs:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          node scripts/release-notes.mjs --tag "$TAG" --channel release --repo "$GITHUB_REPOSITORY" > notes.md
+          # NOTE: this repo's history is mirror commits ("mirror: sync from
+          # monorepo @ <sha>"), so a changelog generated HERE is meaningless.
+          # Real notes are generated from the PRIVATE monorepo's history and
+          # pushed by tools/publish-release-notes.sh. So: never clobber notes
+          # that already exist — only seed a placeholder when the release does
+          # not exist yet, so the binaries have somewhere to attach.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --notes-file notes.md
-          else
-            gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes-file notes.md
+            echo "Release $TAG already exists — leaving its notes alone."
+            exit 0
           fi
+          node scripts/release-notes.mjs --tag "$TAG" --channel release --repo "$GITHUB_REPOSITORY" > notes.md
+          gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes-file notes.md
+
+  # apps/tui is the RECOMMENDED terminal client (apps/cli is deprecated), but it
+  # is Bun/TypeScript, not Rust, so it cannot ride the cargo matrix below.
+  # `bun build --compile` produces a standalone executable per platform.
+  #
+  # It must be built NATIVELY on each OS: @opentui/core pulls a platform-specific
+  # native package (@opentui/core-<plat>), so cross-compiling from one runner
+  # fails to resolve the others. One job per OS, no cross-targets.
+  #
+  # The assets are named `ryu-cli-*` even though they ARE the TUI: install.sh,
+  # install.ps1, and Core's updater fetch that exact name. Keeping the name means
+  # the deprecated Rust CLI simply disappears without breaking a single installer
+  # or updater contract.
+  tui:
+    needs: notes
+    name: ryu-cli / tui (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+      - run: bun install --frozen-lockfile
+      - name: Compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          case "${{ runner.os }}" in
+            Linux)   plat="linux-x86_64" ;;
+            macOS)   plat="macos-aarch64" ;;
+            Windows) plat="windows-x86_64" ;;
+          esac
+          mkdir -p dist
+          ( cd apps/tui && bun build --compile src/index.tsx --outfile "../../dist/ryu-cli-${plat}${ext}" )
+          ( cd dist
+            if command -v sha256sum >/dev/null 2>&1; then sha256sum "ryu-cli-${plat}${ext}" > "ryu-cli-${plat}${ext}.sha256"
+            elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "ryu-cli-${plat}${ext}" > "ryu-cli-${plat}${ext}.sha256"; fi )
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*
+          fail_on_unmatched_files: true
 
   build:
     needs: notes
@@ -69,7 +123,6 @@ jobs:
           # headless trio (standalone [package] manifests under apps/)
           - { asset: ryu-core,       bin: ryu-core,       dir: apps/core }
           - { asset: ryu-gateway,    bin: ryu-gateway,    dir: apps/gateway }
-          - { asset: ryu-cli,        bin: ryu,            dir: apps/cli }
           # the 11 feature-app backend sidecars (apps-store/<app>/backend)
     steps:
       - uses: actions/checkout@v4

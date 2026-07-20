@@ -93,10 +93,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         target:
-          # headless trio + the 11 feature-app backend sidecars (mirrors release.yml / canary.yml)
+          # core + gateway only. The TUI (shipped as ryu-cli) is Bun, not cargo;
+          # app backends build in their own satellite repos.
           - { asset: ryu-core,       bin: ryu-core,       dir: apps/core }
           - { asset: ryu-gateway,    bin: ryu-gateway,    dir: apps/gateway }
-          - { asset: ryu-cli,        bin: ryu,            dir: apps/cli }
     steps:
       - uses: actions/checkout@v4
 
