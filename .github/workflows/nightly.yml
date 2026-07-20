@@ -72,6 +72,10 @@ jobs:
           # `gh release create --target`. || true keeps the first-ever run (no nightly yet) green.
           gh release delete nightly --yes --cleanup-tag || true
           DATE=$(date -u +%Y-%m-%d)
+          # Notes must be GENERATED before the release references them — the
+          # rolling-build banner, no changelog (mirror history is just sync
+          # commits, and no publish step follows to fill one in).
+          node scripts/release-notes.mjs --channel nightly --repo "$GITHUB_REPOSITORY" --no-changelog > notes.md
           gh release create nightly \
             --prerelease \
             --target "$GITHUB_SHA" \
@@ -134,13 +138,31 @@ jobs:
           SENTRY_DSN: ${{ vars.SENTRY_DSN }}
         with:
           projectPath: apps/desktop
-          tagName: nightly
-          releaseName: nightly
-          # The notes job already wrote the real changelog — do not overwrite it.
-          releaseBody: ""
-          releaseDraft: false
-          prerelease: true
+          # NO tagName/releaseName: those make tauri-action publish to the release
+          # itself (an update-a-release PATCH), which the App token is refused
+          # ("Resource not accessible by integration"). Build only; the installers
+          # are collected and uploaded via the assets endpoint below.
           args: ${{ matrix.args }}
+      - name: Collect desktop installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-desktop
+          find apps/desktop/src-tauri/target -type f \
+            \( -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \
+               -o -name "*.msi" -o -name "*-setup.exe" -o -name "*.sig" \) \
+            -not -path "*deps*" -exec cp {} dist-desktop/ \; || true
+          ls -la dist-desktop || true
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist-desktop/*)
+          if [ ${#files[@]} -eq 0 ]; then echo "no desktop installers on this platform — skipping" >&2; exit 0; fi
+          gh release upload nightly "${files[@]}" --clobber
 
   # Island companion (Electron). Same rationale as desktop: source-available here,
   # so it builds on free public runners.
@@ -151,7 +173,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-2022]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -161,7 +183,7 @@ jobs:
       # headers; without them node-gyp dies with "X11/keysym.h: No such file".
       - name: Linux build deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxinerama-dev libxkbcommon-dev libxkbfile-dev libxrandr-dev libxi-dev libxcursor-dev libxss-dev
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libx11-xcb-dev libxt-dev libxtst-dev libxinerama-dev libxkbcommon-dev libxkbfile-dev libxrandr-dev libxi-dev libxcursor-dev libxss-dev
       - run: bun install
       # `build` only runs electron-vite; `dist` is the one that packages installers
       # via electron-builder. --publish never: the upload step below owns that, so
@@ -186,15 +208,19 @@ jobs:
             -not -path "*/node_modules/*" -not -path "*unpacked*" \
             -exec cp {} dist-island/ \; || true
           ls -la dist-island || true
+      # gh release upload (assets endpoint), NOT softprops: softprops PATCHes the
+      # release (update-a-release), which the App token is refused. Rolling builds
+      # stay lenient — a platform that produced no installer skips, not fails.
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: nightly
-          files: dist-island/*
-          # Island packaging is still being brought onto this repo; a platform that
-          # produces no installer must not fail the whole release.
-          fail_on_unmatched_files: false
-          make_latest: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist-island/*)
+          if [ ${#files[@]} -eq 0 ]; then echo "no island installers on this platform — skipping" >&2; exit 0; fi
+          gh release upload nightly "${files[@]}" --clobber
 
   build:
     needs: [gate, prepare]

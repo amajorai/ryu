@@ -1,6 +1,6 @@
 [package]
 name = "ryu-durable"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 license = "Apache-2.0"
 description = "Durable-execution primitive for Ryu: the swap-seam `DurableEngine` trait (checkpoint / resume / replay of a run to completion) plus `FileCheckpointStore`, the atomically-durable (temp + fsync + rename) directory-backed run-state store that makes crash-recoverable resume real rather than best-effort. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the workflow store checkpoints every node through it). The trait is generic over the run/workflow types, so the crate has ZERO dependency on apps/core — the petgraph workflow executor (the `execute` implementation) and the concrete `WorkflowRun` type stay Core-side (`apps/core/src/workflow/durable.rs` host shim). The seam re-admits an external Temporal/Restate/DBOS sidecar backend."

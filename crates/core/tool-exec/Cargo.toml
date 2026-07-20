@@ -1,6 +1,6 @@
 [package]
 name = "ryu-tool-exec"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 license = "Apache-2.0"
 description = "The programmatic-tool-calling (PTC) code-execution sandbox primitive for Ryu: Deno-subprocess backend with deny-by-default permissions, real process isolation, tool-call bridging back to the host, and exec budgets. Part of the Ryu monorepo (github.com/amajorai/ryu)."
@@ -24,7 +24,7 @@ serde_json = "1"
 # The unified permission grammar (PermissionSet) this backend lowers to Deno
 # `--allow-*` flags. A leaf contract crate (serde/schemars/semver only) so there
 # is no dependency cycle, and it carries ZERO dependency on apps/core.
-ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.7" }
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.8" }
 tokio = { version = "1", features = ["io-util", "process", "time", "rt", "macros", "sync"] }
 uuid = { version = "1", features = ["v4"] }
 

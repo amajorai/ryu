@@ -1,6 +1,6 @@
 [package]
 name = "ryu-hardware"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 license = "Apache-2.0"
 description = "Ryu Hardware Protocol (RHP v1) node backend — an extracted Core capability crate: the paired-device registry (SQLite store + revocable per-device tokens), pairing nonce verification, the Opus/WAV codec edge, the per-connection realtime session state machine (audio buffering + ambient meeting bridge), the live device-sender registry, the display-nudge loop, and the device-registry + TRMNL display HTTP surface. In-process default; Core consumes it as a NON-optional path dependency (the codec is also used by the voice module, the store backs ServerState in every build). The public ws/pair ingress route + the chat-turn orchestration (welded to Core's run_text_turn/voice/TTS session loop) stay Core-side as consumers of this crate's types."

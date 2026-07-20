@@ -1,6 +1,6 @@
 [package]
 name = "ryu-tracing"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 license = "Apache-2.0"
 description = "Per-run observability trace primitive for Ryu: the ordered-span store (`Span` v1 contract + SQLite-backed `TraceStore`) that records tool-call/model-call spans keyed by `conversation_id` (the run id) — open/close spans, args-hash privacy fingerprinting, and newest-first per-run span reads that back the desktop per-run trace viewer (M4). Placement rationale (Core, not Gateway): span ordering and tool-call sequencing are *what ran* (orchestration); token counts and cost are *what is measured/paid* and stay Gateway-side — this store deliberately holds NO tokens/cost fields. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the store opens at boot and backs a `ServerState` field). `TraceStore::open` takes an explicit db path, so the crate has ZERO dependency on apps/core — the default-path choice (`~/.ryu/traces.db`) stays Core-side wiring."

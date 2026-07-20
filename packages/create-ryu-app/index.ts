@@ -44,7 +44,7 @@ const SAFE_COMPANION_LABEL = "App Panel";
 /** The @ryuhq/sdk semver range stamped into a generated project's dependencies.
  *  Kept in lockstep with this package's own @ryuhq/sdk dependency (package.json)
  *  so a scaffolded project pins the same SDK line the scaffolder was built against. */
-const SDK_DEPENDENCY_RANGE = "^0.0.7";
+const SDK_DEPENDENCY_RANGE = "^0.0.8";
 
 /** Per-template scaffolding config: the `dev` entry file and whether the template's
  *  widget source needs React in the generated project. The template TREE lives in

@@ -1,6 +1,6 @@
 [package]
 name = "ryu-healing"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 license = "Apache-2.0"
 description = "Self-healing loop for failed runs: an extracted Core capability crate (the diagnose→propose engine + decision logic + `/api/healing/config|status` HTTP surface). In-process default; Core consumes it as a path dependency. The run-status bus, the conversation-store context read, the Gateway diagnosis call, the agent/workflow re-run, and the approvals inbox are inverted through the `HealingHost` trait so this crate has ZERO dependency on apps/core."

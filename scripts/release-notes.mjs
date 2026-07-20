@@ -182,7 +182,12 @@ if (channel === "release" || channel === "beta") {
 }
 
 if (noChangelog) {
-  out.push("_Changelog is being generated._", "");
+  // release/beta seed this placeholder for tools/publish-release-notes.sh to
+  // fill in from private history later. Rolling canary/nightly builds have no
+  // such follow-up step, so they show just the banner — no dangling promise.
+  if (channel === "release" || channel === "beta") {
+    out.push("_Changelog is being generated._", "");
+  }
 } else {
   if (breaking.length) {
     out.push("### Breaking changes", "", ...breaking, "");

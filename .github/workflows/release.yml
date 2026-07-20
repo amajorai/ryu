@@ -101,22 +101,26 @@ jobs:
           ( cd dist
             if command -v sha256sum >/dev/null 2>&1; then sha256sum "ryu-cli-${plat}${ext}" > "ryu-cli-${plat}${ext}.sha256"
             elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "ryu-cli-${plat}${ext}" > "ryu-cli-${plat}${ext}.sha256"; fi )
-      # Uploads straight onto the release. The org has historically blocked
-      # contents:write for GITHUB_TOKEN ("Resource not accessible by
-      # integration"); if that returns, tools/attach-artifacts.sh is the escape
-      # hatch — it downloads the run artifacts and attaches them with a
-      # write-capable token.
-      #
-      # The glob MUST match the directory the collect step wrote to. Pointing it
-      # at a directory that does not exist is silent: fail_on_unmatched_files is
-      # false, so the job goes green having uploaded nothing. That is exactly how
-      # v0.0.7 shipped with no desktop or island assets.
+      # Upload via `gh release upload` (assets endpoint only), NOT softprops.
+      # softprops does an update-a-release PATCH to locate/refresh the release,
+      # which the App-scoped GITHUB_TOKEN is refused ("Resource not accessible by
+      # integration") — re-running v0.0.7 via workflow_dispatch 403'd EVERY hub
+      # job that way. The assets endpoint alone is permitted, works on both
+      # tag-push and dispatch, and is exactly what the satellites already use.
+      # nullglob + count so an EMPTY match fails loudly rather than shipping
+      # nothing — a bare `dist/*` that matched nothing is how v0.0.7 first lost
+      # its desktop/island installers while the jobs stayed green.
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          files: dist/*
-          fail_on_unmatched_files: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/*)
+          if [ ${#files[@]} -eq 0 ]; then echo "no files in dist/ to upload" >&2; exit 1; fi
+          gh release upload "$TAG" "${files[@]}" --clobber
 
   # Desktop installers. The source is source-available in this repo (see
   # LICENSE-COMMERCIAL.md), so it builds HERE on free public runners instead of
@@ -189,12 +193,19 @@ jobs:
                -o -name "*.msi" -o -name "*-setup.exe" -o -name "*.sig" \) \
             -not -path "*deps*" -exec cp {} dist-desktop/ \; || true
           ls -la dist-desktop || true
+      # gh release upload (assets endpoint), NOT softprops — see the tui job for
+      # why. An empty dist-desktop/ fails the job instead of shipping nothing.
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          files: dist-desktop/*
-          fail_on_unmatched_files: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist-desktop/*)
+          if [ ${#files[@]} -eq 0 ]; then echo "no desktop installers to upload" >&2; exit 1; fi
+          gh release upload "$TAG" "${files[@]}" --clobber
 
   # Island companion (Electron). Same rationale as desktop: source-available here,
   # so it builds on free public runners.
@@ -205,7 +216,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Island's Windows leg is pinned to windows-2022, NOT windows-latest.
+        # windows-latest is now windows-2025-vs2026, which ships Visual Studio
+        # 2026 only; node-gyp 11 (via electron-rebuild, for uiohook-napi) can't
+        # find a 2022 toolchain there and dies "Could not find any Visual Studio
+        # installation to use". windows-2022 has VS2022, which node-gyp finds.
+        # Desktop stays on windows-latest — it builds Rust, not node-gyp natives.
+        os: [ubuntu-latest, macos-latest, windows-2022]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -215,7 +232,14 @@ jobs:
       # headers; without them node-gyp dies with "X11/keysym.h: No such file".
       - name: Linux build deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxinerama-dev libxkbcommon-dev libxkbfile-dev libxrandr-dev libxi-dev libxcursor-dev libxss-dev
+        # uiohook-napi's libuiohook probes a spread of X11 dev headers; each
+        # missing one only surfaces after the previous is satisfied, so the set
+        # was derived from src/x11/*.c #includes in one pass rather than by
+        # iterating CI failures: Intrinsic.h (libxt-dev), Xlib-xcb.h
+        # (libx11-xcb-dev), Xrandr.h (libxrandr-dev), XKBrules.h (libxkbfile-dev),
+        # XTest.h + record.h (libxtst-dev), Xinerama.h (libxinerama-dev). The
+        # xf86misc headers it also names are behind a disabled #ifdef.
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libx11-xcb-dev libxt-dev libxtst-dev libxinerama-dev libxkbcommon-dev libxkbfile-dev libxrandr-dev libxi-dev libxcursor-dev libxss-dev
       - run: bun install
       # `build` only runs electron-vite; `dist` is the one that packages installers
       # via electron-builder. --publish never: the upload step below owns that, so
@@ -224,9 +248,8 @@ jobs:
         working-directory: apps/island
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # node-gyp cannot locate Visual Studio on windows-latest without this;
-          # uiohook-napi builds libuiohook from source and dies with
-          # "Could not find any Visual Studio installation to use".
+          # Matches the windows-2022 image pinned above. On the default
+          # windows-latest (VS2026) node-gyp finds no 2022 toolchain and fails.
           GYP_MSVS_VERSION: "2022"
           npm_config_msvs_version: "2022"
         run: bun run dist -- --publish never
@@ -242,22 +265,19 @@ jobs:
             -not -path "*/node_modules/*" -not -path "*unpacked*" \
             -exec cp {} dist-island/ \; || true
           ls -la dist-island || true
-      # Uploads straight onto the release. The org has historically blocked
-      # contents:write for GITHUB_TOKEN ("Resource not accessible by
-      # integration"); if that returns, tools/attach-artifacts.sh is the escape
-      # hatch — it downloads the run artifacts and attaches them with a
-      # write-capable token.
-      #
-      # The glob MUST match the directory the collect step wrote to. Pointing it
-      # at a directory that does not exist is silent: fail_on_unmatched_files is
-      # false, so the job goes green having uploaded nothing. That is exactly how
-      # v0.0.7 shipped with no desktop or island assets.
+      # gh release upload (assets endpoint), NOT softprops — see the tui job for
+      # why. An empty dist-island/ fails the job instead of shipping nothing.
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          files: dist-island/*
-          fail_on_unmatched_files: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist-island/*)
+          if [ ${#files[@]} -eq 0 ]; then echo "no island installers to upload" >&2; exit 1; fi
+          gh release upload "$TAG" "${files[@]}" --clobber
 
   build:
     needs: notes
@@ -327,19 +347,16 @@ jobs:
             elif command -v shasum   >/dev/null 2>&1; then shasum -a 256 "$asset" > "$asset.sha256"
             else echo "! no sha256 tool — skipping checksum for $asset" >&2; fi )
 
-      # Uploads straight onto the release. The org has historically blocked
-      # contents:write for GITHUB_TOKEN ("Resource not accessible by
-      # integration"); if that returns, tools/attach-artifacts.sh is the escape
-      # hatch — it downloads the run artifacts and attaches them with a
-      # write-capable token.
-      #
-      # The glob MUST match the directory the collect step wrote to. Pointing it
-      # at a directory that does not exist is silent: fail_on_unmatched_files is
-      # false, so the job goes green having uploaded nothing. That is exactly how
-      # v0.0.7 shipped with no desktop or island assets.
+      # gh release upload (assets endpoint), NOT softprops — see the tui job for
+      # why. An empty dist/ fails the job instead of shipping nothing.
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          files: dist/*
-          fail_on_unmatched_files: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/*)
+          if [ ${#files[@]} -eq 0 ]; then echo "no files in dist/ to upload" >&2; exit 1; fi
+          gh release upload "$TAG" "${files[@]}" --clobber

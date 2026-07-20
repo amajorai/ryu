@@ -1,6 +1,6 @@
 [package]
 name = "ryu-learning"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 license = "Apache-2.0"
 description = "Continual-learning loop (MetaClaw-style) + experience buffer for Ryu: the reward-filtered SFT/skill-synthesis engine (sweep conversations -> PRM-score -> distill skills / assemble a fine-tune dataset) and its durable experience store (SQLite `experience.db`), plus the `/api/learn/*` + `/api/experience/list` surface. An extracted Core capability crate — in-process default, consumed by Core as a path dependency. Every Core-owned callback (conversation-store sweep, Gateway PRM/synth side-model, skill-synthesis approvals inbox, skills-registry reload, fine-tune dispatch, preference store) is inverted through the `LearningHost` trait, so this crate has ZERO dependency on apps/core. The lone kernel coupling (the `~/.ryu` data directory) is inverted through `init_data_dir`."
@@ -39,7 +39,7 @@ utoipa = { version = "5", features = ["axum_extras", "chrono"] }
 async-trait = "0.1"
 # The skill-synthesis path writes + validates `SKILL.md` files through the shared
 # skills crate (already a Core dependency; no new dependency in the merged build).
-ryu-skills = { path = "../../../../crates/core/skills", version = "0.0.7" }
+ryu-skills = { path = "../../../../crates/core/skills", version = "0.0.8" }
 # Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-finetune`
 # and `ryu-mail`. Core already pulls all of these, so there is no new dependency
 # in the in-process build.

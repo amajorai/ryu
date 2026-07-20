@@ -1,6 +1,6 @@
 [package]
 name = "ryu-sandbox"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 license = "Apache-2.0"
 description = "Sandbox execution primitive for Ryu: `run(command|wasm, spec) -> output` behind a swappable backend seam. The in-process wasmtime/WASI ephemeral sandbox is the default; command backends (docker, microsandbox, opensandbox) and the remote Daytona REST backend are detect-gated swaps selected by name via `select_backend`. Also owns the long-lived-workspace session path and the per-run metering heartbeat (kill-isolation + Gateway `sandbox/tick` debit). An extracted Core capability crate — in-process by default, consumed as a NON-optional path dependency (Core's sidecar/session/eval-code data paths reach it unconditionally). Host couplings the crate cannot own (the Gateway url/bearer for metering, the ryu-dir for the persisted default-backend selection, the registered org id, and the preferences-backed default run budget) are injected via the narrow global `SandboxHost` seam, so the crate has ZERO dependency on apps/core."
@@ -15,7 +15,7 @@ serde_json = "1"
 # The unified permission grammar (PermissionSet) this crate lowers into
 # SandboxCapabilities. A leaf contract crate (serde/schemars/semver only) so
 # there is no dependency cycle, and it carries ZERO dependency on apps/core.
-ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.7" }
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.8" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
 reqwest = { version = "0.12", features = ["json"] }
 tracing = "0.1"

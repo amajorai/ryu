@@ -1,6 +1,6 @@
 [package]
 name = "ryu-email-send"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 license = "Apache-2.0"
 description = "BYOK SMTP email sink for Ryu self-host: a swappable outbound-email transport (the SES agent-inbox path in `packages/mail` is the other) delivering policy/monitor alerts and, later, agent-inbox send. A rich multi-recipient / cc-bcc / text+html multipart / threaded / attachment builder plus a one-line alert helper, over a BYO relay resolved prefs-first then `RYU_SMTP_*` env — no default provider, no-op when unconfigured. An extracted Core capability crate; secret custody stays kernel-side via an injected password resolver, so this crate has ZERO dependency on apps/core."

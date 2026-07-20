@@ -1,6 +1,6 @@
 [package]
 name = "ryu-teams"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 license = "Apache-2.0"
 description = "Agent teams for Ryu (a named, ordered collection of agents + a coordination strategy, addressed as one unit via @team) — an extracted Core capability crate: SQLite store + `/api/teams/*` HTTP surface. In-process default; Core consumes it as a path dependency behind the `teams` feature. The store's only host coupling (the data-dir path) is injected at open time, so this crate has ZERO dependency on apps/core; the @team chat orchestration stays in Core's session loop as a consumer of this crate's types."
