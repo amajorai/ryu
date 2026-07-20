@@ -1,6 +1,6 @@
 [package]
 name = "ryu-rag"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "Retrieval-augmented-generation primitive for Ryu: the embedder (local hashing + remote OpenAI-compatible `/v1/embeddings`), the reranker (local term-overlap + remote cross-encoder `/rerank`), and the sqlite-backed `RetrievalStore` (memory + Spaces + OKF chunk index, cosine merge, top-K rerank) behind the narrow `RagProvider` trait. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (chat retrieval injection, agent auto-routing, tool/space/search embedding all reach it unconditionally). Model/provider selection stays Core-side (`apps/core/src/rag_host.rs`, the single resolver keyed by the bound provider-id) so the crate has ZERO dependency on apps/core — the per-space embedder is a `RagProvider`/`Embedder` INSTANCE a consumer holds, minted by that one resolver, not a process-global singleton. The OKF ingest/export path references the extracted `ryu-knowledge` types directly."
@@ -18,10 +18,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
-ryu-knowledge = { path = "../knowledge", version = "0.0.5" }
+ryu-knowledge = { path = "../knowledge", version = "0.0.6" }
 # The shared tenancy composition layer (`ResourceKey`). A pure-data contract
 # crate (NOT apps/core), so the "ZERO apps/core dependency" invariant holds.
-ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.5" }
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.6" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

@@ -43,6 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Release notes diff against the previous tag — needs full history.
+          fetch-depth: 0
       - name: Reset the rolling canary tag + prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,7 +57,7 @@ jobs:
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Canary (${GITHUB_SHA:0:7})" \
-            --notes "Bleeding-edge build of the Ryu open-core binaries (core / gateway / cli + the 11 app-backend sidecars) from \`main\` @ ${GITHUB_SHA:0:7}, $STAMP. Unsigned prereleases rebuilt on every merge — installed Ryu nodes never auto-update onto them (the updater only tracks the latest tagged \`v*\` release). For a steadier build use the \`nightly\` release; for anything real use the tagged releases."
+            --notes-file notes.md
 
   build:
     needs: prepare
@@ -74,17 +77,6 @@ jobs:
           - { asset: ryu-core,       bin: ryu-core,       dir: apps/core }
           - { asset: ryu-gateway,    bin: ryu-gateway,    dir: apps/gateway }
           - { asset: ryu-cli,        bin: ryu,            dir: apps/cli }
-          - { asset: ryu-mail,       bin: ryu-mail,       dir: apps-store/mail/backend }
-          - { asset: ryu-teams,      bin: ryu-teams,      dir: apps-store/teams/backend }
-          - { asset: ryu-research,   bin: ryu-research,   dir: apps-store/research/backend }
-          - { asset: ryu-clips,      bin: ryu-clips,      dir: apps-store/clips/backend }
-          - { asset: ryu-finetune,   bin: ryu-finetune,   dir: apps-store/finetune/backend }
-          - { asset: ryu-quests,     bin: ryu-quests,     dir: apps-store/quests/backend }
-          - { asset: ryu-healing,    bin: ryu-healing,    dir: apps-store/healing/backend }
-          - { asset: ryu-monitors,   bin: ryu-monitors,   dir: apps-store/monitors/backend }
-          - { asset: ryu-dashboards, bin: ryu-dashboards, dir: apps-store/dashboards/backend }
-          - { asset: ryu-meetings,   bin: ryu-meetings,   dir: apps-store/meetings/backend }
-          - { asset: ryu-recipes,    bin: ryu-recipes,    dir: apps-store/recipes/backend }
     steps:
       - uses: actions/checkout@v4
 

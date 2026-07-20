@@ -1,6 +1,6 @@
 [package]
 name = "ryu-activity"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "Unified activity-feed primitive for Ryu: the cross-module timeline of everything a node did (monitor alerts, quest completions, approvals, meetings, runs, manual notes) — the `ActivityItem`/`ActivityLevel` v1 contract plus the SQLite-backed `ActivityStore` (persist + newest-first cursor paging + a broadcast fan-out to the `/api/activity/stream` SSE feed). An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the store opens at boot, backs a `ServerState` field, and the `/api/activity*` routes are always mounted). `ActivityStore::open` takes an explicit db path, so the crate has ZERO dependency on apps/core — the default-path choice (`~/.ryu/activity.db`) stays Core-side wiring. The per-engine event mappers (`from_monitor_alert`/`from_quest_event`/…) stay in apps/core because they consume Core types (monitors/approvals/meetings/quests)."

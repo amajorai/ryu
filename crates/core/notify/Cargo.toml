@@ -1,6 +1,6 @@
 [package]
 name = "ryu-notify"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "Shared notification-delivery wire types + send primitives for Ryu: the swappable channel targets (webhook / Telegram / Expo push / BYO SMTP email recipient) and the dep-light HTTP send functions behind monitor alerts, policy alerts, workflow channel-send, and user-scoped notifications. The kernel notification STORE + fan-out orchestration stay Core-side (`apps/core/src/notify`); this crate holds only what Core and the out-of-process monitors engine BOTH need, so it has ZERO dependency on apps/core."

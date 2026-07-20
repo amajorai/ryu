@@ -1,6 +1,6 @@
 [package]
 name = "ryu-composio"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "Composio integration orchestration (Core side): the user's Composio account seam. Owns the preferences-first API-key resolver, the toolkit/action/trigger catalog client, connection initiate/status, the persisted trigger-subscription store (poll + fail-closed HMAC-SHA256 webhook verification), and the MCP execute-action HTTP path with connection-required elicitation detection. An extracted Core capability crate — in-process default (no IPC on any hot path). The only workflow/agent-engine couplings (run a workflow / run an agent when a trigger fires) are inverted through the ComposioHost trait so this crate has ZERO dependency on apps/core. The gateway's governed-egress composio execute is a separate package."

@@ -1,6 +1,6 @@
 [package]
 name = "ryu-memory"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "Long-term memory primitive for Ryu: the SQLite-backed, encryption-at-rest MemoryStore plus the multi-level scope model (user/node/project), category/importance/tags metadata, and scoped recall/CRUD over durable cross-conversation facts. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the chat auto-recall loop reaches it unconditionally). Rows are encrypted with the shared `ryu_crypto` master key. The two kernel couplings — the `~/.ryu` default db path and the bind-time owner backfill's org/account resolution — invert through plain constructor injection (`open(path, node_bound, owner)`), so this crate has ZERO dependency on apps/core; the Core wiring lives in `apps/core/src/memory_host.rs`."
@@ -17,10 +17,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
-ryu-crypto = { path = "../crypto", version = "0.0.5" }
+ryu-crypto = { path = "../crypto", version = "0.0.6" }
 # The shared tenancy composition layer (`ResourceKey`). A pure-data contract
 # crate (NOT apps/core), so the "ZERO apps/core dependency" invariant holds.
-ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.5" }
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.6" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

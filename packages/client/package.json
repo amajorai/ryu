@@ -1,6 +1,6 @@
 {
   "name": "@ryuhq/client",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "type": "module",
   "description": "TypeScript client SDK for embedding a Ryu Core agent in any app",
   "exports": {

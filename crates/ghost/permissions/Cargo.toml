@@ -1,6 +1,6 @@
 [package]
 name = "ghost-permissions"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 description = "Cross-platform check/request for the OS capabilities Ghost needs (UI automation + screen capture)."
 license = "Apache-2.0"

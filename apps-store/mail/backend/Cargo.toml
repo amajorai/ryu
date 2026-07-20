@@ -1,6 +1,6 @@
 [package]
 name = "ryu-mail"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 description = "Standalone out-of-process mail sidecar for Ryu: self-host Agent Inboxes (receive/store/send) that Core proxies to on loopback. The tracer for apps-as-microservices."
 license = "Apache-2.0"

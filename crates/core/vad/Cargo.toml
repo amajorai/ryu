@@ -1,6 +1,6 @@
 [package]
 name = "ryu-vad"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "Voice activity detection (VAD) modality primitive for Ryu: `detect(frame) -> speech_prob` feeding an endpointing/barge-in state machine. An extracted Core capability crate — in-process FOREVER (per-frame hot path, NEVER IPC) and consumed as a NON-optional path dependency (the voice session drives it per uplink hop). The endpointing/barge-in gate + an energy speech-probability backend are always compiled; the noise-robust Silero VAD ONNX inference is the genuinely in-process hot path behind the `voice-vad` feature, falling back per-hop to energy so voice mode never breaks. The one host coupling the crate cannot own (the `~/.ryu` data dir the Silero model resolves against, which is user-relocatable at runtime) is injected via the narrow `VadHost` trait installed at boot, so the crate has ZERO dependency on apps/core."
@@ -14,7 +14,7 @@ tracing = "0.1"
 # The Silero VAD download spec + model-path resolution live with the crate (VAD has
 # no sidecar — it's single-file model metadata). The DownloadSpec/DownloadKind/
 # VersionRecord types come from the already-extracted downloads primitive.
-ryu-downloads = { path = "../downloads", version = "0.0.5" }
+ryu-downloads = { path = "../downloads", version = "0.0.6" }
 
 # ── Silero VAD optional dep (in-process ONNX inference) ────────────────────────
 # transcribe-rs is git-only and pulls a heavy native ONNX Runtime; it lives behind

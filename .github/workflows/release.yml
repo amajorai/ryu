@@ -29,7 +29,31 @@ permissions:
   contents: write
 
 jobs:
+  # Standardized notes come FIRST so the release exists (with a real changelog)
+  # before any binary is attached to it.
+  notes:
+    name: Release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The changelog diffs against the previous tag — needs full history.
+          fetch-depth: 0
+      - name: Generate + publish standardized notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          node scripts/release-notes.mjs --tag "$TAG" --channel release --repo "$GITHUB_REPOSITORY" > notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes-file notes.md
+          fi
+
   build:
+    needs: notes
     name: ${{ matrix.target.asset }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # audiopus_sys (transitive: opus codec) vendors a CMakeLists that requires
@@ -47,17 +71,6 @@ jobs:
           - { asset: ryu-gateway,    bin: ryu-gateway,    dir: apps/gateway }
           - { asset: ryu-cli,        bin: ryu,            dir: apps/cli }
           # the 11 feature-app backend sidecars (apps-store/<app>/backend)
-          - { asset: ryu-mail,       bin: ryu-mail,       dir: apps-store/mail/backend }
-          - { asset: ryu-teams,      bin: ryu-teams,      dir: apps-store/teams/backend }
-          - { asset: ryu-research,   bin: ryu-research,   dir: apps-store/research/backend }
-          - { asset: ryu-clips,      bin: ryu-clips,      dir: apps-store/clips/backend }
-          - { asset: ryu-finetune,   bin: ryu-finetune,   dir: apps-store/finetune/backend }
-          - { asset: ryu-quests,     bin: ryu-quests,     dir: apps-store/quests/backend }
-          - { asset: ryu-healing,    bin: ryu-healing,    dir: apps-store/healing/backend }
-          - { asset: ryu-monitors,   bin: ryu-monitors,   dir: apps-store/monitors/backend }
-          - { asset: ryu-dashboards, bin: ryu-dashboards, dir: apps-store/dashboards/backend }
-          - { asset: ryu-meetings,   bin: ryu-meetings,   dir: apps-store/meetings/backend }
-          - { asset: ryu-recipes,    bin: ryu-recipes,    dir: apps-store/recipes/backend }
     steps:
       - uses: actions/checkout@v4
         with:

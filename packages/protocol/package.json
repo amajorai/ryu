@@ -1,6 +1,6 @@
 {
   "name": "@ryuhq/protocol",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "type": "module",
   "exports": {
     "./agent-rules": "./src/agent-rules.ts",

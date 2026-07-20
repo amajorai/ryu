@@ -1,6 +1,6 @@
 [package]
 name = "ryu-model-format"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "Model weight-format primitive for Ryu: the `ModelFormat` enum (GGUF/Safetensors/MLX), its wire/serde mapping, and the pure format→engine capability tables (engines_for_format, needs_engine_label, format_supported_on_node, pick_engine). A leaf capability crate with ZERO dependency on apps/core — the model catalog, sidecar providers, chat adapters, and catalog sources all reference these format types unconditionally, so it is consumed as a NON-optional path dependency and re-exported from Core as `crate::model_format`."
