@@ -80,6 +80,13 @@ export const env = createEnv({
 		STORAGE_FORCE_PATH_STYLE: z.string().optional(),
 		// Notion
 		NOTION_API_KEY: z.string().optional(),
+		// Notion API 2025-09-03 split databases into databases + data sources;
+		// these hold DATA SOURCE ids. The *_DATABASE_ID names are the pre-split
+		// spelling, still accepted so existing deployments keep working.
+		NOTION_BLOG_DATA_SOURCE_ID: z.string().optional(),
+		NOTION_PAGES_DATA_SOURCE_ID: z.string().optional(),
+		NOTION_HELP_DATA_SOURCE_ID: z.string().optional(),
+		NOTION_CHANGELOG_DATA_SOURCE_ID: z.string().optional(),
 		NOTION_BLOG_DATABASE_ID: z.string().optional(),
 		NOTION_PAGES_DATABASE_ID: z.string().optional(),
 		NOTION_HELP_DATABASE_ID: z.string().optional(),

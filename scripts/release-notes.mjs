@@ -16,13 +16,34 @@
 import { execFileSync } from "node:child_process";
 
 const args = new Map();
-for (let i = 2; i < process.argv.length; i += 2) {
-  args.set(process.argv[i].replace(/^--/, ""), process.argv[i + 1]);
+for (let i = 2; i < process.argv.length; i++) {
+  const key = process.argv[i].replace(/^--/, "");
+  const next = process.argv[i + 1];
+  // Bare flags (--no-commit-links) carry no value; keyed options consume one.
+  if (next === undefined || next.startsWith("--")) {
+    args.set(key, true);
+  } else {
+    args.set(key, next);
+    i++;
+  }
 }
 
 const tag = args.get("tag") || "";
 const channel = args.get("channel") || "release";
 const repo = args.get("repo") || "amajorai/ryu";
+// When notes are generated from the PRIVATE monorepo, the shas are private and
+// linking them into the public repo yields 404s for every reader. The grouped
+// changelog is the valuable part, so render bare shas instead.
+const noCommitLinks = args.get("no-commit-links") === true;
+// CI runs this ON the mirror, whose history is only "mirror: sync from monorepo
+// @ <sha>" commits — a changelog computed there is noise. CI seeds the release
+// with the Install block only; tools/publish-release-notes.sh fills in the real
+// changelog afterwards from this repo's history.
+const noChangelog = args.get("no-changelog") === true;
+const commitRef = (sha, short) =>
+  noCommitLinks
+    ? `\`${short}\``
+    : `[\`${short}\`](https://github.com/${repo}/commit/${sha})`;
 /** Commits authored by the project itself are not credited as contributors. */
 const OWN = new Set(["ryu-mirror[bot]", "github-actions[bot]", "web-flow"]);
 
@@ -34,7 +55,13 @@ const git = (...a) => {
   }
 };
 
-const head = git("rev-parse", "HEAD");
+// End of the range. In CI this runs at the tagged commit, so HEAD and the tag
+// agree — but run from a maintainer's checkout for an OLDER tag (which is how
+// tools/publish-release-notes.sh repairs a release) HEAD is whatever main is
+// now, and the notes would list every commit landed since. Prefer the tag when
+// it resolves locally.
+const tagRef = args.get("tag") || "";
+const head = (tagRef && git("rev-parse", `${tagRef}^{commit}`)) || git("rev-parse", "HEAD");
 const shortHead = head.slice(0, 7);
 
 /** Previous tag: explicit, else the most recent tag before HEAD, else the root. */
@@ -93,7 +120,7 @@ for (const c of commits) {
   }
   const link = pr
     ? `[#${pr}](https://github.com/${repo}/pull/${pr})`
-    : `[\`${c.sha.slice(0, 7)}\`](https://github.com/${repo}/commit/${c.sha})`;
+    : commitRef(c.sha, c.sha.slice(0, 7));
   const line = `- ${pretty(c.subject).replace(/\s*\(#\d+\)\s*$/, "")} (${link})`;
   if (/^\w+(\([^)]*\))?!:/.test(c.subject)) breaking.push(line);
   groups.get(bucket(c.subject)).push(line);
@@ -117,11 +144,11 @@ if (channel === "canary" || channel === "nightly") {
 if (channel === "canary" || channel === "nightly") {
   out.push(
     `> Rolling **${channel}** build from \`main\` — not a stable release. Built from commit ` +
-      `[\`${shortHead}\`](https://github.com/${repo}/commit/${head}).`,
+      `${commitRef(head, shortHead)}.`,
     ""
   );
 } else {
-  out.push(`Built from commit [\`${shortHead}\`](https://github.com/${repo}/commit/${head}).`, "");
+  out.push(`Built from commit ${commitRef(head, shortHead)}.`, "");
 }
 
 // Install block sits at the TOP, before the changelog: most people landing on a
@@ -154,24 +181,28 @@ if (channel === "release" || channel === "beta") {
   );
 }
 
-if (breaking.length) {
-  out.push("### Breaking changes", "", ...breaking, "");
+if (noChangelog) {
+  out.push("_Changelog is being generated._", "");
+} else {
+  if (breaking.length) {
+    out.push("### Breaking changes", "", ...breaking, "");
+  }
+
+  let any = false;
+  for (const [key, heading] of SECTIONS) {
+    const list = groups.get(key);
+    if (!list.length) continue;
+    any = true;
+    out.push(heading, "", ...list, "");
+  }
+  if (!any) out.push("_No code changes since the previous build._", "");
+
+  if (contributors.size) {
+    out.push("### Contributors", "", `Thanks to ${[...contributors].sort().join(", ")}.`, "");
+  }
 }
 
-let any = false;
-for (const [key, heading] of SECTIONS) {
-  const list = groups.get(key);
-  if (!list.length) continue;
-  any = true;
-  out.push(heading, "", ...list, "");
-}
-if (!any) out.push("_No code changes since the previous build._", "");
-
-if (contributors.size) {
-  out.push("### Contributors", "", `Thanks to ${[...contributors].sort().join(", ")}.`, "");
-}
-
-if (prev) {
+if (prev && !noChangelog) {
   out.push(`**Full changelog**: https://github.com/${repo}/compare/${prev}...${tag || shortHead}`);
 }
 

@@ -85,10 +85,10 @@ Source: [`packages/env/src/server.ts`](https://github.com/amajorai/ryu/blob/main
 | `STORAGE_BUCKET_NAME` | Optional | - | See `.env.example`. |
 | `STORAGE_FORCE_PATH_STYLE` | Optional | - | See `.env.example`. |
 | `NOTION_API_KEY` | Optional | - | Notion |
-| `NOTION_BLOG_DATABASE_ID` | Optional | - | See `.env.example`. |
-| `NOTION_PAGES_DATABASE_ID` | Optional | - | See `.env.example`. |
-| `NOTION_HELP_DATABASE_ID` | Optional | - | See `.env.example`. |
-| `NOTION_CHANGELOG_DATABASE_ID` | Optional | - | See `.env.example`. |
+| `NOTION_BLOG_DATA_SOURCE_ID` | Optional | - | See `.env.example`. |
+| `NOTION_PAGES_DATA_SOURCE_ID` | Optional | - | See `.env.example`. |
+| `NOTION_HELP_DATA_SOURCE_ID` | Optional | - | See `.env.example`. |
+| `NOTION_CHANGELOG_DATA_SOURCE_ID` | Optional | - | See `.env.example`. |
 | `POLAR_ORGANIZATION_ID` | Optional | - | Polar |
 | `POLAR_SERVER` | Optional | `sandbox` | See `.env.example`. |
 | `POLAR_PRODUCT_DESKTOP_LICENSE` | Optional | - | Plan-catalog product/price ids (epic #496). All optional: each falls back to the documented default in `@ryu/auth/lib/plans`. See `docs/polar-products.md` for which products/prices/benefits to create. |
@@ -825,10 +825,10 @@ Source: [`apps/server/.env.example`](https://github.com/amajorai/ryu/blob/main/a
 | `DUB_PARTNERS_PORTAL_URL` | Optional | - | Legacy Dub partner links  -  only referenced if migrating from the old Dub affiliate program; safe to leave unset on new installs. |
 | `DUB_PARTNERS_PROGRAM_URL` | Optional | - | Legacy Dub partner links  -  only referenced if migrating from the old Dub affiliate program; safe to leave unset on new installs. |
 | `NOTION_API_KEY` | Required* | - | Notion API Configuration |
-| `NOTION_BLOG_DATABASE_ID` | Required* | - | See `.env.example`. |
-| `NOTION_PAGES_DATABASE_ID` | Required* | - | See `.env.example`. |
-| `NOTION_HELP_DATABASE_ID` | Required* | - | See `.env.example`. |
-| `NOTION_CHANGELOG_DATABASE_ID` | Required* | - | See `.env.example`. |
+| `NOTION_BLOG_DATA_SOURCE_ID` | Required* | - | See `.env.example`. |
+| `NOTION_PAGES_DATA_SOURCE_ID` | Required* | - | See `.env.example`. |
+| `NOTION_HELP_DATA_SOURCE_ID` | Required* | - | See `.env.example`. |
+| `NOTION_CHANGELOG_DATA_SOURCE_ID` | Required* | - | See `.env.example`. |
 | `STORAGE_ACCESS_KEY_ID` | Required* | - | Object Storage Configuration (AWS S3 Compatible) Supports: AWS S3, Hetzner Object Storage, DigitalOcean Spaces, Cloudflare R2, etc. |
 | `STORAGE_SECRET_ACCESS_KEY` | Required* | - | See `.env.example`. |
 | `STORAGE_REGION` | Required* | - | See `.env.example`. |

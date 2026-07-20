@@ -29,8 +29,10 @@ permissions:
   contents: write
 
 jobs:
-  # Standardized notes come FIRST so the release exists (with a real changelog)
-  # before any binary is attached to it.
+  # Comes FIRST so the release exists before any binary is attached to it. It
+  # only SEEDS the notes (Install block, no changelog) — the real changelog is
+  # generated from the private monorepo by tools/publish-release-notes.sh, since
+  # this repo's history is nothing but "mirror: sync from monorepo @ <sha>".
   notes:
     name: Release notes
     runs-on: ubuntu-latest
@@ -55,7 +57,7 @@ jobs:
             echo "Release $TAG already exists — leaving its notes alone."
             exit 0
           fi
-          node scripts/release-notes.mjs --tag "$TAG" --channel release --repo "$GITHUB_REPOSITORY" > notes.md
+          node scripts/release-notes.mjs --tag "$TAG" --channel release --repo "$GITHUB_REPOSITORY" --no-changelog > notes.md
           gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes-file notes.md
 
   # apps/tui is the RECOMMENDED terminal client (apps/cli is deprecated), but it
@@ -99,11 +101,16 @@ jobs:
           ( cd dist
             if command -v sha256sum >/dev/null 2>&1; then sha256sum "ryu-cli-${plat}${ext}" > "ryu-cli-${plat}${ext}.sha256"
             elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "ryu-cli-${plat}${ext}" > "ryu-cli-${plat}${ext}.sha256"; fi )
-      # Artifacts, NOT a release upload: the org disables contents:write for
-      # GITHUB_TOKEN, so uploading straight to the release 403s with
-      # "Resource not accessible by integration". Artifacts need no write scope;
-      # tools/attach-artifacts.sh downloads them and attaches them to the release
-      # using a token that does have it.
+      # Uploads straight onto the release. The org has historically blocked
+      # contents:write for GITHUB_TOKEN ("Resource not accessible by
+      # integration"); if that returns, tools/attach-artifacts.sh is the escape
+      # hatch — it downloads the run artifacts and attaches them with a
+      # write-capable token.
+      #
+      # The glob MUST match the directory the collect step wrote to. Pointing it
+      # at a directory that does not exist is silent: fail_on_unmatched_files is
+      # false, so the job goes green having uploaded nothing. That is exactly how
+      # v0.0.7 shipped with no desktop or island assets.
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
@@ -186,7 +193,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          files: dist/*
+          files: dist-desktop/*
           fail_on_unmatched_files: false
 
   # Island companion (Electron). Same rationale as desktop: source-available here,
@@ -235,16 +242,21 @@ jobs:
             -not -path "*/node_modules/*" -not -path "*unpacked*" \
             -exec cp {} dist-island/ \; || true
           ls -la dist-island || true
-      # Artifacts, NOT a release upload: the org disables contents:write for
-      # GITHUB_TOKEN, so uploading straight to the release 403s with
-      # "Resource not accessible by integration". Artifacts need no write scope;
-      # tools/attach-artifacts.sh downloads them and attaches them to the release
-      # using a token that does have it.
+      # Uploads straight onto the release. The org has historically blocked
+      # contents:write for GITHUB_TOKEN ("Resource not accessible by
+      # integration"); if that returns, tools/attach-artifacts.sh is the escape
+      # hatch — it downloads the run artifacts and attaches them with a
+      # write-capable token.
+      #
+      # The glob MUST match the directory the collect step wrote to. Pointing it
+      # at a directory that does not exist is silent: fail_on_unmatched_files is
+      # false, so the job goes green having uploaded nothing. That is exactly how
+      # v0.0.7 shipped with no desktop or island assets.
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          files: dist/*
+          files: dist-island/*
           fail_on_unmatched_files: false
 
   build:
@@ -315,11 +327,16 @@ jobs:
             elif command -v shasum   >/dev/null 2>&1; then shasum -a 256 "$asset" > "$asset.sha256"
             else echo "! no sha256 tool — skipping checksum for $asset" >&2; fi )
 
-      # Artifacts, NOT a release upload: the org disables contents:write for
-      # GITHUB_TOKEN, so uploading straight to the release 403s with
-      # "Resource not accessible by integration". Artifacts need no write scope;
-      # tools/attach-artifacts.sh downloads them and attaches them to the release
-      # using a token that does have it.
+      # Uploads straight onto the release. The org has historically blocked
+      # contents:write for GITHUB_TOKEN ("Resource not accessible by
+      # integration"); if that returns, tools/attach-artifacts.sh is the escape
+      # hatch — it downloads the run artifacts and attaches them with a
+      # write-capable token.
+      #
+      # The glob MUST match the directory the collect step wrote to. Pointing it
+      # at a directory that does not exist is silent: fail_on_unmatched_files is
+      # false, so the job goes green having uploaded nothing. That is exactly how
+      # v0.0.7 shipped with no desktop or island assets.
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
