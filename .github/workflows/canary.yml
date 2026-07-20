@@ -23,7 +23,6 @@ on:
       - "apps/core/**"
       - "apps/gateway/**"
       - "apps/cli/**"
-      - "apps-store/*/backend/**"
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"

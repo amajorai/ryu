@@ -42,7 +42,7 @@ jobs:
       - name: Generate + publish standardized notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           # NOTE: this repo's history is mirror commits ("mirror: sync from
@@ -107,7 +107,7 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: dist/*
           fail_on_unmatched_files: false
 
@@ -185,7 +185,7 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: dist/*
           fail_on_unmatched_files: false
 
@@ -243,7 +243,7 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: dist/*
           fail_on_unmatched_files: false
 
@@ -264,11 +264,10 @@ jobs:
           # headless trio (standalone [package] manifests under apps/)
           - { asset: ryu-core,       bin: ryu-core,       dir: apps/core }
           - { asset: ryu-gateway,    bin: ryu-gateway,    dir: apps/gateway }
-          # the 11 feature-app backend sidecars (apps-store/<app>/backend)
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.ref }}
 
       # Full build-dep union for every bin (opus for the audio crates was the actual
       # v0.0.4 macOS failure — pkg-config could not find Opus).
@@ -324,6 +323,6 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: dist/*
           fail_on_unmatched_files: false
