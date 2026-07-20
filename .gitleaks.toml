@@ -16,4 +16,16 @@ paths = [
   # credential) and trip generic-api-key on minified JS tokens. No real Ryu secret lives
   # here; scanning a vendored bundle is out of scope for this repo's secret hygiene.
   '''apps/core/src/plugin_manifest/fixtures/.*\.ui\.html''',
+  # Desktop build-time env. Every value here is `VITE_`-prefixed, which means Vite
+  # INLINES it into the shipped bundle — the PostHog project key and Sentry DSN are
+  # public client identifiers present in every released binary, by design. Publishing
+  # this file changes nothing about their exposure. A real secret must never be added
+  # here: if it needs to stay secret, it cannot be a VITE_ var.
+  '''apps/desktop/\.env\.production''',
+  # Documentation curl examples: `-H "Authorization: Bearer $RYU_API_KEY"` etc. trips
+  # curl-auth-header on the literal header shape, not on any real token.
+  '''apps/fumadocs/content/docs/.*\.mdx''',
+  # Editor keymap: `keys: "mod+shift+enter"` is a keyboard shortcut that happens to
+  # match generic-api-key's key/value heuristic.
+  '''packages/ui/src/components/editor/plugins/.*-kit\.tsx''',
 ]

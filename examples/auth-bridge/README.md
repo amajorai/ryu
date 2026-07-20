@@ -115,6 +115,18 @@ These are real and worth understanding before building on this.
 - **Translation is minimal.** Seam 3 handles text in and text out. Tool calls,
   images, and structured output are not mapped.
 
+### How Pi authenticates to the bridge
+
+Non-obvious, and worth knowing before you debug a wall of 401s. The extension-host
+bootstrap treats **loopback as not authentication**: it refuses any request whose
+`Authorization` header is not exactly the sidecar's minted `RYU_EXT_TOKEN`. Core
+stamps that token automatically when forwarding through `/api/ext/<id>/*`, but Pi
+does not go through the proxy - it reads `models.json` and calls `baseUrl` directly.
+
+So Core writes the ext-token into the registered provider entry as its `apiKey`, and
+Pi presents it as a bearer. That happens automatically; you do not declare it. But if
+you point a client at the sidecar port yourself, you must send the same bearer.
+
 Note that a sidecar still cannot register *itself*: it holds only `RYU_EXT_TOKEN`,
 scoped to the ext-proxy hop and `/api/host/*`, and the host-RPC vocabulary has no
 provider-registration method. `provides_provider` is a **declaration** Core acts on,

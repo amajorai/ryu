@@ -214,6 +214,15 @@ fn default_grant_allowlist() -> Vec<String> {
         // re-enable would be denied with GrantsDenied. Swappable via the
         // `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
         "meetings:crud",
+        // Shell integration: a companion app that contributes a sidebar section /
+        // navigation entry to the host shell declares this. Seeded by four built-in
+        // fixtures (`activity`, `approvals`, `skill-editor`, `timeline`). Same
+        // rationale as `monitors:crud` above — a fresh install seeds the grant
+        // directly, but a runtime disable→re-enable re-runs `/v1/grants/validate`
+        // and would be denied with GrantsDenied without it. This is what
+        // `every_builtin_fixture_grant_is_allowlisted` caught. Swappable via the
+        // `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
+        "shell:integrate",
         // A durable key/value store scope declared by the seeded chat-hook
         // plugins (`goal`, `proof`) so they can persist run state. Same re-enable
         // rationale as the companion scopes above. Swappable via the env override.
