@@ -104,13 +104,12 @@ jobs:
       # "Resource not accessible by integration". Artifacts need no write scope;
       # tools/attach-artifacts.sh downloads them and attaches them to the release
       # using a token that does have it.
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.job }}-${{ runner.os }}-${{ strategy.job-index }}
-          path: dist/*
-          if-no-files-found: ignore
-          retention-days: 7
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*
+          fail_on_unmatched_files: false
 
   # Desktop installers. The source is source-available in this repo (see
   # LICENSE-COMMERCIAL.md), so it builds HERE on free public runners instead of
@@ -183,13 +182,12 @@ jobs:
                -o -name "*.msi" -o -name "*-setup.exe" -o -name "*.sig" \) \
             -not -path "*deps*" -exec cp {} dist-desktop/ \; || true
           ls -la dist-desktop || true
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
         with:
-          name: desktop-${{ runner.os }}-${{ strategy.job-index }}
-          path: dist-desktop/*
-          if-no-files-found: ignore
-          retention-days: 7
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*
+          fail_on_unmatched_files: false
 
   # Island companion (Electron). Same rationale as desktop: source-available here,
   # so it builds on free public runners.
@@ -237,13 +235,12 @@ jobs:
       # "Resource not accessible by integration". Artifacts need no write scope;
       # tools/attach-artifacts.sh downloads them and attaches them to the release
       # using a token that does have it.
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.job }}-${{ runner.os }}-${{ strategy.job-index }}
-          path: dist/*
-          if-no-files-found: ignore
-          retention-days: 7
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*
+          fail_on_unmatched_files: false
 
   build:
     needs: notes
@@ -319,10 +316,9 @@ jobs:
       # "Resource not accessible by integration". Artifacts need no write scope;
       # tools/attach-artifacts.sh downloads them and attaches them to the release
       # using a token that does have it.
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.job }}-${{ runner.os }}-${{ strategy.job-index }}
-          path: dist/*
-          if-no-files-found: ignore
-          retention-days: 7
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*
+          fail_on_unmatched_files: false
