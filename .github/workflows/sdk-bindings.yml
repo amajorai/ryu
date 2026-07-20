@@ -59,15 +59,18 @@ jobs:
       - name: Generate Python binding
         run: |
           # Standalone crate: `target/` is under the crate dir (the cwd), so the
-          # cdylib is cwd-relative `target/release/...`; the out-dir is repo-root
-          # `../../bindings/python/ryu_sdk`.
+          # cdylib is cwd-relative `target/release/...`; the out-dir is repo-root.
+          # NOTE: this crate lives at crates/sdk/uniffi (3 levels down) — `../../`
+          # only reaches crates/, which silently wrote the binding to
+          # crates/bindings/python and broke the smoke-test import.
+          # `../../../bindings/python/ryu_sdk`.
           cargo run --release --bin uniffi-bindgen -- \
             generate --library target/release/libryu_sdk_uniffi.so \
             --language python \
-            --out-dir ../../bindings/python/ryu_sdk
+            --out-dir ../../../bindings/python/ryu_sdk
           # The generated module dlopens the compiled library at import time, so
           # it must sit next to the module.
-          cp target/release/libryu_sdk_uniffi.so ../../bindings/python/ryu_sdk/
+          cp target/release/libryu_sdk_uniffi.so ../../../bindings/python/ryu_sdk/
 
       - name: Smoke test the generated binding
         working-directory: bindings/python

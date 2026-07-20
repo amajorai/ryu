@@ -107,7 +107,12 @@ const title =
       ? `Nightly build \`${shortHead}\``
       : `${tag}`;
 
-out.push(`## ${title}`, "");
+// GitHub already shows the tag + title on the release card, so repeating it
+// here is pure noise. Rolling channels still need a line saying WHICH build
+// this is, since their tag is just "canary"/"nightly".
+if (channel === "canary" || channel === "nightly") {
+  out.push(`## ${title}`, "");
+}
 
 if (channel === "canary" || channel === "nightly") {
   out.push(
