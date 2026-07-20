@@ -1,6 +1,6 @@
 [package]
 name = "ryu-sdk-ffi"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 description = "C-ABI surface over the ryu-sdk Rust core, consumed by the Go (cgo) binding and any other C-FFI client."
 license = "Apache-2.0"
@@ -13,6 +13,6 @@ name = "ryu_sdk_ffi"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-ryu-sdk = { path = "../core", version = "0.0.6" }
+ryu-sdk = { path = "../core", version = "0.0.7" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }

@@ -1,8 +1,8 @@
 // Shown in the main content area whenever every tab is closed. Rather than a
 // bare "no tabs" placeholder, this is a personalized launchpad: a greeting, a
 // row of quick actions to start something new, and "jump back in" lists of the
-// user's recent chats, agents, and spaces. It mounts only while the window has
-// zero tabs (see Layout), so the data hooks it pulls (agents/spaces/chats) only
+// user's recent agents and spaces. It mounts only while the window has
+// zero tabs (see Layout), so the data hooks it pulls (agents/spaces) only
 // fetch in that idle state.
 
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
@@ -40,7 +40,6 @@ import { GettingStartedChecklist } from "@/src/components/chat/GettingStartedChe
 import { ImportThreadsDialog } from "@/src/components/chat/ImportThreadsDialog.tsx";
 import { WorkspaceBar } from "@/src/components/chat/WorkspaceBar.tsx";
 import { VoiceModeSurface } from "@/src/components/voice/VoiceModeSurface.tsx";
-import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -140,16 +139,10 @@ function QuickActionCard({ action }: { action: QuickAction }) {
 }
 
 /** The reorderable launchpad sections, in their default order. */
-type HomeSectionKey =
-	| "get-started"
-	| "quick-actions"
-	| "chats"
-	| "agents"
-	| "spaces";
+type HomeSectionKey = "get-started" | "quick-actions" | "agents" | "spaces";
 const DEFAULT_HOME_SECTION_ORDER: HomeSectionKey[] = [
 	"get-started",
 	"quick-actions",
-	"chats",
 	"agents",
 	"spaces",
 ];
@@ -584,7 +577,6 @@ function LaunchpadComposer() {
 export function EmptyTabsState() {
 	const { openTab } = useTabsContext();
 	const { data: session } = useSession();
-	const { conversations } = useChatHistoryContext();
 	const { agents } = useAgents();
 	const { spaces } = useSpacesContext();
 	const activeNode = useActiveNode();
@@ -645,25 +637,6 @@ export function EmptyTabsState() {
 			onSelect: () => openTab("/store", { title: "Customize" }),
 		},
 	];
-
-	const recentChats = useMemo<RecentRow[]>(
-		() =>
-			[...conversations]
-				.filter((c) => !c.archived)
-				.sort(
-					(a, b) =>
-						normalizeTimestamp(b.updatedAt ?? b.createdAt) -
-						normalizeTimestamp(a.updatedAt ?? a.createdAt)
-				)
-				.slice(0, RECENT_LIMIT)
-				.map((c) => ({
-					id: c.id,
-					name: c.title || "Untitled chat",
-					subtitle: c.folderPath ?? null,
-					open: () => openTab("/chat", { conversationId: c.id }),
-				})),
-		[conversations, openTab]
-	);
 
 	const recentAgents = useMemo<RecentRow[]>(
 		() =>
@@ -786,21 +759,6 @@ export function EmptyTabsState() {
 								<QuickActionCard action={action} key={action.label} />
 							))}
 						</div>
-					</HomeSection>
-				);
-			case "chats":
-				return (
-					<HomeSection
-						dnd={sectionDnd}
-						key={key}
-						onSeeAll={() => openTab("/library/chat", { title: "Chats" })}
-						sectionKey={key}
-						title="Recent chats"
-					>
-						<RecentList
-							emptyHint="Your recent chats will show up here."
-							rows={recentChats}
-						/>
 					</HomeSection>
 				);
 			case "agents":

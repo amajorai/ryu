@@ -1,6 +1,6 @@
 [package]
 name = "ryu-image"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Image-generation modality primitive for Ryu: `generate(prompt) -> image` with a swappable engine seam (local stable-diffusion.cpp by default; OpenRouter/Replicate/fal cloud providers routed through the Gateway). An extracted Core capability crate — in-process by default and consumed as a NON-optional path dependency (the `POST /api/images/generate` data path reaches it unconditionally). Owns the image-gen abstraction + routing: prompt validation, default-count, the local-vs-cloud dispatch, and the media proxy/gateway-forward mechanics. Host couplings the crate cannot own (the local sd-server base-url, the Gateway url/token, and lazy-starting the sd.cpp sidecar) are injected via the narrow `ImageHost` trait, so the crate has ZERO dependency on apps/core."

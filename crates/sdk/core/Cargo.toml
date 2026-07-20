@@ -1,6 +1,6 @@
 [package]
 name = "ryu-sdk"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 description = "Ryu developer SDK core — the shared Rust kernel (manifest model, gateway egress rules, gateway-mandatory model client) that every language binding builds on."
 license = "Apache-2.0"
@@ -24,7 +24,7 @@ codegen = ["dep:progenitor", "dep:prettyplease", "dep:syn", "dep:openapiv3"]
 # re-exports these types from `manifest`/`runnable` instead of maintaining a
 # drifting copy — apps/core depends on the same crate, so the SDK and Core now
 # validate against one identical definition.
-ryu-kernel-contracts = { path = "../../core/kernel-contracts", version = "0.0.6" }
+ryu-kernel-contracts = { path = "../../core/kernel-contracts", version = "0.0.7" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

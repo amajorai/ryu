@@ -1,6 +1,6 @@
 [package]
 name = "ryu-spaces"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Spaces primitive for Ryu: named document collections with a sqlite-vec (`vec0`) vector store, a content-addressed blob store, per-space embedder, and a GraphRAG (entity/relation) retrieval strategy. An extracted Core capability crate consumed in-process as a NON-optional path dependency; embedders/rerankers are injected as `ryu_rag` instances so the crate has ZERO dependency on apps/core — the model-registry-driven embedder choice, default `~/.ryu` paths, tenancy (`Tenancy`/`ResourceTenancy`) mapping, and preferences all stay Core-side (`apps/core/src/server/spaces.rs` shim)."
@@ -21,11 +21,11 @@ tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
-ryu-rag = { path = "../rag", version = "0.0.6" }
+ryu-rag = { path = "../rag", version = "0.0.7" }
 # The shared tenancy composition layer (`ResourceKey`). A pure-data contract
 # crate (serde/schemars/semver only) — NOT apps/core — so depending on it to
 # derive `DocOwner` keeps the "ZERO apps/core dependency" invariant intact.
-ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.6" }
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.0.7" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

@@ -1,6 +1,6 @@
 [package]
 name = "ryu-recipes"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Recipes: ghost-os parity for Ryu's workflow system — parameterized, replayable native-desktop automations (record once with a frontier model, replay forever with a small one). An extracted Core capability crate owning the on-disk store surface (over ghost-core's RecipeStore), the replay/record engine, and the `/api/recipes/*` HTTP surface. In-process default; Core consumes it as a NON-optional path dependency because the workflow executor's GhostAction/Recipe nodes need `run`/`extract_mcp_json` unconditionally — the `recipes` cargo feature only gates the HTTP routes. The live-ghost couplings (the shared MCP registry for replay, and the dedicated recording subprocess / McpSession lifecycle) are inverted through the `RecipesHost` trait so this crate has ZERO dependency on apps/core."
@@ -19,7 +19,7 @@ path = "src/main.rs"
 # Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
 # axum router has no version skew. This crate has ZERO dependency on apps/core.
 [dependencies]
-ghost-core = { path = "../../../crates/ghost/core", version = "0.0.6" }
+ghost-core = { path = "../../../crates/ghost/core", version = "0.0.7" }
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
 serde = { version = "1", features = ["derive"] }

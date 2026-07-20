@@ -1,6 +1,6 @@
 [package]
 name = "ryu-kernel-contracts"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 description = "Ryu kernel contracts — the single, pure-data definition of the plugin.json manifest model (types + validation) shared by apps/core and the Ryu SDK. No I/O, no runtime deps; serde/schemars only."
 license = "Apache-2.0"

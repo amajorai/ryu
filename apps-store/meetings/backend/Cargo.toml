@@ -1,6 +1,6 @@
 [package]
 name = "ryu-meetings"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Meeting notes for Ryu (Granola/Notion-AI style): record a call, transcribe it live, auto-detect an in-progress meeting from mic-in-use, and generate structured AI notes — an extracted Core capability crate (engine + SQLite store + audio pipeline + HTTP surface). In-process default; Core consumes it as a path dependency. Cross-cutting deps (preferences, the STT transcribe path, the Gateway note-gen call, the Spaces note store, and the auto-title model call) are inverted through the `MeetingsHost` trait so this crate has ZERO dependency on apps/core."
@@ -41,7 +41,7 @@ hound = "3"
 # Built at DEFAULT features (NO `voice-parakeet`) so the sidecar stays free of the
 # heavy git `transcribe-rs` + native ONNX Runtime dep; `default_stt_engine()` then
 # resolves to whisper, matching Core's lean-build fallback. ZERO apps/core dep.
-ryu-stt = { path = "../../../crates/core/stt", version = "0.0.6" }
+ryu-stt = { path = "../../../crates/core/stt", version = "0.0.7" }
 # Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-quests` /
 # `ryu-teams`. Core already pulls all of these, so there is no new dependency in the
 # in-process build.

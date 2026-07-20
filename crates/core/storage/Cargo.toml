@@ -1,6 +1,6 @@
 [package]
 name = "ryu-storage"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Plugin-owned key/value storage primitive for Ryu: an isolated, `(plugin_id, namespace, key)`-namespaced SQLite KV store (the plugin-host `storage:kv` capability's backing state). An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the plugin turn-hook runtime reaches it unconditionally). `PluginStorage::open` takes an explicit db path, so the crate has ZERO dependency on apps/core — the default-path choice and the process-global handle stay Core-side as wiring."

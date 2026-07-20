@@ -1,6 +1,6 @@
 [package]
 name = "ryu-finetune"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Fine-tuning (Unsloth) durable state + HTTP surface for Ryu: Core's system-of-record for fine-tune jobs (SQLite `finetune.db`) and the trained-adapter catalog (`installed-adapters.json`), plus the `/api/finetune/*` control-plane surface. The training itself runs out-of-process in the `apps-store/finetune/sidecar` Python sidecar; this crate owns the durable records that survive a Core restart (the sidecar's in-process registry does not) and the thin proxy that drives the training worker over HTTP. An extracted Core capability crate — in-process default, consumed by Core as a path dependency. Its lone kernel coupling (the `~/.ryu` data directory) is inverted through `init_data_dir`, so this crate has ZERO dependency on apps/core."
@@ -34,8 +34,8 @@ utoipa = { version = "5", features = ["axum_extras", "chrono"] }
 # GGUF as a selectable installed model (`installed::record`). Both are extracted
 # crates (ZERO apps/core dependency); the sidecar shares the SAME on-disk indices
 # under `${RYU_DIR}` that Core reads.
-ryu-model-catalog = { path = "../../../crates/core/model-catalog", version = "0.0.6" }
-ryu-model-format = { path = "../../../crates/core/model-format", version = "0.0.6" }
+ryu-model-catalog = { path = "../../../crates/core/model-catalog", version = "0.0.7" }
+ryu-model-format = { path = "../../../crates/core/model-format", version = "0.0.7" }
 # Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-mail`
 # and `ryu-teams`. Core already pulls all of these, so there is no new dependency
 # in the in-process build.

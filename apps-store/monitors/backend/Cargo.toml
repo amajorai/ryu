@@ -1,6 +1,6 @@
 [package]
 name = "ryu-monitors"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Website monitors for Ryu (price / stock / keyword / content-diff / uptime): watch a URL on a schedule and alert on change, with notification fan-out (webhook / Telegram / Expo push / BYO SMTP email) — an extracted Core capability crate (engine + SQLite store + notify + HTTP surface). Also owns the shared app-inbox notification store + `deliver_user_notification` and the policy-alert dedupe/delivery store. In-process default; Core consumes it as a path dependency. Cross-cutting deps (the Spider fetch MCP tool, desktop-toast events, BYO SMTP send, the notification plugin hooks, and the scheduler backing job) are inverted through the `MonitorsHost` trait so this crate has ZERO dependency on apps/core."
@@ -31,7 +31,7 @@ futures-util = "0.3"
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 tracing = "0.1"
 async-trait = "0.1"
-ryu-notify = { path = "../../../crates/core/notify", version = "0.0.6" }
+ryu-notify = { path = "../../../crates/core/notify", version = "0.0.7" }
 humantime = "2"
 regex = "1"
 sha2 = "0.10"

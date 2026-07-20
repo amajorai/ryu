@@ -1,6 +1,6 @@
 [package]
 name = "ryu-dashboards"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Home dashboards: a customizable, constantly-updating grid of widgets — an extracted Core capability crate (engine + SQLite store + widget-source resolution + refresh loop + device-image renderer + `/api/dashboards/*` HTTP surface). In-process default; Core consumes it as a NON-optional path dependency (the hardware device-dashboard renderer, the `dashboard_builder` MCP runnable, and the background refresh loop reach its types in every build). The three cross-cutting couplings the widget-source resolver needs — the Gateway URL/token (Composio), the agent runner (agent widgets), and the SSRF-guarded external fetch (HTTP widgets) — are inverted through the `DashboardsHost` trait so this crate has ZERO dependency on apps/core."

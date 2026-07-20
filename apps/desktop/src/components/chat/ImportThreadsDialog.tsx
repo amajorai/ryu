@@ -10,10 +10,13 @@
 // messages; it never touches the agent's own history files.
 
 import { Badge } from "@ryu/ui/components/badge";
+import { Button } from "@ryu/ui/components/button";
+import { Checkbox } from "@ryu/ui/components/checkbox";
 import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
+	DialogFooter,
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog";
@@ -65,7 +68,8 @@ export function ImportThreadsDialog({
 	const [supported, setSupported] = useState(true);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [importingId, setImportingId] = useState<string | null>(null);
+	const [selected, setSelected] = useState<Set<string>>(new Set());
+	const [importing, setImporting] = useState(false);
 
 	// Default the picker to the first agent whose engine plausibly has importable
 	// history (Claude Code / Codex), else the first agent — so the dialog opens on
@@ -82,6 +86,7 @@ export function ImportThreadsDialog({
 		async (id: string) => {
 			setLoading(true);
 			setError(null);
+			setSelected(new Set());
 			try {
 				const result = await listAgentThreads(target, id);
 				setSupported(result.supported);
@@ -102,25 +107,61 @@ export function ImportThreadsDialog({
 		}
 	}, [open, agentId, loadThreads]);
 
-	const handleImport = useCallback(
-		async (thread: NativeThread) => {
-			if (!agentId || importingId) {
-				return;
+	const toggleThread = useCallback((id: string) => {
+		setSelected((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) {
+				next.delete(id);
+			} else {
+				next.add(id);
 			}
-			setImportingId(thread.id);
-			setError(null);
+			return next;
+		});
+	}, []);
+
+	const allSelected = threads.length > 0 && selected.size === threads.length;
+
+	const toggleAll = useCallback(() => {
+		setSelected((prev) =>
+			prev.size === threads.length
+				? new Set()
+				: new Set(threads.map((t) => t.id))
+		);
+	}, [threads]);
+
+	// Import every checked thread. One failure must not discard the successes, so
+	// failures are counted and reported while the rest still land.
+	const handleImportSelected = useCallback(async () => {
+		if (!agentId || importing || selected.size === 0) {
+			return;
+		}
+		setImporting(true);
+		setError(null);
+		let firstConversationId: string | null = null;
+		let failed = 0;
+		for (const thread of threads) {
+			if (!selected.has(thread.id)) {
+				continue;
+			}
 			try {
 				const result = await importAgentThread(target, agentId, thread.id);
-				onImported(result.conversationId);
-				onOpenChange(false);
-			} catch (e) {
-				setError(e instanceof Error ? e.message : "Failed to import thread");
-			} finally {
-				setImportingId(null);
+				firstConversationId ??= result.conversationId;
+			} catch {
+				failed += 1;
 			}
-		},
-		[agentId, importingId, target, onImported, onOpenChange]
-	);
+		}
+		setImporting(false);
+		if (firstConversationId) {
+			onImported(firstConversationId);
+			onOpenChange(false);
+			return;
+		}
+		setError(
+			failed === 1
+				? "Failed to import thread"
+				: `Failed to import ${failed} threads`
+		);
+	}, [agentId, importing, selected, threads, target, onImported, onOpenChange]);
 
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
@@ -178,6 +219,27 @@ export function ImportThreadsDialog({
 					</p>
 				)}
 
+				{!loading && supported && threads.length > 0 && (
+					<div className="flex items-center justify-between px-1">
+						<button
+							className="flex items-center gap-2.5 rounded-lg py-1 text-left text-muted-foreground text-xs transition-colors hover:text-foreground"
+							disabled={importing}
+							onClick={toggleAll}
+							type="button"
+						>
+							<Checkbox
+								checked={allSelected}
+								className="pointer-events-none shrink-0"
+								tabIndex={-1}
+							/>
+							{allSelected ? "Deselect all" : "Select all"}
+						</button>
+						<span className="text-muted-foreground text-xs tabular-nums">
+							{selected.size} of {threads.length} selected
+						</span>
+					</div>
+				)}
+
 				{/* min-w-0 keeps a long thread path/URL from forcing the dialog's grid
 				    track wider than the popup — the row text truncates instead. */}
 				<ScrollArea className="h-72 min-w-0">
@@ -195,11 +257,19 @@ export function ImportThreadsDialog({
 								{threads.map((thread) => (
 									<li key={thread.id}>
 										<button
+											aria-pressed={selected.has(thread.id)}
 											className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted disabled:opacity-50"
-											disabled={importingId !== null}
-											onClick={() => handleImport(thread)}
+											disabled={importing}
+											onClick={() => toggleThread(thread.id)}
 											type="button"
 										>
+											{/* Presentational: the row button owns the toggle, so the
+											    checkbox must not be a second tab stop. */}
+											<Checkbox
+												checked={selected.has(thread.id)}
+												className="pointer-events-none shrink-0"
+												tabIndex={-1}
+											/>
 											<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 												<span className="truncate font-medium text-foreground text-sm">
 													{thread.title}
@@ -215,9 +285,6 @@ export function ImportThreadsDialog({
 												<span className="text-muted-foreground text-xs">
 													{compactAge(thread.updatedAt)}
 												</span>
-												{importingId === thread.id && (
-													<Spinner className="size-3" />
-												)}
 											</span>
 										</button>
 									</li>
@@ -230,6 +297,23 @@ export function ImportThreadsDialog({
 						</p>
 					)}
 				</ScrollArea>
+
+				<DialogFooter>
+					<Button
+						disabled={importing}
+						onClick={() => onOpenChange(false)}
+						variant="outline"
+					>
+						Cancel
+					</Button>
+					<Button
+						disabled={selected.size === 0 || importing}
+						onClick={handleImportSelected}
+					>
+						{importing && <Spinner className="size-3" />}
+						{selected.size > 0 ? `Import ${selected.size}` : "Import"}
+					</Button>
+				</DialogFooter>
 			</DialogContent>
 		</Dialog>
 	);

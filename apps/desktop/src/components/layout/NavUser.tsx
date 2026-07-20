@@ -657,24 +657,15 @@ export function NavUser({
 														</DropdownMenuSubContent>
 													</DropdownMenuSub>
 												)}
-												{upgradeLabel && (
-													<>
-														<DropdownMenuItem onClick={openPricing}>
-															<HugeiconsIcon
-																className="mr-2 size-4"
-																icon={ArrowUpRight01Icon}
-															/>
-															{upgradeLabel}
-														</DropdownMenuItem>
-														<DropdownMenuItem onClick={openPricing}>
-															<HugeiconsIcon
-																className="mr-2 size-4"
-																icon={Wallet01Icon}
-															/>
-															See all plans
-														</DropdownMenuItem>
-													</>
-												)}
+												<DropdownMenuItem onClick={openPricing}>
+													<HugeiconsIcon
+														className="mr-2 size-4"
+														icon={
+															upgradeLabel ? ArrowUpRight01Icon : Wallet01Icon
+														}
+													/>
+													{upgradeLabel ?? "See all plans"}
+												</DropdownMenuItem>
 											</DropdownMenuGroup>
 											<DropdownMenuItem
 												disabled={isSigningOut}

@@ -1,5 +1,4 @@
 import {
-	Activity01Icon,
 	Add01Icon,
 	AiBrain01Icon,
 	AiImageIcon,
@@ -11,10 +10,8 @@ import {
 	AudioWave01Icon,
 	BookOpen01Icon,
 	BubbleChatIcon,
-	Calendar04Icon,
 	Cancel01Icon,
 	ChatAdd01Icon,
-	CheckmarkBadge02Icon,
 	ConnectIcon,
 	CpuIcon,
 	DatabaseIcon,
@@ -38,7 +35,6 @@ import {
 	PencilEdit01Icon,
 	PinIcon,
 	PinOffIcon,
-	Pulse01Icon,
 	PuzzleIcon,
 	Search01Icon,
 	ServerStack01Icon,
@@ -471,6 +467,16 @@ export type ChromeKey =
 // filtered out gracefully rather than crashing. Fleet was retired entirely —
 // its cross-node view lives in the node selector and the Store's Installed
 // section — so its key is gone and any stale reference falls out via isChromeKey.
+//
+// Tasks/Timeline/Activity/Calendar left the same way, for a stronger reason: they
+// are no longer built-in pages at all. Each is a Ryu App (com.ryu.{quests,timeline,
+// activity,calendar}) whose route already mounts `PluginCompanionPage` (see
+// `contributions/builtins.ts`), and `AppsSection` lists every ENABLED companion
+// straight from `GET /api/plugins/contributions`. A hardcoded button here was a
+// second, dumber copy of that list — it rendered whether or not the App was
+// installed, so a fresh install (quests/timeline/activity are default-OFF) showed
+// buttons for features the user never had. The App declares itself; the shell does
+// not enumerate Apps.
 const CHROME_ORDER: ChromeKey[] = [
 	"node-selector",
 	"home",
@@ -479,10 +485,6 @@ const CHROME_ORDER: ChromeKey[] = [
 	"library",
 	"memory",
 	"store",
-	"quests",
-	"timeline",
-	"activity",
-	"calendar",
 	"inbox",
 	"announcements",
 	"user",
@@ -517,7 +519,6 @@ const CHROME_LABELS: Record<ChromeKey, string> = {
 function isChromeKey(value: string): value is ChromeKey {
 	return Object.hasOwn(CHROME_LABELS, value);
 }
-
 // The chrome that lives in the sidebar footer (NavUser), below the content
 // sections. Everything else in CHROME_ORDER is header chrome, above the sections.
 // The customize dialog uses this split to list rows top-to-bottom like the sidebar.
@@ -537,13 +538,9 @@ const FOOTER_CHROME: ReadonlySet<ChromeKey> = new Set([
 const HEADER_BUTTON_CHROME: ChromeKey[] = [
 	"home",
 	"new-chat",
-	"activity",
 	"store",
-	"quests",
-	"calendar",
 	"library",
 	"memory",
-	"timeline",
 ];
 
 // Distinct drag-data format for reordering header buttons, so a button drag is
@@ -5623,7 +5620,7 @@ export function SidebarPanelContent({
 	onNewConversation,
 	onDeleteConversation,
 }: AppSidebarProps) {
-	const { listConversations, conversations, renameConversation } =
+	const { listConversations, conversations, renameConversation, refresh } =
 		useChatHistoryContext();
 	const { openTab } = useTabsContext();
 	const activeNode = useActiveNode();
@@ -5646,7 +5643,7 @@ export function SidebarPanelContent({
 		agents,
 		target: importTarget,
 		onImported: () => {
-			listConversations().catch(() => undefined);
+			refresh();
 		},
 	});
 	// The synced project list (shared with the composer's project picker): the
@@ -6273,46 +6270,9 @@ export function SidebarPanelContent({
 						path="/extensions"
 					/>
 				);
-			case "quests":
-				return (
-					<NavTabButton
-						chromeKey="quests"
-						icon={CheckmarkBadge02Icon}
-						label="Tasks"
-						menu={chromeMenu}
-						path="/quests"
-					/>
-				);
-			case "timeline":
-				return (
-					<NavTabButton
-						chromeKey="timeline"
-						icon={Activity01Icon}
-						label="Timeline"
-						menu={chromeMenu}
-						path="/timeline"
-					/>
-				);
-			case "activity":
-				return (
-					<NavTabButton
-						chromeKey="activity"
-						icon={Pulse01Icon}
-						label="Activity"
-						menu={chromeMenu}
-						path="/activity"
-					/>
-				);
-			case "calendar":
-				return (
-					<NavTabButton
-						chromeKey="calendar"
-						icon={Calendar04Icon}
-						label="Calendar"
-						menu={chromeMenu}
-						path="/calendar"
-					/>
-				);
+			// Tasks/Timeline/Activity/Calendar deliberately have NO case here: they are
+			// Ryu Apps, listed by `AppsSection` from the enabled-companion feed. See
+			// the note above CHROME_ORDER.
 			default:
 				return null;
 		}
@@ -6627,7 +6587,7 @@ export function SidebarPanelContent({
 			<ImportThreadsDialog
 				agents={agents}
 				onImported={(conversationId) => {
-					listConversations().catch(() => undefined);
+					refresh();
 					openTab("/chat", { conversationId });
 				}}
 				onOpenChange={setImportOpen}

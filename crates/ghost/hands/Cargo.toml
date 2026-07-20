@@ -1,6 +1,6 @@
 [package]
 name = "ghost-hands"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 description = "Synthetic keyboard/mouse/window input for Ghost — cross-platform."
 license = "Apache-2.0"

@@ -1,6 +1,6 @@
 [package]
 name = "ryu-quests"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Quests: the auto-detecting todo list for Ryu — an extracted Core capability crate (engine + SQLite store + HTTP surface). In-process default; Core consumes it as a path dependency behind the `quests` feature. Cross-cutting deps (preferences, Shadow MCP, the Gateway judge call, the scheduler backing job) are inverted through the `QuestsHost` trait so this crate has ZERO dependency on apps/core."

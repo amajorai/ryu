@@ -1,6 +1,6 @@
 [package]
 name = "ryu-clips"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Clips: agent-native Loom/Jam for Ryu — the Core→Shadow screen-capture proxy. An extracted Core capability crate owning the `/api/clips/*` HTTP surface (record start/stop/pause/resume, URL/file ingest, sources, frames, mp4 stream, diagnostics, recent-activity) that proxies each call to the Shadow sidecar over loopback. In-process default behind the `clips` cargo feature; the lean build drops the crate. The two kernel couplings the moved code needs — the yt-dlp downloader (over Core's DownloadCenter) for URL ingest, and filing a finished clip into the `Clips` system Space — are inverted through the `ClipsHost` trait, so this crate has ZERO dependency on apps/core."

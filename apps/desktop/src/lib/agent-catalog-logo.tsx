@@ -15,6 +15,11 @@ const svglUrl = (slug: string) => `/assets/logos/${slug}.svg`;
  * SVGL slug overrides for registry agents where svgl.app has a polished brand
  * mark. Curated agents with bundled local logos (claude, codex, gemini, pi,
  * ryu, openclaw, hermes) are handled by {@link AgentLogo} instead.
+ *
+ * A `{ light, dark }` spec is only needed for marks with achromatic parts that
+ * disappear against the opposite surface (kimi's panel, mistral's unfilled
+ * squares). Solid brand colours (amp's blue, jetbrains' gradient) read on both
+ * themes, so they stay single-asset — a dark variant would only mis-colour them.
  */
 const REGISTRY_SVGL: Record<string, SvglSpec> = {
 	"amp-acp": "amp",
@@ -22,8 +27,8 @@ const REGISTRY_SVGL: Record<string, SvglSpec> = {
 	"github-copilot-cli": { light: "copilot", dark: "copilot_dark" },
 	"grok-build": { light: "grok-light", dark: "grok-dark" },
 	junie: "jetbrains",
-	kimi: "kimi-icon",
-	"mistral-vibe": "mistral-ai_logo",
+	kimi: { light: "kimi-icon", dark: "kimi-icon-dark" },
+	"mistral-vibe": { light: "mistral-ai_logo", dark: "mistral-ai_logo_dark" },
 	opencode: { light: "opencode", dark: "opencode-dark" },
 	"qwen-code": { light: "qwen_light", dark: "qwen_dark" },
 };
