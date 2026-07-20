@@ -142,7 +142,7 @@ jobs:
       # headers; without them node-gyp dies with "X11/keysym.h: No such file".
       - name: Linux build deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxinerama-dev libxkbcommon-dev libxkbfile-dev
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxinerama-dev libxkbcommon-dev libxkbfile-dev libxrandr-dev libxi-dev libxcursor-dev libxss-dev
       - run: bun install
       # `build` only runs electron-vite; `dist` is the one that packages installers
       # via electron-builder. --publish never: the upload step below owns that, so
@@ -151,6 +151,9 @@ jobs:
         working-directory: apps/island
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # node-gyp cannot locate Visual Studio on windows-latest without this.
+          GYP_MSVS_VERSION: "2022"
+          npm_config_msvs_version: "2022"
         run: bun run dist -- --publish never
       - name: Collect installers
         shell: bash
